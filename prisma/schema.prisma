@@ -1,0 +1,93 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// An ISO file.
+model Iso {
+  id          String     @id @default(uuid())
+  /// Name of the ISO to display in the UI
+  name        String?    @db.VarChar
+  /// Internal identifier of the ISO. Used to find the ISO file internally. Not displayed in the UI.
+  identifier  String?    @db.VarChar
+  /// Description of the ISO to display in the UI
+  description String?    @db.VarChar
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  CdDevice    CdDevice[]
+}
+
+/// A Disk Device attached to a VM
+model Disk {
+  id               String          @id @default(uuid())
+  /// Size of the disk in MB
+  size             Int?
+  /// Format of the disk, like qcow2, raw, etc
+  format           String?         @db.VarChar
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  virtualMachine   VirtualMachine? @relation(fields: [virtualMachineId], references: [id])
+  virtualMachineId String?
+
+  @@index([format], map: "index_disks_on_format")
+}
+
+model SystemSetting {
+  id        String   @id @default(uuid())
+  /// Contextual path, like system.paths.isos
+  path      String?  @db.VarChar
+  /// true if the feature should not be returned in the API
+  hidden    Boolean? @default(false)
+  /// Value of the setting
+  value     String?  @default("")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique(map: "index_users_on_email") @default("") @db.VarChar
+  password  String   @default("") @db.VarChar
+  firstName String?  @db.VarChar
+  lastName  String?  @db.VarChar
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// A Virtual Machine is a virtualized computer system.
+model VirtualMachine {
+  id             String     @id @default(uuid())
+  name           String?    @db.VarChar
+  /// Internal identification of the virtual machine. Used to find it with VirSH
+  identification String?    @db.VarChar
+  /// Operating System name, like Windows, Ubuntu, Fedora, etc.
+  os             String?    @db.VarChar
+  /// Verison of the operating system, like 11 for Windows 11
+  version        String?    @db.VarChar
+  /// Amount of virtual CPUs
+  vcpus          Int?
+  /// Amount of RAM in MB
+  ram            Int?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+  /// List of disks attached to the virtual machine
+  disks          Disk[]
+  /// List of CD devices attached to the virtual machine
+  CdDevice       CdDevice[]
+
+  @@index([os], map: "index_virtual_machines_on_os")
+  @@index([vcpus], map: "index_virtual_machines_on_vcpus")
+}
+
+/// CdRoom device attached to a virtual machine
+model CdDevice {
+  id    String          @id @default(uuid())
+  iso   Iso?            @relation(fields: [isoId], references: [id])
+  isoId String?
+  vm    VirtualMachine? @relation(fields: [vmId], references: [id])
+  vmId  String?
+}
