@@ -1,0 +1,3 @@
+-- AlterTable
+ALTER TABLE "VirtualMachine" ALTER COLUMN "VM_Image" DROP NOT NULL,
+ALTER COLUMN "VM_Image" DROP DEFAULT;
