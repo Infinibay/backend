@@ -1,25 +1,20 @@
-const { gql, GraphQlUpload } = require("apollo-server-express");
+const { gql, GraphQlUpload } = require('apollo-server-express')
 
 const IOS = gql`
   scalar JSON
   scalar Number
   scalar Upload
   scalar Date
-
   type Query {
-
-#--------------------------------FOR IOS--------------------------------------------------##
-getIOSById(input: for_search): [IOS]
+    #--------------------------------FOR IOS--------------------------------------------------##
+    getIOSById(input: for_search): [IOS]
     getAllIOS(input: for_search): [IOS]
   }
   type Mutation {
-
- ##-----------------------------FOR IOS-----------------------------------------------------##
- createIOS(input: for_IOS): IOS
-    deleteIOS(input: for_only_id): String
-
+    ##-----------------------------FOR IOS-----------------------------------------------------##
+    createIOS(input: for_IOS): IOS
+    deleteIOS(input: for_id_token): String
   }
-
   input for_search {
     token: String
     Search: String
@@ -29,10 +24,15 @@ getIOSById(input: for_search): [IOS]
     Type: String
     userId: ID
     createdAt: Date
-    Size : Number
+    Size: Number
+    token: String
   }
   input for_only_id {
     id: ID
+  }
+  input id_token {
+    id: ID
+    Search: String
   }
   type IOS {
     id: ID
@@ -41,7 +41,6 @@ getIOSById(input: for_search): [IOS]
     userId: ID
     createdAt: Date
     Size: Number
-  } 
-
-  `
+  }
+`
 module.exports = IOS

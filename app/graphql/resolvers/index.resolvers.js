@@ -1,5 +1,5 @@
-const user_resolver = require('./user.resolver');
-const vm_resolvers = require('./vm.resolver')
-const  notification_resolver = require('./notification .resolver')
-const IOS_resolvers = require('./ISO.resolver')
-module.exports =  [ user_resolver , vm_resolvers, notification_resolver , IOS_resolvers]
+const userResolver = require('./user.resolver')
+const vmResolvers = require('./vm.resolver')
+const notificationResolver = require('./notification .resolver')
+const IOSResolvers = require('./IOS.resolver')
+module.exports = [userResolver, vmResolvers, notificationResolver, IOSResolvers]

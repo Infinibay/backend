@@ -1,4 +1,4 @@
-const { gql, GraphQlUpload } = require("apollo-server-express");
+const { gql, GraphQlUpload } = require('apollo-server-express')
 
 const user = gql`
   scalar JSON
@@ -11,7 +11,6 @@ const user = gql`
     getUserByID(input: for_id_token): User
     getConfigFile: JSON
     getUserVM(input: for_token): User
-   
   }
   type Mutation {
     ##--------------------------------FOR USER-------------------------------------------------##
@@ -35,22 +34,18 @@ const user = gql`
     id: ID
     token: String
   }
-
   input for_login {
     Email: String
     Password: String
   }
-
   input forget_password {
     Email: String
   }
-
   input Authentication {
     # Email : String
     Password: String
     token: String
   }
-
   input userInput {
     id: ID
     firstName: String
@@ -62,7 +57,6 @@ const user = gql`
     userImage: String
     userType: String
   }
-
   type User {
     id: ID
     First_Name: String
@@ -75,5 +69,5 @@ const user = gql`
     User_Type: String
     _count: Number
   }
-`;
-module.exports = user;
+`
+module.exports = user

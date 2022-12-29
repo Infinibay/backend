@@ -1,4 +1,4 @@
-const { gql, GraphQlUpload } = require("apollo-server-express");
+const { gql, GraphQlUpload } = require('apollo-server-express')
 
 const virtualMachine = gql`
   scalar JSON
@@ -7,15 +7,12 @@ const virtualMachine = gql`
   scalar Date
 
   type Query {
-
-  ##------------------------------ FOR VIRTUAL MACHINE---------------------------------------##
-  getAllVM(input: for_search_all): [VirtualMachine]
-    getUserAllVM (input: for_search__user): [VirtualMachine]
- 
+    ##------------------------------ FOR VIRTUAL MACHINE---------------------------------------##
+    getAllVM(input: for_search_all): [VirtualMachine]
+    getUserAllVM(input: for_search__user): [VirtualMachine]
     getSpecificVM(input: for_id_token): VirtualMachine
-    # getUserVM(input: for_token): User
     getConfigFile: JSON
-  },
+  }
   type Mutation {
     ##------------------------------FOR VIRTUAL MACHINE----------------------------------------##
     createVM(input: For_VirtualMachine): VirtualMachine
@@ -25,9 +22,9 @@ const virtualMachine = gql`
     forStatus(input: status): String
   }
   type User {
-     id: ID
-     First_Name: String
-     Last_Name: String
+    id: ID
+    First_Name: String
+    Last_Name: String
     Email: String
     Password: String
     Deleted: Boolean
@@ -35,12 +32,7 @@ const virtualMachine = gql`
     User_Image: String
     User_Type: String
     _count: Number
-
- 
-  
   }
-
-
   type VirtualMachine {
     id: ID
     GU_ID: ID
@@ -52,7 +44,6 @@ const virtualMachine = gql`
     userId: User
     VM_Image: String
   }
-
   type photo {
     VM_Image: String
     Status: Boolean
@@ -62,10 +53,9 @@ const virtualMachine = gql`
     token: String
     button: Boolean
   }
-  input for_ids_token{
-    id:[ID]
+  input for_ids_token {
+    id: [ID]
     token: String
-
   }
   input image {
     VM_Image: String
@@ -81,7 +71,7 @@ const virtualMachine = gql`
     vmImage: String
     token: String
   }
-  input For_VirtualMachine{
+  input For_VirtualMachine {
     virtualMachineName: String
     Title: String
     Description: String
@@ -90,24 +80,21 @@ const virtualMachine = gql`
     vmImage: String
     token: String
   }
-
   input for_token {
     token: String
   }
   input for_id_token {
-    id:ID
+    id: ID
     token: String
   }
-  input for_search_all{
-  token: String
+  input for_search_all {
+    token: String
     Search: String
     Status: Boolean
-}
-input  for_search__user {
-  token: String
-  Status: Boolean
-}
-
-
-  `;
-  module.exports = virtualMachine;
+  }
+  input for_search__user {
+    token: String
+    Status: Boolean
+  }
+`
+module.exports = virtualMachine
