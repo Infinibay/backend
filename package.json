@@ -10,13 +10,17 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@apollo/server": "^4.3.0",
     "@prisma/client": "^4.5.0",
     "apollo-link-context": "^1.0.20",
     "apollo-server": "^3.11.1",
     "apollo-server-errors": "^3.3.1",
     "apollo-server-express": "^3.11.1",
+    "apollo-server-plugin-response-cache": "^3.8.1",
     "base-64": "^1.0.0",
+    "batteries-included": "^0.0.4",
     "bcrypt": "^5.1.0",
+    "bcryptjs": "^2.4.3",
     "body-parser": "^1.20.1",
     "dotenv": "^16.0.3",
     "express": "^4.18.2",
@@ -31,7 +35,8 @@
     "nodemailer-smtp-transport": "^2.7.4",
     "socket.io": "^4.5.4",
     "static-server": "^2.2.1",
-    "uuid": "^9.0.0"
+    "uuid": "^9.0.0",
+    "v4": "^0.0.1"
   },
   "devDependencies": {
     "prisma": "^4.6.1"

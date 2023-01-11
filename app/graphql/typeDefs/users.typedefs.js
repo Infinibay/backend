@@ -7,38 +7,53 @@ const user = gql`
   scalar Date
 
   type Query {
-    getUserList(input: for_search): [User]
-    getUserByID(input: for_id_token): User
-    getConfigFile: JSON
-    getUserVM(input: for_token): User
+    "This Query is for Admin to get users list by using token"
+    getUserList(input: forSearch): [User]
+    "getUserByID query used by users to view their profile"
+    getUserByID(input: forIdToken): User
+    "getConfigFile is for get config file"
+    getConfigFile: JSON 
+
+    getUserVM(input: forToken): User
   }
   type Mutation {
     ##--------------------------------FOR USER-------------------------------------------------##
+    "For Signup-User"
     createUser(input: userInput): User
+
+   " User can update their profile by using token"
     updateUser(input: userInput): User
-    deleteUser(input: for_id_token): String
-    Login(input: for_login): User
+
+    "Only Admin can delete the user by using User Id."
+    deleteUser(input: forIdToken): String
+
+    "User can login by using Valid Email and Password."
+    Login(input: forLogin): User
+
     sendEmail(input: userInput): User
-    forgetPassword(input: forget_password): String
+    "This forgetPassword Mutation send user verified token through their email for reset password"
+    forgetPassword(input: forgetPassword): String
+
+    "The resetPassword Mutation is used to reset the password by using Mail token"
     resetPassword(input: Authentication): String
   }
-  input for_token {
+  input forToken {
     token: String
   }
 
-  input for_search {
+  input forSearch {
     token: String
     Search: String
   }
-  input for_id_token {
+  input forIdToken {
     id: ID
     token: String
   }
-  input for_login {
+  input forLogin {
     Email: String
     Password: String
   }
-  input forget_password {
+  input forgetPassword {
     Email: String
   }
   input Authentication {

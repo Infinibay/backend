@@ -3,11 +3,21 @@ const prisma = new PrismaClient()
 const { GraphQLError } = require('graphql')
 const jwt = require('jsonwebtoken')
 const config = process.env
+const fs = require('fs')
+// const {userId } = context
+const path = require('path')
+const bcrypt = require('bcryptjs')
+
+const {TOKEN_KEY, getUserId, verifyToken } = require('../../Utils/helperfunction')
+
+
+
 var decoded
 function Auth () {
   decoded = jwt.verify(token, config.TOKEN_KEY)
   console.log(decoded, 'details')
   console.log(decoded.id, 'getid')
+  
 }
 const vmResolvers = {
   Query: {
@@ -17,7 +27,8 @@ const vmResolvers = {
       try {
         token = input['input']['token']
         Auth()
-        if (decoded.id && decoded.User_Type == 'user') {
+        if (decoded.id) {
+          console.log(decoded.id)
           const forSpecificVM = await prisma.virtualMachine.findUnique({
             where: {
               id: input['input']['id']
@@ -30,6 +41,8 @@ const vmResolvers = {
               Title: true,
               Status: true,
               Config: true,
+              VM_Image: true,
+              GU_ID: true,
               user: {
                 select: {
                   id: true,
@@ -131,7 +144,7 @@ const vmResolvers = {
         token = input['input']['token']
         Status = input['input']['Status']
         Auth()
-        if (decoded.id && decoded.User_Type == 'user') {
+        if (decoded.id) {
           const forUserVM = await prisma.virtualMachine.findMany({
             where: {
               userId: decoded.id
@@ -232,7 +245,7 @@ const vmResolvers = {
           return VMCreate
         }
       } catch (error) {
-        // console.log(error);
+        console.log(error)
         throw new GraphQLError('Failed to Create', {
           extensions: {
             StatusCode: 400,
@@ -247,6 +260,8 @@ const vmResolvers = {
       try {
         // for image
         const path = 'app/VM_image/' + Date.now() + '.jpeg'
+        // if (VM_Image = input['input']['vmImage']) {
+        //   const path = 'app/VM_image/' + Date.now() + '.jpeg'
         const VM_Image = input['input']['vmImage']
         if (VM_Image) {
           var base64Data = await VM_Image.replace(
@@ -281,31 +296,60 @@ const vmResolvers = {
             forUpdatingVM.user.id == decoded.id ||
             decoded.User_Type == 'admin'
           ) {
-            const forUpdate = await prisma.virtualMachine.update({
-              where: {
-                id: input['input']['id']
-              },
-              data: {
-                VirtualMachine_Name: input['input']['virtualMachineName'],
-                Title: input['input']['Title'],
-                Description: input['input']['Description'],
-                Status: input['input']['Status'],
-                userId: input['input']['userId'],
-                Config: input['input']['Config'],
-                VM_Image: path
-              },
-              select: {
-                id: true,
-                VirtualMachine_Name: true,
-                Description: true,
-                Status: true,
-                Config: true,
-                Title: true,
-                VM_Image: true
-              }
-            })
-            console.log(forUpdate)
-            return forUpdate
+            if (VM_Image) {
+              const forUpdate = await prisma.virtualMachine.update({
+                where: {
+                  id: input['input']['id']
+                },
+                data: {
+                  VirtualMachine_Name: input['input']['virtualMachineName'],
+                  Title: input['input']['Title'],
+                  Description: input['input']['Description'],
+                  Status: input['input']['Status'],
+                  userId: input['input']['userId'],
+                  Config: input['input']['Config'],
+                  VM_Image: path
+                },
+                select: {
+                  id: true,
+                  VirtualMachine_Name: true,
+                  Description: true,
+                  Status: true,
+                  Config: true,
+                  Title: true,
+                  VM_Image: true
+                }
+              })
+              console.log("forUpdate")
+              return forUpdate
+            } else {
+              const forUpdatewithoutimage = await prisma.virtualMachine.update({
+                where: {
+                  id: input['input']['id']
+                },
+                data: {
+                  VirtualMachine_Name: input['input']['virtualMachineName'],
+                  Title: input['input']['Title'],
+                  Description: input['input']['Description'],
+                  Status: input['input']['Status'],
+                  userId: input['input']['userId'],
+                  Config: input['input']['Config']
+
+                  // VM_Image: path
+                },
+                select: {
+                  id: true,
+                  VirtualMachine_Name: true,
+                  Description: true,
+                  Status: true,
+                  Config: true,
+                  Title: true,
+                  VM_Image: true
+                }
+              })
+              console.log("forUpdatewithoutimage")
+              return forUpdatewithoutimage
+            }
           } else {
             throw new Error('Error')
           }

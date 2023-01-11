@@ -8,17 +8,30 @@ const virtualMachine = gql`
 
   type Query {
     ##------------------------------ FOR VIRTUAL MACHINE---------------------------------------##
-    getAllVM(input: for_search_all): [VirtualMachine]
-    getUserAllVM(input: for_search__user): [VirtualMachine]
-    getSpecificVM(input: for_id_token): VirtualMachine
+    "The getAllVM query is only for Admin to get All Virtual Machine."
+    getAllVM(input: forgetVM): [VirtualMachine]
+
+    "This getUserAllVM query is for users to get their Virtual Machine by using token."
+    getUserAllVM(input: forSearchUser): [VirtualMachine]
+
+    "This getSpecificVM query is for users to get their specific VM by using VirtualMachine ID and token."
+    getSpecificVM(input: forIdToken): VirtualMachine
+
+    " This getConfigFileis used to get Config File"
     getConfigFile: JSON
-  }
+  },
   type Mutation {
     ##------------------------------FOR VIRTUAL MACHINE----------------------------------------##
-    createVM(input: For_VirtualMachine): VirtualMachine
+    " Users can create Virtual Machine by using token "
+    createVM(input: ForVirtualMachine): VirtualMachine
+    "Users can update their Virtual Machine by using Vitual Machine ID and token "
     upadteVM(input: VM): VirtualMachine
-    deleteVM(input: for_ids_token): String
-    Upload_Image(input: image): photo
+
+    "This Mutation is for users to delete their Virtual Machine by using their and VirtualMachine ID "
+    deleteVM(input: forIdsToken): String
+    # uploadImage(input: image): photo
+
+    "The forStatus Mutation  is for turn Virtual Machine ON and OFF"
     forStatus(input: status): String
   }
   type User {
@@ -33,6 +46,7 @@ const virtualMachine = gql`
     User_Type: String
     _count: Number
   }
+
   type VirtualMachine {
     id: ID
     GU_ID: ID
@@ -53,13 +67,14 @@ const virtualMachine = gql`
     token: String
     button: Boolean
   }
-  input for_ids_token {
+  input forIdsToken {
     id: [ID]
     token: String
   }
   input image {
     VM_Image: String
   }
+
   input VM {
     id: ID
     virtualMachineName: String
@@ -71,7 +86,7 @@ const virtualMachine = gql`
     vmImage: String
     token: String
   }
-  input For_VirtualMachine {
+  input ForVirtualMachine {
     virtualMachineName: String
     Title: String
     Description: String
@@ -83,16 +98,25 @@ const virtualMachine = gql`
   input for_token {
     token: String
   }
-  input for_id_token {
+  input forIdToken {
     id: ID
     token: String
+  }
+  input forgetallVM {
+    Search: String
+    Status: Boolean
+  }
+  input forgetVM {
+    token: String
+    Search: String
+    Status: Boolean
   }
   input for_search_all {
     token: String
     Search: String
     Status: Boolean
   }
-  input for_search__user {
+  input forSearchUser {
     token: String
     Status: Boolean
   }

@@ -7,19 +7,31 @@ const IOS = gql`
   scalar Date
   type Query {
     #--------------------------------FOR IOS--------------------------------------------------##
-    getIOSById(input: for_search): [IOS]
-    getAllIOS(input: for_search): [IOS]
+    
+    "Users get their IOS by using token and IOS Id"
+    getIOSById(input: forSearch): [IOS]
+    
+    "Admin get all users IOS "
+    getAllIOS(input: forSearch): [IOS]
   }
   type Mutation {
     ##-----------------------------FOR IOS-----------------------------------------------------##
-    createIOS(input: for_IOS): IOS
-    deleteIOS(input: for_id_token): String
+    "The createIOS Mutation is for users to create IOS by using token"
+    createIOS(input: forIOS): IOS
+    "Delete IOS by using IOS ID and token"
+    deleteIOS(input: forIdToken): String
+  },
+
+  input forIdToken {
+    id: ID
+    token: String
+ 
   }
-  input for_search {
+  input forSearch {
     token: String
     Search: String
   }
-  input for_IOS {
+  input forIOS {
     Name: String
     Type: String
     userId: ID
