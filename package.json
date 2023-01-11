@@ -4,7 +4,9 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "prepare": "npm run snyk-protect",
+    "snyk-protect": "snyk-protect"
   },
   "keywords": [],
   "author": "",
@@ -36,9 +38,11 @@
     "socket.io": "^4.5.4",
     "static-server": "^2.2.1",
     "uuid": "^9.0.0",
-    "v4": "^0.0.1"
+    "v4": "^0.0.1",
+    "@snyk/protect": "latest"
   },
   "devDependencies": {
     "prisma": "^4.6.1"
-  }
+  },
+  "snyk": true
 }
