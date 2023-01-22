@@ -13,28 +13,28 @@ datasource db {
 
 model User {
   id           String           @id @default(uuid())
-  First_Name   String
-  Last_Name    String
+  firstName   String
+  lastName    String
   Email        String           @unique
   Password     String
   Deleted      Boolean
-  User_Type    String
+  userType    String
   token        String           @default("null")
-  User_Image   String?          @unique 
+  userImage   String?          @unique 
   VM           VirtualMachine[]
   Notification Notification[]
-  IOS          IOS[]
+  ISO          ISO[]
 }
 
 model VirtualMachine {
   id                  String         @id @default(uuid())
-  GU_ID               String         @unique @default(uuid())
+  guId               String         @unique @default(uuid())
   Config              Json
   Status              Boolean
-  VirtualMachine_Name String         @unique
+  virtualMachineName String         @unique
   Title               String
   Description         String
-  VM_Image            String?         @unique 
+  vmImage            String?         @unique 
   user                User           @relation(fields: [userId], references: [id])
   userId              String
   Notification        Notification[]
@@ -43,14 +43,14 @@ model VirtualMachine {
 model Notification {
   id      String          @id @default(uuid())
   Message String?
-  vm      VirtualMachine? @relation(fields: [vm_id], references: [id])
-  vm_id   String?
+  vm      VirtualMachine? @relation(fields: [vmId], references: [id])
+  vmId   String?
   user    User            @relation(fields: [userId], references: [id])
   userId  String
   Readed  Boolean
 }
 
-model IOS {
+model ISO {
   id        String   @id @default(uuid())
   Name      String
   Type      String

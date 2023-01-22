@@ -1,2 +1,2 @@
 -- AlterTable
-ALTER TABLE "Notification" ALTER COLUMN "vm_id" SET DEFAULT 'null';
+ALTER TABLE "Notification" ALTER COLUMN " vmId" SET DEFAULT 'null';

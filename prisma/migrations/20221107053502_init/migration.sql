@@ -13,10 +13,10 @@ CREATE TABLE "User" (
 -- CreateTable
 CREATE TABLE "VirtualMachine" (
     "id" TEXT NOT NULL,
-    "GU_ID" TEXT NOT NULL,
+    "guId " TEXT NOT NULL,
     "Config" JSONB NOT NULL,
     "Status" BOOLEAN NOT NULL,
-    "VirtualMachine_Name" TEXT NOT NULL,
+    "virtualMachineName" TEXT NOT NULL,
     "Title" TEXT NOT NULL,
     "Description" TEXT NOT NULL,
     "userId" TEXT NOT NULL,
@@ -25,10 +25,10 @@ CREATE TABLE "VirtualMachine" (
 );
 
 -- CreateIndex
-CREATE UNIQUE INDEX "VirtualMachine_GU_ID_key" ON "VirtualMachine"("GU_ID");
+CREATE UNIQUE INDEX "VirtualMachine_guId _key" ON "VirtualMachine"("guId ");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "VirtualMachine_VirtualMachine_Name_key" ON "VirtualMachine"("VirtualMachine_Name");
+CREATE UNIQUE INDEX "VirtualMachine_virtualMachineName_key" ON "VirtualMachine"("virtualMachineName");
 
 -- AddForeignKey
 ALTER TABLE "VirtualMachine" ADD CONSTRAINT "VirtualMachine_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
