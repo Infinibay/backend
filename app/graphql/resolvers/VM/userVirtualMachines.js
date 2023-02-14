@@ -2,7 +2,7 @@
 import {PrismaClient} from "@prisma/client"
 const prisma = new PrismaClient();
 import { GraphQLError } from "graphql";
-import {isAuthForUser} from "../../middleWare"
+import {isAuthForUser} from "../../middleWare.js"
 
 const allUserVMResolver = {
     Query: {

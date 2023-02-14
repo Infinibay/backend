@@ -2,7 +2,7 @@ import {PrismaClient} from "@prisma/client"
 const prisma = new PrismaClient();
 import bcrypt from "bcrypt"
 import { GraphQLError } from "graphql";
-import {fs} from "fs"
+import fs from "fs"
 const signUp = {
   Mutation: {
     async createUser(root, input) {

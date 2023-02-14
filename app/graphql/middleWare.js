@@ -64,4 +64,4 @@ if (decoded) {
 
 
 
-export  { isAuth, isAuthForUser, AuthForBoth };
+export { isAuth, isAuthForUser, AuthForBoth };

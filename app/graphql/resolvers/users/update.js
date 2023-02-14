@@ -2,7 +2,7 @@ import {PrismaClient} from "@prisma/client"
 const prisma = new PrismaClient();
 import fs from "fs"
 import { GraphQLError } from "graphql";
-import AuthForBoth from "../../middleWare"
+import {AuthForBoth} from "../../middleWare.js"
     const forUpdateUser = {
         Mutation: {
     //////for Update User/////
@@ -66,4 +66,4 @@ import AuthForBoth from "../../middleWare"
 
     }
 }
-module.exports =  forUpdateUser
+export  default forUpdateUser

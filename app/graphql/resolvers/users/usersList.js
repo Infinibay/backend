@@ -1,7 +1,7 @@
 import {PrismaClient} from "@prisma/client"
 const prisma = new PrismaClient();
 
-import {isAuth} from "../../middleWare";
+import {isAuth} from "../../middleWare.js";
 import { GraphQLError } from "graphql";
 
 const forUsersList = {

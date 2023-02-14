@@ -1,7 +1,7 @@
 import {PrismaClient} from "@prisma/client"
 const prisma = new PrismaClient();
 import { GraphQLError } from "graphql";
-import AuthForBoth from "../../middleWare"
+import {AuthForBoth} from "../../middleWare.js"
 
 const forCreateISO = {
   Mutation: {

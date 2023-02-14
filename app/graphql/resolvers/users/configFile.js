@@ -1,4 +1,5 @@
-import file from "../../../configFile/config.json"
+import file from "../../../configFile/config.json" assert { type: "json" };
+
 const forConfigFile = {
     Query: {
 getConfigFile: async () => {
