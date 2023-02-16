@@ -2,6 +2,8 @@ import {PrismaClient} from "@prisma/client"
 const prisma = new PrismaClient();
 import { GraphQLError } from "graphql";
 import {AuthForBoth} from "../../middleWare.js"
+import { createCall } from "../Virtualization/index.js";
+
 const forStatusVMResolvers = {
 Mutation: {
     async forStatus(_root, input) {
@@ -20,6 +22,8 @@ Mutation: {
             });
             if (forFindStatusID.userId == forID || forUserType == 'admin') {
               if (button == true) {
+                let result = await createCall("startVMCall",{"name": forFindStatusID.VirtualMachine_Name})
+                if(result == "")
                 prisma.virtualMachine.update({
                   where: {
                     id: forFindStatusID.id,
@@ -33,6 +37,7 @@ Mutation: {
                 })
               }
               if (button == false) {
+                let result = await createCall("shutdownCall",{"name": forFindStatusID.VirtualMachine_Name})
                 const offStatus = await prisma.virtualMachine.update({
                   where: {
                     id: forFindStatusID.id,
