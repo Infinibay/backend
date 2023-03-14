@@ -161,50 +161,59 @@ const user_resolver = {
     //////for Create User/////
 
     async createUser(root, input) {
-      //for Image
       try {
-        const path = "app/userImage/" + Date.now() + ".jpeg";
-        const userImage = input["input"]["userImage"];
+        // Create a unique file path for the user's image
+        // TODO: Use some configuration on the system to determine where to store the images
+        // TODO: Use a unique ID for the file name
+        const path = `app/userImage/${Date.now()}.jpeg`;
+        // Destructure the userImage from the input
+        const { userImage } = input.input;
+    
+        // If a userImage was provided
         if (userImage) {
-          var base64Data = await userImage.replace(
-            /^data:([A-Za-z-+/]+);base64,/,
-            ""
-          );
-          fs.writeFileSync(path, base64Data, { encoding: "base64" });
-          console.log(path);
-          //for encrypted Password
+          try {
+            // Remove the metadata from the base64 encoded image string
+            const base64Data = userImage.replace(/^data:([A-Za-z-+/]+);base64,/, "");
+            // Write the image data to the file system
+            fs.writeFileSync(path, base64Data, { encoding: "base64" });
+          } catch (error) {
+            throw new GraphQLError("Error writing user image to file", {
+              extensions: {
+                statusCode: 500,
+              },
+            });
+          }
         }
-
-        const encryptedPassword = await bcrypt.hash(
-          input["input"]["Password"],
-          10
-        );
-        const type_of_user = "user";
-        console.log("abcv");
-
-        const user_create = await prisma.user.create({
+    
+        // Hash the password using bcrypt
+        // TODO: Use some configuration on the system to determine the number of rounds
+        const encryptedPassword = await bcrypt.hash(input.input.Password, 10);
+    
+        // Create the user in the database
+        const user = await prisma.user.create({
           data: {
-            First_Name: input["input"]["firstName"],
-            Last_Name: input["input"]["lastName"],
-            Email: input["input"]["Email"],
+            First_Name: input.input.firstName,
+            Last_Name: input.input.lastName,
+            Email: input.input.Email,
             Password: encryptedPassword,
-            Deleted: input["input"]["Deleted"],
+            Deleted: input.input.Deleted,
             User_Image: path,
-            User_Type: input["input"]["userType"],
+            User_Type: input.input.userType,
           },
         });
-        console.log(user_create);
-        return user_create;
+    
+        return user;
       } catch (error) {
-        // console.log(error);
+        // Throw a generic error with a status code if something goes wrong
         throw new GraphQLError("Sign-up Failed", {
           extensions: {
-            StatusCode: 400,
+            statusCode: 400,
             code: "Sign-up Failed",
           },
         });
       }
     },
+
     //////for Update User/////
 
     async updateUser(root, input) {
