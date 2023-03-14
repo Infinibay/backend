@@ -384,73 +384,34 @@ const user_resolver = {
     //////for Forget Passwordr/////
     async forgetPassword(root, input) {
       try {
-        //  const Email = input["input"]["Email"]
-
         const userEmail = await prisma.user.findUnique({
           where: {
             Email: input["input"]["Email"],
           },
         });
-        console.log(userEmail);
-        if (userEmail) {
-          if (!userEmail) {
-            throw new Error("please verify your email");
-          }
-          if (userEmail.Deleted == false) {
-            const tokenss = jwt.sign(
-              {
-                id: userEmail.id,
-                Email: userEmail.Email,
-              },
-              process.env.TOKEN_KEY,
-
-              {
-                expiresIn: "2h",
-              }
-            );
-            var token = tokenss;
-            console.log(token);
-            // sendEmail(req, token);
-            const transporter = nodemailer.createTransport(
-              smtpTransport({
-                service: "gmail",
-                host: "smtp.gmail.com",
-                auth: {
-                  user: "razorshariq@gmail.com",
-                  pass: "xhkjchgrxezlsnvz",
-                },
-              })
-            );
-            const mailOptions = {
-              from: "razorshariq@gmail.com",
-              to: userEmail.Email,
-              subject: "Password Reset",
-              text: "That was easy!",
-
-              // html: "<p> hello</p>",
-              html: `<a href="localhost:3001/forgetpassword?token=${token}"> please click the link and reset your password or visit this link http://localhost:3030/forgetpassword?token=${token} </a>`,
-            };
-
-            transporter.sendMail(mailOptions, function (error, info) {
-              if (error) {
-                console.log(error);
-              } else {
-                console.log("Email sent: " + info.response);
-              }
-            });
-            console.log("pls check ur mail");
-            return "Check Your Mail";
-          }
-          if (userEmail.Deleted == true) {
-            console.log("user not found");
-            throw new Error("user profile not found ");
-          }
-        } else {
-          console.log("not found");
-          throw new Error("NOT FOUND");
+    
+        if (!userEmail) {
+          throw new Error("User profile not found. Please verify your email.");
         }
+    
+        if (userEmail.Deleted) {
+          throw new Error("User profile not found.");
+        }
+    
+        const token = jwt.sign({
+            id: userEmail.id,
+            Email: userEmail.Email,
+          },
+          process.env.TOKEN_KEY,
+          {
+            expiresIn: "2h",
+          }
+        );
+    
+        await sendEmail(userEmail.Email, token);
+        return "Check your email for password reset instructions.";
       } catch (error) {
-        throw new GraphQLError("Something went wrong please try again", {
+        throw new GraphQLError("Failed to send password reset email. Please try again.", {
           extensions: {
             StatusCode: 404,
           },
