@@ -216,47 +216,46 @@ const user_resolver = {
 
     //////for Update User/////
 
+    // NOTE: root is not been used
     async updateUser(root, input) {
       try {
-        //for token
-        token = input["input"]["token"];
+        const token = input.input.token;
         const decoded = jwt.verify(token, config.TOKEN_KEY);
-        input.userId = decoded;
-        const decoded_id = input.userId.id;
+        const decoded_id = decoded.id;
 
-        const path = "app/userImage/" + Date.now() + ".jpeg";
-        const userImage = input["input"]["userImage"];
+        // Create a unique file path for the user's image
+        // TODO: Use some configuration on the system to determine where to store the images
+        const path = `app/userImage/${Date.now()}.jpeg`;
+        const { userImage } = input.input;
         if (userImage) {
-          var base64Data = await userImage.replace(
-            /^data:([A-Za-z-+/]+);base64,/,
-            ""
-          );
+          const base64Data = userImage.replace(/^data:([A-Za-z-+/]+);base64,/, "");
           fs.writeFileSync(path, base64Data, { encoding: "base64" });
-          console.log(path);
         }
 
         if (decoded_id) {
-          const for_Update_User = await prisma.user.update({
+          // Hash the password using bcrypt
+          // TODO: Use some configuration on the system to determine the number of rounds
+          const encryptedPassword = await bcrypt.hash(input.input.Password, 10);
+          const user = await prisma.user.update({
             where: {
               id: decoded_id,
             },
             data: {
-              First_Name: input["input"]["firstName"],
-              Last_Name: input["input"]["lastName"],
-              Email: input["input"]["Email"],
-              Password: input["input"]["Password"],
-              Deleted: input["input"]["Deleted"],
-              // userImage: input["input"]["userImage"] ,
+              First_Name: input.input.firstName,
+              Last_Name: input.input.lastName,
+              Email: input.input.Email,
+              Password: encryptedPassword,
+              Deleted: input.input.Deleted,
               User_Image: path,
-              // userType: input["input"]["userType"],
+              User_Type: input.input.userType,
             },
           });
-          return for_Update_User;
+          return user;
         }
       } catch (error) {
         throw new GraphQLError("Update Failed..!", {
           extensions: {
-            StatusCode: 404,
+            statusCode: 404,
           },
         });
       }
@@ -266,34 +265,29 @@ const user_resolver = {
 
     async deleteUser(root, input) {
       try {
-        token = input["input"]["token"];
+        const token = input.input.token;
         const decoded = jwt.verify(token, config.TOKEN_KEY);
-        input.userId = decoded;
-        console.log(decoded.User_Type);
-        console.log(decoded.userType);
-        const decoded_id = input.userId.id;
-        console.log(decoded_id);
+        const decoded_id = decoded.id;
 
-        if (decoded_id && decoded.User_Type == "admin") {
-          const for_delete_User = await prisma.user.update({
+        if (decoded_id && (decoded.User_Type === "admin")) {
+          await prisma.user.update({
             where: {
-              id: input["input"]["id"],
+              id: input.input.id,
             },
             data: {
               Deleted: true,
             },
           });
-          console.log(for_delete_User);
           return "Deleted";
+        } else {
+          throw new Error("Unauthorized access");
         }
       } catch (error) {
-        throw new GraphQLError("Delete User Failed..!", {
-          extensions: {
-            StatusCode: 404,
-          },
-        });
+        throw new Error(`Delete User Failed: ${error.message}`);
       }
     },
+
+
     //////for Login/////
     async Login(root, input) {
       try {
