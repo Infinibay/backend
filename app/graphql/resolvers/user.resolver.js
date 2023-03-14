@@ -1,21 +1,15 @@
-const { PrismaClient, Prisma } = require("@prisma/client");
-const prisma = new PrismaClient();
+const { PrismaClient } = require("@prisma/client");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
-var smtpTransport = require("nodemailer-smtp-transport");
 const nodemailer = require("nodemailer");
-const file = require("../../configFile/config.json");
+const smtpTransport = require("nodemailer-smtp-transport");
 const fs = require("fs");
-const path = require("path");
-const config = process.env;
-const errorName = require("../../helper/helperfunction");
-const errorType = require("../../helper/helperfunction");
-const { UNAUTHORIZED } = require("../../helper/helperfunction");
+const file = require("../../configFile/config.json");
 const { GraphQLError } = require("graphql");
-const { argsToArgsConfig } = require("graphql/type/definition");
-const {
-  throwHttpGraphQLError,
-} = require("apollo-server-core/dist/runHttpQuery");
+
+const prisma = new PrismaClient();
+const config = process.env;
+
 // const {
 //   throwHttpGraphQLError,
 // } = require("apollo-server-core/dist/runHttpQuery");
@@ -24,27 +18,24 @@ const user_resolver = {
   Query: {
     //////for confile file get/////
     getConfigFile: async () => {
-      try {
-        const for_config_file = file;
-        console.log(for_config_file);
-        return for_config_file;
-      } catch (error) {
-        console.log(error);
-        return error;
-      }
+    try {
+      return file;
+    } catch (error) {
+      return error;
+    }
     },
     //-------------------------------------------------------FOR USER---------------------------------------------///
 
     getUserVM: async (parent, input) => {
       try {
-        token = input["input"]["token"];
+        const token = input.input.token;
         const decoded = jwt.verify(token, config.TOKEN_KEY);
-        input.userId = decoded;
-        const decoded_id = input.userId.id;
-        if (decoded_id) {
-          const for_user_VM = await prisma.user.findUnique({
+        const decodedId = decoded.id;
+
+        if (decodedId) {
+          const userVM = await prisma.user.findUnique({
             where: {
-              id: decoded_id,
+              id: decodedId,
             },
             select: {
               id: true,
@@ -81,15 +72,12 @@ const user_resolver = {
             },
           });
 
-          console.log(for_user_VM._count);
-          console.log(for_user_VM);
-
-          return for_user_VM;
+          return userVM;
         }
       } catch (error) {
         throw new GraphQLError("Something went wrong please check again", {
           extensions: {
-            StatusCode: 500,
+            statusCode: 500,
           },
         });
       }
