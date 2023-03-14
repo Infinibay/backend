@@ -123,19 +123,16 @@ const user_resolver = {
     },
 
     //////for get User By ID/////
-
     getUserByID: async (parent, input) => {
       try {
-        // console.log("hello", input);
-        token = input["input"]["token"];
+        const { token } = input.input;
         const decoded = jwt.verify(token, config.TOKEN_KEY);
-        input.userId = decoded;
-        const decoded_id = decoded.id;
-        console.log(decoded_id);
-        if (decoded_id) {
-          const find_user_by_id = await prisma.user.findUnique({
+        const { id: decodedId } = decoded;
+
+        if (decodedId) {
+          const user = await prisma.user.findUnique({
             where: {
-              id: decoded_id,
+              id: decodedId,
             },
             select: {
               id: true,
@@ -147,15 +144,13 @@ const user_resolver = {
               _count: true,
             },
           });
-          console.log(find_user_by_id);
-          return find_user_by_id;
+
+          return user;
         }
       } catch (error) {
-        console.log(error);
-        // return error;
-        throw new GraphQLError("Something went wrong please try again later", {
+        throw new GraphQLError("Something went wrong, please try again later", {
           extensions: {
-            StatusCode: 500,
+            statusCode: 500,
           },
         });
       }
