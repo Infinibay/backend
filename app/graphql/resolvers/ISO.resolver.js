@@ -10,95 +10,87 @@ const IOS_resolvers = {
     //for get all IOS (admin )
     getAllIOS: async (root, input) => {
       try {
-        token = input["input"]["token"];
-        console.log(token);
-        Search = input["input"]["Search"];
+        const { token, Search } = input.input;
         const decoded = jwt.verify(token, config.TOKEN_KEY);
-        input.userId = decoded;
+        const { id: decoded_id, userType: User_Type } = decoded;
 
-        const decoded_id = input.userId.id;
-        console.log(decoded.userType);
-        console.log(decoded_id);
-        if (decoded_id && decoded.User_Type == "admin") {
-          const for_find_IOS = await prisma.IOS.findMany({
+        if (decoded_id && User_Type === 'admin') {
+          const queryOptions = {
             select: {
               Name: true,
               Type: true,
               createdAt: true,
               userId: true,
             },
-          });
-          console.log(for_find_IOS);
+          };
+
           if (Search) {
-            const search_to_find = await prisma.IOS.findMany({
-              where: {
-                Name: {
-                  contains: Search,
-                  mode: "insensitive",
-                },
+            queryOptions.where = {
+              Name: {
+                contains: Search,
+                mode: 'insensitive',
               },
-            });
-            console.log(search_to_find);
-            return search_to_find;
+            };
           }
-          console.log(for_find_IOS);
-          return for_find_IOS;
+
+          const IOS = await prisma.IOS.findMany(queryOptions);
+          return IOS;
+        } else {
+          throw new GraphQLError('Unauthorized access. Only admin users can access this resource.', {
+            extensions: {
+              StatusCode: 401,
+              code: 'Failed ',
+            },
+          });
         }
       } catch (error) {
         console.log(error);
-        //  return error;
-        throw new GraphQLError("Please enter valid credentials", {
+        throw new GraphQLError('Please enter valid credentials', {
           extensions: {
             StatusCode: 401,
-            code: "Failed ",
+            code: 'Failed ',
           },
         });
       }
     },
     //FOR GET IOS BY ID (users)
-    getIOSById: async (parent, input) => {
+    getIOSById: async (parent, { input }) => {
+      const { token, search } = input;
       try {
-        token = input["input"]["token"];
-        search = input["input"]["search"];
         const decoded = jwt.verify(token, config.TOKEN_KEY);
-        input.userId = decoded;
-        const decoded_id = input.userId.id;
-        console.log(decoded_id);
-        if (decoded_id) {
-          const get_IOS = await prisma.IOS.findMany({
+        const userId = decoded.id;
+
+        if (!userId) {
+          throw new Error("Login again");
+        }
+
+        const IOSProperties = {
+          id: true,
+          userId: true,
+          Name: true,
+          Type: true,
+          createdAt: true,
+        };
+
+        let result;
+
+        if (search) {
+          result = await prisma.iOS.findMany({
             where: {
-              userId: decoded_id,
-            },
-            select: {
-              id: true,
-              userId: true,
-              Name: true,
-              Type: true,
-              createdAt: true,
+              userId,
+              Name: {
+                contains: search,
+                mode: "insensitive",
+              },
             },
           });
-          if (search) {
-            const for_find = await prisma.iOS.findMany({
-              where: {
-                userId: decoded_id,
-                Name: {
-                  contains: search,
-                  mode: "insensitive",
-                },
-              },
-            });
-            console.log(for_find);
-            return for_find;
-          }
-
-          console.log(get_IOS);
-          return get_IOS;
         } else {
-          throw new Error("login again");
+          result = await prisma.IOS.findMany({ where: { userId }, select: IOSProperties });
         }
+
+        return result;
       } catch (error) {
         console.log(error);
-        // return error;
         throw new GraphQLError("Please enter valid credentials", {
           extensions: {
             StatusCode: 401,
@@ -109,25 +101,22 @@ const IOS_resolvers = {
     },
   },
   Mutation: {
-    //-------------------------------------------------IOS----------------------------------------------------//
-    // fOR Create IOS
-
-    async createIOS(root, input) {
+    // Create IOS
+    async createIOS(parent, { input }) {
       try {
-        const for_create_IOS = await prisma.IOS.create({
+        const { Name, Type, userId, createdAt, Size } = input;
+        const ios = await prisma.iOS.create({
           data: {
-            Name: input["input"]["Name"],
-            Type: input["input"]["Type"],
-            userId: input["input"]["userId"],
-            createdAt: input["input"]["createdAt"],
-            Size: input["input"]["Size"],
+            Name,
+            Type,
+            userId,
+            createdAt,
+            Size,
           },
         });
-        return for_create_IOS;
+        return ios;
       } catch (error) {
-        console.log(error);
-        // return error;
-        throw new GraphQLError("Failed to Create", {
+        throw new GraphQLError("Failed to create IOS", {
           extensions: {
             StatusCode: 400,
             code: "Failed ",
@@ -139,17 +128,14 @@ const IOS_resolvers = {
     //FOR DELETE IOS
     async deleteIOS(root, input) {
       try {
-        const for_delete_IOS = await prisma.IOS.delete({
+        await prisma.IOS.delete({
           where: {
-            id: input["input"]["id"],
+            id: input.input.id,
           },
         });
-        console.log(for_delete_IOS);
         return "IOS Deleted";
       } catch (error) {
-        console.log(error);
-        //        return error;
-        throw new GraphQLError("failed to delete", {
+        throw new GraphQLError("Failed to delete IOS", {
           extensions: {
             StatusCode: 400,
             code: "Failed ",
