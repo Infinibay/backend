@@ -87,47 +87,41 @@ const user_resolver = {
 
     getUserList: async (parent, input) => {
       try {
-        token = input["input"]["token"];
-        Search = input["input"]["Search"];
+        const { token, Search } = input.input;
         const decoded = jwt.verify(token, config.TOKEN_KEY);
-        input.userId = decoded;
-        console.log(decoded);
-        console.log(decoded.User_Type);
-        if (decoded.User_Type == "admin") {
-          const for_get_user_list = await prisma.user.findMany({
-            where: {
-              Deleted: false,
-              User_Type: "user",
+        const { User_Type } = decoded;
+
+        if (User_Type !== "admin") {
+          throw new GraphQLError("Unauthorized access", {
+            extensions: {
+              statusCode: 401,
             },
           });
-
-          if (Search && decoded.User_Type == "admin") {
-            const search_to_find = await prisma.user.findMany({
-              where: {
-                Deleted: false,
-                User_Type: "user",
-                First_Name: {
-                  contains: Search,
-                  mode: "insensitive",
-                },
-              },
-            });
-            //  console.log(search_to_find);
-            return search_to_find;
-          }
-          console.log(for_get_user_list);
-          return for_get_user_list;
         }
+
+        const userList = await prisma.user.findMany({
+          where: {
+            Deleted: false,
+            User_Type: "user",
+            ...(Search && {
+              First_Name: {
+                contains: Search,
+                mode: "insensitive",
+              },
+            }),
+          },
+        });
+
+        return userList;
       } catch (error) {
-        console.log(error);
-        return error;
-        //   throw new GraphQLError("Something went wrong please check again", {
-        //     extensions: {
-        //       StatusCode: 500,
-        //     },
-        //   });
+        throw new GraphQLError("Something went wrong, please check again", {
+          extensions: {
+            statusCode: 500,
+          },
+        });
       }
     },
+
     //////for get User By ID/////
 
     getUserByID: async (parent, input) => {
