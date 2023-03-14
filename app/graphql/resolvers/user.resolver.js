@@ -267,9 +267,9 @@ const user_resolver = {
       try {
         const token = input.input.token;
         const decoded = jwt.verify(token, config.TOKEN_KEY);
-        const decoded_id = decoded.id;
+        const decodedId = decoded.id;
 
-        if (decoded_id && (decoded.User_Type === "admin")) {
+        if (decodedId && (decoded.User_Type === "admin")) {
           await prisma.user.update({
             where: {
               id: input.input.id,
@@ -291,55 +291,57 @@ const user_resolver = {
     //////for Login/////
     async Login(root, input) {
       try {
-        const Email = input["input"]["Email"];
-        const Password = input["input"]["Password"];
-        const for_login = await prisma.user.findUnique({
+        const email = input.input.Email;
+        const password = input.input.Password;
+        const forLogin = await prisma.user.findUnique({
           where: {
-            Email: Email,
+            Email: email,
           },
         });
 
-        if (!(Password || Email)) {
-          console.log("hello");
-          throw new Error("All input is required");
+        if (!password || !email) {
+          throw new Error("Both email and password are required");
         }
 
-        if ((await bcrypt.compare(Password, for_login.Password)) == true) {
+        if (!forLogin) {
+          throw new GraphQLError("Email not found", {
+            extensions: {
+              statusCode: 404,
+            },
+          });
+        }
+
+        if (await bcrypt.compare(password, forLogin.Password)) {
           const for_update_token = await prisma.user.update({
             where: {
-              id: for_login.id,
+              id: forLogin.id,
             },
             data: {
-              token: jwt.sign(
-                {
-                  id: for_login.id,
-                  Email: for_login.Email,
-                  User_Type: for_login.User_Type,
+              token: jwt.sign({
+                  id: forLogin.id,
+                  Email: forLogin.Email,
+                  User_Type: forLogin.User_Type,
                 },
-                process.env.TOKEN_KEY,
+                config.TOKEN_KEY,
                 {
                   expiresIn: "1d",
                 }
               ),
             },
           });
-          console.log(for_login.User_Type);
-          // console.log(for_login.userType);
           return for_update_token;
         } else {
-          throw new GraphQLError("Wrong password..!", {
+          throw new GraphQLError("Wrong password", {
             extensions: {
-              StatusCode: 401,
+              statusCode: 401,
             },
           });
         }
-        // // console.log(for_login);
-        // return (for_update_token);
       } catch (error) {
-        console.log(error);
-        throw new GraphQLError("Login Failed " + "Please Try Again....!", {
+        console.error(error);
+        throw new GraphQLError("Login failed. Please try again later", {
           extensions: {
-            StatusCode: 401,
+            statusCode: 500,
           },
         });
       }
