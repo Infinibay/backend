@@ -1,7 +1,7 @@
-const { errorType } = require('../helper/helperfunction')
+const { errorType } = require('../helper/helperfunction');
 
-const getErrorCode = errorName => {
-  return errorType[errorName]
-}
+const getErrorCode = (errorName) => {
+    return errorType[errorName];
+};
 
-module.exports = getErrorCode
+module.exports = getErrorCode;

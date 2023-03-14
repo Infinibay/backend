@@ -1,4 +1,4 @@
-const { gql, GraphQlUpload } = require("apollo-server-express");
+const { gql, GraphQlUpload } = require('apollo-server-express');
 
 const notification = gql`
   scalar JSON
@@ -54,6 +54,6 @@ const notification = gql`
   }
 
 
-  `
+  `;
 
-  module.exports = notification;
+module.exports = notification;

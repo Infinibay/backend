@@ -1,4 +1,4 @@
-const { gql, GraphQlUpload } = require("apollo-server-express");
+const { gql, GraphQlUpload } = require('apollo-server-express');
 
 const IOS = gql`
   scalar JSON
@@ -43,5 +43,5 @@ getIOSById(input: for_search): [IOS]
     Size: Number
   } 
 
-  `
-module.exports = IOS
+  `;
+module.exports = IOS;

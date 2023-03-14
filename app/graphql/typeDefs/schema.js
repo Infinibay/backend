@@ -14,7 +14,7 @@
 //     ##------------------------------ FOR VIRTUAL MACHINE---------------------------------------##
 //     getAllVM(input: for_search_all): [VirtualMachine]
 //     getUserAllVM (input: for_search__user): [VirtualMachine]
- 
+
 //     getSpecificVM(input: for_id_token): VirtualMachine
 //     getUserVM(input: for_token): User
 //     getConfigFile: JSON
@@ -69,8 +69,6 @@
 //     createdAt: Date
 //     Size : Number
 //   }
-    
-
 
 
 //   input userInput {
@@ -149,11 +147,10 @@
 //     User_Type: String
 //     _count: Number
 
- 
-  
+
 //   }
 
- 
+
 //   input VM {
 //     id: ID
 //     virtualMachineName: String

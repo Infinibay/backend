@@ -532,7 +532,7 @@
 //         console.log(decoded.userType);
 //         const decoded_id = input.userId.id;
 //         console.log(decoded_id);
-       
+
 //         if (decoded_id && decoded.User_Type == "admin") {
 //           const for_delete_User = await prisma.user.update({
 //             where: {
@@ -573,7 +573,7 @@
 //             },
 //             data: {
 //               token: jwt.sign(
-              
+
 //                 {
 //                   id: for_login.id,
 //                   Email: for_login.Email,

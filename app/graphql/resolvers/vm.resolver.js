@@ -67,7 +67,6 @@ const vm_resolvers = {
     // },
 
     //////for Get Specific VM/////
-
     getSpecificVM: async (parent, input) => {
       try {
         token = input["input"]["token"];
@@ -473,7 +472,6 @@ const vm_resolvers = {
             } else {
               throw new Error("ERROR");
             }
-            return for_delete_vm;
           }
         }
       } catch (error) {

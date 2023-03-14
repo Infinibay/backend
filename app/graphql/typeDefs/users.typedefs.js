@@ -1,4 +1,4 @@
-const { gql, GraphQlUpload } = require("apollo-server-express");
+const { gql, GraphQlUpload } = require('apollo-server-express');
 
 const user = gql`
   scalar JSON

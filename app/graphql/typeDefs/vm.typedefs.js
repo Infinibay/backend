@@ -1,4 +1,4 @@
-const { gql, GraphQlUpload } = require("apollo-server-express");
+const { gql, GraphQlUpload } = require('apollo-server-express');
 
 const virtualMachine = gql`
   scalar JSON
@@ -110,4 +110,4 @@ input  for_search__user {
 
 
   `;
-  module.exports = virtualMachine;
+module.exports = virtualMachine;
