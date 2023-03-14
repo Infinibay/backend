@@ -28,8 +28,7 @@ const user_resolver = {
 
     getUserVM: async (parent, input) => {
       try {
-        const token = input.input.token;
-        const decoded = jwt.verify(token, config.TOKEN_KEY);
+        const decoded = jwt.verify(input.input.token, config.TOKEN_KEY);
         const decodedId = decoded.id;
 
         if (decodedId) {
@@ -125,8 +124,7 @@ const user_resolver = {
     //////for get User By ID/////
     getUserByID: async (parent, input) => {
       try {
-        const { token } = input.input;
-        const decoded = jwt.verify(token, config.TOKEN_KEY);
+        const decoded = jwt.verify(input.input, config.TOKEN_KEY);
         const { id: decodedId } = decoded;
 
         if (decodedId) {
@@ -160,6 +158,9 @@ const user_resolver = {
     //------------------------------------------USER------------------------------------------------//
     //////for Create User/////
 
+    // TODO: Add validation to the input
+    // TODO: Add a way to handle errors
+    // TODO: check permission
     async createUser(root, input) {
       try {
         // Create a unique file path for the user's image
@@ -219,8 +220,7 @@ const user_resolver = {
     // NOTE: root is not been used
     async updateUser(root, input) {
       try {
-        const token = input.input.token;
-        const decoded = jwt.verify(token, config.TOKEN_KEY);
+        const decoded = jwt.verify(input.input.token, config.TOKEN_KEY);
         const decoded_id = decoded.id;
 
         // Create a unique file path for the user's image
@@ -265,8 +265,7 @@ const user_resolver = {
 
     async deleteUser(root, input) {
       try {
-        const token = input.input.token;
-        const decoded = jwt.verify(token, config.TOKEN_KEY);
+        const decoded = jwt.verify(input.input.token, config.TOKEN_KEY);
         const decodedId = decoded.id;
 
         if (decodedId && (decoded.User_Type === "admin")) {
@@ -386,7 +385,7 @@ const user_resolver = {
       try {
         const userEmail = await prisma.user.findUnique({
           where: {
-            Email: input["input"]["Email"],
+            Email: input.input.Email,
           },
         });
     
@@ -423,14 +422,12 @@ const user_resolver = {
 
     async resetPassword(root, input) {
       try {
-        const token = input["input"]["token"];
-        const decoded = jwt.verify(token, process.env.TOKEN_KEY);
+        const decoded = jwt.verify(input.input.token, process.env.TOKEN_KEY);
         const userId = decoded.id;
-
-        var Password = input["input"]["Password"];
+        var password = input.input.Password;
 
         // TODO: Add some configuration to determine the number of rounds
-        var encryptedPassword = await bcrypt.hash(Password, 10);
+        var encryptedPassword = await bcrypt.hash(password, 10);
         await prisma.user.update({
           where: {
             id: userId,
@@ -442,7 +439,6 @@ const user_resolver = {
 
         return "Password Reset";
       } catch (error) {
-        console.log(error);
         throw new GraphQLError(`Error: ${error.message}`, {
           extensions: {
             StatusCode: 404,
