@@ -349,37 +349,38 @@ const user_resolver = {
 
     async sendEmail(root, input) {
       try {
-        const Email = input["input"]["Email"];
-        console.log(Email);
+        const email = input.input.Email;
         const transporter = nodemailer.createTransport(
+          // TODO: Add ENV variables for the email service
           smtpTransport({
-            service: "gmail",
-            host: "smtp.gmail.com",
+            service: process.env.EMAIL_SERVICE,
+            host: process.env.EMAIL_HOST,
             auth: {
-              user: "razorshariq@gmail.com",
-              pass: "xhkjchgrxezlsnvz",
+              user: process.env.EMAIL_USER,
+              pass: process.env.EMAIL_PASSWORD,
             },
           })
         );
         const mailOptions = {
-          from: "fizzafatima066@gmail.com",
-          to: Email,
+          from: process.env.EMAIL_FROM,
+          to: email,
           subject: "Password Reset",
           text: "That was easy!",
+          // TODO: Add a template library to generate the email
           html: `<a href="localhost:3001/forgetpassword?> please click the link and reset your password or visit this link http://localhost:3030/forgetpassword? </a>`,
         };
 
-        transporter.sendMail(mailOptions, function (error, info) {
-          if (error) {
-            console.log(error);
-          } else {
-            console.log("Email sent: " + info.response);
-          }
-        });
+        await transporter.sendMail(mailOptions);
       } catch (error) {
-        return error;
+        // Throw a GraphQL error if something goes wrong
+        throw new GraphQLError("Email not sent", {
+          extensions: {
+            statusCode: 500,
+          },
+        });
       }
     },
+
     //////for Forget Passwordr/////
     async forgetPassword(root, input) {
       try {
