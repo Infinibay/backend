@@ -422,20 +422,16 @@ const user_resolver = {
     //////for Reset Password/////
 
     async resetPassword(root, input) {
-      const config = process.env;
-
       try {
-        console.log(input);
         const token = input["input"]["token"];
-        console.log(token);
-        const decoded = jwt.verify(token, config.TOKEN_KEY);
+        const decoded = jwt.verify(token, process.env.TOKEN_KEY);
         const userId = decoded.id;
-        console.log(userId);
-        // var Email = input["input"]["Email"];
+
         var Password = input["input"]["Password"];
 
+        // TODO: Add some configuration to determine the number of rounds
         var encryptedPassword = await bcrypt.hash(Password, 10);
-        const for_reset_password = await prisma.user.update({
+        await prisma.user.update({
           where: {
             id: userId,
           },
@@ -444,11 +440,10 @@ const user_resolver = {
           },
         });
 
-        console.log("Password Reset");
         return "Password Reset";
       } catch (error) {
         console.log(error);
-        throw new GraphQLError("Something went wrong please try again", {
+        throw new GraphQLError(`Error: ${error.message}`, {
           extensions: {
             StatusCode: 404,
           },
