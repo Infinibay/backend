@@ -1,0 +1,61 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["fullTextIndex"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String  @id @default(uuid())
+  eMail     String  @unique
+  password  String
+  deleted   Boolean
+  token     String  @default("null")
+  firstName String
+  lastName  String
+  userImage String? @unique
+  userType  String
+
+  ISO          ISO[]
+  notification Notification[]
+
+  VM VirtualMachine[]
+}
+
+model VirtualMachine {
+  id                 String  @id @default(uuid())
+  config             Json
+  status             Boolean
+  virtualMachineName String  @unique
+  title              String
+  description        String
+  userId             String
+  guId               String  @unique @default(uuid())
+  vmImage            String? @unique
+
+  user         User           @relation(fields: [userId], references: [id])
+  notification Notification[]
+}
+
+model Notification {
+  id      String          @id @default(uuid())
+  message String?
+  userId  String
+  readed  Boolean
+  vmId    String?
+  user    User            @relation(fields: [userId], references: [id])
+  vm      VirtualMachine? @relation(fields: [vmId], references: [id])
+}
+
+model ISO {
+  id        String   @id @default(uuid())
+  name      String
+  type      String
+  size      Int
+  createdAt DateTime @default(now())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id])
+}
