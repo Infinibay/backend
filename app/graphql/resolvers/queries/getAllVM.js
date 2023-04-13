@@ -55,13 +55,12 @@ const allVMResolver = {
           return forVM
         }
       } catch (error) {
-        logger.error(error)
+        logger.error(error, error.message)
         throw new GraphQLError(
           'Something went wrong....please enter valid credentials .!!!  ',
           {
             extensions: {
-              StatusCode: 401,
-              code: 'Failed '
+              StatusCode: 401
             }
           }
         )

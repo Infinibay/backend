@@ -15,6 +15,9 @@ const ISO = gql`
     "The createISO Mutation is for users to create ISO by using token"
     createISO(input: createISOInput): ISO
 
+    "The updateISO Mutation is for users to update type of ISO by using token"
+    updateISO(input: updateISOInput): ISO
+
     "Delete ISO by using ISO ID and token"
     deleteISO(input: deleteISOInput): String
   }
@@ -49,6 +52,11 @@ const ISO = gql`
   input deleteISOInput {
     id: ID
     token: String
+  }
+  input updateISOInput {
+    id: ID
+    token: String
+    type: String
   }
 `
 export default ISO

@@ -20,7 +20,7 @@ const forVirtualMachineName = {
           return 'false'
         }
       } catch (error) {
-        logger.error(error)
+        logger.error(error, error.message)
         return error
       }
     }

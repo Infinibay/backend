@@ -18,7 +18,7 @@ const forUpdateNotification = {
         })
         return 'Updated'
       } catch (error) {
-        logger.error(error)
+        logger.error(error, error.message)
         throw new GraphQLError('Failed to Update', {
           extensions: {
             StatusCode: 400,

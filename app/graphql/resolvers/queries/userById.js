@@ -28,7 +28,7 @@ const forUserById = {
           return findUserById
         }
       } catch (error) {
-        logger.error(error)
+        logger.error(error, error.message)
         throw new GraphQLError('Something went wrong please try again later', {
           extensions: {
             StatusCode: 500

@@ -23,24 +23,6 @@ const userVirtualMachine = {
               eMail: true,
               userImage: true,
               userType: true,
-              notification: {
-                select: {
-                  id: true,
-                  message: true
-                }
-              },
-              ISO: {
-                select: {
-                  id: true,
-                  name: true
-                }
-              },
-              VM: {
-                select: {
-                  virtualMachineName: true,
-                  vmImage: true
-                }
-              },
               _count: {
                 select: {
                   VM: true,
@@ -53,7 +35,7 @@ const userVirtualMachine = {
           return forUserVM
         }
       } catch (error) {
-        logger.error(error)
+        logger.error(error, error.message)
         throw new GraphQLError('Something went wrong please check again', {
           extensions: {
             StatusCode: 500

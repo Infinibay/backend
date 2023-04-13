@@ -22,7 +22,6 @@ const ISOById = {
               userId: true,
               name: true,
               type: true,
-              createdAt: true,
               size: true
             }
           })
@@ -44,11 +43,10 @@ const ISOById = {
           throw new Error('Login again')
         }
       } catch (error) {
-        logger.error(error)
+        logger.error(error, error.message)
         throw new GraphQLError('Please enter valid credentials', {
           extensions: {
-            StatusCode: 401,
-            code: 'Failed '
+            StatusCode: 401
           }
         })
       }

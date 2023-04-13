@@ -19,11 +19,10 @@ const forUserNotification = {
           return userNotification
         }
       } catch (error) {
-        logger.log(error)
+        logger.error(error, error.message)
         throw new GraphQLError('Please enter valid credentials ', {
           extensions: {
-            StatusCode: 401,
-            code: 'Failed '
+            StatusCode: 401
           }
         })
       }

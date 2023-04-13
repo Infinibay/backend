@@ -8,7 +8,7 @@ import ms from 'ms'
 import fs from 'fs'
 import ejs from 'ejs'
 const prisma = new PrismaClient()
-const forgetPasswordExpiredIn = ms(process.env.forgetPasswordExpiredIn)
+const forgetPasswordExpiredIn = ms(process.env.FORGETPASSWORDEXPIREDIN)
 
 const forgetPassword = {
   Mutation: {
@@ -29,7 +29,7 @@ const forgetPassword = {
                 id: userEmail.id,
                 eMail: userEmail.eMail
               },
-              process.env.TOKEN_KEY,
+              process.env.TOKENKEY,
               {
                 expiresIn: forgetPasswordExpiredIn
               }
@@ -40,8 +40,8 @@ const forgetPassword = {
                 service: 'gmail',
                 host: 'smtp.gmail.com',
                 auth: {
-                  user: process.env.user,
-                  pass: process.env.pass
+                  user: process.env.USER,
+                  pass: process.env.PASS
                 }
               })
             )
@@ -54,7 +54,7 @@ const forgetPassword = {
             }
             const html = ejs.render(template, data)
             const mailOptions = {
-              from: process.env.user,
+              from: process.env.USERR,
               to: userEmail.eMail,
               subject: 'Password Reset',
               text: 'That was easy!',
@@ -76,7 +76,7 @@ const forgetPassword = {
           throw new Error('NOT FOUND')
         }
       } catch (error) {
-        logger.error(error)
+        logger.error(error, error.message)
         throw new GraphQLError('Something went wrong please try again', {
           extensions: {
             StatusCode: 404

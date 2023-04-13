@@ -14,7 +14,7 @@ const fordeleteNotification = {
         })
         return 'Deleted'
       } catch (error) {
-        logger.error(error)
+        logger.error(error, error.message)
         throw new GraphQLError('Failed to Delete', {
           extensions: {
             StatusCode: 404,

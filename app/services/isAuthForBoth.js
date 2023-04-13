@@ -8,14 +8,14 @@ const AuthForBoth = (token) => {
     throw new GraphQLError('A token is required for authentication')
   }
   try {
-    const decoded = jwt.verify(token, config.TOKEN_KEY)
+    const decoded = jwt.verify(token, config.TOKENKEY)
     if (decoded) {
       return decoded
     } else {
       throw new GraphQLError('Sorry Access Denied')
     }
   } catch (err) {
-    logger.error(err)
+    logger.error(err, err.message)
     throw new GraphQLError('Invalid Token')
   }
 }

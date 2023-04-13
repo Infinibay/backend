@@ -2,9 +2,8 @@ import { PrismaClient } from '@prisma/client'
 import { GraphQLError } from 'graphql'
 import AuthForBoth from '../../../services/isAuthForBoth.js'
 import fs from 'fs'
-import axios from 'axios'
 const prisma = new PrismaClient()
-const RandomStringLength = parseInt(process.env.RandomStringLength)
+const RandomStringLength = parseInt(process.env.RANDOMSTRINGLENGTH)
 
 const updateVMResolvers = {
   Mutation: {
@@ -45,95 +44,34 @@ const updateVMResolvers = {
               }
             }
           })
-          console.log(forUpdatingVM.virtualMachineName)
-          const virtualMachineName = input.input.virtualMachineName
-          const confii = JSON.parse(input.input.Config)
-          // let size = confii["getConfigFile"]["Memory"];
-          const count = confii.getConfigFile.processor.Processors
-
-          if (forUpdatingVM.user.id === forID) {
-            //  var data1 = JSON.stringify({
-            //   jsonrpc: "2.0",
-            //   method: "updateAllCall",3
-
-            //   params: {
-            //     name: forUpdatingVM.virtualMachineName,
-            //     newname : virtualMachineName,
-            //     // cpu : cpu ,
-            //     // ram: ram,
-            //   },
-            //   id: 1,
-            // });
-            // console.log(data1);
-            // var data2 = JSON.stringify({
-            //   jsonrpc: "2.0",
-            //   method: "updateMemoryCall",
-            //   params: {
-            //     name: forUpdatingVM.virtualMachineName,
-            //     size: size,
-            //   },
-            //   id: 1,
-
-            // });
-            // console.log(data2);
-            //     updateAllCall(name,newname,cpu,ram)
-            const data3 = JSON.stringify({
-              jsonrpc: '2.0',
-              method: 'updateCpuCall',
-              params: {
-                name: forUpdatingVM.virtualMachineName,
-                count
+          console.log(forUpdatingVM)
+          if (vmImage) {
+            const forUpdate = await prisma.virtualMachine.update({
+              where: {
+                id: input.input.id
               },
-              id: 1
-            })
-
-            console.log(data3, 'kkkkkkkkk')
-            const config = {
-              method: 'post',
-              maxBodyLength: Infinity,
-              url: 'http://168.119.24.70:5001',
-              headers: {
-                'Content-Type': 'application/json'
+              data: {
+                virtualMachineName: input.input.virtualMachineName,
+                title: input.input.title,
+                description: input.input.description,
+                status: input.input.status,
+                vmImage: path
               },
-              data: data3
-            }
-
-            const kk = await axios(config)
-            console.log(kk)
-            console.log(kk.data.result, '//')
-
-            console.log(kk.data.result, 'hhbehdhjbd')
-            if (kk.data.result.status === true) {
-              if (vmImage) {
-                const forUpdate = await prisma.virtualMachine.update({
-                  where: {
-                    id: input.input.id
-                  },
-                  data: {
-                    virtualMachineName,
-                    title: input.input.title,
-                    description: input.input.description,
-                    status: input.input.status,
-                    userId: input.input.userId,
-                    config: input.input.config,
-                    vmImage: path
-                  },
-                  select: {
-                    id: true,
-                    virtualMachineName: true,
-                    description: true,
-                    status: true,
-                    config: true,
-                    title: true,
-                    vmImage: true
-                  }
-                })
-                console.log('forUpdate')
-                return forUpdate
+              select: {
+                id: true,
+                virtualMachineName: true,
+                description: true,
+                status: true,
+                title: true,
+                vmImage: true
               }
+            })
+            console.log('forUpdate')
+            return forUpdate
+          }
 
-              if (vmImage === null || !vmImage) {
-                const forUpdatewithoutimage =
+          if (vmImage === null || !vmImage) {
+            const forUpdatewithoutimage =
                   await prisma.virtualMachine.update({
                     where: {
                       id: input.input.id
@@ -141,39 +79,34 @@ const updateVMResolvers = {
                     data: {
                       virtualMachineName: input.input.virtualMachineName,
                       title: input.input.title,
-                      Description: input.input.description,
+                      description: input.input.description,
                       status: input.input.status,
-                      userId: input.input.userId,
-                      config: input.input.config
+                      userId: input.input.userId
+
                     },
                     select: {
                       id: true,
                       virtualMachineName: true,
                       description: true,
                       status: true,
-                      config: true,
-                      title: true,
-                      vmImage: true
+
+                      title: true
                     }
                   })
-                console.log('forUpdatewithoutimage')
-                return forUpdatewithoutimage
-              }
-            }
-          } else {
-            throw new Error('Error')
+            console.log('forUpdatewithoutimage')
+            return forUpdatewithoutimage
           }
         }
       } catch (error) {
         console.log(error)
         throw new GraphQLError('Failed to Update', {
           extensions: {
-            StatusCode: 404,
-            code: 'Failed '
+            StatusCode: 404
           }
         })
       }
     }
   }
 }
+
 export default updateVMResolvers

@@ -10,7 +10,7 @@ const allNotification = {
         const forGetNotification = await prisma.notification.findMany({})
         return forGetNotification
       } catch (error) {
-        logger.error(error)
+        logger.error(error, error.message)
         throw new GraphQLError('failed to get all notifications ', {
           extensions: {
             StatusCode: 500,

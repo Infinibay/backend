@@ -6,7 +6,7 @@ import ms from 'ms'
 import logger from '../../../../logger.js'
 
 const prisma = new PrismaClient()
-const expiresIn = ms(process.env.expiresIn)
+const forExpiresIn = ms(process.env.EXPIRESIN)
 
 const login = {
   Mutation: {
@@ -34,9 +34,9 @@ const login = {
                   eMail: forLogin.eMail,
                   userType: forLogin.userType
                 },
-                process.env.TOKEN_KEY,
+                process.env.TOKENKEY,
                 {
-                  expiresIn
+                  expiresIn: forExpiresIn
                 }
               )
             }
@@ -50,12 +50,11 @@ const login = {
           })
         }
       } catch (error) {
-        logger.error(error)
+        logger.error(error, error.message)
         throw new GraphQLError('Login Failed ' + 'Please Try Again....!', {
           extensions: {
             StatusCode: 401
           }
-
         })
       }
     }

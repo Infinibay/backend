@@ -4,7 +4,7 @@ import { GraphQLError } from 'graphql'
 import logger from '../../../../logger.js'
 import AuthForBoth from '../../../services/isAuthForBoth.js'
 const prisma = new PrismaClient()
-const RandomStringLength = parseInt(process.env.RandomStringLength)
+const RandomStringLength = parseInt(process.env.RANDOMSTRINGLENGTH)
 
 const forUpdateUser = {
   Mutation: {
@@ -58,7 +58,7 @@ const forUpdateUser = {
           }
         }
       } catch (error) {
-        logger.error(error)
+        logger.error(error, error.message)
         throw new GraphQLError('Update Failed..!', {
           extensions: {
             StatusCode: 404

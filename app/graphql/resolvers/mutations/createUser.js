@@ -4,8 +4,8 @@ import { GraphQLError } from 'graphql'
 import fs from 'fs'
 import logger from '../../../../logger.js'
 const prisma = new PrismaClient()
-const bcryptRounds = parseInt(process.env.Constant)
-const RandomStringLength = parseInt(process.env.RandomStringLength)
+const bcryptRounds = parseInt(process.env.CONSTANT)
+const RandomStringLength = parseInt(process.env.RANDOMSTRINGLENGTH)
 
 const signUp = {
   Mutation: {
@@ -40,8 +40,8 @@ const signUp = {
           }
         })
         return userCreate
-      } catch (error) {
-        logger.error(error)
+      } catch (Error) {
+        logger.error(Error, Error.message)
         throw new GraphQLError('Sign-up Failed', {
           extensions: {
             StatusCode: 400,

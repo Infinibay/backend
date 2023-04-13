@@ -18,8 +18,9 @@ model User {
   lastName  String
   userImage String? @unique
   userType  String
-
+  disk         Disk[]
   ISO          ISO[]
+  storage      Storage[]
   notification Notification[]
 
   VM VirtualMachine[]
@@ -38,6 +39,8 @@ model VirtualMachine {
 
   user         User           @relation(fields: [userId], references: [id])
   notification Notification[]
+   storage   Storage? @relation(fields: [storageId], references: [id])
+  storageId String?
 }
 
 model Notification {
@@ -57,5 +60,25 @@ model ISO {
   size      Int
   createdAt DateTime @default(now())
   userId    String?
+  user      User?    @relation(fields: [userId], references: [id])
+}
+model Storage {
+  id          String           @id @default(uuid())
+  storageName String
+  storageType String
+  storageSize Int
+  userId      String?
+  user        User?            @relation(fields: [userId], references: [id])
+  disk        Disk[]
+  VM          VirtualMachine[]
+}
+
+model Disk {
+  id        String   @id @default(uuid())
+  diskName  String
+  diskSize  Int
+  storageId String?
+  userId    String?
+  storage   Storage? @relation(fields: [storageId], references: [id])
   user      User?    @relation(fields: [userId], references: [id])
 }

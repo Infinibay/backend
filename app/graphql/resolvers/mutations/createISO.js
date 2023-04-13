@@ -26,15 +26,23 @@ const forCreateISO = {
                 name: forCon,
                 type: input.input.type,
                 userId: forID,
-                createdAt: input.input.createdAt,
                 size: input.input.size
+              },
+              select: {
+                id: true,
+                name: true,
+                userId: true,
+                size: true,
+                type: true,
+                createdAt: true
               }
+
             })
             return forCreateISO
           }
         }
       } catch (error) {
-        logger.error(error)
+        logger.error(error, error.message)
         throw new GraphQLError('Failed to Create', {
           extensions: {
             StatusCode: 400,

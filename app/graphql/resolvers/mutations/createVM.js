@@ -3,9 +3,9 @@ import { GraphQLError } from 'graphql'
 import logger from '../../../../logger.js'
 import AuthForBoth from '../../../services/isAuthForBoth.js'
 import fs from 'fs'
-import createCallFunction from './createVmFunction.js'
+import createCallFunction from '../../../services/createCallFunctions.js'
 const prisma = new PrismaClient()
-const RandomStringLength = parseInt(process.env.RandomStringLength)
+const RandomStringLength = parseInt(process.env.RANDOMSTRINGLENGTH)
 
 const createVMResolvers = {
   Mutation: {
@@ -38,11 +38,11 @@ const createVMResolvers = {
           const kk = await createCallFunction(fordata)
           const storageId = input.input.storageId
           if (storageId) {
-            // eslint-disable-next-line no-undef
-            VMCreate.storageId = storageId
+            input.input.storageId = storageId
           }
           if (kk.data.result.status === true) {
             if (kk.data.result.status === true) {
+              const storageId = input.input.storageId ? input.input.storageId : null
               const VMCreate = await prisma.virtualMachine.create({
                 data: {
                   userId: forID,
@@ -61,7 +61,8 @@ const createVMResolvers = {
                   status: true,
                   description: true,
                   config: true,
-                  vmImage: true
+                  vmImage: true,
+                  storageId: true
                 }
               })
               return VMCreate
@@ -69,18 +70,16 @@ const createVMResolvers = {
           } else {
             throw new GraphQLError('Failed to Create', {
               extensions: {
-                StatusCode: 400,
-                code: 'Failed '
+                StatusCode: 400
               }
             })
           }
         }
       } catch (error) {
-        logger.error(error)
+        logger.error(error, error.message)
         throw new GraphQLError('Failed to Create', {
           extensions: {
-            StatusCode: 400,
-            code: 'Failed '
+            StatusCode: 400
           }
         })
       }

@@ -8,7 +8,7 @@ const forConfigFile = {
         const configFile = file
         return configFile
       } catch (error) {
-        logger.error(error)
+        logger.error(error, error.message)
         throw new GraphQLError('Sign-up Failed', {
           extensions: {
             StatusCode: 400,
@@ -19,5 +19,4 @@ const forConfigFile = {
     }
   }
 }
-
 export default forConfigFile

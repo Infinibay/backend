@@ -47,7 +47,7 @@ const allUserVMResolver = {
           return forUserVM
         }
       } catch (error) {
-        logger.error(error)
+        logger.error(error, error.message)
         throw new GraphQLError(
           'Something went wrong....please enter valid credentials .!!!  ',
           {

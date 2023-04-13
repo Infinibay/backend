@@ -24,6 +24,7 @@ const specificVirtualMachine = {
               title: true,
               status: true,
               config: true,
+              storageId: true,
               vmImage: true,
               guId: true,
               user: {
@@ -41,13 +42,12 @@ const specificVirtualMachine = {
           }
         }
       } catch (error) {
-        logger.error(error)
+        logger.error(error, error.message)
         throw new GraphQLError(
           'Something went wrong....please try again.!!!  ',
           {
             extensions: {
-              StatusCode: 400,
-              code: 'Failed '
+              StatusCode: 400
             }
           }
         )

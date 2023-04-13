@@ -17,7 +17,7 @@ const createNotification = {
         })
         return forNotification
       } catch (error) {
-        logger.error(error)
+        logger.error(error, error.message)
         throw new GraphQLError('Failed to Create', {
           extensions: {
             StatusCode: 400,

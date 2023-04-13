@@ -33,26 +33,16 @@ const forDeleteISO = {
                   id: forFind.id
                 }
               })
-              return 'deleted ISO'
+              return 'ISO Deleted'
             }
           }
         }
       } catch (error) {
-        logger.error(error)
-        if (error.extensions.StatusCode === 400) {
-          throw new GraphQLError('please enter valid credentials', {
-            extensions: {
-              StatusCode: 401,
-              code: 'Invalid Credentials'
-            }
-          })
+        logger.error(error, error.message)
+        if (error.extensions && error.extensions.status === 400) {
+          throw new GraphQLError('please enter valid credentials', { extensions: { status: 400 } })
         } else {
-          throw new GraphQLError('Failed to Delete', {
-            extensions: {
-              StatusCode: 400,
-              code: 'Failed'
-            }
-          })
+          throw new GraphQLError('Failed to Delete', { extensions: { status: 500 } })
         }
       }
     }

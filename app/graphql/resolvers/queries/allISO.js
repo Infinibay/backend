@@ -17,7 +17,7 @@ const forAllSO = {
               id: true,
               name: true,
               type: true,
-              createdAt: true,
+              // createdAt: true,
               userId: true,
               size: true
             }
@@ -36,7 +36,7 @@ const forAllSO = {
           return forFindISO
         }
       } catch (error) {
-        logger.error(error)
+        logger.error(error, error.message)
         throw new GraphQLError('Please enter valid credentials', {
           extensions: {
             StatusCode: 401,

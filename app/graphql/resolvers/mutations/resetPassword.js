@@ -4,7 +4,7 @@ import jwt from 'jsonwebtoken'
 import { GraphQLError } from 'graphql'
 import logger from '../../../../logger.js'
 const prisma = new PrismaClient()
-const bcryptRounds = parseInt(process.env.Constant)
+const bcryptRounds = parseInt(process.env.CONSTANT)
 
 const forResetPassword = {
   Mutation: {
@@ -12,7 +12,7 @@ const forResetPassword = {
       const config = process.env
       try {
         const token = input.input.token
-        const decoded = jwt.verify(token, config.TOKEN_KEY)
+        const decoded = jwt.verify(token, config.TOKENKEY)
         const password = input.input.password
         const encryptedPassword = await bcrypt.hash(password, bcryptRounds)
         await prisma.user
@@ -26,7 +26,7 @@ const forResetPassword = {
           })
         return 'Password Reset'
       } catch (error) {
-        logger.log(error)
+        logger.error(error, error.message)
         throw new GraphQLError('Something went wrong please try again', {
           extensions: {
             StatusCode: 404
