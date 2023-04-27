@@ -16,7 +16,7 @@ const virtualMachine = gql`
     findVMName(input: findVMNameInput): String
   }
   type Mutation {
-    " Users can create Virtual Machine by using token "
+    "Users can create Virtual Machine by using token "
     createVM(input: createVMInput): VirtualMachine
     "Users can update their Virtual Machine by using Vitual Machine ID and token "
     upadteVM(input: upadteVMInput): VirtualMachine

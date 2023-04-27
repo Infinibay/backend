@@ -23,7 +23,6 @@ const createVMResolvers = {
           'app/VM_image/' +
           (Math.random() + 1).toString(36).substring(RandomStringLength) +
           '.jpeg'
-
         const vmImage = input.input.vmImage
         if (vmImage) {
           const base64Data = await vmImage.replace(
@@ -62,18 +61,20 @@ const createVMResolvers = {
                   description: true,
                   config: true,
                   vmImage: true,
-                  storageId: true
+                  storageId: true,
+                  title: true
                 }
               })
               return VMCreate
             }
-          } else {
-            throw new GraphQLError('Failed to Create', {
-              extensions: {
-                StatusCode: 400
-              }
-            })
           }
+          //  else {
+          //   throw new GraphQLError('Failed to Create', {
+          //     extensions: {
+          //       StatusCode: 400
+          //     }
+          //   })
+          // }
         }
       } catch (error) {
         logger.error(error, error.message)

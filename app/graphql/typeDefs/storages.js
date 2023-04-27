@@ -5,7 +5,9 @@ const storage = gql`
   type Query {
     "This Mutation is for users to get details of  Storage Pool by using token "
     getStorageList(input: getStorageListInput): [Storage]
-  }
+
+    getStorageDetailsDisk(input: getStorageDetailsDisInput ) : StorageDisk
+  } 
   type Mutation {
     "This Mutation is for users to add Storage Pool by using token "
     createStorage(input: createStorageInput): Storage
@@ -17,6 +19,18 @@ const storage = gql`
     deleteStoragePool(input: deleteStorageInput): String
   }
 
+  type StorageDisk {
+  storage: [Storage]
+  disk: [Disk]
+}
+
+type Disk {
+  id: ID
+    diskName: String
+    diskSize: Number
+    storageId: Storage
+}
+
   type Storage {
     id: ID
     storageName: String
@@ -24,6 +38,7 @@ const storage = gql`
     storageSize: Number
     userId: User
   }
+
   type User {
     id: ID
     firstName: String
@@ -54,6 +69,10 @@ const storage = gql`
     id: ID
   }
   input deleteStorageInput {
+    id: ID
+    token: String
+  }
+  input getStorageDetailsDisInput {
     id: ID
     token: String
   }

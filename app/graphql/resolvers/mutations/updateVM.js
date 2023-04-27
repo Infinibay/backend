@@ -23,7 +23,6 @@ const updateVMResolvers = {
           fs.writeFileSync(path, base64Data, { encoding: 'base64' })
           console.log(path)
         }
-
         const token = input.input.token
 
         const forID = AuthForBoth(token).id

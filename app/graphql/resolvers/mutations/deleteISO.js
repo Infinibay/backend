@@ -9,14 +9,14 @@ const forDeleteISO = {
     async deleteISO (_root, input) {
       try {
         const token = input.input.token
-
+        const ids = input.input.id
         const forBoth = AuthForBoth(token).id
         const forUserType = AuthForBoth(token).userType
         if (forBoth) {
           if (forUserType === 'admin') {
-            await prisma.ISO.delete({
+            await prisma.ISO.deleteMany({
               where: {
-                id: input.input.id
+                id: { in: ids }
               }
             })
             return 'ISO Deleted'

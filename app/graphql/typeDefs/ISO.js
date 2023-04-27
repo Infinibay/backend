@@ -50,7 +50,7 @@ const ISO = gql`
   }
 
   input deleteISOInput {
-    id: ID
+    id:[ID]
     token: String
   }
   input updateISOInput {

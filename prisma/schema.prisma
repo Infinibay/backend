@@ -18,7 +18,6 @@ model User {
   lastName  String
   userImage String? @unique
   userType  String
-  disk         Disk[]
   ISO          ISO[]
   storage      Storage[]
   notification Notification[]
@@ -78,7 +77,5 @@ model Disk {
   diskName  String
   diskSize  Int
   storageId String?
-  userId    String?
   storage   Storage? @relation(fields: [storageId], references: [id])
-  user      User?    @relation(fields: [userId], references: [id])
 }
