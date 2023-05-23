@@ -1,35 +1,16 @@
 import axios from 'axios'
 import logger from '../../logger.js'
-
+import VM from './vmFucntions.js'
 const forDeleteFunction = (forName) => {
   return new Promise((resolve, reject) => {
-    const data = JSON.stringify({
-      jsonrpc: '2.0',
-      method: 'deleteCall',
-      params: {
-        name: forName
-      },
-      id: 1
+    const vm = new VM()
+    vm.deleteVM(forName).then((response) => {
+      resolve({"status":true})
+    }).catch((error) => {
+      logger.error(error, error.message)
+      reject(error)
     })
-
-    const config = {
-      method: 'post',
-      maxBodyLength: Infinity,
-      url: 'http://168.119.24.70:5001',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      data
-    }
-
-    axios(config)
-      .then((response) => {
-        resolve(response)
-      })
-      .catch((error) => {
-        logger.error(error, error.message)
-        reject(error)
-      })
+  
   })
 }
 

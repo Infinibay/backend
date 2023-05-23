@@ -1,6 +1,7 @@
 import { PrismaClient } from '@prisma/client'
 import { GraphQLError } from 'graphql'
 import AuthForBoth from '../../../services/isAuthForBoth.js'
+import updateVMFunctions from '../../../services/updateVMFunctions.js'
 import fs from 'fs'
 const prisma = new PrismaClient()
 const RandomStringLength = parseInt(process.env.RANDOMSTRINGLENGTH)
@@ -24,7 +25,6 @@ const updateVMResolvers = {
           console.log(path)
         }
         const token = input.input.token
-
         const forID = AuthForBoth(token).id
         if (forID) {
           const id = input.input.id

@@ -39,8 +39,8 @@ const createVMResolvers = {
           if (storageId) {
             input.input.storageId = storageId
           }
-          if (kk.data.result.status === true) {
-            if (kk.data.result.status === true) {
+          if (kk.status === true) {
+            if (kk.status === true) {
               const storageId = input.input.storageId ? input.input.storageId : null
               const VMCreate = await prisma.virtualMachine.create({
                 data: {
@@ -68,13 +68,7 @@ const createVMResolvers = {
               return VMCreate
             }
           }
-          //  else {
-          //   throw new GraphQLError('Failed to Create', {
-          //     extensions: {
-          //       StatusCode: 400
-          //     }
-          //   })
-          // }
+
         }
       } catch (error) {
         logger.error(error, error.message)

@@ -40,7 +40,7 @@ const deleteVMResolvers = {
               if (forDeleteVM[i]) {
                 const forName = forDeleteVM[i].virtualMachineName
                 const reqq = await forDeleteFunction(forName)
-                if (reqq.data.result.status === true) {
+                if (reqq.status === true) {
                   await prisma.notification.deleteMany({
                     where: {
                       vmId: { in: id }
@@ -92,7 +92,7 @@ const deleteVMResolvers = {
               if (forDeleteVM[i]) {
                 const forName = forDeleteVM[i].virtualMachineName
                 const reqq = await forDeleteFunction(forName)
-                if (reqq.data.result.status === true) {
+                if (reqq.status === true) {
                   await prisma.notification.deleteMany({
                     where: {
                       vmId: { in: id },
