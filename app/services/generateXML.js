@@ -7,32 +7,32 @@ import fs from "fs";
 
 class generateXML {
     constructor(name) {
-        this.json = { name: name, memory: 0, cpu: 0, storage: 0, os: "", iso: "",tpm:0 };
+        this.json = { name: name.replace(/[^\w\s]/gi, ''), memory: 0, cpu: 0, storage: 0, os: "", iso: "",tpm:0 };
         this.xml = "";
     }
 
     setRAM(size) {
-        this.json["memory"] = size;
+        this.json["memory"] = size.replace(/[^\w\s]/gi, '');
     }
 
     setStorage(size) {
-        this.json["storage"] = size;
+        this.json["storage"] = size.replace(/[^\w\s]/gi, '');
     }
 
     setCPUs(count) {
-        this.json["cpu"] = count;
+        this.json["cpu"] = count.replace(/[^\w\s]/gi, '');
     }
 
     setOS(os) {
-        this.json["os"] = os;
+        this.json["os"] = os.replace(/[^\w\s]/gi, '');
     }
 
     setIso(iso) {
-        this.json["iso"] = iso;
+        this.json["iso"] = iso.replace(/[^\w\s]/gi, '');
     }
 
     setTpm(bit){
-        this.json["tpm"] = bit;
+        this.json["tpm"] = bit.replace(/[^\w\s]/gi, '');
     }
 
     setGraphics() {
@@ -84,18 +84,18 @@ class generateXML {
     async generate() {
         let comm =""
         if(this.json.os == "linux"){
-            comm = `export VIRTINSTALL_OSINFO_DISABLE_REQUIRE=1 && virt-install --name ${this.json.name} --ram ${this.json.memory} --vcpus ${this.json.cpu} \
-            --disk path=/var/lib/libvirt/images/${this.json.name}.qcow2,size=${this.json.storage} --os-type ${this.json.os} --console pty,target_type=serial \
-             --cdrom /var/lib/libvirt/iso/${this.json.iso} --print-xml`
+            comm = `export VIRTINSTALL_OSINFO_DISABLE_REQUIRE=1 && virt-install --name "${this.json.name}" --ram "${this.json.memory}" --vcpus "${this.json.cpu}" \
+            --disk path=/var/lib/libvirt/images/"${this.json.name}".qcow2,size="${this.json.storage}" --os-type "${this.json.os}" --console pty,target_type=serial \
+             --cdrom /var/lib/libvirt/iso/"${this.json.iso}" --print-xml`
         }
         else{
             if(this.json.tpm==1){
-               comm= `export VIRTINSTALL_OSINFO_DISABLE_REQUIRE=1 && virt-install --name ${this.json.name} --ram ${this.json.memory} --vcpus=${this.json.cpu} \
-                --disk path=/var/lib/libvirt/images/${this.json.name}.img,bus=virtio,size=${this.json.storage},format=qcow2 --network=network=default,model=virtio,mac=RANDOM --graphics spice,listen=0.0.0.0 --cdrom=/var/lib/libvirt/iso/${this.json.iso} --os-type=${this.json.os} \
+               comm= `export VIRTINSTALL_OSINFO_DISABLE_REQUIRE=1 && virt-install --name "${this.json.name}" --ram "${this.json.memory}" --vcpus="${this.json.cpu}" \
+                --disk path=/var/lib/libvirt/images/"${this.json.name}".img,bus=virtio,size="${this.json.storage}",format=qcow2 --network=network=default,model=virtio,mac=RANDOM --graphics spice,listen=0.0.0.0 --cdrom=/var/lib/libvirt/iso/"${this.json.iso}" --os-type="${this.json.os}" \
                 --boot uefi,loader=/usr/share/ovmf/OVMF.fd,  --print-xml`
             }else{
-               comm= `export VIRTINSTALL_OSINFO_DISABLE_REQUIRE=1 && virt-install --name ${this.json.name} --ram ${this.json.memory} --vcpus=${this.json.cpu} \
-                --disk path=/var/lib/libvirt/images/${this.json.name}.img,bus=virtio,size=${this.json.storage},format=qcow2 --network=network=default,model=virtio,mac=RANDOM --graphics spice,listen=0.0.0.0 --cdrom=/var/lib/libvirt/iso/${this.json.iso} --os-type=windows --print-xml`
+               comm= `export VIRTINSTALL_OSINFO_DISABLE_REQUIRE=1 && virt-install --name "${this.json.name}" --ram "${this.json.memory}" --vcpus="${this.json.cpu}" \
+                --disk path=/var/lib/libvirt/images/"${this.json.name}".img,bus=virtio,size="${this.json.storage}",format=qcow2 --network=network=default,model=virtio,mac=RANDOM --graphics spice,listen=0.0.0.0 --cdrom=/var/lib/libvirt/iso/"${this.json.iso}" --os-type=windows --print-xml`
             }
         }
 

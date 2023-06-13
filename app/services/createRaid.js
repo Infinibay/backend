@@ -21,28 +21,28 @@ const raidMap = (name)=>{
 const createLibvirtStoragePool = async (storageName, disks, raidType) => {
   try {
     // Step 1: Format the disks with Btrfs filesystem
-    const formatDisksCommand = 'mkfs.btrfs -f '+disks.join(' ');
+    const formatDisksCommand = `mkfs.btrfs -f "${disks.join(' ').replace(/[^\w\s]/gi, '')}"`;
     await executeCommand(formatDisksCommand);
 
     // Step 2: Create the RAID 0 array
     let raid = await raidMap(raidType)
-    const createRAIDCommand = `mkfs.btrfs -m ${raid} -d ${raid} ${disks.join(' ')}`;
+    const createRAIDCommand = `mkfs.btrfs -m "${raid}" -d "${raid}" ${disks.join(' ').replace(/[^\w\s]/gi, '')}`;
     await executeCommand(createRAIDCommand);
 
     // Step 3: Mount the RAID 0 array
-    const mountCommand = `mount ${disks[0]} /${storageName}`; // Replace with the desired mountpoint
+    const mountCommand = `mount "${disks[0].replace(/[^\w\s]/gi, '')}" /"${storageName.replace(/[^\w\s]/gi, '')}"`; // Replace with the desired mountpoint
     await executeCommand(mountCommand);
 
     // Step 4: Create Libvirt storage pool
-    const createPoolCommand = `virsh pool-define-as ${storageName} btrfs --source-dir /${storageName}`;
+    const createPoolCommand = `virsh pool-define-as "${storageName.replace(/[^\w\s]/gi, '')}" btrfs --source-dir /"${storageName.replace(/[^\w\s]/gi, '')}"`;
     await executeCommand(createPoolCommand);
 
     // Step 5: Start the Libvirt storage pool
-    const startPoolCommand = `virsh pool-start ${storageName}`;
+    const startPoolCommand = `virsh pool-start "${storageName.replace(/[^\w\s]/gi, '')}"`;
     await executeCommand(startPoolCommand);
 
     // Step 6: Set the Libvirt storage pool to auto-start
-    const autostartPoolCommand = `virsh pool-autostart ${storageName}`;
+    const autostartPoolCommand = `virsh pool-autostart "${storageName.replace(/[^\w\s]/gi, '')}"`;
     await executeCommand(autostartPoolCommand);
 
     console.log('Libvirt storage pool created and configured successfully.');

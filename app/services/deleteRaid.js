@@ -3,18 +3,18 @@ import { exec } from "child_process";
 const deleteLibvirtStorageAndRAID = async (storageName, disks) => {
   try {
     // Step 1: Stop and undefine the Libvirt storage pool
-    const stopPoolCommand = `virsh pool-destroy ${storageName}`;
+    const stopPoolCommand = `virsh pool-destroy "${storageName.replace(/[^\w\s]/gi, '')}"`;
     await executeCommand(stopPoolCommand);
 
-    const undefinePoolCommand = `virsh pool-undefine ${storageName}`;
+    const undefinePoolCommand = `virsh pool-undefine "${storageName.replace(/[^\w\s]/gi, '')}"`;
     await executeCommand(undefinePoolCommand);
 
     // Step 2: Unmount the RAID 0 array
-    const unmountCommand = `umount /${storageName}`; // Replace with the actual mountpoint
+    const unmountCommand = `umount /"${storageName.replace(/[^\w\s]/gi, '')}"`; // Replace with the actual mountpoint
     await executeCommand(unmountCommand);
 
     // Step 3: Remove the RAID 0 array
-    const removeRAIDCommand = `btrfs device delete ${disks.join(' ')}`;
+    const removeRAIDCommand = `btrfs device delete "${disks.join(' ').replace(/[^\w\s]/gi, '')}"`;
     await executeCommand(removeRAIDCommand);
 
     console.log('Libvirt storage pool deleted and RAID 0 array removed successfully.');

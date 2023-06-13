@@ -29,7 +29,7 @@ class VM {
 
     startVM(name){
         return new Promise((resolve, reject) => {
-            const comm = `virsh start ${name}`
+            const comm = `virsh start "${name.replace(/[^\w\s]/gi, '')}"`
             exec(comm).then((data)=>{
                 resolve(true)
             }).catch((err)=>{
@@ -40,7 +40,7 @@ class VM {
 
     stopVM(name){
         return new Promise((resolve, reject) => {
-            const comm = `virsh destroy ${name}`
+            const comm = `virsh destroy "${name.replace(/[^\w\s]/gi, '')}"`
             exec(comm).then((data)=>{
                 resolve(true)
             }).catch((err)=>{
@@ -53,7 +53,7 @@ class VM {
 
     deleteVM(name){
         return new Promise((resolve, reject) => {
-            const comm = `virsh undefine --nvram ${name}`
+            const comm = `virsh undefine --nvram "${name.replace(/[^\w\s]/gi, '')}"`
             exec(comm).then((data)=>{
                 resolve(true)
             }).catch((err)=>{
@@ -64,7 +64,7 @@ class VM {
 
     updateVM(name,newname,ram,cpu){
         return new Promise((resolve, reject) => {
-            const comm = `virsh destroy ${name} && virsh domrename ${name} ${newname} && virsh setmaxmem ${name} ${ram} --config && virsh setmem ${name} ${ram} --config && virsh setvcpus ${name} ${cpu} --config`
+            const comm = `virsh destroy "${name.replace(/[^\w\s]/gi, '')}" && virsh domrename "${name.replace(/[^\w\s]/gi, '')}" "${newname.replace(/[^\w\s]/gi, '')}" && virsh setmaxmem "${name.replace(/[^\w\s]/gi, '')}" "${ram.replace(/[^\w\s]/gi, '')}" --config && virsh setmem "${name.replace(/[^\w\s]/gi, '')}" "${ram.replace(/[^\w\s]/gi, '')}" --config && virsh setvcpus "${name.replace(/[^\w\s]/gi, '')}" "${cpu.replace(/[^\w\s]/gi, '')}" --config`
             exec(comm).then((data)=>{
                 resolve(true)
             }).catch((err)=>{
