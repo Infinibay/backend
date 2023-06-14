@@ -1,38 +1,59 @@
-import { exec } from "child_process";
+import { spawn } from "child_process";
+
+const executeCommand = (command, args) => {
+  return new Promise((resolve, reject) => {
+    const childProcess = spawn(command, args);
+
+    let stdout = "";
+    let stderr = "";
+
+    childProcess.stdout.on("data", (data) => {
+      stdout += data.toString();
+    });
+
+    childProcess.stderr.on("data", (data) => {
+      stderr += data.toString();
+    });
+
+    childProcess.on("error", (error) => {
+      reject(error);
+    });
+
+    childProcess.on("close", (code) => {
+      if (code !== 0) {
+        reject(new Error(stderr));
+      } else {
+        resolve(stdout || stderr);
+      }
+    });
+  });
+};
 
 const deleteLibvirtStorageAndRAID = async (storageName, disks) => {
   try {
     // Step 1: Stop and undefine the Libvirt storage pool
-    const stopPoolCommand = `virsh pool-destroy "${storageName.replace(/[^\w\s]/gi, '')}"`;
-    await executeCommand(stopPoolCommand);
+    const stopPoolCommand = "virsh";
+    const stopPoolArgs = ["pool-destroy", storageName];
+    await executeCommand(stopPoolCommand, stopPoolArgs);
 
-    const undefinePoolCommand = `virsh pool-undefine "${storageName.replace(/[^\w\s]/gi, '')}"`;
-    await executeCommand(undefinePoolCommand);
+    const undefinePoolCommand = "virsh";
+    const undefinePoolArgs = ["pool-undefine", storageName];
+    await executeCommand(undefinePoolCommand, undefinePoolArgs);
 
     // Step 2: Unmount the RAID 0 array
-    const unmountCommand = `umount /"${storageName.replace(/[^\w\s]/gi, '')}"`; // Replace with the actual mountpoint
-    await executeCommand(unmountCommand);
+    const unmountCommand = "umount";
+    const unmountArgs = [`/${storageName}`]; // Replace with the actual mountpoint
+    await executeCommand(unmountCommand, unmountArgs);
 
     // Step 3: Remove the RAID 0 array
-    const removeRAIDCommand = `btrfs device delete "${disks.join(' ').replace(/[^\w\s]/gi, '')}"`;
-    await executeCommand(removeRAIDCommand);
+    const removeRAIDCommand = "btrfs";
+    const removeRAIDArgs = ["device", "delete", ...disks];
+    await executeCommand(removeRAIDCommand, removeRAIDArgs);
 
-    console.log('Libvirt storage pool deleted and RAID 0 array removed successfully.');
+    console.log("Libvirt storage pool deleted and RAID 0 array removed successfully.");
   } catch (error) {
-    console.error('An error occurred:', error);
+    console.error("An error occurred:", error);
   }
-};
-
-const executeCommand = (command) => {
-  return new Promise((resolve, reject) => {
-    exec(command, (error, stdout, stderr) => {
-      if (error) {
-        reject(error);
-        return;
-      }
-      resolve(stdout || stderr);
-    });
-  });
 };
 
 export default deleteLibvirtStorageAndRAID;
