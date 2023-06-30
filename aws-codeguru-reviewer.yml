@@ -18,5 +18,5 @@ version: 1.0
 
 excludeFiles:
   - '.github/**'
-  - '.DS_Store
+  - '.DS_Store'
   - 'combined.log'
