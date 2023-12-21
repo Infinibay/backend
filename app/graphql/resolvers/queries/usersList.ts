@@ -1,12 +1,13 @@
 import { PrismaClient } from '@prisma/client'
-import isAuth from '../../../services/isAuth.js'
-import logger from '../../../../logger.js'
 import { GraphQLError } from 'graphql'
+import isAuth from '@services/isAuth'
+import logger from '@main/logger'
+
 const prisma = new PrismaClient()
 
 const forUsersList = {
   Query: {
-    getUserList: async (parent, input) => {
+    getUserList: async (root: any, input: any) => {
       try {
         const token = input.input.token
         const search = input.input.search
@@ -47,7 +48,7 @@ const forUsersList = {
           console.log(totalPages)
           return forGetUserList
         }
-      } catch (error) {
+      } catch (error: any) {
         logger.error(error)
         throw new GraphQLError('Something went wrong please check again', {
           extensions: {

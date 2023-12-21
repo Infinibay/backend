@@ -1,12 +1,20 @@
+
 import { PrismaClient } from '@prisma/client'
 import { GraphQLError } from 'graphql'
-import logger from '../../../../logger.js'
-import AuthForBoth from '../../../services/isAuthForBoth.js'
+import logger from '@main/logger'
+import AuthForBoth from '@services/isAuthForBoth'
+
 const prisma = new PrismaClient()
+
+interface StorageDetailsInput {
+  input: {
+    token: string;
+  };
+}
 
 const getStorageDetails = {
   Query: {
-    getStorageList: async (root, input) => {
+    getStorageList: async (_root: any, input: StorageDetailsInput) => {
       try {
         const token = input.input.token
         AuthForBoth(token)
@@ -23,7 +31,7 @@ const getStorageDetails = {
           }
         })
         return forGetList
-      } catch (error) {
+      } catch (error: any) {
         logger.error(error, error.message)
         throw new GraphQLError('Failed', {
           extensions: {
@@ -35,4 +43,5 @@ const getStorageDetails = {
     }
   }
 }
-export default getStorageDetails
+
+export default getStorageDetails;

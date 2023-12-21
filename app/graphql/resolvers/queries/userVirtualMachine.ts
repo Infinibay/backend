@@ -1,12 +1,13 @@
 import { PrismaClient } from '@prisma/client'
 import { GraphQLError } from 'graphql'
-import logger from '../../../../logger.js'
-import AuthForBoth from '../../../services/isAuthForBoth.js'
+import AuthForBoth from '@services/isAuthForBoth'
+import logger from '@main/logger'
+
 const prisma = new PrismaClient()
 
 const userVirtualMachine = {
   Query: {
-    getUserVM: async (_parent, input) => {
+    getUserVM: async (root: any, input: any) => {
       try {
         const token = input.input.token
         AuthForBoth(token)
@@ -34,7 +35,7 @@ const userVirtualMachine = {
           })
           return forUserVM
         }
-      } catch (error) {
+      } catch (error: any) {
         logger.error(error, error.message)
         throw new GraphQLError('Something went wrong please check again', {
           extensions: {

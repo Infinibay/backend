@@ -1,11 +1,12 @@
 import { PrismaClient } from '@prisma/client'
-import logger from '../../../../logger.js'
 import { GraphQLError } from 'graphql'
+import logger from '@main/logger'
+
 const prisma = new PrismaClient()
 
 const forGetUnAssignedDisk = {
   Query: {
-    getUnAssignedDisk: async (root, input) => {
+    getUnAssignedDisk: async (root: any, _input: any) => {
       try {
         const DiskUnAssigned = await prisma.disk.findMany({
           where: {
@@ -16,11 +17,10 @@ const forGetUnAssignedDisk = {
             diskName: true,
             diskSize: true,
             storageId: true
-
           }
         })
         return DiskUnAssigned
-      } catch (error) {
+      } catch (error: any) {
         logger.error(error, error.message)
         throw new GraphQLError('failed to get Details ', {
           extensions: {
@@ -32,4 +32,4 @@ const forGetUnAssignedDisk = {
   }
 }
 
-export default forGetUnAssignedDisk
+export default forGetUnAssignedDisk;

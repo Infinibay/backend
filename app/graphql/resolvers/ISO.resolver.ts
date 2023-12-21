@@ -1,8 +1,15 @@
-import forCreateISO from './mutations/createISO.js'
-import forAllSO from './queries/allISO.js'
-import ISOById from './queries/ISOById.js'
-import forUpdateISO from './mutations/updateISO.js'
-import forDeleteISO from './mutations/deleteISO.js'
-const forISOexport = [forUpdateISO, forCreateISO, forAllSO, ISOById, forDeleteISO]
+import forCreateISO from './mutations/createISO'
+import forAllSO from './queries/allISO'
+import ISOById from './queries/ISOById'
+import forUpdateISO from './mutations/updateISO'
+import forDeleteISO from './mutations/deleteISO'
 
-export default forISOexport
+const forISOexport = [
+  forUpdateISO,
+  forCreateISO,
+  forAllSO,
+  ISOById,
+  forDeleteISO
+]
+
+export default forISOexport;

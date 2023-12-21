@@ -1,19 +1,20 @@
 import { PrismaClient } from '@prisma/client'
 import { GraphQLError } from 'graphql'
-import AuthForBoth from '../../../services/isAuthForBoth.js'
-import logger from '../../../../logger.js'
+import AuthForBoth from '@services/isAuthForBoth'
+import logger from '@main/logger'
+
 const prisma = new PrismaClient()
 
 const ISOById = {
   Query: {
-    getISOById: async (parent, input) => {
+    getISOById: async (_parent: any, input: any) => {
       try {
         const token = input.input.token
         const search = input.input.search
         const forAuth = AuthForBoth(token).id
 
         if (forAuth) {
-          const getISO = await prisma.ISO.findMany({
+          const getISO = await prisma.iSO.findMany({
             where: {
               userId: forAuth
             },
@@ -26,7 +27,7 @@ const ISOById = {
             }
           })
           if (search) {
-            const forFind = await prisma.ISO.findMany({
+            const forFind = await prisma.iSO.findMany({
               where: {
                 userId: forAuth,
                 name: {
@@ -42,7 +43,7 @@ const ISOById = {
         } else {
           throw new Error('Login again')
         }
-      } catch (error) {
+      } catch (error: any) {
         logger.error(error, error.message)
         throw new GraphQLError('Please enter valid credentials', {
           extensions: {
@@ -53,4 +54,5 @@ const ISOById = {
     }
   }
 }
-export default ISOById
+
+export default ISOById;

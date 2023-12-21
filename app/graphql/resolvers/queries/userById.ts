@@ -1,11 +1,13 @@
 import { PrismaClient } from '@prisma/client'
-import logger from '../../../../logger.js'
 import { GraphQLError } from 'graphql'
-import AuthForBoth from '../../../services/isAuthForBoth.js'
+import AuthForBoth from '@services/isAuthForBoth'
+import logger from '@main/logger'
+
 const prisma = new PrismaClient()
+
 const forUserById = {
   Query: {
-    getUserByID: async (_parent, input) => {
+    getUserByID: async (root: any, input: any) => {
       try {
         const token = input.input.token
         const forId = AuthForBoth(token).id
@@ -27,7 +29,7 @@ const forUserById = {
           })
           return findUserById
         }
-      } catch (error) {
+      } catch (error: any) {
         logger.error(error, error.message)
         throw new GraphQLError('Something went wrong please try again later', {
           extensions: {

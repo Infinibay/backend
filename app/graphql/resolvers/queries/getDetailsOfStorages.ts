@@ -1,74 +1,87 @@
 import { PrismaClient } from '@prisma/client'
 import { GraphQLError } from 'graphql'
-import logger from '../../../../logger.js'
-import isAuthorBoth from '../../../services/isAuthForBoth.js'
+import isAuthorBoth from '@services/isAuthForBoth.js'
+import logger from '@main/logger'
+
 const prisma = new PrismaClient()
+
+interface StorageDetailsInput {
+  input: {
+    token: string;
+    id?: any;
+  };
+}
+
+async function getStorageById(id: any) {
+  return await prisma.storage.findUnique({
+    where: {
+      id: String(id)
+    },
+    select: {
+      id: true,
+      storageName: true,
+      storageSize: true,
+      storageType: true,
+      userId: true
+    }
+  });
+}
+
+async function getDisksByStorageId(storageId: any) {
+  return await prisma.disk.findMany({
+    where: {
+      storageId: storageId || null
+    },
+    select: {
+      id: true,
+      diskName: true,
+      diskSize: true
+    }
+  });
+}
+
+async function getStoragesByUserId(userId: any) {
+  return await prisma.storage.findMany({
+    where: {
+      userId: userId
+    },
+    select: {
+      id: true,
+      storageName: true,
+      storageSize: true,
+      storageType: true,
+      userId: true
+    }
+  });
+}
 
 const StorageDetailsDisk = {
   Query: {
-    getStorageDetailsDisk: async (root, input) => {
+    getStorageDetailsDisk: async (_root: any, input: StorageDetailsInput) => {
       try {
         const token = input.input.token
         const forUserId = isAuthorBoth(token).id
         const forStorageId = input.input.id
         if (forStorageId) {
-          const forGetStorages = []
-          const findByStorageId = await prisma.storage.findUnique({
-            where: {
-              id: input.input.id
-            },
-            select: {
-              id: true,
-              storageName: true,
-              storageSize: true,
-              storageType: true,
-              userId: true
-            }
-          })
-          forGetStorages.push(findByStorageId)
-          const findDiskByStorageId = await prisma.disk.findMany({
-            where: {
-              storageId: findByStorageId.id
-            },
-            select: {
-              id: true,
-              diskName: true,
-              diskSize: true
-            }
-          })
-          if (findByStorageId.userId === forUserId) {
+          const forGetStorages: any[] = []
+          const findByStorageId = await getStorageById(forStorageId)
+          if (findByStorageId) {
+            forGetStorages.push(findByStorageId);
+          }
+          const findDiskByStorageId = await getDisksByStorageId(findByStorageId?.id)
+          if (findByStorageId && findByStorageId.userId === forUserId) {
             return {
               storage: forGetStorages,
               disk: findDiskByStorageId
             }
           }
         } else {
-          const forgetStorage = []
-          const forpush = []
-          const findByStorageId = await prisma.storage.findMany({
-            where: {
-              userId: forUserId
-            },
-            select: {
-              id: true,
-              storageName: true,
-              storageSize: true,
-              storageType: true,
-              userId: true
-            }
-          })
+          const forgetStorage: any[] = []
+          const forpush: any[] = []
+          const findByStorageId: any = await getStoragesByUserId(forUserId)
           forgetStorage.push(...findByStorageId)
           for (const disk of findByStorageId) {
-            const findDiskByStorageId = await prisma.disk.findMany({
-              where: {
-                storageId: disk.id
-              },
-              select: {
-                id: true,
-                diskName: true,
-                diskSize: true
-              }
-            })
+            const findDiskByStorageId = await getDisksByStorageId(disk.id)
             forpush.push(...findDiskByStorageId)
           }
           console.log(forgetStorage, forpush)
@@ -77,8 +90,7 @@ const StorageDetailsDisk = {
             disk: forpush
           }
         }
-      } catch (error) {
-        console.log(error)
+      } catch (error: any) {
         logger.error(error, error.message)
         throw new GraphQLError('Failed', {
           extensions: {
@@ -91,4 +103,4 @@ const StorageDetailsDisk = {
   }
 }
 
-export default StorageDetailsDisk
+export default StorageDetailsDisk;

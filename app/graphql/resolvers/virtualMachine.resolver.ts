@@ -1,11 +1,11 @@
-import createVMResolvers from './mutations/createVM.js'
-import forStatusVMResolvers from './mutations/forStatus.js'
-import allVMResolver from './queries/getAllVM.js'
-import userVirtualMachines from './queries/userVirtualMachines.js'
-import specificVirtualMachine from './queries/specificVirtualMachine.js'
-import forVirtualMachineName from './queries/forVirtualMachineNames.js'
-import updateVMResolvers from './mutations/updateVM.js'
-import deleteVMResolvers from './mutations/deleteVM.js'
+import createVMResolvers from './mutations/createVM';
+import forStatusVMResolvers from './mutations/forStatus';
+import allVMResolver from './queries/getAllVM';
+import userVirtualMachines from './queries/userVirtualMachines';
+import specificVirtualMachine from './queries/specificVirtualMachine';
+import forVirtualMachineName from './queries/forVirtualMachineNames';
+import updateVMResolvers from './mutations/updateVM';
+import deleteVMResolvers from './mutations/deleteVM';
 
 const forexport = [
   createVMResolvers,
@@ -16,5 +16,5 @@ const forexport = [
   forVirtualMachineName,
   updateVMResolvers,
   deleteVMResolvers
-]
-export default forexport
+];
+export default forexport;

@@ -1,18 +1,19 @@
 import { PrismaClient } from '@prisma/client'
 import { GraphQLError } from 'graphql'
-import logger from '../../../../logger.js'
-import AuthForBoth from '../../../services/isAuthForBoth.js'
+import logger from '@main/logger'
+import AuthForBoth from '@services/isAuthForBoth'
+
 const prisma = new PrismaClient()
 
 const specificVirtualMachine = {
   Query: {
-    getSpecificVM: async (_parent, input) => {
+    getSpecificVM: async (root: any, input: any) => {
       try {
         const token = input.input.token
         AuthForBoth(token)
         const forid = AuthForBoth(token).id
         if (forid) {
-          const forSpecificVM = await prisma.virtualMachine.findUnique({
+          const forSpecificVM: any = await prisma.virtualMachine.findUnique({
             where: {
               id: input.input.id
             },
@@ -41,7 +42,7 @@ const specificVirtualMachine = {
             throw new Error('VM Not Found')
           }
         }
-      } catch (error) {
+      } catch (error: any) {
         logger.error(error, error.message)
         throw new GraphQLError(
           'Something went wrong....please try again.!!!  ',

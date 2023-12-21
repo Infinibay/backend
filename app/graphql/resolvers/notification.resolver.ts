@@ -1,8 +1,8 @@
-import createNotification from './mutations/createNotification.js'
-import allNotification from './queries/allNotification.js'
-import forUpdateNotification from './mutations/updateNotification.js'
-import fordeleteNotification from './mutations/deleteNotification.js'
-import forUserNotification from './queries/userNotification.js'
+import createNotification from './mutations/createNotification';
+import allNotification from './queries/allNotification';
+import forUpdateNotification from './mutations/updateNotification';
+import fordeleteNotification from './mutations/deleteNotification';
+import forUserNotification from './queries/userNotification';
 
 const forNotificationExports = [
   createNotification,
@@ -10,6 +10,6 @@ const forNotificationExports = [
   allNotification,
   forUpdateNotification,
   forUserNotification
-]
+];
 
-export default forNotificationExports
+export default forNotificationExports;

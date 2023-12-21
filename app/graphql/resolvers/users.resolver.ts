@@ -1,13 +1,14 @@
-import signUp from './mutations/createUser.js'
-import forDeleteUser from './mutations/deleteUser.js'
-import login from './mutations/login.js'
-import forUsersList from './queries/usersList.js'
-import forgetPassword from './mutations/forgetPassword.js'
-import forResetPassword from './mutations/resetPassword.js'
-import forUpdateUser from './mutations/updateUser.js'
-import userVirtualMachine from './queries/userVirtualMachine.js'
-import forUserById from './queries/userById.js'
-import forConfigFile from './queries/configFile.js'
+import signUp from './mutations/createUser'
+import forDeleteUser from './mutations/deleteUser'
+import login from './mutations/login'
+import forUsersList from './queries/usersList'
+import forgetPassword from './mutations/forgetPassword'
+import forResetPassword from './mutations/resetPassword'
+import forUpdateUser from './mutations/updateUser'
+import userVirtualMachine from './queries/userVirtualMachine'
+import forUserById from './queries/userById'
+import forConfigFile from './queries/configFile'
+
 const foruserResolverExport = [
   login,
   forUsersList,
@@ -21,4 +22,4 @@ const foruserResolverExport = [
   forgetPassword
 ]
 
-export default foruserResolverExport
+export default foruserResolverExport;

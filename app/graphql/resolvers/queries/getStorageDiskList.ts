@@ -3,7 +3,7 @@ const prisma = new PrismaClient()
 
 const forGetListofStorage = {
   Query: {
-    getListOfStorageDetails: async (root, input) => {
+    getListOfStorageDetails: async (root: any, input: any) => {
       try {
         const forgetList = await prisma.disk.findMany({
           where: {
@@ -16,7 +16,6 @@ const forGetListofStorage = {
             storageId: true
           }
         })
-        console.log(forgetList)
         return forgetList
       } catch (error) {
         console.log(error)

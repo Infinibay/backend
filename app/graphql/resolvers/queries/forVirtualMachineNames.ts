@@ -1,10 +1,18 @@
-import { PrismaClient } from '@prisma/client'
-import logger from '../../../../logger.js'
-const prisma = new PrismaClient()
+import { PrismaClient } from '@prisma/client';
+import { GraphQLError } from 'graphql';
+import logger from '@main/logger';
+
+const prisma = new PrismaClient();
+
+interface FindVMNameInput {
+  input: {
+    virtualMachineName: string;
+  };
+}
 
 const forVirtualMachineName = {
   Query: {
-    findVMName: async (root, input) => {
+    findVMName: async (root: any, input: FindVMNameInput) => {
       try {
         const forFindVMName = await prisma.virtualMachine.findUnique({
           where: {
@@ -13,18 +21,22 @@ const forVirtualMachineName = {
           select: {
             virtualMachineName: true
           }
-        })
+        });
         if (forFindVMName) {
-          return 'true'
+          return 'true';
         } else {
-          return 'false'
+          return 'false';
         }
-      } catch (error) {
-        logger.error(error, error.message)
-        return error
+      } catch (error: any) {
+        logger.error(error, error.message);
+        throw new GraphQLError('Error finding virtual machine name', {
+          extensions: {
+            code: 'VIRTUAL_MACHINE_ERROR'
+          }
+        });
       }
     }
   }
-}
+};
 
-export default forVirtualMachineName
+export default forVirtualMachineName;

@@ -1,14 +1,18 @@
-import forexport from './virtualMachine.resolver.js'
-import foruserResolverExport from './users.resolver.js'
-import forISOexport from './ISO.resolver.js'
-import forNotificationExports from './notification.resolver.js'
-import diskExport from './disk.resolver.js'
-import forStorageExports from './storage.resolver.js'
-export default [
+import { IResolvers } from 'graphql-tools';
+import forexport from './virtualMachine.resolver';
+import foruserResolverExport from './users.resolver';
+import forISOexport from './ISO.resolver';
+import forNotificationExports from './notification.resolver';
+import diskExport from './disk.resolver';
+import forStorageExports from './storage.resolver';
+
+const resolvers: IResolvers[] = [
   forexport,
   foruserResolverExport,
   forISOexport,
   forNotificationExports,
   diskExport,
   forStorageExports
-]
+];
+
+export default resolvers;

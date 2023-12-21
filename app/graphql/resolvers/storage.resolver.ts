@@ -1,8 +1,8 @@
-import createStorageResolver from './mutations/createStorage.js'
-import getStorageDetails from './queries/getStorageDetails.js'
-import forUpdateStorage from './mutations/updateStorage.js'
-import forDeleteStorage from './mutations/deleteStorage.js'
-import StorageDetailsDisk from './queries/getDetailsOfStorages.js'
+import createStorageResolver from './mutations/createStorage'
+import getStorageDetails from './queries/getStorageDetails'
+import forUpdateStorage from './mutations/updateStorage'
+import forDeleteStorage from './mutations/deleteStorage'
+import StorageDetailsDisk from './queries/getDetailsOfStorages'
 
 const forStorageExports = [
   createStorageResolver,
@@ -12,4 +12,4 @@ const forStorageExports = [
   StorageDetailsDisk
 ]
 
-export default forStorageExports
+export default forStorageExports;

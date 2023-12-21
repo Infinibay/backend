@@ -1,12 +1,11 @@
 import { PrismaClient } from '@prisma/client'
 import { GraphQLError } from 'graphql'
-// import AuthForBoth from '../../../services/isAuthForBoth.js'
-import logger from '../../../../logger.js'
+import logger from '@main/logger'
 const prisma = new PrismaClient()
 
 const forSpecificDiskDetail = {
   Query: {
-    getSpecificDiskDetails: async (root, input) => {
+    getSpecificDiskDetails: async (root: any, input: any) => {
       try {
         const forGetSpecificDisk = await prisma.disk.findUnique({
           where: {
@@ -19,9 +18,7 @@ const forSpecificDiskDetail = {
           }
         })
         return forGetSpecificDisk
-        // }
-      } catch (error) {
-        console.log(error)
+      } catch (error: any) {
         logger.error(error, error.message)
         throw new GraphQLError('Failed', {
           extensions: {
