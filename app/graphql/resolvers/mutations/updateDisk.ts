@@ -24,7 +24,7 @@ const forUpdateaDisk = {
           }
         })
         return forUpdate
-      } catch (error) {
+      } catch (error: any) {
         logger.error(error, error.message)
         throw new GraphQLError('Failed', {
           extensions: {

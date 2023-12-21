@@ -93,7 +93,7 @@ const deleteVMResolvers = {
             for (let i = 0; i < forDeleteVM.length; i++) {
               if (forDeleteVM[i]) {
                 const forName = forDeleteVM[i].virtualMachineName
-                const reqq = await forDeleteFunction(forName)
+                const reqq: any = await forDeleteFunction(forName)
                 if (reqq.status === true) {
                   await prisma.notification.deleteMany({
                     where: {
@@ -120,7 +120,7 @@ const deleteVMResolvers = {
             }
           }
         }
-      } catch (error) {
+      } catch (error: any) {
         logger.error(error, error.message)
         throw new GraphQLError('Failed to Delete', {
           extensions: {
