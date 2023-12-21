@@ -1,32 +1,36 @@
-import { spawn } from "child_process";
+import { spawn, ChildProcessWithoutNullStreams } from "child_process";
 
-const raidMap = {
+interface RaidMap {
+  [key: string]: string;
+}
+
+const raidMap: RaidMap = {
   "Fast Storage": "raid0",
   "Safe Storage": "raid1",
   "Mixed Storage": "raid5",
   "Redundant Mixed Storage": "raid6"
 };
 
-const executeCommand = (command, args) => {
+const executeCommand = (command: string, args: string[]): Promise<string> => {
   return new Promise((resolve, reject) => {
-    const childProcess = spawn(command, args);
+    const childProcess: ChildProcessWithoutNullStreams = spawn(command, args);
 
     let stdout = "";
     let stderr = "";
 
-    childProcess.stdout.on("data", (data) => {
+    childProcess.stdout.on("data", (data: Buffer) => {
       stdout += data.toString();
     });
 
-    childProcess.stderr.on("data", (data) => {
+    childProcess.stderr.on("data", (data: Buffer) => {
       stderr += data.toString();
     });
 
-    childProcess.on("error", (error) => {
+    childProcess.on("error", (error: Error) => {
       reject(error);
     });
 
-    childProcess.on("close", (code) => {
+    childProcess.on("close", (code: number) => {
       if (code !== 0) {
         reject(new Error(stderr));
       } else {
@@ -36,25 +40,21 @@ const executeCommand = (command, args) => {
   });
 };
 
-const createLibvirtStoragePool = async (storageName, disks, raidType) => {
+const createLibvirtStoragePool = async (storageName: string, disks: string[], raidType: keyof RaidMap): Promise<void> => {
   try {
-    // Step 1: Format the disks with Btrfs filesystem
     const formatDisksCommand = "mkfs.btrfs";
     const formatDisksArgs = ["-f", ...disks];
     await executeCommand(formatDisksCommand, formatDisksArgs);
 
-    // Step 2: Create the RAID array
     const raid = raidMap[raidType];
     const createRAIDCommand = "mkfs.btrfs";
     const createRAIDArgs = ["-m", raid, "-d", raid, ...disks];
     await executeCommand(createRAIDCommand, createRAIDArgs);
 
-    // Step 3: Mount the RAID array
     const mountCommand = "mount";
-    const mountArgs = [disks[0], `/${storageName}`]; // Replace with the desired mountpoint
+    const mountArgs = [disks[0], `/${storageName}`];
     await executeCommand(mountCommand, mountArgs);
 
-    // Step 4: Create Libvirt storage pool
     const createPoolCommand = "virsh";
     const createPoolArgs = [
       "pool-define-as",
@@ -65,12 +65,10 @@ const createLibvirtStoragePool = async (storageName, disks, raidType) => {
     ];
     await executeCommand(createPoolCommand, createPoolArgs);
 
-    // Step 5: Start the Libvirt storage pool
     const startPoolCommand = "virsh";
     const startPoolArgs = ["pool-start", storageName];
     await executeCommand(startPoolCommand, startPoolArgs);
 
-    // Step 6: Set the Libvirt storage pool to auto-start
     const autostartPoolCommand = "virsh";
     const autostartPoolArgs = ["pool-autostart", storageName];
     await executeCommand(autostartPoolCommand, autostartPoolArgs);

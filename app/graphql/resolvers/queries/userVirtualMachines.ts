@@ -11,6 +11,7 @@ const allUserVMResolver = {
       try {
         const token = input.input.token
         const status = input.input.status
+
         AuthForBoth(token)
         const forUserId = AuthForBoth(token).id
         if (forUserId) {

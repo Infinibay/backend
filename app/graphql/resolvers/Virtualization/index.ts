@@ -1,8 +1,8 @@
 import axios from 'axios'
 
-const rpcUrl = 'http://168.119.24.70:5001'
+const rpcUrl = process.env.RPC_URL ?? ''
 
-const createCall = async (name, params) => {
+const createCall = async (name: string, params: any) => {
   const data = { jsonrpc: '2.0', method: name, params, id: 1 }
   const config = {
     method: 'post',
