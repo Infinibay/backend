@@ -3,8 +3,13 @@ import xml2js from "xml2js";
 import fs from "fs";
 import GenerateXML from "./generateXML";
 
+interface ExecResult {
+  stdout: string;
+  stderr: string;
+}
+
 class VM {
-  async createVM(name, ram, cpu, storage, os, iso) {
+  async createVM(name: any, ram: any, cpu: any, storage: any, os: any, iso: any) {
     const xml = new GenerateXML(name);
     xml.setRAM(ram);
     xml.setCPUs(cpu);
@@ -15,7 +20,7 @@ class VM {
     try {
       await xml.generate();
       xml.setGraphics();
-      xml.setDrviers();
+      xml.setDrivers();
 
       const builder = new xml2js.Builder();
       const newXmlString = builder.buildObject(xml.json);
@@ -33,7 +38,7 @@ class VM {
     }
   }
 
-  async startVM(name) {
+  async startVM(name: string) {
     try {
       const comm = `virsh start ${name}`;
       await this.exec(comm);
@@ -43,7 +48,7 @@ class VM {
     }
   }
 
-  async stopVM(name) {
+  async stopVM(name: string) {
     try {
       const comm = `virsh destroy ${name}`;
       await this.exec(comm);
@@ -53,7 +58,7 @@ class VM {
     }
   }
 
-  async deleteVM(name) {
+  async deleteVM(name: string) {
     try {
       const comm = `virsh undefine --nvram ${name}`;
       await this.exec(comm);
@@ -63,7 +68,7 @@ class VM {
     }
   }
 
-  async updateVM(name, newname, ram, cpu) {
+  async updateVM(name: string, newname: string, ram: number, cpu: number) {
     try {
       const comm = `virsh destroy ${name} && virsh domrename ${name} ${newname} && virsh setmaxmem ${newname} ${ram} --config && virsh setmem ${newname} ${ram} --config && virsh setvcpus ${newname} ${cpu} --config`;
       await this.exec(comm);
@@ -73,7 +78,7 @@ class VM {
     }
   }
 
-  async exec(command) {
+  async exec(command: string): Promise<ExecResult> {
     return new Promise((resolve, reject) => {
       const process = spawn("bash", ["-c", command]);
       let stdout = "";

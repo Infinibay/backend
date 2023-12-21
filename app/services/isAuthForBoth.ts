@@ -2,14 +2,13 @@ import jwt from 'jsonwebtoken';
 import { GraphQLError } from 'graphql';
 import logger from '@main/logger'
 
-const config = process.env
 
 const AuthForBoth = (token: any): any => {
   if (!token) {
     throw new GraphQLError('A token is required for authentication');
   }
   try {
-    const decoded = jwt.verify(token, config.TOKENKEY ?? 'secret');
+    const decoded = jwt.verify(token, process.env.TOKENKEY ?? 'secret');
     if (decoded) {
       return decoded;
     } else {

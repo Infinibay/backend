@@ -1,7 +1,7 @@
 import { PrismaClient } from '@prisma/client'
 import { GraphQLError } from 'graphql'
 import fs from 'fs'
-import logger from '@main/logger'
+import logger from 'logger'
 import AuthForBoth from '@services/isAuthForBoth'
 import createCallFunction from '@services/createCallFunctions'
 

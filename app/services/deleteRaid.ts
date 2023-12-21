@@ -1,25 +1,25 @@
-import { spawn } from "child_process";
+import { spawn, ChildProcessWithoutNullStreams } from "child_process";
 
-const executeCommand = (command, args) => {
+const executeCommand = (command: string, args: string[]): Promise<string> => {
   return new Promise((resolve, reject) => {
-    const childProcess = spawn(command, args);
+    const childProcess: ChildProcessWithoutNullStreams = spawn(command, args);
 
     let stdout = "";
     let stderr = "";
 
-    childProcess.stdout.on("data", (data) => {
+    childProcess.stdout.on("data", (data: Buffer) => {
       stdout += data.toString();
     });
 
-    childProcess.stderr.on("data", (data) => {
+    childProcess.stderr.on("data", (data: Buffer) => {
       stderr += data.toString();
     });
 
-    childProcess.on("error", (error) => {
+    childProcess.on("error", (error: Error) => {
       reject(error);
     });
 
-    childProcess.on("close", (code) => {
+    childProcess.on("close", (code: number) => {
       if (code !== 0) {
         reject(new Error(stderr));
       } else {
@@ -29,7 +29,7 @@ const executeCommand = (command, args) => {
   });
 };
 
-const deleteLibvirtStorageAndRAID = async (storageName, disks) => {
+const deleteLibvirtStorageAndRAID = async (storageName: string, disks: string[]): Promise<void> => {
   try {
     // Step 1: Stop and undefine the Libvirt storage pool
     const stopPoolCommand = "virsh";

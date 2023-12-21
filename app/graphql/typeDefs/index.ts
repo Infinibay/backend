@@ -1,9 +1,9 @@
-import user from './users.js'
-import virtualMachine from './vm.js'
-import notification from './notifications.js'
-import ISO from './ISO.js'
-import disk from './disk.js'
-import storage from './storages.js'
+import user from './users'
+import virtualMachine from './vm'
+import notification from './notifications'
+import ISO from './ISO'
+import disk from './disk'
+import storage from './storages'
 
 const typeDefs = [user, virtualMachine, notification, ISO, disk, storage]
 export default typeDefs

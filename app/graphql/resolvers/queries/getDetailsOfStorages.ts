@@ -1,6 +1,6 @@
 import { PrismaClient } from '@prisma/client'
 import { GraphQLError } from 'graphql'
-import isAuthorBoth from '@services/isAuthForBoth.js'
+import isAuthorBoth from '@services/isAuthForBoth'
 import logger from '@main/logger'
 
 const prisma = new PrismaClient()

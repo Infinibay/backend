@@ -1,8 +1,8 @@
 
 import { PrismaClient } from '@prisma/client'
 import { GraphQLError } from 'graphql'
-import AuthForBoth from '@services/isAuthForBoth.js'
-import logger from '@main/logger.js'
+import AuthForBoth from '@services/isAuthForBoth'
+import logger from '@main/logger'
 import forDeleteFunction from '@services/deleteVMFucntions'
 
 const prisma = new PrismaClient()

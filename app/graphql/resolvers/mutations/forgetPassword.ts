@@ -8,7 +8,7 @@ import fs from 'fs'
 import ejs from 'ejs'
 import logger from '@main/logger'
 const prisma = new PrismaClient()
-const forgetPasswordExpiredIn = ms(process.env.FORGETPASSWORDEXPIREDIN || '')
+const forgetPasswordExpiredIn = ms(process.env.FORGETPASSWORDEXPIREDIN || '1d')
 
 const forgetPassword = {
   Mutation: {
