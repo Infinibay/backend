@@ -1,6 +1,6 @@
-import file from '../../../configFile/config.js';
 import { GraphQLError } from 'graphql';
 import logger from '@main/logger';
+import file from '../../../configFile/config';
 
 const forConfigFile: any = {
   Query: {

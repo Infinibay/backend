@@ -4,16 +4,9 @@ import logger from '@main/logger';
 
 const prisma = new PrismaClient();
 
-type DiskDetailsInput = {
-  // Define tus campos aquí. Por ejemplo:
-  id?: number;
-  diskName?: string;
-  diskSize?: string;
-};
-
 const getAllUserDisk = {
   Query: {
-    getDiskDetails: async (root: any, input: DiskDetailsInput) => {
+    getDiskDetails: async (root: any, input: any) => {
       try {
         const forGetList = await prisma.disk.findMany({
           select: {

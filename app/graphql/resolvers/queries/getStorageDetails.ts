@@ -6,15 +6,9 @@ import AuthForBoth from '@services/isAuthForBoth'
 
 const prisma = new PrismaClient()
 
-interface StorageDetailsInput {
-  input: {
-    token: string;
-  };
-}
-
 const getStorageDetails = {
   Query: {
-    getStorageList: async (_root: any, input: StorageDetailsInput) => {
+    getStorageList: async (_root: any, input: any) => {
       try {
         const token = input.input.token
         AuthForBoth(token)

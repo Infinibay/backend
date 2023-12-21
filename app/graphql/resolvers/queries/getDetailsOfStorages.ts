@@ -5,13 +5,6 @@ import logger from '@main/logger'
 
 const prisma = new PrismaClient()
 
-interface StorageDetailsInput {
-  input: {
-    token: string;
-    id?: any;
-  };
-}
-
 async function getStorageById(id: any) {
   return await prisma.storage.findUnique({
     where: {
@@ -57,7 +50,7 @@ async function getStoragesByUserId(userId: any) {
 
 const StorageDetailsDisk = {
   Query: {
-    getStorageDetailsDisk: async (_root: any, input: StorageDetailsInput) => {
+    getStorageDetailsDisk: async (_root: any, input: any) => {
       try {
         const token = input.input.token
         const forUserId = isAuthorBoth(token).id

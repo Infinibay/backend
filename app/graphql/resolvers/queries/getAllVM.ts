@@ -5,30 +5,9 @@ import logger from '@main/logger'
 
 const prisma = new PrismaClient()
 
-interface VirtualMachineWhereInput {
-  virtualMachineName?: {
-    contains: string;
-    mode: 'insensitive';
-  };
-  Status?: {
-    equals: string;
-  };
-}
-
-interface UserSelect {
-  id: true,
-  firstName: true
-}
-
-interface GetAllVMInput {
-  token: string;
-  search?: string;
-  status?: string;
-}
-
 const allVMResolver = {
   Query: {
-    getAllVM: async (_root: any, input: GetAllVMInput) => {
+    getAllVM: async (_root: any, input: any) => {
       try {
         const { token, search, status } = input;
         const foradminID = isAuth(token).id
@@ -47,7 +26,7 @@ const allVMResolver = {
                 select: {
                   id: true,
                   firstName: true
-                } as UserSelect
+                }
               }
             }
           })

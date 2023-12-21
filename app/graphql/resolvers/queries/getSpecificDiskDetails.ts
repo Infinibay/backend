@@ -1,6 +1,7 @@
 import { PrismaClient } from '@prisma/client'
 import { GraphQLError } from 'graphql'
 import logger from '@main/logger'
+
 const prisma = new PrismaClient()
 
 const forSpecificDiskDetail = {

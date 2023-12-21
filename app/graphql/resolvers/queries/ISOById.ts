@@ -7,7 +7,7 @@ const prisma = new PrismaClient()
 
 const ISOById = {
   Query: {
-    getISOById: async (_parent: any, input: any) => {
+    getISOById: async (root: any, input: any) => {
       try {
         const token = input.input.token
         const search = input.input.search
