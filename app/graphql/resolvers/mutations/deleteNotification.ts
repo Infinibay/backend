@@ -1,11 +1,12 @@
 import { PrismaClient } from '@prisma/client'
 import { GraphQLError } from 'graphql'
-import logger from '../../../../logger.js'
+import logger from '@main/logger'
+
 const prisma = new PrismaClient()
 
 const fordeleteNotification = {
   Mutation: {
-    async deleteNotification (_root, input) {
+    async deleteNotification(root: any, input: any) {
       try {
         await prisma.notification.delete({
           where: {
@@ -13,7 +14,7 @@ const fordeleteNotification = {
           }
         })
         return 'Deleted'
-      } catch (error) {
+      } catch (error: any) {
         logger.error(error, error.message)
         throw new GraphQLError('Failed to Delete', {
           extensions: {

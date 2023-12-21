@@ -2,14 +2,15 @@ import { PrismaClient } from '@prisma/client'
 import bcrypt from 'bcrypt'
 import { GraphQLError } from 'graphql'
 import fs from 'fs'
-import logger from '../../../../logger.js'
+import logger from '@main/logger'
+
 const prisma = new PrismaClient()
-const bcryptRounds = parseInt(process.env.CONSTANT)
-const RandomStringLength = parseInt(process.env.RANDOMSTRINGLENGTH)
+const bcryptRounds = parseInt(process.env.CONSTANT || '0')
+const RandomStringLength = parseInt(process.env.RANDOMSTRINGLENGTH || '0')
 
 const signUp = {
   Mutation: {
-    async createUser (root, input) {
+    async createUser(root: any, input: any) {
       try {
         const path =
           'app/userImage/' +
@@ -40,8 +41,8 @@ const signUp = {
           }
         })
         return userCreate
-      } catch (Error) {
-        logger.error(Error, Error.message)
+      } catch (error: any) {
+        logger.error(error, error.message)
         throw new GraphQLError('Sign-up Failed', {
           extensions: {
             StatusCode: 400,

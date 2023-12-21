@@ -1,22 +1,23 @@
-import jwt from 'jsonwebtoken'
-import logger from '../../logger.js'
-import GraphQLError from 'graphql'
+import jwt from 'jsonwebtoken';
+import { GraphQLError } from 'graphql';
+import logger from '@main/logger'
+
 const config = process.env
 
-const AuthForBoth = (token) => {
+const AuthForBoth = (token: any): any => {
   if (!token) {
-    throw new GraphQLError('A token is required for authentication')
+    throw new GraphQLError('A token is required for authentication');
   }
   try {
-    const decoded = jwt.verify(token, config.TOKENKEY)
+    const decoded = jwt.verify(token, config.TOKENKEY ?? 'secret');
     if (decoded) {
-      return decoded
+      return decoded;
     } else {
-      throw new GraphQLError('Sorry Access Denied')
+      throw new GraphQLError('Sorry Access Denied');
     }
-  } catch (err) {
-    logger.error(err, err.message)
-    throw new GraphQLError('Invalid Token')
+  } catch (err: any) {
+    logger.error(err, err.message);
+    throw new GraphQLError('Invalid Token');
   }
 }
 

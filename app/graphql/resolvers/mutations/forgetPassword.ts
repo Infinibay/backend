@@ -3,16 +3,16 @@ import jwt from 'jsonwebtoken'
 import smtpTransport from 'nodemailer-smtp-transport'
 import nodemailer from 'nodemailer'
 import { GraphQLError } from 'graphql'
-import logger from '../../../../logger.js'
 import ms from 'ms'
 import fs from 'fs'
 import ejs from 'ejs'
+import logger from '@main/logger'
 const prisma = new PrismaClient()
-const forgetPasswordExpiredIn = ms(process.env.FORGETPASSWORDEXPIREDIN)
+const forgetPasswordExpiredIn = ms(process.env.FORGETPASSWORDEXPIREDIN || '')
 
 const forgetPassword = {
   Mutation: {
-    async forgetPassword (root, input) {
+    async forgetPassword(root: any, input: any) {
       try {
         const userEmail = await prisma.user.findUnique({
           where: {
@@ -29,7 +29,7 @@ const forgetPassword = {
                 id: userEmail.id,
                 eMail: userEmail.eMail
               },
-              process.env.TOKENKEY,
+              process.env.TOKENKEY ?? '',
               {
                 expiresIn: forgetPasswordExpiredIn
               }
@@ -75,7 +75,7 @@ const forgetPassword = {
         } else {
           throw new Error('NOT FOUND')
         }
-      } catch (error) {
+      } catch (error: any) {
         logger.error(error, error.message)
         throw new GraphQLError('Something went wrong please try again', {
           extensions: {

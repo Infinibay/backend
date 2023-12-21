@@ -1,12 +1,13 @@
 import { PrismaClient } from '@prisma/client'
 import { GraphQLError } from 'graphql'
-import logger from '../../../../logger.js'
-import AuthForBoth from '../../../services/isAuthForBoth.js'
+import AuthForBoth from '@services/isAuthForBoth'
+import logger from '@main/logger'
+
 const prisma = new PrismaClient()
 
 const createStorageResolver = {
   Mutation: {
-    async createStorage (root, input) {
+    async createStorage(root: any, input: any) {
       try {
         const token = input.input.token
         const forId = AuthForBoth(token).id
@@ -29,7 +30,7 @@ const createStorageResolver = {
           })
           return forcreateStroage
         }
-      } catch (error) {
+      } catch (error: any) {
         logger.error(error, error.message)
 
         throw new GraphQLError('Failed', {

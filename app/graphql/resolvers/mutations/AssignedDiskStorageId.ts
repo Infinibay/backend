@@ -1,53 +1,13 @@
 import { PrismaClient } from '@prisma/client'
 import { GraphQLError } from 'graphql'
-import logger from '../../../../logger.js'
+import logger from '@main/logger'
+
 const prisma = new PrismaClient()
 
 const forAssignedDiskStorageID = {
   Mutation: {
-    async UpdateDiskStorageId (root, input) {
+    async UpdateDiskStorageId(root: any, input: any) {
       try {
-        // const token = input.input.token
-        // AuthForBoth(token)
-        // const forId = AuthForBoth(token).id
-        // const ids = input.input.id
-        // const findDiskStorage = await prisma.disk.findMany({
-        //   where: {
-        //     id: { in: ids }
-        //   },
-        //   select: {
-        //     id: true,
-        //     userId: true,
-        //     diskName: true,
-        //     diskSize: true,
-        //     storageId: true
-        //   }
-        // })
-        // console.log(findDiskStorage)
-        // const updateList = []
-        // for (const forlist of findDiskStorage) {
-        //   if (forlist.userId === forId) {
-        //     const forget = await prisma.disk.update({
-        //       where: {
-        //         id: forlist.id
-        //       },
-        //       data: {
-        //         storageId: input.input.storageId
-        //       },
-        //       select: {
-        //         id: true,
-        //         userId: true,
-        //         diskName: true,
-        //         diskSize: true,
-        //         storageId: true
-        //       }
-        //     })
-        //     logger.log(forget)
-        //     updateList.push(forlist.id)
-        //   }
-        // }
-        // return 'Updated'
-
         const ids = input.input.id
         const AssignDiskStorage = await prisma.disk.findMany({
           where: {
@@ -59,7 +19,6 @@ const forAssignedDiskStorageID = {
             diskSize: true
           }
         })
-        console.log(AssignDiskStorage)
         const updateList = []
         for (const forlist of AssignDiskStorage) {
           await prisma.disk.update({
@@ -80,8 +39,7 @@ const forAssignedDiskStorageID = {
           updateList.push(forlist.id)
         }
         return 'Update Disk'
-      } catch (error) {
-        console.log(error)
+      } catch (error: any) {
         logger.error(error, error.message)
         throw new GraphQLError('Failed', {
           extensions: {

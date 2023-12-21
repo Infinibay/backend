@@ -1,11 +1,12 @@
 import { PrismaClient } from '@prisma/client'
 import { GraphQLError } from 'graphql'
-import logger from '../../../../logger.js'
+import logger from '@main/logger'
+
 const prisma = new PrismaClient()
 
 const createDisk = {
   Mutation: {
-    async createDisk (root, input) {
+    async createDisk(root: any, input: any) {
       try {
         const forCreateDisk = await prisma.disk.create({
           data: {
@@ -22,8 +23,7 @@ const createDisk = {
           }
         })
         return forCreateDisk
-      } catch (error) {
-        console.log(error)
+      } catch (error: any) {
         logger.error(error, error.message)
         throw new GraphQLError('Failed', {
           extensions: {

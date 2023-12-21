@@ -1,17 +1,18 @@
 import { PrismaClient } from '@prisma/client'
 import { GraphQLError } from 'graphql'
-import logger from '../../../../logger.js'
-import AuthForBoth from '../../../services/isAuthForBoth.js'
+import logger from '@main/logger'
+import AuthForBoth from '@services/isAuthForBoth'
+
 const prisma = new PrismaClient()
 
 const forUpdateStorage = {
   Mutation: {
-    async updateStorage (root, input) {
+    async updateStorage(root: any, input: any) {
       try {
         const token = input.input.token
         AuthForBoth(token)
         const forId = AuthForBoth(token).id
-        const forFindUserStorage = await prisma.storage.findUnique({
+        const forFindUserStorage: any = await prisma.storage.findUnique({
           where: {
             id: input.input.id
           },
@@ -46,7 +47,7 @@ const forUpdateStorage = {
         } else {
           throw new Error('Error')
         }
-      } catch (error) {
+      } catch (error: any) {
         logger.error(error, error.message)
         throw new GraphQLError('Failed', {
           extensions: {

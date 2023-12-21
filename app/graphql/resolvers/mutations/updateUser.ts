@@ -1,14 +1,15 @@
 import { PrismaClient } from '@prisma/client'
 import fs from 'fs'
 import { GraphQLError } from 'graphql'
-import logger from '../../../../logger.js'
-import AuthForBoth from '../../../services/isAuthForBoth.js'
+import logger from '@main/logger'
+import AuthForBoth from '@services/isAuthForBoth'
+
 const prisma = new PrismaClient()
-const RandomStringLength = parseInt(process.env.RANDOMSTRINGLENGTH)
+const RandomStringLength = parseInt(process.env.RANDOMSTRINGLENGTH ?? '10')
 
 const forUpdateUser = {
   Mutation: {
-    async updateUser (_root, input) {
+    async updateUser(root: any, input: any) {
       try {
         const token = input.input.token
         const forID = AuthForBoth(token).id
@@ -57,7 +58,7 @@ const forUpdateUser = {
             return forUpdateUserWithoutImage
           }
         }
-      } catch (error) {
+      } catch (error: any) {
         logger.error(error, error.message)
         throw new GraphQLError('Update Failed..!', {
           extensions: {

@@ -1,13 +1,15 @@
-import AuthForBoth from '../../../services/isAuthForBoth.js'
+
 import { PrismaClient } from '@prisma/client'
 import { GraphQLError } from 'graphql'
-import logger from '../../../../logger.js'
-import forDeleteFunction from '../../../services/deleteVMFucntions.js'
+import AuthForBoth from '@services/isAuthForBoth.js'
+import logger from '@main/logger.js'
+import forDeleteFunction from '@services/deleteVMFucntions'
+
 const prisma = new PrismaClient()
 
 const deleteVMResolvers = {
   Mutation: {
-    async deleteVM (root, input) {
+    async deleteVM(root: any, input: any) {
       try {
         const token = input.input.token
         const forID = AuthForBoth(token)
@@ -39,7 +41,7 @@ const deleteVMResolvers = {
             for (let i = 0; i < forDeleteVM.length; i++) {
               if (forDeleteVM[i]) {
                 const forName = forDeleteVM[i].virtualMachineName
-                const reqq = await forDeleteFunction(forName)
+                const reqq: any = await forDeleteFunction(forName)
                 if (reqq.status === true) {
                   await prisma.notification.deleteMany({
                     where: {

@@ -1,12 +1,12 @@
 import { PrismaClient } from '@prisma/client'
 import { GraphQLError } from 'graphql'
-import logger from '../../../../logger.js'
-import isAuthForUser from '../../../services/isAuthForUser.js'
+import logger from '@main/logger'
+import isAuthForUser from '@services/isAuthForUser'
 const prisma = new PrismaClient()
 
 const forDeleteStorage = {
   Mutation: {
-    async deleteStoragePool (root, input) {
+    async deleteStoragePool(root: any, input: any) {
       try {
         const token = input.input.token
         const id = input.input.id
@@ -20,13 +20,13 @@ const forDeleteStorage = {
             userId: true
           }
         })
-        if (forFindStorage.userId === forId) {
+        if (forFindStorage && forFindStorage.userId === forId) {
           const forDeleteStorage = await prisma.storage.delete({
             where: {
               id
             }
           })
-          if (forDeleteStorage === true) {
+          if (forDeleteStorage !== null) {
             await prisma.disk.updateMany({
               where: {
                 storageId: id
@@ -38,7 +38,7 @@ const forDeleteStorage = {
           }
         }
         return 'deleted'
-      } catch (error) {
+      } catch (error: any) {
         logger.error(error, error.message)
         throw new GraphQLError('deleted Failed', {
           extensions: {

@@ -1,13 +1,13 @@
 import { PrismaClient } from '@prisma/client'
 import { GraphQLError } from 'graphql'
-import AuthForBoth from '../../../services/isAuthForBoth.js'
-import { createCall } from '../Virtualization/index.js'
-import logger from '../../../../logger.js'
+import AuthForBoth from '@services/isAuthForBoth'
+import { createCall } from '../Virtualization/index'
+import logger from '@main/logger'
 const prisma = new PrismaClient()
 
 const forStatusVMResolvers = {
   Mutation: {
-    async forStatus (_root, input) {
+    async forStatus(root: any, input: any) {
       try {
         const token = input.input.token
         AuthForBoth(token)
@@ -16,7 +16,7 @@ const forStatusVMResolvers = {
         if (forID) {
           const id = input.input.id
           const button = input.input.button
-          const forFindStatusID = await prisma.virtualMachine.findUnique({
+          const forFindStatusID: any = await prisma.virtualMachine.findUnique({
             where: {
               id
             }
@@ -54,7 +54,7 @@ const forStatusVMResolvers = {
             throw new Error('Invalid Token')
           }
         }
-      } catch (error) {
+      } catch (error: any) {
         logger.error(error, error.message)
         throw new GraphQLError('Failed to Update', {
           extensions: {

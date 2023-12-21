@@ -1,12 +1,13 @@
 import { PrismaClient } from '@prisma/client'
 import { GraphQLError } from 'graphql'
-import logger from '../../../../logger.js'
-import AuthForBoth from '../../../services/isAuthForBoth.js'
+import logger from '@main/logger'
+import AuthForBoth from '@services/isAuthForBoth'
+
 const prisma = new PrismaClient()
 
 const forDeleteISO = {
   Mutation: {
-    async deleteISO (_root, input) {
+    async deleteISO(root: any, input: any) {
       try {
         const token = input.input.token
         const ids = input.input.id
@@ -14,21 +15,21 @@ const forDeleteISO = {
         const forUserType = AuthForBoth(token).userType
         if (forBoth) {
           if (forUserType === 'admin') {
-            await prisma.ISO.deleteMany({
+            await prisma.iSO.deleteMany({
               where: {
                 id: { in: ids }
               }
             })
             return 'ISO Deleted'
           }
-          if (forUserType === 'user') {
-            const forFind = await prisma.ISO.findUnique({
+          if (forUserType && forUserType === 'user') {
+            const forFind = await prisma.iSO.findUnique({
               where: {
                 id: input.input.id
               }
             })
-            if (forBoth === forFind.userId) {
-              await prisma.ISO.delete({
+            if (forFind && forBoth === forFind.userId) {
+              await prisma.iSO.delete({
                 where: {
                   id: forFind.id
                 }
@@ -37,7 +38,7 @@ const forDeleteISO = {
             }
           }
         }
-      } catch (error) {
+      } catch (error: any) {
         logger.error(error, error.message)
         if (error.extensions && error.extensions.status === 400) {
           throw new GraphQLError('please enter valid credentials', { extensions: { status: 400 } })

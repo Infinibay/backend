@@ -1,18 +1,18 @@
 import { PrismaClient } from '@prisma/client'
 import { GraphQLError } from 'graphql'
-import isAuthForUser from '../../../services/isAuthForUser.js'
+import isAuthForUser from '@services/isAuthForUser'
 
 const prisma = new PrismaClient()
 
 const forUpdateISO = {
   Mutation: {
-    async updateISO (root, input) {
+    async updateISO(root: any, input: any) {
       try {
         const token = input.input.token
         const forID = isAuthForUser(token).id
         if (forID) {
           const id = input.input.id
-          const forUpdatingISO = await prisma.ISO.findUnique({
+          const forUpdatingISO: any = await prisma.iSO.findUnique({
             where: {
               id
             },
@@ -25,9 +25,9 @@ const forUpdateISO = {
               createdAt: true
             }
           })
-          console.log(forUpdatingISO.userId)
+
           if (forUpdatingISO.userId === forID) {
-            const forUpdate = await prisma.ISO.update({
+            const forUpdate = await prisma.iSO.update({
               where: {
                 id: input.input.id
               },
@@ -47,8 +47,7 @@ const forUpdateISO = {
             return forUpdate
           }
         }
-      } catch (error) {
-        console.log(error)
+      } catch (error: any) {
         throw new GraphQLError('Failed to Update', {
           extensions: {
             StatusCode: 404,

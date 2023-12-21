@@ -1,13 +1,13 @@
 import { PrismaClient } from '@prisma/client'
 import { GraphQLError } from 'graphql'
-import logger from '../../../../logger.js'
+import AuthForBoth from '@services/isAuthForBoth'
+import logger from '@main/logger'
 
-import AuthForBoth from '../../../services/isAuthForBoth.js'
 const prisma = new PrismaClient()
 
 const forCreateISO = {
   Mutation: {
-    async createISO (_root, input) {
+    async createISO(root: any, input: any) {
       try {
         const token = input.input.token
         const forID = AuthForBoth(token).id
@@ -21,7 +21,7 @@ const forCreateISO = {
           const forCon = filename + ext
 
           if (forName === true) {
-            const forCreateISO = await prisma.ISO.create({
+            const forCreateISO = await prisma.iSO.create({
               data: {
                 name: forCon,
                 type: input.input.type,
@@ -41,7 +41,7 @@ const forCreateISO = {
             return forCreateISO
           }
         }
-      } catch (error) {
+      } catch (error: any) {
         logger.error(error, error.message)
         throw new GraphQLError('Failed to Create', {
           extensions: {

@@ -1,11 +1,13 @@
 import { PrismaClient } from '@prisma/client'
 import { GraphQLError } from 'graphql'
-import logger from '../../../../logger.js'
-import isAuth from '../../../services/isAuth.js'
+import logger from '@main/logger'
+import isAuth from '@services/isAuth'
+
 const prisma = new PrismaClient()
+
 const forDeleteUser = {
   Mutation: {
-    async deleteUser (root, input) {
+    async deleteUser(root: any, input: any) {
       try {
         const token = input.input.token
         const forID = isAuth(token).id
@@ -20,7 +22,7 @@ const forDeleteUser = {
           })
           return 'Deleted'
         }
-      } catch (error) {
+      } catch (error: any) {
         logger.error(error, error.message)
         throw new GraphQLError('Delete User Failed..!', {
           extensions: {

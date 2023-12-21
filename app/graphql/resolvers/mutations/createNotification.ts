@@ -1,11 +1,12 @@
 import { PrismaClient } from '@prisma/client'
 import { GraphQLError } from 'graphql'
-import logger from '../../../../logger.js'
+import logger from '@main/logger'
+
 const prisma = new PrismaClient()
 
 const createNotification = {
   Mutation: {
-    async addNotification (root, input) {
+    async addNotification(root: any, input: any) {
       try {
         const forNotification = await prisma.notification.create({
           data: {
@@ -16,7 +17,7 @@ const createNotification = {
           }
         })
         return forNotification
-      } catch (error) {
+      } catch (error: any) {
         logger.error(error, error.message)
         throw new GraphQLError('Failed to Create', {
           extensions: {

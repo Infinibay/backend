@@ -1,14 +1,15 @@
 import { PrismaClient } from '@prisma/client'
 import { GraphQLError } from 'graphql'
-import AuthForBoth from '../../../services/isAuthForBoth.js'
-import updateVMFunctions from '../../../services/updateVMFunctions.js'
 import fs from 'fs'
+import AuthForBoth from '@services/isAuthForBoth'
+// import updateVMFunctions from '../../../services/updateVMFunctions.js'
+
 const prisma = new PrismaClient()
-const RandomStringLength = parseInt(process.env.RANDOMSTRINGLENGTH)
+const RandomStringLength = parseInt(process.env.RANDOMSTRINGLENGTH ?? '10')
 
 const updateVMResolvers = {
   Mutation: {
-    async upadteVM (_root, input) {
+    async upadteVM(root: any, input: any) {
       try {
         const path =
           'app/VM_image/' +
@@ -22,7 +23,6 @@ const updateVMResolvers = {
             ''
           )
           fs.writeFileSync(path, base64Data, { encoding: 'base64' })
-          console.log(path)
         }
         const token = input.input.token
         const forID = AuthForBoth(token).id
@@ -65,39 +65,36 @@ const updateVMResolvers = {
                 vmImage: true
               }
             })
-            console.log('forUpdate')
             return forUpdate
           }
 
           if (vmImage === null || !vmImage) {
             const forUpdatewithoutimage =
-                  await prisma.virtualMachine.update({
-                    where: {
-                      id: input.input.id
-                    },
-                    data: {
-                      virtualMachineName: input.input.virtualMachineName,
-                      title: input.input.title,
-                      description: input.input.description,
-                      status: input.input.status,
-                      userId: input.input.userId
+              await prisma.virtualMachine.update({
+                where: {
+                  id: input.input.id
+                },
+                data: {
+                  virtualMachineName: input.input.virtualMachineName,
+                  title: input.input.title,
+                  description: input.input.description,
+                  status: input.input.status,
+                  userId: input.input.userId
 
-                    },
-                    select: {
-                      id: true,
-                      virtualMachineName: true,
-                      description: true,
-                      status: true,
+                },
+                select: {
+                  id: true,
+                  virtualMachineName: true,
+                  description: true,
+                  status: true,
 
-                      title: true
-                    }
-                  })
-            console.log('forUpdatewithoutimage')
+                  title: true
+                }
+              })
             return forUpdatewithoutimage
           }
         }
-      } catch (error) {
-        console.log(error)
+      } catch (error: any) {
         throw new GraphQLError('Failed to Update', {
           extensions: {
             StatusCode: 404

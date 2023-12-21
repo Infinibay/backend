@@ -1,15 +1,16 @@
 import { PrismaClient } from '@prisma/client'
 import { GraphQLError } from 'graphql'
-import logger from '../../../../logger.js'
-import AuthForBoth from '../../../services/isAuthForBoth.js'
 import fs from 'fs'
-import createCallFunction from '../../../services/createCallFunctions.js'
+import logger from '@main/logger'
+import AuthForBoth from '@services/isAuthForBoth'
+import createCallFunction from '@services/createCallFunctions'
+
 const prisma = new PrismaClient()
-const RandomStringLength = parseInt(process.env.RANDOMSTRINGLENGTH)
+const RandomStringLength = parseInt(process.env.RANDOMSTRINGLENGTH || '5')
 
 const createVMResolvers = {
   Mutation: {
-    async createVM (root, input, context) {
+    async createVM(root: any, input: any, context: any) {
       try {
         const confii = JSON.parse(input.input.config)
         const ram = confii.getConfigFile.Memory
@@ -34,13 +35,13 @@ const createVMResolvers = {
         const token = input.input.token
         const forID = AuthForBoth(token).id
         if (token) {
-          const kk = await createCallFunction(fordata)
+          const createCallResult: any = await createCallFunction(fordata)
           const storageId = input.input.storageId
           if (storageId) {
             input.input.storageId = storageId
           }
-          if (kk.status === true) {
-            if (kk.status === true) {
+          if (createCallResult.status === true) {
+            if (createCallResult.status === true) {
               const storageId = input.input.storageId ? input.input.storageId : null
               const VMCreate = await prisma.virtualMachine.create({
                 data: {
@@ -70,7 +71,7 @@ const createVMResolvers = {
           }
 
         }
-      } catch (error) {
+      } catch (error: any) {
         logger.error(error, error.message)
         throw new GraphQLError('Failed to Create', {
           extensions: {

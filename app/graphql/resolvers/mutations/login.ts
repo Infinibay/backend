@@ -3,18 +3,18 @@ import bcrypt from 'bcrypt'
 import jwt from 'jsonwebtoken'
 import { GraphQLError } from 'graphql'
 import ms from 'ms'
-import logger from '../../../../logger.js'
+import logger from '@main/logger'
 
 const prisma = new PrismaClient()
-const forExpiresIn = ms(process.env.EXPIRESIN)
+const forExpiresIn = ms(process.env.EXPIRESIN ?? '1d')
 
 const login = {
   Mutation: {
-    async Login (root, input) {
+    async Login(root: any, input: any) {
       try {
         const eMail = input.input.eMail
         const password = input.input.password
-        const forLogin = await prisma.user.findUnique({
+        const forLogin: any = await prisma.user.findUnique({
           where: {
             eMail
           }
@@ -34,7 +34,7 @@ const login = {
                   eMail: forLogin.eMail,
                   userType: forLogin.userType
                 },
-                process.env.TOKENKEY,
+                process.env.TOKENKEY ?? '',
                 {
                   expiresIn: forExpiresIn
                 }
@@ -49,7 +49,7 @@ const login = {
             }
           })
         }
-      } catch (error) {
+      } catch (error: any) {
         logger.error(error, error.message)
         throw new GraphQLError('Login Failed ' + 'Please Try Again....!', {
           extensions: {
@@ -60,4 +60,4 @@ const login = {
     }
   }
 }
-export default login
+export default login;
