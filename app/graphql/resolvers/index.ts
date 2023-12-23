@@ -1,18 +1,9 @@
-// import { IResolvers } from 'graphql-tools';
-import forexport from './virtualMachine.resolver';
-import foruserResolverExport from './users.resolver';
-import forISOexport from './ISO.resolver';
-import forNotificationExports from './notification.resolver';
-import diskExport from './disk.resolver';
-import forStorageExports from './storage.resolver';
+import { NonEmptyArray } from 'type-graphql';
+import { UserResolver } from './user/resolver'
+import { MachineTemplateResolver } from './machine_template/resolver'
 
-const resolvers: any[] = [
-  forexport,
-  foruserResolverExport,
-  forISOexport,
-  forNotificationExports,
-  diskExport,
-  forStorageExports
+const resolvers: NonEmptyArray<Function> = [
+  UserResolver
 ];
 
-export default resolvers;
+export default resolvers as NonEmptyArray<Function>;

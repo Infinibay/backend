@@ -10,72 +10,41 @@ datasource db {
 
 model User {
   id        String  @id @default(uuid())
-  eMail     String  @unique
+  email     String  @unique
   password  String
   deleted   Boolean
   token     String  @default("null")
   firstName String
   lastName  String
   userImage String? @unique
-  userType  String
-  ISO          ISO[]
-  storage      Storage[]
-  notification Notification[]
-
-  VM VirtualMachine[]
+  role      String
+  createdAt DateTime @default(now())
+  VM Machine[]
 }
 
-model VirtualMachine {
+model Machine {
   id                 String  @id @default(uuid())
   config             Json
   status             Boolean
-  virtualMachineName String  @unique
-  title              String
-  description        String
   userId             String
-  guId               String  @unique @default(uuid())
-  vmImage            String? @unique
-
-  user         User           @relation(fields: [userId], references: [id])
-  notification Notification[]
-   storage   Storage? @relation(fields: [storageId], references: [id])
-  storageId String?
+  templateId         String
+  template           MachineTemplate @relation(fields: [templateId], references: [id])
+  user               User            @relation(fields: [userId], references: [id])
 }
+
+model MachineTemplate {
+  id            String @id @default(uuid())
+  name          String
+  description   String?
+  cores         Int
+  ram           Int
+  storage       Int
+  createdAt     DateTime @default(now())
+  machines      Machine[]
+}
+
 
 model Notification {
   id      String          @id @default(uuid())
   message String?
-  userId  String
-  readed  Boolean
-  vmId    String?
-  user    User            @relation(fields: [userId], references: [id])
-  vm      VirtualMachine? @relation(fields: [vmId], references: [id])
-}
-
-model ISO {
-  id        String   @id @default(uuid())
-  name      String
-  type      String
-  size      Int
-  createdAt DateTime @default(now())
-  userId    String?
-  user      User?    @relation(fields: [userId], references: [id])
-}
-model Storage {
-  id          String           @id @default(uuid())
-  storageName String
-  storageType String
-  storageSize Int
-  userId      String?
-  user        User?            @relation(fields: [userId], references: [id])
-  disk        Disk[]
-  VM          VirtualMachine[]
-}
-
-model Disk {
-  id        String   @id @default(uuid())
-  diskName  String
-  diskSize  Int
-  storageId String?
-  storage   Storage? @relation(fields: [storageId], references: [id])
 }
