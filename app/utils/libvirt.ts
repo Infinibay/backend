@@ -127,34 +127,42 @@ enum LibvirtErrorCodes {
 
 // Define the custom error class
 class LibvirtError extends Error {
-  constructor(libvirtErrorCode: LibvirtErrorCodes) {
-    let message: string;
-
-    switch (libvirtErrorCode) {
-      case LibvirtErrorCodes.VIR_ERR_OK:
-        message = 'No error';
-        break;
-      case LibvirtErrorCodes.VIR_ERR_INTERNAL_ERROR:
-        message = 'Internal error';
-        break;
-      case LibvirtErrorCodes.VIR_ERR_NO_MEMORY:
-        message = 'Memory allocation failure';
-        break;
-      case LibvirtErrorCodes.VIR_ERR_NO_CONNECT:
-        message = 'Failed to connect';
-        break;
-      case LibvirtErrorCodes.VIR_ERR_NO_DOMAIN:
-        message = 'Failed to find the domain';
-        break;
-      // Add more cases as needed
-      default:
-        message = 'Unknown error';
+    constructor(libvirtErrorCode: LibvirtErrorCodes) {
+      let message: string;
+  
+      switch (libvirtErrorCode) {
+        case LibvirtErrorCodes.VIR_ERR_OK:
+          message = 'No error';
+          break;
+        case LibvirtErrorCodes.VIR_ERR_INTERNAL_ERROR:
+          message = 'Internal error';
+          break;
+        case LibvirtErrorCodes.VIR_ERR_NO_MEMORY:
+          message = 'Memory allocation failure';
+          break;
+        case LibvirtErrorCodes.VIR_ERR_NO_CONNECT:
+          message = 'Failed to connect';
+          break;
+        case LibvirtErrorCodes.VIR_ERR_NO_DOMAIN:
+          message = 'Failed to find the domain';
+          break;
+        case LibvirtErrorCodes.VIR_ERR_OPERATION_FAILED:
+          message = 'Operation failed';
+          break;
+        case LibvirtErrorCodes.VIR_ERR_INVALID_ARG:
+          message = 'Invalid argument';
+          break;
+        case LibvirtErrorCodes.VIR_ERR_NO_NETWORK:
+          message = 'Failed to find the network';
+          break;
+        default:
+          message = 'Unknown error';
+      }
+  
+      super(message);
+      this.name = 'LibvirtError';
     }
-
-    super(message);
-    this.name = 'LibvirtError';
   }
-}
 
 /**
  * The Libvirt class provides a wrapper around the libvirt library, allowing
@@ -223,7 +231,13 @@ class Libvirt {
     });
   }
 
-  // Connect to a hypervisor
+  /**
+   * This method establishes a connection to the hypervisor.
+   * 
+   * @param {string} uri - The URI of the hypervisor to connect to.
+   * @returns {Buffer | null} - A buffer representing the connection, or null if the connection fails.
+   * @throws {LibvirtError} - Throws an error if the connection fails.
+   */
   public connect(uri: string): Buffer | null {
     this.connection = this.libvirt.virConnectOpen(uri);
   
@@ -234,7 +248,20 @@ class Libvirt {
     return this.connection;
   }
 
-  // Close connection to the hypervisor
+  /**
+   * This method checks if there is an active connection to the hypervisor.
+   * 
+   * @returns {boolean} - Returns true if there is an active connection, false otherwise.
+   */
+  public isConnected(): boolean {
+    return this.connection !== null && !this.connection.isNull();
+  }
+
+  /**
+   * This method closes the connection to the hypervisor.
+   * 
+   * @throws {LibvirtError} - Throws an error if the operation fails.
+   */
   public close(): void {
     if (this.connection) {
       const result = this.libvirt.virConnectClose(this.connection);
@@ -247,12 +274,20 @@ class Libvirt {
     }
   }
 
-  // Destructor-like method
+  /**
+   * This method disconnects from the hypervisor by closing the connection.
+   */
   public disconnect(): void {
     this.close();
   }
 
-  // Lookup a domain by name
+  /**
+   * This method looks up a domain by its name.
+   * 
+   * @param {string} name - The name of the domain to look up.
+   * @returns {Buffer} - A buffer representing the domain.
+   * @throws {LibvirtError} - Throws an error if the domain does not exist.
+   */
   public domainLookupByName(name: string): Buffer {
     const domain = this.libvirt.virDomainLookupByName(this.connection, name);
 
@@ -263,17 +298,47 @@ class Libvirt {
     return domain;
   }
 
-  // Start a domain
+  /**
+   * This method creates (starts) a domain.
+   * 
+   * @param {Buffer} domain - A buffer representing the domain to be created.
+   * @returns {number} - Returns 0 on success, -1 in case of error.
+   * @throws {LibvirtError} - Throws an error if the operation fails.
+   */
   public domainCreate(domain: Buffer): number {
-    return this.libvirt.virDomainCreate(domain);
+    const result = this.libvirt.virDomainCreate(domain);
+
+    if (result < 0) {
+      throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_OPERATION_FAILED);
+    }
+
+    return result;
   }
 
-  // Destroy a domain
+  /**
+   * This method destroys a domain.
+   * 
+   * @param {Buffer} domain - A buffer representing the domain to be destroyed.
+   * @returns {number} - Returns 0 on success, -1 in case of error.
+   * @throws {LibvirtError} - Throws an error if the operation fails.
+   */
   public domainDestroy(domain: Buffer): number {
-    return this.libvirt.virDomainDestroy(domain);
+    const result = this.libvirt.virDomainDestroy(domain);
+
+    if (result < 0) {
+      throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_OPERATION_FAILED);
+    }
+
+    return result;
   }
 
-  // Define a new domain from an XML string
+  /**
+   * This method defines a domain from an XML string.
+   * 
+   * @param {string} xml - The XML string defining the domain.
+   * @returns {Buffer} - A buffer representing the defined domain.
+   * @throws {LibvirtError} - Throws an error if the domain definition is invalid.
+   */
   public domainDefineXML(xml: string,): Buffer {
     const domain = this.libvirt.virDomainDefineXML(this.connection, xml);
 
@@ -284,7 +349,14 @@ class Libvirt {
     return domain;
   }
 
-  // Update a domain
+  /**
+   * This method updates a domain with a new XML configuration.
+   * 
+   * @param {string} name - The name of the domain to be updated.
+   * @param {string} newXml - The new XML configuration for the domain.
+   * @returns {Buffer} - A buffer representing the updated domain.
+   * @throws {LibvirtError} - Throws an error if the domain does not exist, if the new XML configuration is invalid, or if the operation fails.
+   */
   public updateDomain(name: string, newXml: string): Buffer {
     // Lookup the domain by its name
     const domain = this.domainLookupByName(name);
@@ -300,7 +372,12 @@ class Libvirt {
     return newDomain;
   }
 
-  // Power on a domain
+  /**
+   * This method powers on a domain.
+   * 
+   * @param {string} name - The name of the domain to be powered on.
+   * @throws {LibvirtError} - Throws an error if the operation fails.
+   */
   public powerOn(name: string): void {
     const domain = this.domainLookupByName(name);
     const result = this.libvirt.virDomainCreate(domain);
@@ -310,7 +387,12 @@ class Libvirt {
     }
   }
 
-  // Power off a domain
+  /**
+   * This method powers off a domain.
+   * 
+   * @param {string} name - The name of the domain to be powered off.
+   * @throws {LibvirtError} - Throws an error if the operation fails.
+   */
   public powerOff(name: string): void {
     const domain = this.domainLookupByName(name);
     const result = this.libvirt.virDomainDestroy(domain);
@@ -320,7 +402,12 @@ class Libvirt {
     }
   }
 
-  // Suspend a domain
+  /**
+   * This method suspends a domain.
+   * 
+   * @param {string} name - The name of the domain to be suspended.
+   * @throws {LibvirtError} - Throws an error if the operation fails.
+   */
   public suspend(name: string): void {
     const domain = this.domainLookupByName(name);
     const result = this.libvirt.virDomainSuspend(domain);
@@ -330,7 +417,13 @@ class Libvirt {
     }
   }
 
-  // Get domain status
+  /**
+   * This method retrieves the status of a domain.
+   * 
+   * @param {string} name - The name of the domain.
+   * @returns {string} - The status of the domain. Possible values are 'Running', 'Blocked', 'Paused', 'Shutdown', 'Shutoff', 'Crashed', 'PMSuspended', and 'Unknown'.
+   * @throws {LibvirtError} - Throws an error if the operation fails.
+   */
   public getDomainStatus(name: string): string {
     const domain = this.domainLookupByName(name);
     const state = this.libvirt.virDomainGetState(domain);
@@ -359,7 +452,14 @@ class Libvirt {
     }
   }
 
-  // Create a virtual disk
+  /**
+   * This method creates a disk in a specified storage pool from an XML string.
+   * 
+   * @param {string} poolName - The name of the storage pool where the disk will be created.
+   * @param {string} xml - The XML string defining the disk.
+   * @returns {Buffer} - A buffer representing the created disk.
+   * @throws {LibvirtError} - Throws an error if the disk definition is invalid or if the operation fails.
+   */
   public createDisk(poolName: string, xml: string): Buffer {
     // Lookup the storage pool by its name
     const pool = this.libvirt.virStoragePoolLookupByName(this.connection, poolName);
@@ -374,7 +474,13 @@ class Libvirt {
     return volume;
   }
 
-  // Create a storage pool
+  /**
+   * This method creates a storage pool from an XML string.
+   * 
+   * @param {string} xml - The XML string defining the storage pool.
+   * @returns {Buffer} - A buffer representing the created storage pool.
+   * @throws {LibvirtError} - Throws an error if the storage pool definition is invalid or if the operation fails.
+   */
   public createStoragePool(xml: string): Buffer {
     // Define the storage pool
     const pool = this.libvirt.virStoragePoolDefineXML(this.connection, xml, 0);
@@ -393,6 +499,13 @@ class Libvirt {
     return pool;
   }
 
+  /**
+   * This method creates a network from an XML string.
+   * 
+   * @param {string} xml - The XML string defining the network.
+   * @returns {Buffer} - A buffer representing the created network.
+   * @throws {LibvirtError} - Throws an error if the network definition is invalid or if the operation fails.
+   */
   public createNetwork(xml: string): Buffer {
     // Define the network
     const network = this.libvirt.virNetworkDefineXML(this.connection, xml);
@@ -411,6 +524,13 @@ class Libvirt {
     return network;
   }
   
+  /**
+   * This method adds a domain to a network.
+   * 
+   * @param {string} domainName - The name of the domain to be added.
+   * @param {string} networkName - The name of the network to which the domain will be added.
+   * @throws {LibvirtError} - Throws an error if the network does not exist or if the operation fails.
+   */
   public addDomainToNetwork(domainName: string, networkName: string): void {
     const domain = this.domainLookupByName(domainName);
     const network = this.libvirt.virNetworkLookupByName(this.connection, networkName);
@@ -426,6 +546,13 @@ class Libvirt {
     }
   }
 
+  /**
+   * This method removes a domain from a network.
+   * 
+   * @param {string} domainName - The name of the domain to be removed.
+   * @param {string} networkName - The name of the network from which the domain will be removed.
+   * @throws {LibvirtError} - Throws an error if the network does not exist or if the operation fails.
+   */
   public removeDomainFromNetwork(domainName: string, networkName: string): void {
     const domain = this.domainLookupByName(domainName);
     const network = this.libvirt.virNetworkLookupByName(this.connection, networkName);
@@ -441,6 +568,12 @@ class Libvirt {
     }
   }
   
+  /**
+   * This method retrieves the networks associated with a given domain.
+   * 
+   * @param {string} domainName - The name of the domain.
+   * @returns {string[]} - An array of network names associated with the domain.
+   */
   public getDomainNetworks(domainName: string): string[] {
     const domain = this.domainLookupByName(domainName);
     const xml = this.libvirt.virDomainGetXMLDesc(domain, 0);
