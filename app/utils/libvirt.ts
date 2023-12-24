@@ -1,5 +1,6 @@
 import { Library, types } from 'ffi-napi';
 import { refType } from 'ref-napi';
+import { DOMParser } from 'xmldom';
 
 // Define necessary C types and structs
 const int = types.int;
@@ -155,6 +156,46 @@ class LibvirtError extends Error {
   }
 }
 
+/**
+ * The Libvirt class provides a wrapper around the libvirt library, allowing
+ * you to manage virtual machines and their resources.
+ *
+ * @example
+ * const libvirt = new Libvirt();
+ * 
+ * // Connect to the hypervisor
+ * libvirt.connect('qemu:///system');
+ * 
+ * // Create a storage pool
+ * const poolXml = `<pool>...</pool>`; // Replace with your pool XML
+ * libvirt.createStoragePool(poolXml);
+ * 
+ * // Create a storage volume
+ * const volumeXml = `<volume>...</volume>`; // Replace with your volume XML
+ * libvirt.createDisk('my-pool', volumeXml);
+ * 
+ * // Define a domain
+ * const domainXml = `<domain>...</domain>`; // Replace with your domain XML
+ * libvirt.domainDefineXML(domainXml);
+ * 
+ * // Power on the domain
+ * libvirt.powerOn('my-domain');
+ * 
+ * // Check the domain status
+ * console.log(libvirt.getDomainStatus('my-domain')); // 'Running'
+ * 
+ * // Suspend the domain
+ * libvirt.suspend('my-domain');
+ * 
+ * // Power on the domain again
+ * libvirt.powerOn('my-domain');
+ * 
+ * // Power off the domain
+ * libvirt.powerOff('my-domain');
+ * 
+ * // Disconnect from the hypervisor
+ * libvirt.disconnect();
+ */
 class Libvirt {
   private libvirt: any;
   private connection: Buffer | null = null;
@@ -168,7 +209,16 @@ class Libvirt {
       'virDomainLookupByName': ['pointer', ['pointer', 'string']],
       'virDomainCreate': ['int', ['pointer']],
       'virDomainDestroy': ['int', ['pointer']],
-      'virDomainDefineXML': ['pointer', ['pointer', 'string']], // Add this line
+      'virDomainDefineXML': ['pointer', ['pointer', 'string']],
+      'virDomainUndefine': ['int', ['pointer']], // Add this line
+      'virStoragePoolLookupByName': ['pointer', ['pointer', 'string']],
+      'virStorageVolCreateXML': ['pointer', ['pointer', 'string', 'int']],
+      'virStoragePoolDefineXML': ['pointer', ['pointer', 'string', 'int']],
+      'virStoragePoolCreate': ['int', ['pointer', 'int']],
+      'virNetworkDefineXML': ['pointer', ['pointer', 'string']],
+      'virNetworkCreate': ['int', ['pointer']],
+      'virNetworkLookupByName': ['pointer', ['pointer', 'string']],
+      'virDomainAttachDevice': ['int', ['pointer', 'string']],
       // Add more functions as needed
     });
   }
@@ -232,6 +282,177 @@ class Libvirt {
     }
 
     return domain;
+  }
+
+  // Update a domain
+  public updateDomain(name: string, newXml: string): Buffer {
+    // Lookup the domain by its name
+    const domain = this.domainLookupByName(name);
+
+    // Undefine the old domain
+    const undefineResult = this.libvirt.virDomainUndefine(domain);
+    if (undefineResult < 0) {
+      throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_INTERNAL_ERROR);
+    }
+
+    // Define a new domain with the updated XML
+    const newDomain = this.domainDefineXML(newXml);
+    return newDomain;
+  }
+
+  // Power on a domain
+  public powerOn(name: string): void {
+    const domain = this.domainLookupByName(name);
+    const result = this.libvirt.virDomainCreate(domain);
+  
+    if (result < 0) {
+      throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_OPERATION_FAILED);
+    }
+  }
+
+  // Power off a domain
+  public powerOff(name: string): void {
+    const domain = this.domainLookupByName(name);
+    const result = this.libvirt.virDomainDestroy(domain);
+  
+    if (result < 0) {
+      throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_OPERATION_FAILED);
+    }
+  }
+
+  // Suspend a domain
+  public suspend(name: string): void {
+    const domain = this.domainLookupByName(name);
+    const result = this.libvirt.virDomainSuspend(domain);
+  
+    if (result < 0) {
+      throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_OPERATION_FAILED);
+    }
+  }
+
+  // Get domain status
+  public getDomainStatus(name: string): string {
+    const domain = this.domainLookupByName(name);
+    const state = this.libvirt.virDomainGetState(domain);
+
+    if (state < 0) {
+      throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_OPERATION_FAILED);
+    }
+
+    switch (state) {
+      case 1:
+        return 'Running';
+      case 2:
+        return 'Blocked';
+      case 3:
+        return 'Paused';
+      case 4:
+        return 'Shutdown';
+      case 5:
+        return 'Shutoff';
+      case 6:
+        return 'Crashed';
+      case 7:
+        return 'PMSuspended';
+      default:
+        return 'Unknown';
+    }
+  }
+
+  // Create a virtual disk
+  public createDisk(poolName: string, xml: string): Buffer {
+    // Lookup the storage pool by its name
+    const pool = this.libvirt.virStoragePoolLookupByName(this.connection, poolName);
+
+    // Create the storage volume
+    const volume = this.libvirt.virStorageVolCreateXML(pool, xml, 0);
+
+    if (volume.isNull()) {
+      throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_OPERATION_FAILED);
+    }
+
+    return volume;
+  }
+
+  // Create a storage pool
+  public createStoragePool(xml: string): Buffer {
+    // Define the storage pool
+    const pool = this.libvirt.virStoragePoolDefineXML(this.connection, xml, 0);
+
+    if (pool.isNull()) {
+      throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_OPERATION_FAILED);
+    }
+
+    // Create (start) the storage pool
+    const result = this.libvirt.virStoragePoolCreate(pool, 0);
+
+    if (result < 0) {
+      throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_OPERATION_FAILED);
+    }
+
+    return pool;
+  }
+
+  public createNetwork(xml: string): Buffer {
+    // Define the network
+    const network = this.libvirt.virNetworkDefineXML(this.connection, xml);
+  
+    if (network.isNull()) {
+      throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_OPERATION_FAILED);
+    }
+  
+    // Create (start) the network
+    const result = this.libvirt.virNetworkCreate(network);
+  
+    if (result < 0) {
+      throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_OPERATION_FAILED);
+    }
+  
+    return network;
+  }
+  
+  public addDomainToNetwork(domainName: string, networkName: string): void {
+    const domain = this.domainLookupByName(domainName);
+    const network = this.libvirt.virNetworkLookupByName(this.connection, networkName);
+  
+    if (network.isNull()) {
+      throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_NO_NETWORK);
+    }
+  
+    const result = this.libvirt.virDomainAttachDevice(domain, `<interface type='network'><source network='${networkName}'/></interface>`);
+  
+    if (result < 0) {
+      throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_OPERATION_FAILED);
+    }
+  }
+
+  public removeDomainFromNetwork(domainName: string, networkName: string): void {
+    const domain = this.domainLookupByName(domainName);
+    const network = this.libvirt.virNetworkLookupByName(this.connection, networkName);
+  
+    if (network.isNull()) {
+      throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_NO_NETWORK);
+    }
+  
+    const result = this.libvirt.virDomainDetachDevice(domain, `<interface type='network'><source network='${networkName}'/></interface>`);
+  
+    if (result < 0) {
+      throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_OPERATION_FAILED);
+    }
+  }
+  
+  public getDomainNetworks(domainName: string): string[] {
+    const domain = this.domainLookupByName(domainName);
+    const xml = this.libvirt.virDomainGetXMLDesc(domain, 0);
+    const xmlDoc = new DOMParser().parseFromString(xml, 'text/xml');
+    const interfaces = xmlDoc.getElementsByTagName('interface');
+
+    const networks = Array.from(interfaces as NodeList)
+        .map((iface: any) => iface.getElementsByTagName('source')[0])
+        .filter((source: Element | null) => source && source.getAttribute('network'))
+        .map((source: Element) => source.getAttribute('network') as string);
+
+    return networks;
   }
 
   // Add more methods to wrap Libvirt functions
