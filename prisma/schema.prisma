@@ -25,9 +25,10 @@ model User {
 model Machine {
   id                 String  @id @default(uuid())
   config             Json
-  status             Boolean
+  status             String
   userId             String
   templateId         String
+  createdAt          DateTime @default(now())
   template           MachineTemplate @relation(fields: [templateId], references: [id])
   user               User            @relation(fields: [userId], references: [id])
 }

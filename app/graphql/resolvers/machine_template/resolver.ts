@@ -2,21 +2,17 @@ import { PrismaClient } from '@prisma/client'
 import {
     Arg,
     Authorized,
-    FieldResolver,
-    Int,
     Mutation,
     Query,
     Resolver,
-    Root,
   } from "type-graphql"
-import { UserInputError, AuthenticationError } from 'apollo-server-errors'
-import { MachineTemplate, MachineTemplateOrderBy } from './type'
+import { UserInputError } from 'apollo-server-errors'
+import { MachineTemplate, MachineTemplateOrderBy, CreateMachineInputType } from './type'
 import { PaginationInputType } from '@utils/pagination'
 
 export interface MachineTemplateResolver {
     machineTemplates(pagination: PaginationInputType, orderBy: MachineTemplateOrderBy): Promise<MachineTemplate[]>
 }
-
 
 @Resolver(MachineTemplate)
 export class MachineTemplateResolver implements MachineTemplateResolver {
@@ -79,39 +75,87 @@ export class MachineTemplateResolver implements MachineTemplateResolver {
     @Mutation(() => MachineTemplate)
     @Authorized('ADMIN')
     async createMachineTemplate(
-        @Arg('name', { nullable: false }) name: string,
-        @Arg('cores', { nullable: false }) cores: number,
-        @Arg('ram', { nullable: false }) ram: number,
-        @Arg('storage', { nullable: false }) storage: number,
+        @Arg('input', { nullable: false }) input: CreateMachineInputType,
     ): Promise<MachineTemplate> {
         const prisma = new PrismaClient()
         // Check if the machine template already exists
         const machineTemplate = await prisma.machineTemplate.findFirst({
             where: {
-                name
+                name: input.name
             }
         })
         if (machineTemplate) {
             throw new UserInputError('Machine template already exists')
         }
-        if (cores < 1 || cores > 64) {
+        if (input.cores < 1 || input.cores > 64) {
             throw new UserInputError('Cores must be between 1 and 64')
         }
-        if (ram < 1 || ram > 512) {
+        if (input.ram < 1 || input.ram > 512) {
             throw new UserInputError('RAM must be between 1 and 512')
         }
-        if (storage < 1 || storage > 1024) {
+        if (input.storage < 1 || input.storage > 1024) {
             throw new UserInputError('Storage must be between 1 and 1024')
         }
         const createdMachineTemplate = await prisma.machineTemplate.create({
             data: {
-                name,
-                cores,
-                ram,
-                storage
+                name: input.name,
+                cores: input.cores,
+                ram: input.ram,
+                storage: input.storage
             }
         })
         return createdMachineTemplate
+    }
+
+    /*
+    updateMachineTemplate
+    @Args
+        id: ID!
+        name: String
+        cores: Int
+        ram: Int
+        storage: Int
+    Return the updated machine template
+    */
+    @Mutation(() => MachineTemplate)
+    @Authorized('ADMIN')
+    async updateMachineTemplate(
+        @Arg('id', { nullable: false }) id: string,
+        @Arg('input', { nullable: false }) input: CreateMachineInputType
+    ): Promise<MachineTemplate> {
+        const prisma = new PrismaClient()
+        const machineTemplate = await prisma.machineTemplate.findUnique({
+            where: {
+                id
+            }
+        })
+        if (!machineTemplate) {
+            throw new UserInputError('Machine template not found')
+        }
+        if (input.name) {
+            machineTemplate.name = input.name
+        }
+        if (input.cores) {
+            machineTemplate.cores = input.cores
+        }
+        if (input.ram) {
+            machineTemplate.ram = input.ram
+        }
+        if (input.storage) {
+            machineTemplate.storage = input.storage
+        }
+        const updatedMachineTemplate = await prisma.machineTemplate.update({
+            where: {
+                id
+            },
+            data: {
+                name: machineTemplate.name,
+                cores: machineTemplate.cores,
+                ram: machineTemplate.ram,
+                storage: machineTemplate.storage
+            }
+        })
+        return updatedMachineTemplate
     }
 }
 

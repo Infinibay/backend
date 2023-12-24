@@ -48,3 +48,23 @@ registerEnumType(MachineTemplateOrderByEnum, {
     name: 'MachineTemplateOrderByField',
     description: 'The field to order machine templates by'
 })
+
+
+@InputType()
+export class CreateMachineInputType {
+    @Field(() => String)
+    name: string = ''
+
+    @Field(() => String)
+    description: string = ''
+    
+    @Field(() => Int)
+    cores: number = 0
+
+    @Field(() => Int)
+    ram: number = 0
+
+    @Field(() => Int)
+    storage: number = 0
+}
+

@@ -1,23 +1,21 @@
-import "reflect-metadata";
-import "dotenv/config";
-import http from "node:http";
-import path from "node:path";
 import { ApolloServer } from "@apollo/server";
-import { expressMiddleware } from "@apollo/server/express4";
 import { ApolloServerPluginLandingPageLocalDefault } from "@apollo/server/plugin/landingPage/default";
+import { expressMiddleware } from "@apollo/server/express4";
 import bodyParser from "body-parser";
 import cors from "cors";
+import "dotenv/config";
 import express from "express";
-import { Request, Response } from "express";
+import http from "node:http";
+import path from "node:path";
+import "reflect-metadata";
 import { buildSchema } from "type-graphql";
+import { PrismaClient } from "@prisma/client";
 
-import resolvers from './graphql/resolvers'
-import { authChecker } from './utils/authChecker'
+import { authChecker } from './utils/authChecker';
+import { InfinibayContext } from './utils/context';
+import resolvers from './graphql/resolvers';
 
-interface InfinibayContext {
-  req: Request
-  res: Response
-}
+const prisma = new PrismaClient(); // Create a new instance of PrismaClient
 
 // Check: https://github.com/MichalLytek/type-graphql/blob/c5a03745dc951785b73a0afa4e85cd041adfa279/examples/redis-subscriptions/index.ts
 async function bootstrap() {
@@ -45,7 +43,9 @@ async function bootstrap() {
   // Start server
   await server.start();
   app.use("/graphql", cors<cors.CorsRequest>(), bodyParser.json(), expressMiddleware(server, {
-    context: async ({ req, res }): Promise<InfinibayContext> => ({ req, res } as InfinibayContext)
+      context: async ({ req, res }): Promise<InfinibayContext> => {
+        return { req, res, prisma, user: null } as InfinibayContext; // Add prisma to the context
+      },
     }),
   );
 

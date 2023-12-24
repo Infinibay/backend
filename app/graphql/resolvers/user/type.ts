@@ -56,3 +56,47 @@ export class UserOrderByInputType {
     @Field(() => OrderByDirection, { nullable: true })
     direction: OrderByDirection | undefined
 }
+
+export enum UserRole {
+    ADMIN = 'admin',
+    USER = 'user'
+}
+
+@InputType()
+export class CreateUserInputType {
+    @Field(() => String)
+    firstName: string = ''
+
+    @Field(() => String)
+    lastName: string = ''
+
+    @Field(() => String)
+    email: string = ''
+
+    @Field(() => String)
+    password: string = ''
+
+    @Field(() => String)
+    passwordConfirmation: string = ''
+
+    @Field(() => UserRole)
+    role: UserRole = UserRole.USER
+}
+
+@InputType()
+export class UpdateUserInputType {
+    @Field(() => String, { nullable: true })
+    firstName: string | undefined = ''
+
+    @Field(() => String, { nullable: true })
+    lastName: string | undefined = ''
+
+    @Field(() => String, { nullable: true })
+    password: string | undefined = ''
+
+    @Field(() => String, { nullable: true })
+    passwordConfirmation: string | undefined = ''
+
+    @Field(() => UserRole, { nullable: true})
+    role: UserRole | undefined = UserRole.USER
+}

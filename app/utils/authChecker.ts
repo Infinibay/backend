@@ -1,17 +1,30 @@
 import { AuthChecker } from 'type-graphql'
+import { PrismaClient } from '@prisma/client'
 import jwt from 'jsonwebtoken'
 
-export const authChecker: AuthChecker<any> = (
+export const authChecker: AuthChecker<any> = async (
     { root, args, context, info },
     level: any // ADMIN, USER
   ) => {
     const token = context.req.headers.authorization;
+    const prisma = new PrismaClient()
+    let decoded: any
+    if (token){
+        decoded = jwt.verify(token, process.env.TOKENKEY ?? 'secret')
+        if (decoded && decoded.userId) {
+            const user = await prisma.user.findUnique({
+                where: {
+                    id: decoded.userId
+                }
+            })
+            context.user = user
+        }
+    }
+
     if (level == 'ADMIN') {
         if (token) {
             try {
-                const decoded: any = jwt.verify(token, process.env.TOKENKEY ?? 'secret')
-                console.log(decoded)
-                if (decoded.userId && decoded.userRole == 'ADMIN') {
+                if (decoded && decoded.userRole == 'ADMIN') {
                     return true
                 } else {
                     return false
@@ -25,8 +38,6 @@ export const authChecker: AuthChecker<any> = (
     } else if (level == 'USER') {
         if (token) {
             try {
-                const decoded: any = jwt.verify(token, process.env.TOKENKEY ?? 'secret')
-                console.log(decoded)
                 if (decoded.userId) {
                     return true
                 } else {
@@ -40,3 +51,4 @@ export const authChecker: AuthChecker<any> = (
 
     return true; // or 'false' if access is denied
   };
+

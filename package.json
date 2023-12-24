@@ -38,6 +38,7 @@
     "graphql-errors": "^2.1.0",
     "graphql-scalars": "^1.22.4",
     "graphql-test": "^0.0.1",
+    "graphql-type-json": "^0.3.2",
     "graphql-upload": "^16.0.2",
     "jest-transform-graphql": "^2.1.0",
     "jsonwebtoken": "^8.5.1",

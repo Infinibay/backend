@@ -4,30 +4,27 @@ import jwt from 'jsonwebtoken'
 import {
     Arg,
     Authorized,
-    FieldResolver,
-    InputType,
-    Int,
     Mutation,
     Query,
     Resolver,
-    Root,
-    registerEnumType,
-    Field,
   } from "type-graphql"
 import { UserInputError, AuthenticationError } from 'apollo-server-errors'
-import { User, UserToken, UserOrderByInputType } from './type'
+import { User, UserToken, UserOrderByInputType, CreateUserInputType, UpdateUserInputType } from './type'
 import { PaginationInputType } from '@utils/pagination'
 
-interface UserResolverInterface {
+export interface UserResolverInterface {
     user(id: string): Promise<User | undefined>;
+    users(
+        orderBy: UserOrderByInputType,
+        pagination: PaginationInputType
+    ): Promise<User[]>;
     login(email: string, password: string): Promise<UserToken>;
     createUser(
-        email: string,
-        password: string,
-        passwordConfirmation: string,
-        firstName: string,
-        lastName: string,
-        role: 'USER' | 'ADMIN'
+        input: CreateUserInputType
+    ): Promise<User>
+    updateUser(
+        id: string,
+        input: UpdateUserInputType
     ): Promise<User>
 }
 
@@ -129,42 +126,77 @@ export class UserResolver implements UserResolverInterface {
     @Mutation(() => User)
     @Authorized('ADMIN')
     async createUser(
-        @Arg('email') email: string,
-        @Arg('password') password: string,
-        @Arg('passwordConfirmation') passwordConfirmation: string,
-        @Arg('firstName') firstName: string,
-        @Arg('lastName') lastName: string,
-        @Arg('role') role: 'USER' | 'ADMIN'
+        @Arg('input', { nullable: false }) input: CreateUserInputType
     ): Promise<User> {
         const prisma = new PrismaClient()
     
         // Check if password and password confirmation match
-        if (password !== passwordConfirmation) {
+        if (input.password !== input.passwordConfirmation) {
             throw new UserInputError('Password and password confirmation do not match')
         }
 
         // Check if the user email already does not exist in db
-        const userExists = await prisma.user.findUnique({ where: { email }})
+        const userExists = await prisma.user.findUnique({ where: { email: input.email }})
         if (userExists) {
             throw new UserInputError('User already exists')
         }
     
         // Encrypt the password with bcrypt
-        const hashedPassword = await bcrypt.hash(password, parseInt(process.env.BCRYPT_ROUNDS || '10'))
+        const hashedPassword = await bcrypt.hash(input.password, parseInt(process.env.BCRYPT_ROUNDS || '10'))
     
         // Create the user with the hashed password
         const user = await prisma.user.create({
             data: {
-                email,
+                email: input.email,
                 password: hashedPassword,
-                firstName,
-                lastName,
-                role,
+                firstName: input.firstName,
+                lastName: input.lastName,
+                role: input.role,
                 deleted: false,
             }
         })
     
         return Promise.resolve(user)
     }
-}
 
+    /*
+    udpateUser Mutation
+    @Args
+        id: ID!
+        email: String
+        password: String
+        passwordConfirmation: String
+        firstName: String
+        lastName: String
+        role: 'USER' | 'ADMIN'
+    Require auth('ADMIN')
+    */
+    @Mutation(() => User)
+    @Authorized('ADMIN')
+    async updateUser(
+        @Arg('id') id: string,
+        @Arg('input', { nullable: false }) input: UpdateUserInputType
+    ): Promise<User> {
+        const prisma = new PrismaClient()
+        const user = await prisma.user.findUnique({ where: { id }})
+        if (!user) {
+            throw new UserInputError('User not found')
+        }
+        if (input.password && input.passwordConfirmation) {
+            if (input.password !== input.passwordConfirmation) {
+                throw new UserInputError('Password and password confirmation do not match')
+            }
+        }
+        const hashedPassword = input.password ? await bcrypt.hash(input.password, parseInt(process.env.BCRYPT_ROUNDS || '10')) : undefined
+        const updatedUser = await prisma.user.update({
+            where: { id },
+            data: {
+                password: hashedPassword || user.password,
+                firstName: input.firstName || user.firstName,
+                lastName: input.lastName || user.lastName,
+                role: input.role || user.role
+            }
+        })
+        return updatedUser
+    }
+}
