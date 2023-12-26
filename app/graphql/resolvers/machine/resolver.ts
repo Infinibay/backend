@@ -87,6 +87,21 @@ export class MachineResolver implements MachineResolverI {
     ): Promise<Machine> {
         const prisma = context.prisma
         const user = context.user
+        /*
+        Steps: everything must be inside a transaction, since is everything or nothing.
+        create the machine prisma model
+        generate the libvirt xml
+        Generate automated windows installation xml file based on the inputs. Add a command to halt the machine after install everything
+        extract the content of the corresponding windows iso into a temporal folder
+        add the automated installation xml file there
+        create a new windows iso
+        assign the new iso the cdroom
+        set the boot order to boot from the cdroom
+        set the network to the global network
+        set the status of the machine to building
+        boot the vm
+        return the machine
+        */
 
         return {} as Machine
     }

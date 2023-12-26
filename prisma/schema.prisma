@@ -44,6 +44,14 @@ model MachineTemplate {
   machines      Machine[]
 }
 
+model Application {
+  id            String    @id @default(uuid())
+  name          String
+  description   String?
+  os            String[]
+  installCommand String[]
+  createdAt     DateTime  @default(now())
+}
 
 model Notification {
   id      String          @id @default(uuid())
