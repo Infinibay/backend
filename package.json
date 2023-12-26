@@ -29,6 +29,7 @@
     "batteries-included": "^0.0.4",
     "bcrypt": "^5.1.0",
     "body-parser": "^1.20.1",
+    "crypto": "^1.0.1",
     "decode": "^0.3.0",
     "dotenv": "^16.0.3",
     "ejs": "^3.1.9",

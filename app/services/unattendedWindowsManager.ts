@@ -24,14 +24,13 @@ export interface ComponentConfig {
  * Example usage:
  * 
  * const generator = new UnattendedWindowsManager(
- *     '10.0.19041.0',
  *     'admin',
  *     'password',
  *     'productKey',
  *     applications
  * );
  * 
- * const xml = generator.generateXML();
+ * const xml = generator.generateNewImage();
  */
 
 export class UnattendedWindowsManager extends UnattendedManagerBase {
@@ -45,7 +44,6 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
   };
 
   constructor(
-    private version: string,
     private username: string,
     private password: string,
     private productKey: string | null,
