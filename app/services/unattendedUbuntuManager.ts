@@ -5,18 +5,22 @@ import * as path from 'path';
 import { promises as fsPromises } from 'fs';
 import * as yaml from 'js-yaml';
 
-export class AutoinstallUbuntuManager {
+import { UnattendedManagerBase } from './unattendedManagerBase';
+
+export class UnattendedUbuntuManager extends UnattendedManagerBase {
   private username: string;
   private password: string;
   private applications: Application[];
 
   constructor(username: string, password: string, applications: Application[]) {
+    super()
     this.username = username;
     this.password = password;
     this.applications = applications;
+    this.configFileName = 'autoinstall.yaml';
   }
 
-  async generateAutoinstallConfig(): Promise<string> {
+  generateConfig(): string {
     const config = {
       version: 1,
       identity: {
@@ -48,9 +52,7 @@ export class AutoinstallUbuntuManager {
       'late-commands': this.applications.map(app => this.getUbuntuInstallCommand(app)),
     };
 
-    const configPath = path.join(os.tmpdir(), 'autoinstall_' + Date.now() + '.yaml');
-    await fsPromises.writeFile(configPath, yaml.dump(config));
-    return configPath;
+    return yaml.dump(config);
   }
 
   private getUbuntuInstallCommand(app: Application): string | undefined {
@@ -60,6 +62,4 @@ export class AutoinstallUbuntuManager {
       }
     }
   }
-
-  // Other methods similar to UnattendedWindowsManager...
 }
