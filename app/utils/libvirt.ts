@@ -1,11 +1,51 @@
 import { Library, types } from 'ffi-napi';
 import { refType } from 'ref-napi';
+import ArrayType from 'ref-array-napi';
 import { DOMParser } from 'xmldom';
 
 // Define necessary C types and structs
 const int = types.int;
 const voidPtr = refType('void');
 const charPtr = refType(types.char);
+const voidPtrArray = ArrayType(voidPtr);
+
+const Struct = require('ref-struct-napi');
+
+// https://libvirt.org/html/libvirt-libvirt-domain.html#virDomainInfoPtr
+const virDomainInfo = Struct();
+virDomainInfo.defineProperty('state', types.int8);
+virDomainInfo.defineProperty('maxMem', types.ulong);
+virDomainInfo.defineProperty('memory', types.ulong);
+virDomainInfo.defineProperty('nrVirtCpu', types.ushort);
+virDomainInfo.defineProperty('cpuTime', types.ulonglong);
+
+const virDomainInfoPtr = refType(virDomainInfo);
+
+export interface VirDomainInfo {
+  state: number;
+  maxMem: number;
+  memory: number;
+  nrVirtCpu: number;
+  cpuTime: number;
+}
+
+export enum virDomainModificationImpact {
+  VIR_DOMAIN_AFFECT_CURRENT = 0, /* Affect current domain state. */
+  VIR_DOMAIN_AFFECT_LIVE = 1 << 0, /* Affect running domain state. */
+  VIR_DOMAIN_AFFECT_CONFIG = 1 << 1 /* Affect persistent domain state. */
+}
+
+export enum VirDomainState {
+  VIR_DOMAIN_NOSTATE = 0,     /* no state */
+  VIR_DOMAIN_RUNNING = 1,     /* the domain is running */
+  VIR_DOMAIN_BLOCKED = 2,     /* the domain is blocked on resource */
+  VIR_DOMAIN_PAUSED = 3,      /* the domain is paused by user */
+  VIR_DOMAIN_SHUTDOWN = 4,    /* the domain is being shut down */
+  VIR_DOMAIN_SHUTOFF = 5,     /* the domain is shut off */
+  VIR_DOMAIN_CRASHED = 6,     /* the domain is crashed */
+  VIR_DOMAIN_PMSUSPENDED = 7, /* the domain is suspended by guest power management */
+  VIR_DOMAIN_LAST = 8,        /* the last state */
+}
 
 // Define the enumeration for the libvirt error codes
 enum LibvirtErrorCodes {
@@ -204,7 +244,7 @@ class LibvirtError extends Error {
  * // Disconnect from the hypervisor
  * libvirt.disconnect();
  */
-class Libvirt {
+export class Libvirt {
   private libvirt: any;
   private connection: Buffer | null = null;
 
@@ -219,6 +259,7 @@ class Libvirt {
       'virDomainDestroy': ['int', ['pointer']],
       'virDomainDefineXML': ['pointer', ['pointer', 'string']],
       'virDomainUndefine': ['int', ['pointer']], // Add this line
+      'virDomainUpdateDeviceFlags': ['int', ['pointer', 'string', 'int']], // Add this line
       'virStoragePoolLookupByName': ['pointer', ['pointer', 'string']],
       'virStorageVolCreateXML': ['pointer', ['pointer', 'string', 'int']],
       'virStoragePoolDefineXML': ['pointer', ['pointer', 'string', 'int']],
@@ -227,6 +268,9 @@ class Libvirt {
       'virNetworkCreate': ['int', ['pointer']],
       'virNetworkLookupByName': ['pointer', ['pointer', 'string']],
       'virDomainAttachDevice': ['int', ['pointer', 'string']],
+      'virDomainGetXMLDesc': ['string', ['pointer', 'int']], // Add this line
+      'virConnectListAllDomains': [int, ['pointer', voidPtrArray, 'int']],
+      'virDomainGetInfo': ['int', [voidPtr, virDomainInfoPtr]],
       // Add more functions as needed
     });
   }
@@ -305,8 +349,9 @@ class Libvirt {
    * @returns {number} - Returns 0 on success, -1 in case of error.
    * @throws {LibvirtError} - Throws an error if the operation fails.
    */
-  public domainCreate(domain: Buffer): number {
-    const result = this.libvirt.virDomainCreate(domain);
+  public domainCreate(domain: string): number {
+    const domainBuffer = this.libvirt.virDomainLookupByName(this.connection, domain);
+    const result = this.libvirt.virDomainCreate(domainBuffer);
 
     if (result < 0) {
       throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_OPERATION_FAILED);
@@ -322,8 +367,9 @@ class Libvirt {
    * @returns {number} - Returns 0 on success, -1 in case of error.
    * @throws {LibvirtError} - Throws an error if the operation fails.
    */
-  public domainDestroy(domain: Buffer): number {
-    const result = this.libvirt.virDomainDestroy(domain);
+  public domainDestroy(domain: string): number {
+    const domainBuffer = this.libvirt.virDomainLookupByName(this.connection, domain);
+    const result = this.libvirt.virDomainDestroy(domainBuffer);
 
     if (result < 0) {
       throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_OPERATION_FAILED);
@@ -580,12 +626,82 @@ class Libvirt {
     const xmlDoc = new DOMParser().parseFromString(xml, 'text/xml');
     const interfaces = xmlDoc.getElementsByTagName('interface');
 
-    const networks = Array.from(interfaces as NodeList)
+    const networks = Array.from(interfaces)
         .map((iface: any) => iface.getElementsByTagName('source')[0])
         .filter((source: Element | null) => source && source.getAttribute('network'))
         .map((source: Element) => source.getAttribute('network') as string);
 
     return networks;
+  }
+
+  async domainSetBootloader(domainName: string, isoPath: string): Promise<void> {
+    // Fetch the domain's XML definition
+    const xml = this.libvirt.virDomainGetXMLDesc(domainName, 0);
+  
+    // Parse the XML
+    let xmlDoc = new DOMParser().parseFromString(xml, 'text/xml');
+  
+    // Find the <os> element
+    let osElement = xmlDoc.getElementsByTagName('os')[0];
+  
+    // Create a new <boot> element
+    const bootElement = xmlDoc.createElement('boot');
+    bootElement.setAttribute('dev', 'cdrom');
+    bootElement.setAttribute('order', '1');  // Boot order 1 is the first device to try. It does not start on 0
+  
+    // Append the <boot> element to the <os> element
+    osElement.appendChild(bootElement);
+  
+    // Serialize the modified XML
+    const newXml = new XMLSerializer().serializeToString(xmlDoc);
+  
+    // Redefine the domain with the modified XML
+    this.libvirt.virDomainDefineXML(newXml);
+  
+    // Set the ISO path for the domain's CDROM device
+    // This method overwrite ONLY the given devices, in this case, the cdroom
+    this.libvirt.virDomainUpdateDeviceFlags(domainName, `<disk type='file' device='cdrom'><driver name='qemu' type='raw'/><source file='${isoPath}'/><target dev='hdc' bus='ide'/><readonly/></disk>`, virDomainModificationImpact.VIR_DOMAIN_AFFECT_CONFIG);
+
+    // Reload the xml
+    xmlDoc = new DOMParser().parseFromString(xml, 'text/xml');
+  }
+
+  listAllDomains(): string[] {
+    const domainsPtr = new voidPtrArray();
+    const count = this.libvirt.virConnectListAllDomains(this.connection, domainsPtr, 0);
+  
+    if (count < 0) {
+      throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_OPERATION_FAILED);
+    }
+  
+    const domains = domainsPtr.toArray().slice(0, count) as Buffer[];
+    const domainStrings = domains.map(buffer => buffer.toString());
+    return domainStrings;
+  }
+
+  lookupDomainByName(name: string): string {
+    return this.libvirt.virDomainLookupByName(this.connection, name).toString();
+  }
+
+  domainGetInfo(name: string): VirDomainInfo {
+    const domain = this.domainLookupByName(name);
+    const info = new virDomainInfo();
+    const result = this.libvirt.virDomainGetInfo(domain, info.ref());
+  
+    if (result < 0) {
+      throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_OPERATION_FAILED);
+    }
+  
+    // Convert the returned struct to a JavaScript object
+    const infoObject: VirDomainInfo = {
+      state: info.state,
+      maxMem: info.maxMem,
+      memory: info.memory,
+      nrVirtCpu: info.nrVirtCpu,
+      cpuTime: info.cpuTime,
+    };
+  
+    return infoObject;
   }
 
   // Add more methods to wrap Libvirt functions

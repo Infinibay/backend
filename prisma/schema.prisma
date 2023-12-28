@@ -24,13 +24,17 @@ model User {
 
 model Machine {
   id                 String  @id @default(uuid())
-  config             Json
+  name               String
+  internalName       String
+  config             String?
   status             String
-  userId             String
+  userId             String?
   templateId         String
+  os                 String
   createdAt          DateTime @default(now())
   template           MachineTemplate @relation(fields: [templateId], references: [id])
-  user               User            @relation(fields: [userId], references: [id])
+  user               User?           @relation(fields: [userId], references: [id])
+  applications       MachineApplication[]
 }
 
 model MachineTemplate {
@@ -45,12 +49,25 @@ model MachineTemplate {
 }
 
 model Application {
-  id            String    @id @default(uuid())
-  name          String
-  description   String?
-  os            String[]
-  installCommand String[]
-  createdAt     DateTime  @default(now())
+  id              String    @id @default(uuid())
+  name            String
+  description     String?
+  version         String?
+  url             String?
+  icon            String?
+  os              String[]
+  installCommand  String[]
+  createdAt       DateTime  @default(now())
+  machines        MachineApplication[]
+}
+
+model MachineApplication {
+  machineId     String
+  applicationId String
+  machine       Machine     @relation(fields: [machineId], references: [id])
+  application   Application @relation(fields: [applicationId], references: [id])
+
+  @@id([machineId, applicationId])
 }
 
 model Notification {

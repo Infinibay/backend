@@ -79,6 +79,15 @@ registerEnumType(MachineStatus, {
 })
 
 @InputType()
+export class MachineApplicationInputType {
+    @Field(() => String)
+    machineId: string = ''
+
+    @Field(() => String)
+    applicationId: string = ''
+}
+
+@InputType()
 export class CreateMachineInputType {
     @Field(() => String)
     templateId: string = ''
@@ -88,5 +97,17 @@ export class CreateMachineInputType {
 
     @Field()
     os: string = ''
+
+    @Field()
+    username: string = ''
+
+    @Field()
+    password: string = ''
+
+    @Field()
+    productKey: string = ''
+
+    @Field(() => [MachineApplicationInputType])
+    applications: MachineApplicationInputType[] = []
 }
 

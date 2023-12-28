@@ -1,16 +1,26 @@
-import Libvirt from '@utils/libvirt';
+import fs from 'fs';
+import { PrismaClient } from '@prisma/client';
+import { Libvirt, VirDomainState } from '@utils/libvirt';
 import { Machine, MachineTemplate } from '@prisma/client';
 
 import { XMLGenerator } from './xmlGenerator';
+import { UnattendedWindowsManager } from '@services/UnattendedWindowsManager'
+import { UnattendedUbuntuManager } from '@services/unattendedUbuntuManager';
+import { UnattendedRedHatManager } from '@services/unattendedRedHatManager';
 
-class VirtManager {
+export class VirtManager {
   private libvirt: Libvirt;
   private uri: string;
+  private prisma: PrismaClient | null = null;
 
   constructor(uri: string='qemu:///system') {
     this.libvirt = new Libvirt();
     this.uri = uri;
     this.connect();
+  }
+
+  setPrisma(prisma: PrismaClient): void {
+    this.prisma = prisma;
   }
 
   connect(uri?: string): void {
@@ -39,20 +49,127 @@ class VirtManager {
 
       return domains;
     } catch (error) {
-      console.error(`Error listing machines: ${error.message}`);
+      console.error(`Error listing machines: ${error}`);
       return [];
     }
   }
 
-  async createMachine(machine: Machine, template: MachineTemplate, name: string, osName: string): Promise<void> {
-    // Generate the XML string
-    const xml = this.generateXML(machine, template, name, osName);
+  /**
+   * This method is used to create a new virtual machine.
+   * It takes in a machine object, username, password, and a product key.
+   * It first checks if the Prisma client is set, then fetches the machine template.
+   * It then fetches the applications related to the machine and extracts the application data.
+   * It determines the OS and uses the corresponding unattended manager.
+   * It generates a new ISO with the auto-install script and the XML string for the VM.
+   * Finally, it starts a Prisma transaction.
+   *
+   * @param machine - The machine object containing the details of the machine to be created.
+   * @param username - The username for the new machine.
+   * @param password - The password for the new machine.
+   * @param productKey - The product key for the new machine.
+   * @returns A promise that resolves when the machine is created.
+   */
+  async createMachine(machine: Machine, username: string, password: string, productKey: string|null): Promise<void> {
+    // Check if Prisma client is set
+    if (!this.prisma) {
+      throw new Error('Prisma client not set');
+    }
 
-    // Create the virtual machine
-    await this.libvirt.domainDefineXML(xml);
+    // Fetch the machine template
+    const template = await this.prisma.machineTemplate.findUnique({ where: { id: machine.templateId } });
+    if (!template) {
+      throw new Error('Template not found for machine ' + machine.name);
+    }
+
+    let xml: string | null = null
+    let newIsoPath: string | null = null
+    try {
+      // Fetch the applications related to the machine
+      const applications = await this.prisma.machineApplication.findMany({
+        where: {
+          machineId: machine.id,
+        },
+        include: {
+          application: true,
+        },
+      });
+
+      // Extract the application data from the query result
+      const applicationData = applications.map((ma) => ma.application);
+
+      // Determine the OS and use the corresponding unattended manager
+      let unattendedManager;
+      switch (machine.os) {
+        case 'windows':
+          unattendedManager = new UnattendedWindowsManager(username, password, productKey, applicationData);
+          break;
+        case 'ubuntu':
+          unattendedManager = new UnattendedUbuntuManager(username, password, applicationData);
+          break;
+        case 'redhat':
+          unattendedManager = new UnattendedRedHatManager(username, password, applicationData);
+          break;
+        // ...add more cases as needed...
+        default:
+          throw new Error(`Unsupported OS: ${machine.os}`);
+      }
+
+      // Generate the new ISO with the auto-install script
+      const newIsoPathPromise = unattendedManager.generateNewImage();
+
+      // Generate the XML string for the VM
+      const xmlPromise = this.generateXML(machine, template);
+
+      // Start a Prisma transaction
+      return this.prisma.$transaction(async (tx) => {
+        // Set the status of the machine to 'building'
+        tx.machine.update({
+          where: { id: machine.id },
+          data: { status: 'building' },
+        });
+
+        // Define the VM using the generated XML
+        xml = await xmlPromise
+        await this.libvirt.domainDefineXML(xml);
+
+        // Assign the new ISO to the VM's bootloader
+        // This depends on your libvirt wrapper and might look different
+        newIsoPath = await newIsoPathPromise;
+        await this.libvirt.domainSetBootloader(machine.name, newIsoPath);
+      });
+    } catch (error) {
+      console.error(`Error creating machine: ${error}`);
+      console.log('Rolling back')
+
+      // Delete the ISO
+      if (newIsoPath) {
+        console.log('Deleting ISO')
+        fs.unlinkSync(newIsoPath);
+      }
+
+      // Delete the XML
+      if (xml) {
+        console.log('Deleting XML')
+        fs.unlinkSync(xml);
+      }
+      throw new Error('Error creating machine');
+    }
+    
   }
 
-  async generateXML(machine: Machine, template: MachineTemplate, name: string, osName: string): Promise<string> {
+  /**
+   * This method generates an XML string that represents a virtual machine configuration.
+   * It uses the XMLGenerator class to set the various properties of the virtual machine.
+   * 
+   * @param machine - The machine object containing the details of the machine.
+   * @param template - The template object containing the configuration of the machine.
+   * @param name - The name of the machine.
+   * @param osName - The name of the operating system of the machine.
+   * @returns A promise that resolves to a string representing the XML configuration of the machine.
+   */
+  async generateXML(machine: Machine, template: MachineTemplate): Promise<string> {
+    const name = machine.internalName;
+    const osName = machine.os;
     const xml = new XMLGenerator(name, machine.id);
     xml.setMemory(template.ram);
     xml.setVCPUs(template.cores);
@@ -60,6 +177,55 @@ class VirtManager {
     xml.setStorage(template.storage);
     // xml.setNetwork(template.network);
     return xml.generate();
+  }
+
+  async powerOn(domainName: string): Promise<void> {
+    const domain = this.libvirt.lookupDomainByName(domainName);
+    if (!domain) {
+      throw new Error(`Domain ${domainName} not found`);
+    }
+    await this.libvirt.domainCreate(domain);
+  }
+
+  async powerOff(domainName: string): Promise<void> {
+    const domain = this.libvirt.lookupDomainByName(domainName);
+    if (!domain) {
+      throw new Error(`Domain ${domainName} not found`);
+    }
+    await this.libvirt.powerOff(domain);
+  }
+
+  async suspend(domainName: string): Promise<void> {
+    const domain = this.libvirt.lookupDomainByName(domainName);
+    if (!domain) {
+      throw new Error(`Domain ${domainName} not found`);
+    }
+    await this.libvirt.suspend(domain);
+  }
+
+  async getDomainStatus(domainName: string): Promise<string> {
+    const domain = this.libvirt.lookupDomainByName(domainName);
+    if (!domain) {
+      throw new Error(`Domain ${domainName} not found`);
+    }
+
+    const info = await this.libvirt.domainGetInfo(domain);
+    const state = info.state;
+
+    switch (state) {
+      case VirDomainState.VIR_DOMAIN_RUNNING:
+        return 'running';
+      case VirDomainState.VIR_DOMAIN_PAUSED:
+        return 'paused';
+      case VirDomainState.VIR_DOMAIN_SHUTDOWN:
+        return 'shutdown';
+      case VirDomainState.VIR_DOMAIN_CRASHED:
+        return 'crashed';
+      case VirDomainState.VIR_DOMAIN_PMSUSPENDED:
+        return 'suspended';
+      default:
+        return 'unknown';
+    }
   }
 }
 

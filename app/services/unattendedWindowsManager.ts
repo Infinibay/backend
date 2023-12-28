@@ -254,7 +254,7 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
               {
                 $: { 'wcm:action': 'add' },
                 Order: [appIndex.toString()],
-                CommandLine: app.installCommands[osIndex],
+                CommandLine: app.installCommand[osIndex],
                 Description: 'Install ' + app.name,
               },
             ],

@@ -7,10 +7,12 @@ import {
     Resolver,
     Ctx,
   } from "type-graphql"
+import { v4 as uuidv4 } from 'uuid';
 import { UserInputError } from 'apollo-server-errors'
 import { Machine, MachineOrderBy, CreateMachineInputType } from './type'
 import { PaginationInputType } from '@utils/pagination'
 import { InfinibayContext } from '@main/utils/context'
+import { VirtManager } from '@utils/virtManager'
 
 export interface MachineResolverI {
     machine: (id: string, ctx: InfinibayContext) => Promise<Machine | null>
@@ -87,21 +89,49 @@ export class MachineResolver implements MachineResolverI {
     ): Promise<Machine> {
         const prisma = context.prisma
         const user = context.user
-        /*
-        Steps: everything must be inside a transaction, since is everything or nothing.
-        create the machine prisma model
-        generate the libvirt xml
-        Generate automated windows installation xml file based on the inputs. Add a command to halt the machine after install everything
-        extract the content of the corresponding windows iso into a temporal folder
-        add the automated installation xml file there
-        create a new windows iso
-        assign the new iso the cdroom
-        set the boot order to boot from the cdroom
-        set the network to the global network
-        set the status of the machine to building
-        boot the vm
-        return the machine
-        */
+
+        // Validate everything
+        
+        prisma.$transaction(async (tx: any) => {
+
+            const internalName = uuidv4()
+        
+            // Create the machine
+            const machine = await tx.machine.create({
+                data: {
+                    name: input.name,
+                    userId: user?.id,
+                    status: 'building',
+                    os: input.os,
+                    templateId: input.templateId,
+                    internalName: internalName
+                }
+            })
+            if (!machine) {
+                throw new Error("Machine not created")
+            }
+
+            // Create Machine-Application relationship
+            for (const application of input.applications) {
+                let app = await tx.machineApplication.create({
+                    data: {
+                        machineId: machine.id,
+                        applicationId: application.applicationId
+                    }
+                })
+                if (!app) {
+                    throw new Error("Machine-Application relationship not created")
+                }
+            }
+
+            // User VirtManager and create the machine
+            const virtManager = new VirtManager()
+            await virtManager.createMachine(machine, input.username, input.password, input.productKey)
+
+            // VirtManager to power on the machine
+            await virtManager.powerOn(machine.internalName)
+
+        });
 
         return {} as Machine
     }
