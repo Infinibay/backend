@@ -13,6 +13,7 @@ import { Machine, MachineOrderBy, CreateMachineInputType } from './type'
 import { PaginationInputType } from '@utils/pagination'
 import { InfinibayContext } from '@main/utils/context'
 import { VirtManager } from '@utils/virtManager'
+import { Machine as PrismaMachine } from '@prisma/client'
 
 export interface MachineResolverI {
     machine: (id: string, ctx: InfinibayContext) => Promise<Machine | null>
@@ -82,29 +83,30 @@ export class MachineResolver implements MachineResolverI {
     }
 
     @Mutation(() => Machine)
-    @Authorized('USER')
+    @Authorized('ADMIN')
     async createMachine(
         @Arg('input') input: CreateMachineInputType,
         @Ctx() context: InfinibayContext
     ): Promise<Machine> {
         const prisma = context.prisma
         const user = context.user
-
+        let machine: PrismaMachine = {} as PrismaMachine
         // Validate everything
-        
+        // TODO: Validate the input
+
         prisma.$transaction(async (tx: any) => {
 
             const internalName = uuidv4()
         
             // Create the machine
-            const machine = await tx.machine.create({
+            machine = await tx.machine.create({
                 data: {
                     name: input.name,
                     userId: user?.id,
                     status: 'building',
                     os: input.os,
                     templateId: input.templateId,
-                    internalName: internalName
+                    internalName: internalName,
                 }
             })
             if (!machine) {
@@ -126,14 +128,20 @@ export class MachineResolver implements MachineResolverI {
 
             // User VirtManager and create the machine
             const virtManager = new VirtManager()
-            await virtManager.createMachine(machine, input.username, input.password, input.productKey)
+            await virtManager.createMachine(machine as any, input.username, input.password, input.productKey)
 
             // VirtManager to power on the machine
             await virtManager.powerOn(machine.internalName)
 
         });
 
-        return {} as Machine
+        if (!machine) {
+            throw new Error("Machine not created")
+        }
+
+        return {
+            ...machine
+        } as unknown as Machine // WARNING!! typescript type-check bypassed
     }
 }
 
