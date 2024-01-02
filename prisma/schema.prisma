@@ -26,7 +26,6 @@ model Machine {
   id                 String  @id @default(uuid())
   name               String
   internalName       String
-  config             String?
   status             String
   userId             String?
   templateId         String
@@ -35,6 +34,18 @@ model Machine {
   template           MachineTemplate @relation(fields: [templateId], references: [id])
   user               User?           @relation(fields: [userId], references: [id])
   applications       MachineApplication[]
+  configuration      MachineConfiguration?
+}
+
+model MachineConfiguration {
+  id          String  @id @default(uuid())
+  vncPort     Int?
+  vncPassword String?
+  vncListen   String?
+  vncAutoport Boolean?
+  vncType     String?
+  machineId   String  @unique
+  machine     Machine @relation(fields: [machineId], references: [id])
 }
 
 model MachineTemplate {

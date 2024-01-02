@@ -9,7 +9,7 @@ import {
   } from "type-graphql"
 import { v4 as uuidv4 } from 'uuid';
 import { UserInputError } from 'apollo-server-errors'
-import { Machine, MachineOrderBy, CreateMachineInputType } from './type'
+import { Machine, MachineConfigurationType, MachineOrderBy, CreateMachineInputType } from './type'
 import { PaginationInputType } from '@utils/pagination'
 import { InfinibayContext } from '@main/utils/context'
 import { VirtManager } from '@utils/virtManager'
@@ -126,6 +126,21 @@ export class MachineResolver implements MachineResolverI {
                 }
             }
 
+            // Create MachineConfiguration
+            const configuration = await tx.machineConfiguration.create({
+                data: {
+                    machineId: machine.id,
+                    vncPort: 0,
+                    vncListen: '0.0.0.0',
+                    vncPassword: null,
+                    vncAutoport: false,
+                }
+            })
+
+            if (!configuration) {
+                throw new Error("MachineConfiguration not created")
+            }
+
             // User VirtManager and create the machine
             const virtManager = new VirtManager()
             await virtManager.createMachine(machine as any, input.username, input.password, input.productKey)
@@ -142,6 +157,41 @@ export class MachineResolver implements MachineResolverI {
         return {
             ...machine
         } as unknown as Machine // WARNING!! typescript type-check bypassed
+    }
+
+    @Query(() => MachineConfigurationType, { nullable: true })
+    @Authorized('USER')
+    async getVncConnection(
+        @Arg('id') id: string,
+        @Ctx() context: InfinibayContext
+    ): Promise<MachineConfigurationType | null> {
+        const prisma = context.prisma
+        const role = context.user?.role
+
+        if (role == 'ADMIN') {
+            const machine = await prisma.machine.findUnique({
+                where: { id },
+                include: { configuration: true },
+            });
+        } else {
+            const machine = await prisma.machine.findFirst({
+                where: {
+                    id,
+                    userId: context.user?.id
+                },
+                include: { configuration: true },
+            });
+
+            if (machine && machine.userId == context.user?.id) {
+                return {
+                    port: machine.configuration?.vncPort || 0,
+                    address: '127.0.0.1', // TODO: Get the server ip/hostname
+                } || null;
+            } else {
+                return null;
+            }
+        }
+        return null
     }
 }
 

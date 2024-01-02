@@ -1,5 +1,6 @@
 import fs from 'fs';
-import { PrismaClient } from '@prisma/client';
+import portfinder from 'portfinder';
+import { MachineConfiguration, PrismaClient } from '@prisma/client';
 import { Libvirt, VirDomainState } from '@utils/libvirt';
 import { Machine, MachineTemplate } from '@prisma/client';
 
@@ -77,8 +78,12 @@ export class VirtManager {
 
     // Fetch the machine template
     const template = await this.prisma.machineTemplate.findUnique({ where: { id: machine.templateId } });
+    let configuration: MachineConfiguration | null = await this.prisma.machineConfiguration.findUnique({ where: { machineId: machine.id } });
     if (!template) {
       throw new Error('Template not found for machine ' + machine.name);
+    }
+    if (!configuration) {
+      throw new Error('Configuration not found for machine ' + machine.name);
     }
 
     let xml: string | null = null
@@ -118,7 +123,7 @@ export class VirtManager {
       const newIsoPathPromise = unattendedManager.generateNewImage();
 
       // Generate the XML string for the VM
-      const xmlPromise = this.generateXML(machine, template);
+      const xmlPromise = this.generateXML(machine, template, configuration);
 
       // Start a Prisma transaction
       return this.prisma.$transaction(async (tx) => {
@@ -167,7 +172,10 @@ export class VirtManager {
    * @param osName - The name of the operating system of the machine.
    * @returns A promise that resolves to a string representing the XML configuration of the machine.
    */
-  async generateXML(machine: Machine, template: MachineTemplate): Promise<string> {
+  async generateXML(machine: Machine, template: MachineTemplate, configuration: MachineConfiguration): Promise<string> {
+    if (!this.prisma) {
+      throw new Error('Prisma client not set');
+    }
     const name = machine.internalName;
     const osName = machine.os;
     const xml = new XMLGenerator(name, machine.id);
@@ -175,18 +183,75 @@ export class VirtManager {
     xml.setVCPUs(template.cores);
     xml.setOS(osName);
     xml.setStorage(template.storage);
+    // TODO: In the future, when we support connecting multiple servers, the getNewPort should return the port and server ip/name/id
+    const port = await this.getNewPort();
+    xml.addVNC(port, true, '0.0.0.0');
+    // Update configuration to have the new port
+    configuration.vncPort = port;
+    configuration.vncListen = '0.0.0.0';
+    configuration.vncPassword = null;
+    configuration.vncAutoport = true;
+    // Now save the configuration
+    await this.prisma.machineConfiguration.update({
+      where: { id: configuration.id },
+      data: configuration,
+    });
+
     // xml.setNetwork(template.network);
     return xml.generate();
   }
 
+
+  /**
+   * This method gets a new port for the virtual machine.
+   * It uses the portfinder library to find an available port starting from 5000.
+   * It also checks the database to ensure the port is not already in use.
+   * 
+   * @returns A promise that resolves to a number representing the new port.
+   */
+  async getNewPort(): Promise<number> {
+    if (!this.prisma) {
+      throw new Error('Prisma client not set');
+    }
+  
+    portfinder.basePort = 5000; // set the minimum port to start searching from
+  
+    // Fetch all the ports from the database and store them in a Set
+    const machineConfigs = await this.prisma.machineConfiguration.findMany();
+    const usedPorts = new Set(machineConfigs.map(config => config.vncPort));
+  
+    let port: number;
+  
+    do {
+      port = await portfinder.getPortPromise();
+    } while (usedPorts.has(port));
+  
+    return port;
+  }
+
+  /**
+   * This method powers on a virtual machine.
+   * 
+   * @param domainName - The name of the domain.
+   * @returns A promise that resolves to void.
+   */
   async powerOn(domainName: string): Promise<void> {
     const domain = this.libvirt.lookupDomainByName(domainName);
     if (!domain) {
       throw new Error(`Domain ${domainName} not found`);
     }
-    await this.libvirt.domainCreate(domain);
+    await this.libvirt.resume(domain);
   }
 
+  // Alias method
+  public resume = this.powerOn;
+
+  /**
+   * This method powers off a virtual machine.
+   * 
+   * @param domainName - The name of the domain.
+   * @returns A promise that resolves to void.
+   */
   async powerOff(domainName: string): Promise<void> {
     const domain = this.libvirt.lookupDomainByName(domainName);
     if (!domain) {

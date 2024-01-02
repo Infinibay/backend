@@ -42,6 +42,15 @@ export class Machine {
     user?: User
 }
 
+@ObjectType()
+export class MachineConfigurationType {
+    @Field(() => Int)
+    port: number = 0
+
+    @Field(() => String)
+    address: string = ''
+}
+
 
 @InputType()
 export class MachineOrderBy {

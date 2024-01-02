@@ -419,19 +419,29 @@ export class Libvirt {
   }
 
   /**
-   * This method powers on a domain.
+   * This method powers on a domain or resumes it if it's suspended.
    * 
-   * @param {string} name - The name of the domain to be powered on.
+   * @param {string} name - The name of the domain to be powered on or resumed.
    * @throws {LibvirtError} - Throws an error if the operation fails.
    */
   public powerOn(name: string): void {
     const domain = this.domainLookupByName(name);
-    const result = this.libvirt.virDomainCreate(domain);
-  
+    const state = this.libvirt.virDomainGetState(domain);
+
+    let result;
+    if (state === VirDomainState.VIR_DOMAIN_PAUSED) {
+      result = this.libvirt.virDomainResume(domain);
+    } else {
+      result = this.libvirt.virDomainCreate(domain);
+    }
+
     if (result < 0) {
       throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_OPERATION_FAILED);
     }
   }
+
+  // alias methos
+  public resume = this.powerOn;
 
   /**
    * This method powers off a domain.

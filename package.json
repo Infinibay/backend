@@ -50,6 +50,7 @@
     "multer": "^1.4.5-lts.1",
     "nodemailer": "^6.8.0",
     "nodemailer-smtp-transport": "^2.7.4",
+    "portfinder": "^1.0.32",
     "ref-array-napi": "^1.2.2",
     "ref-napi": "^3.0.3",
     "reflect-metadata": "^0.2.1",
