@@ -13,14 +13,6 @@ input CreateMachineInputType {
   username: String! = ""
 }
 
-input CreateMachineTemplateInputType {
-  cores: Int! = 0
-  description: String! = ""
-  name: String! = ""
-  ram: Int! = 0
-  storage: Int! = 0
-}
-
 input CreateUserInputType {
   email: String! = ""
   firstName: String! = ""
@@ -45,9 +37,9 @@ type Machine {
   createAt: DateTimeISO!
   id: ID!
   status: String!
-  template: MachineTemplate
+  template: MachineTemplateType
   templateId: String!
-  user: User
+  user: UserType
   userId: String!
 }
 
@@ -76,14 +68,12 @@ enum MachineOrderByField {
   USER_ID
 }
 
-type MachineTemplate {
-  cores: Int!
-  createdAt: Int!
-  description: String
-  id: ID!
-  name: String
-  ram: Int!
-  storage: Int!
+input MachineTemplateInputType {
+  cores: Int! = 0
+  description: String! = ""
+  name: String! = ""
+  ram: Int! = 0
+  storage: Int! = 0
 }
 
 input MachineTemplateOrderBy {
@@ -101,12 +91,22 @@ enum MachineTemplateOrderByField {
   STORAGE
 }
 
+type MachineTemplateType {
+  cores: Int!
+  createdAt: Int!
+  description: String
+  id: ID!
+  name: String
+  ram: Int!
+  storage: Int!
+}
+
 type Mutation {
   createMachine(input: CreateMachineInputType!): Machine!
-  createMachineTemplate(input: CreateMachineTemplateInputType!): MachineTemplate!
-  createUser(input: CreateUserInputType!): User!
-  updateMachineTemplate(id: String!, input: CreateMachineTemplateInputType!): MachineTemplate!
-  updateUser(id: String!, input: UpdateUserInputType!): User!
+  createMachineTemplate(input: MachineTemplateInputType!): MachineTemplateType!
+  createUser(input: CreateUserInputType!): UserType!
+  updateMachineTemplate(id: String!, input: MachineTemplateInputType!): MachineTemplateType!
+  updateUser(id: String!, input: UpdateUserInputType!): UserType!
 }
 
 enum OrderByDirection {
@@ -123,11 +123,11 @@ type Query {
   getVncConnection(id: String!): MachineConfigurationType
   login(email: String!, password: String!): UserToken!
   machine(id: String!): Machine
-  machineTemplate(id: String!): MachineTemplate
-  machineTemplates(orderBy: MachineTemplateOrderBy, pagination: PaginationInputType): [MachineTemplate!]!
+  machineTemplate(id: String!): MachineTemplateType
+  machineTemplates(orderBy: MachineTemplateOrderBy, pagination: PaginationInputType): [MachineTemplateType!]!
   machines(orderBy: MachineOrderBy, pagination: PaginationInputType): [Machine!]!
-  user(id: String!): User!
-  users(orderBy: UserOrderByInputType, pagination: PaginationInputType): [User!]!
+  user(id: String!): UserType!
+  users(orderBy: UserOrderByInputType, pagination: PaginationInputType): [UserType!]!
 }
 
 input UpdateUserInputType {
@@ -136,15 +136,6 @@ input UpdateUserInputType {
   password: String = ""
   passwordConfirmation: String = ""
   role: UserRole = USER
-}
-
-"""User model"""
-type User {
-  createdAt: DateTimeISO!
-  firstName: String!
-  id: ID!
-  lastName: String!
-  role: String!
 }
 
 """The field to order users by"""
@@ -172,4 +163,13 @@ enum UserRole {
 """Token used to log in"""
 type UserToken {
   token: String!
+}
+
+"""User model"""
+type UserType {
+  createdAt: DateTimeISO!
+  firstName: String!
+  id: ID!
+  lastName: String!
+  role: String!
 }

@@ -9,26 +9,26 @@ import {
     Resolver,
   } from "type-graphql"
 import { UserInputError, AuthenticationError } from 'apollo-server-errors'
-import { User, UserToken, UserOrderByInputType, CreateUserInputType, UpdateUserInputType } from './type'
+import { UserType, UserToken, UserOrderByInputType, CreateUserInputType, UpdateUserInputType } from './type'
 import { PaginationInputType } from '@utils/pagination'
 
 export interface UserResolverInterface {
-    user(id: string): Promise<User | undefined>;
+    user(id: string): Promise<UserType | undefined>;
     users(
         orderBy: UserOrderByInputType,
         pagination: PaginationInputType
-    ): Promise<User[]>;
+    ): Promise<UserType[]>;
     login(email: string, password: string): Promise<UserToken>;
     createUser(
         input: CreateUserInputType
-    ): Promise<User>
+    ): Promise<UserType>
     updateUser(
         id: string,
         input: UpdateUserInputType
-    ): Promise<User>
+    ): Promise<UserType>
 }
 
-@Resolver(_of => User)
+@Resolver(_of => UserType)
 export class UserResolver implements UserResolverInterface {
     /*
     user Query
@@ -36,11 +36,11 @@ export class UserResolver implements UserResolverInterface {
       id: ID
     Require auth('ADMIN')
     */
-    @Query(_returns => User)
+    @Query(_returns => UserType)
     @Authorized('ADMIN')
     async user(
         @Arg('id') id: string
-    ): Promise<User | undefined> {
+    ): Promise<UserType | undefined> {
         const prisma = new PrismaClient()
         const user = await prisma.user.findUnique({ where: { id }})
         // thrwo exception if user not found
@@ -57,12 +57,12 @@ export class UserResolver implements UserResolverInterface {
         pagination: PaginationInputType
     Require auth('ADMIN')
     */
-    @Query(() => [User])
+    @Query(() => [UserType])
     @Authorized('ADMIN')
     async users(
         @Arg('orderBy', { nullable: true }) orderBy: UserOrderByInputType,
         @Arg('pagination', { nullable: true }) pagination: PaginationInputType
-    ): Promise<User[]> {
+    ): Promise<UserType[]> {
         const prisma = new PrismaClient()
         // Check if pagination is valid
         if (pagination.take < 0 || pagination.skip < 0) {
@@ -123,11 +123,11 @@ export class UserResolver implements UserResolverInterface {
         role: 'USER' | 'ADMIN'
     Require auth('ADMIN)
     */
-    @Mutation(() => User)
+    @Mutation(() => UserType)
     @Authorized('ADMIN')
     async createUser(
         @Arg('input', { nullable: false }) input: CreateUserInputType
-    ): Promise<User> {
+    ): Promise<UserType> {
         const prisma = new PrismaClient()
     
         // Check if password and password confirmation match
@@ -171,12 +171,12 @@ export class UserResolver implements UserResolverInterface {
         role: 'USER' | 'ADMIN'
     Require auth('ADMIN')
     */
-    @Mutation(() => User)
+    @Mutation(() => UserType)
     @Authorized('ADMIN')
     async updateUser(
         @Arg('id') id: string,
         @Arg('input', { nullable: false }) input: UpdateUserInputType
-    ): Promise<User> {
+    ): Promise<UserType> {
         const prisma = new PrismaClient()
         const user = await prisma.user.findUnique({ where: { id }})
         if (!user) {

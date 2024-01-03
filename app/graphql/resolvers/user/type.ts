@@ -9,7 +9,7 @@ import {
 import { PaginationInputType, OrderByDirection } from '@utils/pagination'
 
 @ObjectType({ description: 'User model' })
-export class User {
+export class UserType {
     @Field(type => ID, { nullable: false})  
     id: string = ''
     // Add the rest of the fields, like firstName, lastName, role, etc

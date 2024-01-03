@@ -7,17 +7,17 @@ import {
     Resolver,
   } from "type-graphql"
 import { UserInputError } from 'apollo-server-errors'
-import { MachineTemplate, MachineTemplateOrderBy, CreateMachineTemplateInputType } from './type'
+import { MachineTemplateType, MachineTemplateOrderBy, MachineTemplateInputType } from './type'
 import { PaginationInputType } from '@utils/pagination'
 
 export interface MachineTemplateResolver {
-    machineTemplates(pagination: PaginationInputType, orderBy: MachineTemplateOrderBy): Promise<MachineTemplate[]>
-    createMachineTemplate(input: CreateMachineTemplateInputType): Promise<MachineTemplate>
-    updateMachineTemplate(id: string, input: CreateMachineTemplateInputType): Promise<MachineTemplate>
-    deleteMachineTemplate(id: string): Promise<MachineTemplate>
+    machineTemplates(pagination: PaginationInputType, orderBy: MachineTemplateOrderBy): Promise<MachineTemplateType[]>
+    createMachineTemplate(input: MachineTemplateInputType): Promise<MachineTemplateType>
+    updateMachineTemplate(id: string, input: MachineTemplateInputType): Promise<MachineTemplateType>
+    deleteMachineTemplate(id: string): Promise<MachineTemplateType>
 }
 
-@Resolver(MachineTemplate)
+@Resolver(MachineTemplateType)
 export class MachineTemplateResolver implements MachineTemplateResolver {
     /*
     machineTemplate
@@ -25,11 +25,11 @@ export class MachineTemplateResolver implements MachineTemplateResolver {
         id: ID!
     ): Promise<MachineTemplate | null>
     */
-    @Query(() => MachineTemplate, { nullable: true })
+    @Query(() => MachineTemplateType, { nullable: true })
     @Authorized('ADMIN')
     async machineTemplate(
         @Arg('id', { nullable: false }) id: string
-    ): Promise<MachineTemplate | null> {
+    ): Promise<MachineTemplateType | null> {
         const prisma = new PrismaClient()
         const machineTemplate = await prisma.machineTemplate.findUnique({
             where: {
@@ -46,15 +46,15 @@ export class MachineTemplateResolver implements MachineTemplateResolver {
         OrderBy args
     Return all the machine templates
     */
-    @Query(() => [MachineTemplate])
+    @Query(() => [MachineTemplateType])
     @Authorized('ADMIN')
     async machineTemplates(
         @Arg('pagination', { nullable: true }) pagination: PaginationInputType,
         @Arg('orderBy', { nullable: true }) orderBy: MachineTemplateOrderBy,
-    ): Promise<MachineTemplate[]> {
+    ): Promise<MachineTemplateType[]> {
         const prisma = new PrismaClient()
         const order = orderBy ? {
-            [orderBy.fieldName as keyof MachineTemplate]: orderBy.direction
+            [orderBy.fieldName as keyof MachineTemplateType]: orderBy.direction
         } : undefined
         const skip = pagination ? pagination.skip : 0
         const take = pagination ? pagination.take : 20
@@ -75,11 +75,11 @@ export class MachineTemplateResolver implements MachineTemplateResolver {
         storage: Int!
     Return the created machine template 
     */
-    @Mutation(() => MachineTemplate)
+    @Mutation(() => MachineTemplateType)
     @Authorized('ADMIN')
     async createMachineTemplate(
-        @Arg('input', { nullable: false }) input: CreateMachineTemplateInputType,
-    ): Promise<MachineTemplate> {
+        @Arg('input', { nullable: false }) input: MachineTemplateInputType,
+    ): Promise<MachineTemplateType> {
         const prisma = new PrismaClient()
         // Check if the machine template already exists
         const machineTemplate = await prisma.machineTemplate.findFirst({
@@ -115,7 +115,7 @@ export class MachineTemplateResolver implements MachineTemplateResolver {
             storage: createdMachineTemplate.storage,
             description: createdMachineTemplate.description,
             createdAt: createdMachineTemplate.createdAt,
-        } as MachineTemplate
+        } as MachineTemplateType
     }
 
     /*
@@ -128,12 +128,12 @@ export class MachineTemplateResolver implements MachineTemplateResolver {
         storage: Int
     Return the updated machine template
     */
-    @Mutation(() => MachineTemplate)
+    @Mutation(() => MachineTemplateType)
     @Authorized('ADMIN')
     async updateMachineTemplate(
         @Arg('id', { nullable: false }) id: string,
-        @Arg('input', { nullable: false }) input: CreateMachineTemplateInputType
-    ): Promise<MachineTemplate> {
+        @Arg('input', { nullable: false }) input: MachineTemplateInputType
+    ): Promise<MachineTemplateType> {
         const prisma = new PrismaClient()
         const machineTemplate = await prisma.machineTemplate.findUnique({
             where: {

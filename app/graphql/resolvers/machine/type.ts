@@ -1,8 +1,8 @@
 import { ObjectType, Field, Int, ID, InputType, registerEnumType } from 'type-graphql'
 import { GraphQLJSONObject } from 'graphql-type-json'
 import { OrderByDirection } from '@utils/pagination'
-import { MachineTemplate } from '@resolvers/machine_template/type'
-import { User } from '@resolvers/user/type'
+import { MachineTemplateType } from '@resolvers/machine_template/type'
+import { UserType } from '@resolvers/user/type'
 // Create Machine type (check prisma Machine model)
 /*
 model Machine {
@@ -35,11 +35,11 @@ export class Machine {
     @Field(() => Date)
     createAt: Date = new Date()
 
-    @Field(() => MachineTemplate, { nullable: true })
-    template?: MachineTemplate
+    @Field(() => MachineTemplateType, { nullable: true })
+    template?: MachineTemplateType
 
-    @Field(() => User, { nullable: true })
-    user?: User
+    @Field(() => UserType, { nullable: true })
+    user?: UserType
 }
 
 @ObjectType()

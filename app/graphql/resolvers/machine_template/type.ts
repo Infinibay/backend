@@ -2,7 +2,7 @@ import { ObjectType, Field, Int, ID, InputType, registerEnumType } from 'type-gr
 import { OrderByDirection } from '@utils/pagination'
 
 @ObjectType()
-export class MachineTemplate {
+export class MachineTemplateType {
   @Field(() => ID)
   id: string = ''
 
@@ -51,7 +51,7 @@ registerEnumType(MachineTemplateOrderByEnum, {
 
 
 @InputType()
-export class CreateMachineTemplateInputType {
+export class MachineTemplateInputType {
     @Field(() => String)
     name: string = ''
 
