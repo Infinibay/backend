@@ -10,15 +10,15 @@ import { UserInputError } from 'apollo-server-errors'
 import { MachineTemplateType, MachineTemplateOrderBy, MachineTemplateInputType } from './type'
 import { PaginationInputType } from '@utils/pagination'
 
-export interface MachineTemplateResolver {
+export interface MachineTemplateResolverInterface {
     machineTemplates(pagination: PaginationInputType, orderBy: MachineTemplateOrderBy): Promise<MachineTemplateType[]>
     createMachineTemplate(input: MachineTemplateInputType): Promise<MachineTemplateType>
     updateMachineTemplate(id: string, input: MachineTemplateInputType): Promise<MachineTemplateType>
-    deleteMachineTemplate(id: string): Promise<MachineTemplateType>
+    // deleteMachineTemplate(id: string): Promise<MachineTemplateType>
 }
 
 @Resolver(MachineTemplateType)
-export class MachineTemplateResolver implements MachineTemplateResolver {
+export class MachineTemplateResolver implements MachineTemplateResolverInterface {
     /*
     machineTemplate
         @args
