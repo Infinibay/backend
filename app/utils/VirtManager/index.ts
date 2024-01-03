@@ -5,7 +5,7 @@ import { Libvirt, VirDomainState } from '@utils/libvirt';
 import { Machine, MachineTemplate } from '@prisma/client';
 
 import { XMLGenerator } from './xmlGenerator';
-import { UnattendedWindowsManager } from '@services/UnattendedWindowsManager'
+import { UnattendedWindowsManager } from '@services/unattendedWindowsManager'
 import { UnattendedUbuntuManager } from '@services/unattendedUbuntuManager';
 import { UnattendedRedHatManager } from '@services/unattendedRedHatManager';
 
