@@ -10,7 +10,7 @@
     "build": "tsc",
     "tsc": "tsc",
     "seed": "ts-node prisma/seed.ts",
-    "install": "ts-node scripts/install.ts"
+    "setup": "ts-node scripts/install.ts"
   },
   "keywords": [],
   "author": "",
