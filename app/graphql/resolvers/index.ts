@@ -7,7 +7,6 @@ const resolvers: NonEmptyArray<Function> = [
   UserResolver,
   MachineTemplateResolver,
   MachineResolver,
-  MachineTemplateResolver,
 ];
 
 export default resolvers as NonEmptyArray<Function>;
