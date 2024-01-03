@@ -65,7 +65,7 @@ export class MachineResolver implements MachineResolverI {
     ): Promise<Machine[]> {
         const prisma = context.prisma
         const role = context.user?.role
-        const order = { [(orderBy.fieldName as string)]: orderBy.direction }
+        const order = { [(orderBy?.fieldName ?? 'createdAt') as string]: orderBy?.direction ?? 'desc' }
         if (role == 'ADMIN') {
             return await prisma.machine.findMany({
                 ...pagination,
