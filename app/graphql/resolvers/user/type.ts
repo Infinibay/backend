@@ -62,6 +62,11 @@ export enum UserRole {
     USER = 'user'
 }
 
+registerEnumType(UserRole, {
+    name: 'UserRole', // this one is mandatory
+    description: 'The basic roles of users', // this one is optional
+});
+
 @InputType()
 export class CreateUserInputType {
     @Field(() => String)

@@ -3,18 +3,63 @@
 # !!!   DO NOT MODIFY THIS FILE BY YOURSELF   !!!
 # -----------------------------------------------
 
+input CreateMachineInputType {
+  cores: Int! = 0
+  description: String! = ""
+  name: String! = ""
+  ram: Int! = 0
+  storage: Int! = 0
+}
+
+input CreateUserInputType {
+  email: String! = ""
+  firstName: String! = ""
+  lastName: String! = ""
+  password: String! = ""
+  passwordConfirmation: String! = ""
+  role: UserRole! = USER
+}
+
 """
 A date-time string at UTC, such as 2007-12-03T10:15:30Z, compliant with the `date-time` format outlined in section 5.6 of the RFC 3339 profile of the ISO 8601 standard for representation of dates and times using the Gregorian calendar.This scalar is serialized to a string in ISO 8601 format and parsed from a string in ISO 8601 format.
 """
 scalar DateTimeISO
 
-type Mutation {
-  createUser(email: String!, firstName: String!, lastName: String!, password: String!, passwordConfirmation: String!, role: String!): User!
+type MachineTemplate {
+  cores: Int!
+  createdAt: Int!
+  description: String
+  id: ID!
+  name: String
+  ram: Int!
+  storage: Int!
 }
 
-input OrderByInputType {
-  direction: String = "asc"
-  fieldName: String = "id"
+input MachineTemplateOrderBy {
+  direction: OrderByDirection
+  fieldName: MachineTemplateOrderByField
+}
+
+"""The field to order machine templates by"""
+enum MachineTemplateOrderByField {
+  CORES
+  CREATED_AT
+  ID
+  NAME
+  RAM
+  STORAGE
+}
+
+type Mutation {
+  createMachineTemplate(input: CreateMachineInputType!): MachineTemplate!
+  createUser(input: CreateUserInputType!): User!
+  updateMachineTemplate(id: String!, input: CreateMachineInputType!): MachineTemplate!
+  updateUser(id: String!, input: UpdateUserInputType!): User!
+}
+
+enum OrderByDirection {
+  ASC
+  DESC
 }
 
 input PaginationInputType {
@@ -24,8 +69,18 @@ input PaginationInputType {
 
 type Query {
   login(email: String!, password: String!): UserToken!
+  machineTemplate(id: String!): MachineTemplate
+  machineTemplates(orderBy: MachineTemplateOrderBy, pagination: PaginationInputType): [MachineTemplate!]!
   user(id: String!): User!
-  users(orderBy: OrderByInputType, pagination: PaginationInputType): [User!]!
+  users(orderBy: UserOrderByInputType, pagination: PaginationInputType): [User!]!
+}
+
+input UpdateUserInputType {
+  firstName: String = ""
+  lastName: String = ""
+  password: String = ""
+  passwordConfirmation: String = ""
+  role: UserRole = USER
 }
 
 """User model"""
@@ -35,6 +90,28 @@ type User {
   id: ID!
   lastName: String!
   role: String!
+}
+
+"""The field to order users by"""
+enum UserOrderByField {
+  CREATED_AT
+  EMAIL
+  FIRST_NAME
+  ID
+  LAST_NAME
+  ROLE
+  UPDATED_AT
+}
+
+input UserOrderByInputType {
+  direction: OrderByDirection
+  fieldName: UserOrderByField
+}
+
+"""The basic roles of users"""
+enum UserRole {
+  ADMIN
+  USER
 }
 
 """Token used to log in"""

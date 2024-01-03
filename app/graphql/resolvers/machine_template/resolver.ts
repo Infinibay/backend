@@ -22,7 +22,7 @@ export class MachineTemplateResolver implements MachineTemplateResolver {
         id: ID!
     ): Promise<MachineTemplate | null>
     */
-    @Query()
+    @Query(() => MachineTemplate, { nullable: true })
     @Authorized('ADMIN')
     async machineTemplate(
         @Arg('id', { nullable: false }) id: string

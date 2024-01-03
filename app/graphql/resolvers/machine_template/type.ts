@@ -6,10 +6,10 @@ export class MachineTemplate {
   @Field(() => ID)
   id: string = ''
 
-  @Field({ nullable: true })
+  @Field(() => String, { nullable: true })
   name: string | null = null
 
-  @Field({ nullable: true })
+  @Field(() => String, { nullable: true })
   description: string | null = null
 
   @Field(() => Int)
