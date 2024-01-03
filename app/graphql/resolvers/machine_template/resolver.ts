@@ -104,7 +104,15 @@ export class MachineTemplateResolver implements MachineTemplateResolver {
                 storage: input.storage
             }
         })
-        return createdMachineTemplate
+        return  {
+            id: createdMachineTemplate.id,
+            name: createdMachineTemplate.name,
+            cores: createdMachineTemplate.cores,
+            ram: createdMachineTemplate.ram,
+            storage: createdMachineTemplate.storage,
+            description: createdMachineTemplate.description,
+            createdAt: createdMachineTemplate.createdAt,
+        }
     }
 
     /*
