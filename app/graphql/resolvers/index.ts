@@ -5,7 +5,9 @@ import { MachineResolver } from './machine/resolver'
 
 const resolvers: NonEmptyArray<Function> = [
   UserResolver,
-  MachineTemplateResolver
+  MachineTemplateResolver,
+  MachineResolver,
+  MachineTemplateResolver,
 ];
 
 export default resolvers as NonEmptyArray<Function>;
