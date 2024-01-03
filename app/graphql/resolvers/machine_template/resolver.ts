@@ -76,7 +76,7 @@ export class MachineTemplateResolver implements MachineTemplateResolverInterface
     Return the created machine template 
     */
     @Mutation(() => MachineTemplateType)
-    // @Authorized('ADMIN')
+    @Authorized('ADMIN')
     async createMachineTemplate(
         @Arg('input', { nullable: false }) input: MachineTemplateInputType,
     ): Promise<MachineTemplateType> {
