@@ -125,7 +125,7 @@ type Query {
   machine(id: String!): Machine
   machineTemplate(id: String!): MachineTemplate
   machineTemplates(orderBy: MachineTemplateOrderBy, pagination: PaginationInputType): [MachineTemplate!]!
-  machines(orderBy: MachineOrderBy!, pagination: PaginationInputType!): [Machine!]!
+  machines(orderBy: MachineOrderBy, pagination: PaginationInputType): [Machine!]!
   user(id: String!): User!
   users(orderBy: UserOrderByInputType, pagination: PaginationInputType): [User!]!
 }

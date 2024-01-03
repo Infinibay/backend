@@ -12,6 +12,9 @@ import { PaginationInputType } from '@utils/pagination'
 
 export interface MachineTemplateResolver {
     machineTemplates(pagination: PaginationInputType, orderBy: MachineTemplateOrderBy): Promise<MachineTemplate[]>
+    createMachineTemplate(input: CreateMachineTemplateInputType): Promise<MachineTemplate>
+    updateMachineTemplate(id: string, input: CreateMachineTemplateInputType): Promise<MachineTemplate>
+    deleteMachineTemplate(id: string): Promise<MachineTemplate>
 }
 
 @Resolver(MachineTemplate)
