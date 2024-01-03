@@ -12,7 +12,7 @@ import { UserInputError } from 'apollo-server-errors'
 import { Machine, MachineConfigurationType, MachineOrderBy, CreateMachineInputType } from './type'
 import { PaginationInputType } from '@utils/pagination'
 import { InfinibayContext } from '@main/utils/context'
-import { VirtManager } from '@utils/virtManager'
+import { VirtManager } from '@utils/VirtManager'
 import { Machine as PrismaMachine } from '@prisma/client'
 
 export interface MachineResolverI {
