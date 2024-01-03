@@ -50,8 +50,8 @@ async function bootstrap() {
   );
 
   // Now that the HTTP server is fully set up, we can listen to it
-  httpServer.listen(4000, () => {
-    console.log(`GraphQL server ready at http://localhost:4000/graphql`);
+  httpServer.listen(4000, '0.0.0.0', () => {
+    console.log(`GraphQL server ready at http://0.0.0.0:4000/graphql`);
   });
 }
 
