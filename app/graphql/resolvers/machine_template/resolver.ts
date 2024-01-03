@@ -112,7 +112,7 @@ export class MachineTemplateResolver implements MachineTemplateResolver {
             storage: createdMachineTemplate.storage,
             description: createdMachineTemplate.description,
             createdAt: createdMachineTemplate.createdAt,
-        }
+        } as MachineTemplate
     }
 
     /*
