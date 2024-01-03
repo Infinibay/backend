@@ -59,8 +59,8 @@ export class MachineResolver implements MachineResolverI {
     @Query(() => [Machine])
     @Authorized('USER')
     async machines(
-        @Arg('pagination') pagination: PaginationInputType,
-        @Arg('orderBy') orderBy: MachineOrderBy,
+        @Arg('pagination', { nullable: true }) pagination: PaginationInputType,
+        @Arg('orderBy', { nullable: true }) orderBy: MachineOrderBy,
         @Ctx() context: InfinibayContext
     ): Promise<Machine[]> {
         const prisma = context.prisma
