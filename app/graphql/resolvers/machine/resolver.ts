@@ -15,14 +15,14 @@ import { InfinibayContext } from '@main/utils/context'
 import { VirtManager } from '@utils/VirtManager'
 import { Machine as PrismaMachine } from '@prisma/client'
 
-export interface MachineResolverI {
+export interface MachineResolverInterface {
     machine: (id: string, ctx: InfinibayContext) => Promise<Machine | null>
     machines: (pagination: PaginationInputType, orderBy: MachineOrderBy, ctx: InfinibayContext) => Promise<Machine[]>
     createMachine: (input: CreateMachineInputType, ctx: InfinibayContext) => Promise<Machine>
 }
 
 @Resolver(Machine)
-export class MachineResolver implements MachineResolverI {
+export class MachineResolver implements MachineResolverInterface {
     @Query(() => Machine, { nullable: true })
     @Authorized('USER')
     async machine(

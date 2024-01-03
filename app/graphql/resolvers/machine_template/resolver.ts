@@ -17,7 +17,7 @@ export interface MachineTemplateResolverInterface {
     // deleteMachineTemplate(id: string): Promise<MachineTemplateType>
 }
 
-@Resolver(MachineTemplateType)
+@Resolver(_of => MachineTemplateType)
 export class MachineTemplateResolver implements MachineTemplateResolverInterface {
     /*
     machineTemplate
