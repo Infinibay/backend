@@ -51,7 +51,7 @@ registerEnumType(MachineTemplateOrderByEnum, {
 
 
 @InputType()
-export class CreateMachineInputType {
+export class CreateMachineTemplateInputType {
     @Field(() => String)
     name: string = ''
 

@@ -7,7 +7,7 @@ import {
     Resolver,
   } from "type-graphql"
 import { UserInputError } from 'apollo-server-errors'
-import { MachineTemplate, MachineTemplateOrderBy, CreateMachineInputType } from './type'
+import { MachineTemplate, MachineTemplateOrderBy, CreateMachineTemplateInputType } from './type'
 import { PaginationInputType } from '@utils/pagination'
 
 export interface MachineTemplateResolver {
@@ -75,7 +75,7 @@ export class MachineTemplateResolver implements MachineTemplateResolver {
     @Mutation(() => MachineTemplate)
     @Authorized('ADMIN')
     async createMachineTemplate(
-        @Arg('input', { nullable: false }) input: CreateMachineInputType,
+        @Arg('input', { nullable: false }) input: CreateMachineTemplateInputType,
     ): Promise<MachineTemplate> {
         const prisma = new PrismaClient()
         // Check if the machine template already exists
@@ -121,7 +121,7 @@ export class MachineTemplateResolver implements MachineTemplateResolver {
     @Authorized('ADMIN')
     async updateMachineTemplate(
         @Arg('id', { nullable: false }) id: string,
-        @Arg('input', { nullable: false }) input: CreateMachineInputType
+        @Arg('input', { nullable: false }) input: CreateMachineTemplateInputType
     ): Promise<MachineTemplate> {
         const prisma = new PrismaClient()
         const machineTemplate = await prisma.machineTemplate.findUnique({

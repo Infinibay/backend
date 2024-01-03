@@ -4,6 +4,16 @@
 # -----------------------------------------------
 
 input CreateMachineInputType {
+  applications: [MachineApplicationInputType!]! = []
+  name: String! = ""
+  os: String! = ""
+  password: String! = ""
+  productKey: String! = ""
+  templateId: String! = ""
+  username: String! = ""
+}
+
+input CreateMachineTemplateInputType {
   cores: Int! = 0
   description: String! = ""
   name: String! = ""
@@ -24,6 +34,47 @@ input CreateUserInputType {
 A date-time string at UTC, such as 2007-12-03T10:15:30Z, compliant with the `date-time` format outlined in section 5.6 of the RFC 3339 profile of the ISO 8601 standard for representation of dates and times using the Gregorian calendar.This scalar is serialized to a string in ISO 8601 format and parsed from a string in ISO 8601 format.
 """
 scalar DateTimeISO
+
+"""
+The `JSONObject` scalar type represents JSON objects as specified by [ECMA-404](http://www.ecma-international.org/publications/files/ECMA-ST/ECMA-404.pdf).
+"""
+scalar JSONObject
+
+type Machine {
+  config: JSONObject!
+  createAt: DateTimeISO!
+  id: ID!
+  status: String!
+  template: MachineTemplate
+  templateId: String!
+  user: User
+  userId: String!
+}
+
+input MachineApplicationInputType {
+  applicationId: String! = ""
+  machineId: String! = ""
+}
+
+type MachineConfigurationType {
+  address: String!
+  port: Int!
+}
+
+input MachineOrderBy {
+  direction: OrderByDirection
+  fieldName: MachineOrderByField
+}
+
+"""The field to order machines by"""
+enum MachineOrderByField {
+  CONFIG
+  CREATED_AT
+  ID
+  STATUS
+  TEMPLATE_ID
+  USER_ID
+}
 
 type MachineTemplate {
   cores: Int!
@@ -51,9 +102,10 @@ enum MachineTemplateOrderByField {
 }
 
 type Mutation {
-  createMachineTemplate(input: CreateMachineInputType!): MachineTemplate!
+  createMachine(input: CreateMachineInputType!): Machine!
+  createMachineTemplate(input: CreateMachineTemplateInputType!): MachineTemplate!
   createUser(input: CreateUserInputType!): User!
-  updateMachineTemplate(id: String!, input: CreateMachineInputType!): MachineTemplate!
+  updateMachineTemplate(id: String!, input: CreateMachineTemplateInputType!): MachineTemplate!
   updateUser(id: String!, input: UpdateUserInputType!): User!
 }
 
@@ -68,9 +120,12 @@ input PaginationInputType {
 }
 
 type Query {
+  getVncConnection(id: String!): MachineConfigurationType
   login(email: String!, password: String!): UserToken!
+  machine(id: String!): Machine
   machineTemplate(id: String!): MachineTemplate
   machineTemplates(orderBy: MachineTemplateOrderBy, pagination: PaginationInputType): [MachineTemplate!]!
+  machines(orderBy: MachineOrderBy!, pagination: PaginationInputType!): [Machine!]!
   user(id: String!): User!
   users(orderBy: UserOrderByInputType, pagination: PaginationInputType): [User!]!
 }
