@@ -77,6 +77,13 @@ export enum MachineStatus {
     PAUSED = 'paused'
 }
 
+export enum OsEnum {
+    WINDOWS10 = 'windows10',
+    WINDOWS11 = 'windows11',
+    FEDORA = 'fedora',
+    UBUNTU = 'ubuntu'
+}
+
 registerEnumType(MachineOrderByEnum, {
     name: 'MachineOrderByField',
     description: 'The field to order machines by'
@@ -85,6 +92,11 @@ registerEnumType(MachineOrderByEnum, {
 registerEnumType(MachineStatus, {
     name: 'MachineStatus',
     description: 'The status of the machine'
+})
+
+registerEnumType(OsEnum, {
+    name: 'MachineOs',
+    description: 'The os of the machine'
 })
 
 @InputType()
@@ -104,8 +116,8 @@ export class CreateMachineInputType {
     @Field()
     name: string = ''
 
-    @Field()
-    os: string = ''
+    @Field(() => OsEnum)
+    os: OsEnum = OsEnum.WINDOWS10
 
     @Field()
     username: string = ''
