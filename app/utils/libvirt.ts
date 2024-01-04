@@ -2,6 +2,7 @@ import * as ffi from 'ffi-napi';
 import { refType } from 'ref-napi';
 import ArrayType from 'ref-array-napi';
 import { DOMParser } from 'xmldom';
+import StructType from 'ref-struct-napi';
 
 // Define necessary C types and structs
 const int = ffi.types.int;
@@ -12,14 +13,15 @@ const voidPtrArray = ArrayType(voidPtr);
 const Struct = require('ref-struct-napi');
 
 // https://libvirt.org/html/libvirt-libvirt-domain.html#virDomainInfoPtr
-const virDomainInfo = Struct();
-virDomainInfo.defineProperty('state', ffi.types.int8);
-virDomainInfo.defineProperty('maxMem', ffi.types.ulong);
-virDomainInfo.defineProperty('memory', ffi.types.ulong);
-virDomainInfo.defineProperty('nrVirtCpu', ffi.types.ushort);
-virDomainInfo.defineProperty('cpuTime', ffi.types.ulonglong);
+const VirDomainInfo = StructType({
+  state: 'uchar',        // unsigned char
+  maxMem: 'ulong',       // unsigned long
+  memory: 'ulong',       // unsigned long
+  nrVirtCpu: 'ushort',   // unsigned short
+  cpuTime: 'ulonglong'   // unsigned long long
+});
 
-const virDomainInfoPtr = refType(virDomainInfo);
+const virDomainInfoPtr = refType(VirDomainInfo);
 
 export interface VirDomainInfo {
   state: number;
@@ -269,8 +271,8 @@ export class Libvirt {
       'virNetworkLookupByName': ['pointer', ['pointer', 'string']],
       'virDomainAttachDevice': ['int', ['pointer', 'string']],
       'virDomainGetXMLDesc': ['string', ['pointer', 'int']], // Add this line
-      'virConnectListAllDomains': [int, ['pointer', voidPtrArray, 'int']],
-      'virDomainGetInfo': ['int', [voidPtr, virDomainInfoPtr]],
+      'virConnectListAllDomains': ['int', ['pointer', 'pointer', 'int']],
+      'virDomainGetInfo': ['int', ['pointer', virDomainInfoPtr]],
       // Add more functions as needed
     });
   }
@@ -695,7 +697,7 @@ export class Libvirt {
 
   domainGetInfo(name: string): VirDomainInfo {
     const domain = this.domainLookupByName(name);
-    const info = new virDomainInfo();
+    const info = new VirDomainInfo();
     const result = this.libvirt.virDomainGetInfo(domain, info.ref());
   
     if (result < 0) {
