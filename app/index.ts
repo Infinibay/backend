@@ -37,7 +37,12 @@ async function bootstrap() {
     cache: "bounded",
     plugins: [
       ApolloServerPluginLandingPageLocalDefault({ embed: true }),
-    ]
+    ],
+    formatError: (error) => {
+      console.error(error); // Log the error
+      // Return a generic error message to the client
+      return new Error('Internal server error');
+    },
   });
 
   // Start server
