@@ -1,11 +1,13 @@
 import * as ffi from 'ffi-napi';
 import ref from 'ref-napi';
 // import { refType } from 'ref-napi';
-// import ArrayType from 'ref-array-napi';
+import ArrayType from 'ref-array-napi';
 import { DOMParser } from 'xmldom';
 // import StructType from 'ref-struct-napi';
 
 const voidPtr = ref.refType(ref.types.void);
+const charPtr = ref.refType('char')
+const charPtrArray = ArrayType(charPtr)
 
 // https://libvirt.org/html/libvirt-libvirt-domain.html#virDomainInfoPtr
 // const VirDomainInfo = StructType({
@@ -259,6 +261,7 @@ export class Libvirt {
       'virDomainAttachDevice': ['int', ['pointer', 'string']],
       'virDomainGetXMLDesc': ['string', ['pointer', 'int']], // Add this line
       'virConnectListAllDomains': ['int', ['pointer', 'pointer', 'int']],
+      'virConnectListDefinedDomains': ['int', ['pointer', 'pointer', 'int']],
       'virDomainGetInfo': ['int', ['pointer', 'pointer']],
       'virDomainGetName': ['string', ['pointer']],
       // Add more functions as needed
@@ -667,40 +670,32 @@ export class Libvirt {
   }
 
   public listAllDomains(): string[] {
-    const connection = this.libvirt.virConnectOpen('qemu:///system');
-    if (connection.isNull()) {
-        throw new Error('Failed to open connection');
+    // Get the number of domains
+    const numDomains = this.libvirt.virConnectNumOfDomains(this.connection);
+
+    // Allocate memory for the names
+    const namesPtr = new charPtrArray(numDomains);
+
+    // Get the domain names
+    const result = this.libvirt.virConnectListDefinedDomains(this.connection, namesPtr, numDomains);
+
+    if (result < 0) {
+        throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_OPERATION_FAILED);
     }
 
-    const voidPtr = ref.refType(ref.types.void);
-    const domainsPtrPtr = ref.alloc(voidPtr);
-    const flags = 0; // 0 for listing both active and inactive domains
-    const numDomains = this.libvirt.virConnectListAllDomains(connection, domainsPtrPtr, flags);
-
-    if (numDomains < 0) {
-        this.libvirt.virConnectClose(connection);
-        throw new Error('Failed to list all domains');
-    }
-
-    const domainNames: string[] = [];
-    const buffer = domainsPtrPtr.deref();
-    const sizeOfPointer = ref.types.void.size;
-
+    // Convert the names to a JavaScript array
+    const names = [];
     for (let i = 0; i < numDomains; i++) {
-        const domainPtr = ref.get(domainsPtrPtr, i * sizeOfPointer, voidPtr);
-
-        // Use virDomainGetName to get the domain name
-        const domainName = this.libvirt.virDomainGetName(domainPtr);
-        if (domainName) {
-            domainNames.push(domainName);
+        const name: any = namesPtr[i];
+        if (name.isNull()) {
+            break;
         }
+        const string = ref.readCString(name);
+        names.push(string);
     }
 
-    // Clean up and close the connection
-    this.libvirt.virConnectClose(connection);
-
-    return domainNames;
-}
+    return names;
+  }
 
   lookupDomainByName(name: string): string {
     return this.libvirt.virDomainLookupByName(this.connection, name).toString();

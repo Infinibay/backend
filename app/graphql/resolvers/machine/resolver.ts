@@ -143,7 +143,7 @@ export class MachineResolver implements MachineResolverInterface {
 
             // User VirtManager and create the machine
             const virtManager = new VirtManager()
-            virtManager.setPrisma(prisma)
+            virtManager.setPrisma(tx)
             await virtManager.createMachine(machine as any, input.username, input.password, input.productKey)
 
             // VirtManager to power on the machine
