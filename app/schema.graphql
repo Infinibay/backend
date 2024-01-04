@@ -6,7 +6,7 @@
 input CreateMachineInputType {
   applications: [MachineApplicationInputType!]! = []
   name: String! = ""
-  os: String! = ""
+  os: MachineOs! = WINDOWS10
   password: String! = ""
   productKey: String! = ""
   templateId: String! = ""
@@ -66,6 +66,14 @@ enum MachineOrderByField {
   STATUS
   TEMPLATE_ID
   USER_ID
+}
+
+"""The os of the machine"""
+enum MachineOs {
+  FEDORA
+  UBUNTU
+  WINDOWS10
+  WINDOWS11
 }
 
 input MachineTemplateInputType {
