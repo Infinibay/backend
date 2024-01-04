@@ -20,6 +20,7 @@
     "@graphql-tools/jest-transform": "^1.2.2",
     "@prisma/client": "^5.7.1",
     "@types/axios": "^0.14.0",
+    "@types/ffi": "^0.2.7",
     "@types/ffi-napi": "^4.0.10",
     "apollo-link-context": "^1.0.20",
     "apollo-server": "^3.12.0",

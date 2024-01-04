@@ -1,4 +1,5 @@
 import { Library, types } from 'ffi-napi';
+import ffi from 'ffi';
 import { refType } from 'ref-napi';
 import ArrayType from 'ref-array-napi';
 import { DOMParser } from 'xmldom';
@@ -250,7 +251,7 @@ export class Libvirt {
 
   constructor() {
     // Load the Libvirt library
-    this.libvirt = new Library('libvirt.so', {
+    this.libvirt = new ffi.Library('libvirt.so', {
       // Map the Libvirt functions
       'virConnectOpen': ['pointer', ['string']],
       'virConnectClose': ['int', ['pointer']],
