@@ -13,7 +13,7 @@ export class Debugger {
   private debuggers: { [key: string]: debug.Debugger } = {};
 
   constructor(private module: string) {
-      this.debuggers['default'] = debug(module);
+      this.debuggers['default'] = debug('infinibay:' + module);
   }
 
   public log(...args: string[]) {
