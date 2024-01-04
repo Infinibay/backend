@@ -1,4 +1,5 @@
 import { ApolloServer } from "@apollo/server";
+import { ApolloError /*, AuthenticationError, UserInputError*/ } from 'apollo-server';
 import { ApolloServerPluginLandingPageLocalDefault } from "@apollo/server/plugin/landingPage/default";
 import { expressMiddleware } from "@apollo/server/express4";
 import bodyParser from "body-parser";
@@ -41,7 +42,7 @@ async function bootstrap() {
     formatError: (error) => {
       console.error(error); // Log the error
       // Return a generic error message to the client
-      return new Error('Internal server error');
+      return new ApolloError('Internal server error');
     },
   });
 

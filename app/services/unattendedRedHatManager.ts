@@ -2,31 +2,42 @@ import { Application } from '@prisma/client';
 import { randomBytes, createHash } from 'crypto';
 
 import { UnattendedManagerBase } from './unattendedManagerBase';
+import { Debugger } from '@utils/debug';
 
 export class UnattendedRedHatManager extends UnattendedManagerBase {
   private username: string;
   private password: string;
   private applications: Application[];
+  debug: Debugger = new Debugger('unattended-redhat-manager');
 
   constructor(username: string, password: string, applications: Application[]) {
     super();
+    this.debug.log('Initializing UnattendedRedHatManager');
     if (!username || !password) {
+      this.debug.log('error', 'Username and password are required');
       throw new Error('Username and password are required');
     }
     this.username = username;
     this.password = password;
     this.applications = applications;
     this.configFileName = 'ks.cfg';
+    this.debug.log('UnattendedRedHatManager initialized');
   }
 
   
 
  generateConfig(): string {
+    this.debug.log('Generating configuration');
     const partitionConfig = this.generatePartitionConfig();
+    this.debug.log('Partition configuration generated');
     const networkConfig = this.generateNetworkConfig();
+    this.debug.log('Network configuration generated');
     const rootPassword = this.encryptPassword(this.generateRandomPassword(16)); // Use encryptPassword here
+    this.debug.log('Root password generated and encrypted');
     const applicationsPostCommands = this.generateApplicationsConfig(); // Returns commands without %post and %end tags
+    this.debug.log('Applications post commands generated');
     const userPostCommands = this.generateUserConfig(); // Returns commands without %post and %end tags
+    this.debug.log('User post commands generated');
   
     // Combine all post-installation commands into one %post section
     const postInstallSection = `

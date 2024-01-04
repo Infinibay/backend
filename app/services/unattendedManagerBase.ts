@@ -5,9 +5,12 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { promises as fsPromises } from 'fs';
+
+import { Debugger } from '@utils/debug';
 // ... other imports ...
 
 export class UnattendedManagerBase {
+  private debug: Debugger = new Debugger('unattended-manager-base');
 
   configFileName: string | null = null;
 
@@ -16,31 +19,43 @@ export class UnattendedManagerBase {
   }
 
   async generateNewImage(): Promise<string> {
+    this.debug.log('Starting to generate new image');
     let extractDir: string | null = null;
     try {
-      const isoPath = this.validatePath(process.env.ISO_PATH, '/mnt/tmp/iso');
+      this.debug.log('Validating ISO path');
+      const isoPath = this.validatePath(process.env.ISO_PATH, '/opt/infinibay/iso/fedora.iso');
+      this.debug.log('Generating config');
       const configPath = await this.generateConfig();
-      const outputPath = this.validatePath(process.env.OUTPUT_PATH, '/mnt/tmp/isos');
+      this.debug.log('Validating output path');
+      const outputPath = this.validatePath(process.env.OUTPUT_PATH, '/opt/infinibay/isos');
   
+      this.debug.log('Generating random file name for new ISO');
       const newIsoName = this.generateRandomFileName();
       const newIsoPath = path.join(outputPath, newIsoName);
   
+      this.debug.log('Extracting ISO');
       extractDir = await this.extractISO(isoPath);
       if (this.configFileName) {
+        this.debug.log('Adding autoinstall config file');
         await this.addAutonistallConfigFile(configPath, extractDir, this.configFileName);
       } else {
+        this.debug.log('Error: configFileName is not set');
         throw new Error('configFileName is not set');
       }
+      this.debug.log('Creating new ISO');
       await this.createISO(newIsoPath, extractDir);
       // TODO: We may need to delete the iso file in the future, after finishing the installation process
   
       // Optional: Clean up extracted files
+      this.debug.log('Cleaning up extracted files');
       await this.cleanup(extractDir);
   
+      this.debug.log('New image generated successfully');
       return newIsoPath;
     } catch (error) {
-      console.error('Error generating new image:', error);
+      this.debug.log('Error generating new image:');
       if (extractDir) {
+        this.debug.log('Cleaning up extracted files due to error');
         await this.cleanup(extractDir);
       }
       throw error;

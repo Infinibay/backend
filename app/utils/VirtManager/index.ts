@@ -8,13 +8,16 @@ import { XMLGenerator } from './xmlGenerator';
 import { UnattendedWindowsManager } from '@services/unattendedWindowsManager'
 import { UnattendedUbuntuManager } from '@services/unattendedUbuntuManager';
 import { UnattendedRedHatManager } from '@services/unattendedRedHatManager';
+import { Debugger } from '@utils/debug';
 
 export class VirtManager {
   private libvirt: Libvirt;
   private uri: string;
   private prisma: PrismaClient | null = null;
+  private debug: Debugger = new Debugger('virt-manager');
 
   constructor(uri: string='qemu:///system') {
+    this.debug.log('Creating VirtManager instance with URI', uri);
     this.libvirt = new Libvirt();
     this.uri = uri;
     this.connect();
@@ -25,6 +28,7 @@ export class VirtManager {
   }
 
   connect(uri?: string): void {
+    this.debug.log('Connecting to hypervisor with URI', uri ?? '');
     // If a new URI is provided, update the current URI
     if (uri) {
       this.uri = uri;
