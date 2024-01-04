@@ -4,14 +4,6 @@ import ArrayType from 'ref-array-napi';
 import { DOMParser } from 'xmldom';
 import StructType from 'ref-struct-napi';
 
-// Define necessary C types and structs
-const int = ffi.types.int;
-const voidPtr = refType('void');
-const charPtr = refType(ffi.types.char);
-const voidPtrArray = ArrayType(voidPtr);
-
-const Struct = require('ref-struct-napi');
-
 // https://libvirt.org/html/libvirt-libvirt-domain.html#virDomainInfoPtr
 const VirDomainInfo = StructType({
   state: 'uchar',        // unsigned char
