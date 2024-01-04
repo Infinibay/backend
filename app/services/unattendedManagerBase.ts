@@ -156,6 +156,7 @@ export class UnattendedManagerBase {
    */
   protected executeCommand(commandParts: string[]): Promise<void> {
     return new Promise((resolve, reject) => {
+        console.log(`Executing command: ${commandParts.join(' ')}`);
         const process = spawn(commandParts[0], commandParts.slice(1));
 
         process.stdout.on('data', (data) => {
@@ -168,13 +169,16 @@ export class UnattendedManagerBase {
 
         process.on('close', (code) => {
             if (code === 0) {
+                console.log(`Command executed successfully: ${commandParts.join(' ')}`);
                 resolve();
             } else {
+                console.error(`Command failed with exit code ${code}: ${commandParts.join(' ')}`);
                 reject(new Error(`Command failed with exit code ${code}`));
             }
         });
 
         process.on('error', (error) => {
+            console.error(`Error occurred while executing command: ${commandParts.join(' ')}`);
             reject(error);
         });
     });
