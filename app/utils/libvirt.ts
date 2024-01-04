@@ -706,9 +706,9 @@ export class Libvirt {
     return this.libvirt.virDomainLookupByName(this.connection, name).toString();
   }
 
-  domainGetInfo(name: string): VirDomainInfo {
+  domainGetInfo(name: string): any {
     const domain = this.domainLookupByName(name);
-    const info = new VirDomainInfo();
+    const info: any = {}
     const result = this.libvirt.virDomainGetInfo(domain, info.ref());
   
     if (result < 0) {
@@ -716,7 +716,7 @@ export class Libvirt {
     }
   
     // Convert the returned struct to a JavaScript object
-    const infoObject: VirDomainInfo = {
+    const infoObject: any = {
       state: info.state,
       maxMem: info.maxMem,
       memory: info.memory,
