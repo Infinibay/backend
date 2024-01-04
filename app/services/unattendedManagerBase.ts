@@ -10,7 +10,7 @@ import { Debugger } from '@utils/debug';
 // ... other imports ...
 
 export class UnattendedManagerBase {
-  private debug: Debugger = new Debugger('unattended-manager-base');
+  protected debug: Debugger = new Debugger('unattended-manager-base');
 
   configFileName: string | null = null;
 

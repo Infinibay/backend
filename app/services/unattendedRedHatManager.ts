@@ -8,7 +8,7 @@ export class UnattendedRedHatManager extends UnattendedManagerBase {
   private username: string;
   private password: string;
   private applications: Application[];
-  protected debug: Debugger = new Debugger('unattended-redhat-manager');
+  // protected debug: Debugger = new Debugger('unattended-redhat-manager');
 
   constructor(username: string, password: string, applications: Application[]) {
     super();
