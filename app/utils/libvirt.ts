@@ -1,24 +1,23 @@
-import { Library, types } from 'ffi-napi';
-import ffi from 'ffi';
+import * as ffi from 'ffi-napi';
 import { refType } from 'ref-napi';
 import ArrayType from 'ref-array-napi';
 import { DOMParser } from 'xmldom';
 
 // Define necessary C types and structs
-const int = types.int;
+const int = ffi.types.int;
 const voidPtr = refType('void');
-const charPtr = refType(types.char);
+const charPtr = refType(ffi.types.char);
 const voidPtrArray = ArrayType(voidPtr);
 
 const Struct = require('ref-struct-napi');
 
 // https://libvirt.org/html/libvirt-libvirt-domain.html#virDomainInfoPtr
 const virDomainInfo = Struct();
-virDomainInfo.defineProperty('state', types.int8);
-virDomainInfo.defineProperty('maxMem', types.ulong);
-virDomainInfo.defineProperty('memory', types.ulong);
-virDomainInfo.defineProperty('nrVirtCpu', types.ushort);
-virDomainInfo.defineProperty('cpuTime', types.ulonglong);
+virDomainInfo.defineProperty('state', ffi.types.int8);
+virDomainInfo.defineProperty('maxMem', ffi.types.ulong);
+virDomainInfo.defineProperty('memory', ffi.types.ulong);
+virDomainInfo.defineProperty('nrVirtCpu', ffi.types.ushort);
+virDomainInfo.defineProperty('cpuTime', ffi.types.ulonglong);
 
 const virDomainInfoPtr = refType(virDomainInfo);
 
