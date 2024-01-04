@@ -1,30 +1,22 @@
 import * as ffi from 'ffi-napi';
 import ref from 'ref-napi';
 // import { refType } from 'ref-napi';
-import ArrayType from 'ref-array-napi';
+// import ArrayType from 'ref-array-napi';
 import { DOMParser } from 'xmldom';
-import StructType from 'ref-struct-napi';
+// import StructType from 'ref-struct-napi';
 
 const voidPtr = ref.refType(ref.types.void);
 
 // https://libvirt.org/html/libvirt-libvirt-domain.html#virDomainInfoPtr
-const VirDomainInfo = StructType({
-  state: 'uchar',        // unsigned char
-  maxMem: 'ulong',       // unsigned long
-  memory: 'ulong',       // unsigned long
-  nrVirtCpu: 'ushort',   // unsigned short
-  cpuTime: 'ulonglong'   // unsigned long long
-});
+// const VirDomainInfo = StructType({
+//   state: 'uchar',        // unsigned char
+//   maxMem: 'ulong',       // unsigned long
+//   memory: 'ulong',       // unsigned long
+//   nrVirtCpu: 'ushort',   // unsigned short
+//   cpuTime: 'ulonglong'   // unsigned long long
+// });
 
-const virDomainInfoPtr = ref.refType(VirDomainInfo);
-
-export interface VirDomainInfo {
-  state: number;
-  maxMem: number;
-  memory: number;
-  nrVirtCpu: number;
-  cpuTime: number;
-}
+// const virDomainInfoPtr = ref.refType(VirDomainInfo);
 
 export enum virDomainModificationImpact {
   VIR_DOMAIN_AFFECT_CURRENT = 0, /* Affect current domain state. */
@@ -266,8 +258,8 @@ export class Libvirt {
       'virNetworkLookupByName': ['pointer', ['pointer', 'string']],
       'virDomainAttachDevice': ['int', ['pointer', 'string']],
       'virDomainGetXMLDesc': ['string', ['pointer', 'int']], // Add this line
-      'virConnectListAllDomains': ['int', ['pointer', voidPtr, 'int']],
-      'virDomainGetInfo': ['int', ['pointer', virDomainInfoPtr]],
+      'virConnectListAllDomains': ['int', ['pointer', 'pointer', 'int']],
+      'virDomainGetInfo': ['int', ['pointer', 'pointer']],
       'virDomainGetName': ['string', ['pointer']],
       // Add more functions as needed
     });
