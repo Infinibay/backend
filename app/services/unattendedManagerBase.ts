@@ -94,8 +94,11 @@ export class UnattendedManagerBase {
    */
   protected async extractISO(isoPath: string): Promise<string> {
     const extractDir = path.join(os.tmpdir(), 'extracted_iso_' + Date.now());
+    this.debug.log(`Creating directory ${extractDir} for ISO extraction`);
     await fsPromises.mkdir(extractDir, { recursive: true });
+    this.debug.log(`Extracting ISO file ${isoPath} to ${extractDir}`);
     await this.executeCommand(['7z', 'x', isoPath, '-o' + extractDir]);
+    this.debug.log(`ISO file ${isoPath} extracted successfully to ${extractDir}`);
     return extractDir;
   }
 
