@@ -119,6 +119,8 @@ export class VirtManager {
           unattendedManager = new UnattendedUbuntuManager(username, password, applicationData);
           break;
         case 'fedora': // fedora or redhat
+          unattendedManager = new UnattendedRedHatManager(username, password, applicationData);
+          break;
         case 'redhat':
           unattendedManager = new UnattendedRedHatManager(username, password, applicationData);
           break;
