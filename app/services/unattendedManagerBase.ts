@@ -106,11 +106,10 @@ export class UnattendedManagerBase {
    * @param {string} extractDir - The directory where the XML file will be copied.
    * @returns {Promise<void>}
    */
-  protected async addAutonistallConfigFile(xmlPath: string, extractDir: string, fileName: string): Promise<void> {
+  protected async addAutonistallConfigFile(content: string, extractDir: string, fileName: string): Promise<void> {
     this.debug.log(`Starting to add Autonistall Config File: ${fileName}`);
-    this.debug.log(`Copying file from ${xmlPath} to ${extractDir}`);
     const destPath = path.join(extractDir, fileName);
-    await fsPromises.copyFile(xmlPath, destPath);
+    await fsPromises.writeFile(destPath, content);
     this.debug.log(`Successfully added Autonistall Config File: ${fileName}`);
   }
 
