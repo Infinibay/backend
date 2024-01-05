@@ -750,7 +750,12 @@ export class Libvirt {
     // bootElement.setAttribute('order', '1');  // Boot order 1 is the first device to try. It does not start on 0
   
     // Append the <boot> element to the <os> element
-    osElement.prepend(bootElement);
+    if (osElement.hasChildNodes()) {
+      osElement.insertBefore(bootElement, osElement.firstChild);
+    } else {
+        // If targetNode has no children, appendChild will work like prepend
+        osElement.appendChild(bootElement);
+    }
   
     // Serialize the modified XML
     const newXml = new XMLSerializer().serializeToString(xmlDoc);
