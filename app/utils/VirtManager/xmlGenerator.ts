@@ -34,8 +34,8 @@ export class XMLGenerator {
     this.xml.domain.devices[0].disk.push(disk);
   }
 
-  setOS(os: string): void {
-    this.xml.domain.os = [{ type: [os] }];
+  setOS(): void {
+    this.xml.domain.os = [{ type: [{ _: 'hvm', $: { arch: 'x86_64', machine: 'pc' } }] }];
   }
     
   setStorage(size: number): void {
@@ -96,3 +96,4 @@ export class XMLGenerator {
     return builder.buildObject(this.xml);
   }
 }
+

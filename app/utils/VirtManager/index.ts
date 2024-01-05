@@ -201,7 +201,7 @@ export class VirtManager {
     const xml = new XMLGenerator(name, machine.id);
     xml.setMemory(template.ram);
     xml.setVCPUs(template.cores);
-    xml.setOS(osName);
+    xml.setOS();
     xml.setStorage(template.storage);
     // TODO: In the future, when we support connecting multiple servers, the getNewPort should return the port and server ip/name/id
     const port = await this.getNewPort();
