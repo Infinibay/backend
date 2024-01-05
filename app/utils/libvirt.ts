@@ -753,11 +753,12 @@ export class Libvirt {
     this.debug.log('Modified XML serialized');
   
     // Redefine the domain with the modified XML
-    this.libvirt.virDomainDefineXML(newXml);
-  
+    this.libvirt.virDomainDefineXML(Buffer.from(newXml + '\0', 'utf-8'));
+    this.debug.log('Domain redefined with modified XML');
+
     // Set the ISO path for the domain's CDROM device
     // This method overwrite ONLY the given devices, in this case, the cdroom
-    this.libvirt.virDomainUpdateDeviceFlags(domainName, 
+    this.libvirt.virDomainUpdateDeviceFlags(domainNameBuffer, 
                 Buffer.from(`<disk type='file' device='cdrom'><driver name='qemu' type='raw'/><source file='${isoPath}'/><target dev='hdc' bus='ide'/><readonly/></disk>` + '\0'), 
                 virDomainModificationImpact.VIR_DOMAIN_AFFECT_CONFIG);
     this.debug.log('ISO path set for domain\'s CDROM device');
