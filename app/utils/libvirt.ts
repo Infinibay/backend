@@ -730,8 +730,9 @@ export class Libvirt {
 
   async domainSetBootloader(domainName: string, isoPath: string): Promise<void> {
     this.debug.log('Setting bootloader for domain', domainName, 'with ISO path', isoPath);
+    const domainNameBuffer = ref.allocCString(domainName);
     // Fetch the domain's XML definition
-    const xml = this.libvirt.virDomainGetXMLDesc(domainName, 0);
+    const xml = this.libvirt.virDomainGetXMLDesc(domainNameBuffer, 0);
   
     // Parse the XML
     let xmlDoc = new DOMParser().parseFromString(xml, 'text/xml');
