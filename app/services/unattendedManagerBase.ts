@@ -53,7 +53,7 @@ export class UnattendedManagerBase {
       this.debug.log('New image generated successfully');
       return newIsoPath;
     } catch (error) {
-      this.debug.log('Error generating new image:');
+      this.debug.log(`Error generating new image: ${error}`);
       if (extractDir) {
         this.debug.log('Cleaning up extracted files due to error');
         await this.cleanup(extractDir);
