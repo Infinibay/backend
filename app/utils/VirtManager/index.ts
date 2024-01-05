@@ -153,7 +153,7 @@ export class VirtManager {
         newIsoPath = await newIsoPathPromise;
         await this.libvirt.domainSetBootloader(machine.name, newIsoPath);
         this.debug.log('ISO assigned to VM bootloader for machine', machine.name);
-      });
+      };
 
       // check if this.prisma define $transaction
       if (this.prisma.$transaction) {
