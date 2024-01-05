@@ -165,6 +165,11 @@ export class VirtManager {
       }
     } catch (error) {
       console.error(`Error creating machine: ${error}`);
+      // print stack trace
+      if (error instanceof Error) {
+        console.log(error.stack); // This will log the stack trace
+      }
+
       console.log('Rolling back')
 
       // Delete the ISO
@@ -176,7 +181,7 @@ export class VirtManager {
       // Delete the XML
       if (xml) {
         console.log('Deleting XML')
-        fs.unlinkSync(xml);
+        // fs.unlinkSync(xml);
       }
       throw new Error('Error creating machine');
     }
