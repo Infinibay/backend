@@ -94,7 +94,7 @@ export class MachineResolver implements MachineResolverInterface {
         // Validate everything
         // TODO: Validate the input
 
-        prisma.$transaction(async (tx: any) => {
+        await prisma.$transaction(async (tx: any) => {
 
             const internalName = uuidv4()
         
