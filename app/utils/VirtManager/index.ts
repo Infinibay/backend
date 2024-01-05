@@ -153,7 +153,7 @@ export class VirtManager {
         // Assign the new ISO to the VM's bootloader
         // This depends on your libvirt wrapper and might look different
         newIsoPath = await newIsoPathPromise;
-        await this.libvirt.domainSetBootloader(machine.name, newIsoPath);
+        await this.libvirt.domainSetBootloader(machine.internalName, newIsoPath);
         this.debug.log('ISO assigned to VM bootloader for machine', machine.name);
       };
 
