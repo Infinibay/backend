@@ -156,7 +156,7 @@ export class UnattendedManagerBase {
    */
   protected executeCommand(commandParts: string[]): Promise<void> {
     return new Promise((resolve, reject) => {
-        console.log(`Executing command: ${commandParts.join(' ')}`);
+        console.log(`Executing command: `, commandParts[0], commandParts.slice(1));
         const process = spawn(commandParts[0], commandParts.slice(1));
 
         process.stdout.on('data', (data) => {

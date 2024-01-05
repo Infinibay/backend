@@ -75,6 +75,8 @@ export class VirtManager {
    * @returns A promise that resolves when the machine is created.
    */
   async createMachine(machine: Machine, username: string, password: string, productKey: string|null): Promise<void> {
+    this.debug.log('Creating machine', machine.name);
+
     // Check if Prisma client is set
     if (!this.prisma) {
       throw new Error('Prisma client not set');
@@ -102,6 +104,7 @@ export class VirtManager {
           application: true,
         },
       });
+      this.debug.log('Fetched applications for machine', machine.name);
 
       // Extract the application data from the query result
       const applicationData = applications.map((ma) => ma.application);
@@ -123,6 +126,7 @@ export class VirtManager {
         default:
           throw new Error(`Unsupported OS: ${machine.os}`);
       }
+      this.debug.log('Unattended manager set for machine', machine.name);
 
       // Generate the new ISO with the auto-install script
       const newIsoPathPromise = unattendedManager.generateNewImage();
@@ -131,22 +135,32 @@ export class VirtManager {
       const xmlPromise = this.generateXML(machine, template, configuration);
 
       // Start a Prisma transaction
-      return this.prisma.$transaction(async (tx) => {
+      let transaction = async (tx: any) => {
         // Set the status of the machine to 'building'
-        tx.machine.update({
+        await tx.machine.update({
           where: { id: machine.id },
           data: { status: 'building' },
         });
+        this.debug.log('Machine status set to building', machine.name);
 
         // Define the VM using the generated XML
         xml = await xmlPromise
         await this.libvirt.domainDefineXML(xml);
+        this.debug.log('VM defined with XML for machine', machine.name);
 
         // Assign the new ISO to the VM's bootloader
         // This depends on your libvirt wrapper and might look different
         newIsoPath = await newIsoPathPromise;
         await this.libvirt.domainSetBootloader(machine.name, newIsoPath);
+        this.debug.log('ISO assigned to VM bootloader for machine', machine.name);
       });
+
+      // check if this.prisma define $transaction
+      if (this.prisma.$transaction) {
+        await this.prisma.$transaction(transaction);
+      } else {
+        await transaction(this.prisma);
+      }
     } catch (error) {
       console.error(`Error creating machine: ${error}`);
       console.log('Rolling back')
@@ -164,7 +178,6 @@ export class VirtManager {
       }
       throw new Error('Error creating machine');
     }
-    
   }
 
   /**
