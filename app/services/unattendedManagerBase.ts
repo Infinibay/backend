@@ -108,6 +108,7 @@ export class UnattendedManagerBase {
    */
   protected async addAutonistallConfigFile(xmlPath: string, extractDir: string, fileName: string): Promise<void> {
     this.debug.log(`Starting to add Autonistall Config File: ${fileName}`);
+    this.debug.log(`Copying file from ${xmlPath} to ${extractDir}`);
     const destPath = path.join(extractDir, fileName);
     await fsPromises.copyFile(xmlPath, destPath);
     this.debug.log(`Successfully added Autonistall Config File: ${fileName}`);
