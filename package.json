@@ -68,7 +68,8 @@
     "winston": "^3.8.2",
     "winston-daily-rotate-file": "^4.7.1",
     "xml2js": "^0.6.2",
-    "xmldom": "^0.6.0"
+    "xmldom": "^0.6.0",
+    "xmlserializer": "^0.6.1"
   },
   "devDependencies": {
     "@types/bcrypt": "^5.0.2",

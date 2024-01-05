@@ -1,9 +1,10 @@
 import * as ffi from 'ffi-napi';
 import ref from 'ref-napi';
 import ArrayType from 'ref-array-napi';
-import { DOMParser } from 'xmldom';
+import { DOMParser, XMLSerializer } from 'xmldom';
 
 import { Debugger } from './debug';
+
 
 const voidPtr = ref.refType(ref.types.void);
 const charPtr = ref.refType('char')
