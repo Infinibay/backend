@@ -121,7 +121,7 @@ export class UnattendedManagerBase {
    * @returns {Promise<void>}
    */
   protected async createISO(newIsoPath: string, extractDir: string): Promise<void> {
-    await this.executeCommand(['mkisofs', '-o', newIsoPath, '-b', 'boot/etfsboot.com', '-no-emul-boot', '-boot-load-size', '8', '-iso-level', '2', '-udf', '-joliet', '-D', '-N', '-relaxed-filenames', '-boot-info-table', '-v', extractDir]);
+    await this.executeCommand(['genisoimage', '-o', newIsoPath, extractDir]);
   }
 
   /**

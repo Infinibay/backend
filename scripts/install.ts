@@ -130,6 +130,8 @@ async function install() {
   prepareFolders()
   downloadUbuntu()
   downloadFedora()
+  // genisoimage
+  // 7z
 }
 
 install()
