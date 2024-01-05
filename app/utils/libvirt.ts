@@ -755,7 +755,7 @@ export class Libvirt {
     this.debug.log('Modified XML serialized');
   
     // Redefine the domain with the modified XML
-    this.libvirt.virDomainDefineXML(Buffer.from(newXml + '\0', 'utf-8'));
+    this.libvirt.virDomainDefineXML(domain, Buffer.from(newXml + '\0', 'utf-8'));
     this.debug.log('Domain redefined with modified XML');
 
     // Set the ISO path for the domain's CDROM device
