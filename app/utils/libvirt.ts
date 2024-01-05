@@ -742,13 +742,15 @@ export class Libvirt {
     // Find the <os> element
     let osElement = xmlDoc.getElementsByTagName('os')[0];
   
+    //
+
     // Create a new <boot> element
     const bootElement = xmlDoc.createElement('boot');
     bootElement.setAttribute('dev', 'cdrom');
-    bootElement.setAttribute('order', '1');  // Boot order 1 is the first device to try. It does not start on 0
+    // bootElement.setAttribute('order', '1');  // Boot order 1 is the first device to try. It does not start on 0
   
     // Append the <boot> element to the <os> element
-    osElement.appendChild(bootElement);
+    osElement.prepend(bootElement);
   
     // Serialize the modified XML
     const newXml = new XMLSerializer().serializeToString(xmlDoc);
@@ -758,12 +760,26 @@ export class Libvirt {
     this.libvirt.virDomainDefineXML(domain, Buffer.from(newXml + '\0', 'utf-8'));
     this.debug.log('Domain redefined with modified XML');
 
+    const diskXml = `<disk type='file' device='disk'>
+      <driver name='qemu' type='raw'/>
+      <source file='${isoPath}'/>
+      <target dev='hda' bus='ide'/>
+      <address type='drive' controller='0' bus='0' target='0' unit='0'/>
+    </disk>`;
+
     // Set the ISO path for the domain's CDROM device
     // This method overwrite ONLY the given devices, in this case, the cdroom
-    this.libvirt.virDomainUpdateDeviceFlags(domain, 
-                Buffer.from(`<disk type='file' device='cdrom'><driver name='qemu' type='raw'/><source file='${isoPath}'/><target dev='hdc' bus='ide'/><readonly/></disk>` + '\0'), 
+    const deviceAdded = this.libvirt.virDomainUpdateDeviceFlags(domain, 
+                Buffer.from(diskXml + '\0', 'utf-8'), 
                 virDomainModificationImpact.VIR_DOMAIN_AFFECT_CONFIG);
-    this.debug.log('ISO path set for domain\'s CDROM device');
+
+    if (deviceAdded < 0) {
+      this.debug.log('error', 'Failed to set ISO path for domain\'s CDROM device');
+      throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_OPERATION_FAILED);
+    } else {
+      this.debug.log('ISO path set for domain\'s CDROM device', deviceAdded);
+    }
+    
 
     // Reload the xml
     xmlDoc = new DOMParser().parseFromString(xml, 'text/xml');
