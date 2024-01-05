@@ -757,7 +757,9 @@ export class Libvirt {
   
     // Set the ISO path for the domain's CDROM device
     // This method overwrite ONLY the given devices, in this case, the cdroom
-    this.libvirt.virDomainUpdateDeviceFlags(domainName, `<disk type='file' device='cdrom'><driver name='qemu' type='raw'/><source file='${isoPath}'/><target dev='hdc' bus='ide'/><readonly/></disk>`, virDomainModificationImpact.VIR_DOMAIN_AFFECT_CONFIG);
+    this.libvirt.virDomainUpdateDeviceFlags(domainName, 
+                Buffer.from(`<disk type='file' device='cdrom'><driver name='qemu' type='raw'/><source file='${isoPath}'/><target dev='hdc' bus='ide'/><readonly/></disk>`), 
+                virDomainModificationImpact.VIR_DOMAIN_AFFECT_CONFIG);
     this.debug.log('ISO path set for domain\'s CDROM device');
 
     // Reload the xml
