@@ -193,17 +193,20 @@ export class VirtManager {
    * @returns A promise that resolves to a string representing the XML configuration of the machine.
    */
   async generateXML(machine: Machine, template: MachineTemplate, configuration: MachineConfiguration): Promise<string> {
+    this.debug.log('Starting to generate XML for machine', machine.name);
     if (!this.prisma) {
       throw new Error('Prisma client not set');
     }
     const name = machine.internalName;
     const osName = machine.os;
+    this.debug.log('Creating new XMLGenerator instance for machine', machine.name);
     const xml = new XMLGenerator(name, machine.id);
     xml.setMemory(template.ram);
     xml.setVCPUs(template.cores);
     xml.setOS();
     xml.setStorage(template.storage);
     // TODO: In the future, when we support connecting multiple servers, the getNewPort should return the port and server ip/name/id
+    this.debug.log('Getting new port for machine', machine.name);
     const port = await this.getNewPort();
     xml.addVNC(port, true, '0.0.0.0');
     // Update configuration to have the new port
@@ -212,12 +215,14 @@ export class VirtManager {
     configuration.vncPassword = null;
     configuration.vncAutoport = true;
     // Now save the configuration
+    this.debug.log('Updating machine configuration in database');
     await this.prisma.machineConfiguration.update({
       where: { id: configuration.id },
       data: configuration,
     });
 
     // xml.setNetwork(template.network);
+    this.debug.log('XML generation for machine completed', machine.name);
     return xml.generate();
   }
 
