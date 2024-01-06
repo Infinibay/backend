@@ -9,15 +9,17 @@ import {
   } from "type-graphql"
 import { v4 as uuidv4 } from 'uuid';
 import { UserInputError } from 'apollo-server-errors'
-import { Machine, MachineConfigurationType, MachineOrderBy, CreateMachineInputType } from './type'
+import { Machine, MachineConfigurationType, VncConfiguration, MachineOrderBy, CreateMachineInputType } from './type'
 import { PaginationInputType } from '@utils/pagination'
 import { InfinibayContext } from '@main/utils/context'
 import { VirtManager } from '@utils/VirtManager'
 import { Machine as PrismaMachine } from '@prisma/client'
+import { Libvirt } from '@utils/libvirt'
 
 export interface MachineResolverInterface {
     machine: (id: string, ctx: InfinibayContext) => Promise<Machine | null>
     machines: (pagination: PaginationInputType, orderBy: MachineOrderBy, ctx: InfinibayContext) => Promise<Machine[]>
+    vncConnection: (id: string, ctx: InfinibayContext) => Promise<VncConfiguration | null>
     createMachine: (input: CreateMachineInputType, ctx: InfinibayContext) => Promise<Machine>
 }
 
@@ -162,12 +164,13 @@ export class MachineResolver implements MachineResolverInterface {
 
     @Query(() => MachineConfigurationType, { nullable: true })
     @Authorized('USER')
-    async getVncConnection(
+    async vncConnection(
         @Arg('id') id: string,
         @Ctx() context: InfinibayContext
-    ): Promise<MachineConfigurationType | null> {
+    ): Promise<VncConfiguration | null> {
         const prisma = context.prisma
         const role = context.user?.role
+        const libvirt = new Libvirt()
 
         if (role == 'ADMIN') {
             const machine = await prisma.machine.findUnique({
@@ -183,10 +186,21 @@ export class MachineResolver implements MachineResolverInterface {
                 include: { configuration: true },
             });
 
+            const configuration = await prisma.machineConfiguration.findUnique({
+                where: {
+                    machineId: id
+                }
+            })
+
+            if (!configuration) {
+                return null
+            }
+            const port = await libvirt.getVncPort(id)
+
             if (machine && machine.userId == context.user?.id) {
                 return {
-                    port: machine.configuration?.vncPort || 0,
-                    address: '127.0.0.1', // TODO: Get the server ip/hostname
+                    link: `vnc://${configuration?.vncHost}:${port}`,
+                    password: configuration?.vncPassword || ''
                 } || null;
             } else {
                 return null;

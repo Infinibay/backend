@@ -193,109 +193,81 @@ export class VirtManager {
     }
   }
 
-/**
- * This method generates an XML string that represents a virtual machine configuration.
- * It uses the XMLGenerator class to set the various properties of the virtual machine.
- * 
- * @param machine - The machine object containing the details of the machine.
- * @param template - The template object containing the configuration of the machine.
- * @param configuration - The machine configuration object.
- * @returns A promise that resolves to a string representing the XML configuration of the machine.
- */
-async generateXML(
-  machine: Machine,
-  template: MachineTemplate,
-  configuration: MachineConfiguration,
-  newIsoPath?: string
-): Promise<XMLGenerator> {
-  // Log the start of the XML generation
-  this.debug.log('Starting to generate XML for machine', machine.name);
-
-  // Check if the Prisma client is set
-  if (!this.prisma) {
-    throw new Error('Prisma client not set');
-  }
-
-  // Get the machine's internal name and operating system
-  const machineName = machine.internalName;
-  const osName = machine.os;
-
-  // Log the creation of a new XMLGenerator instance
-  this.debug.log('Creating new XMLGenerator instance for machine', machine.name);
-
-  // Create a new XMLGenerator instance
-  const xmlGenerator = new XMLGenerator(machineName, machine.id);
-
-  // Set the machine's properties
-  xmlGenerator.setMemory(template.ram);
-  xmlGenerator.setVCPUs(template.cores);
-  xmlGenerator.enableTPM('2.0');
-  xmlGenerator.setStorage(template.storage);
-  xmlGenerator.setBootDevice(['cdrom', 'hd']);
-  if (newIsoPath) {
-    xmlGenerator.addCDROM(newIsoPath, 'sata');
-  }
-
-  // Get a new port for the machine
-  this.debug.log('Getting new port for machine', machine.name);
-  const newPort = await this.getNewPort();
-
-  // Add a VNC server to the machine
-  xmlGenerator.addVNC(newPort, true, '0.0.0.0');
-
-  // Update the machine configuration with the new port
-  configuration.vncPort = newPort;
-  configuration.vncListen = '0.0.0.0';
-  configuration.vncPassword = null;
-  configuration.vncAutoport = true;
-
-  // Save the machine configuration
-  this.debug.log('Updating machine configuration in database');
-  await this.prisma.machineConfiguration.update({
-    where: { id: configuration.id },
-    data: {
-      xml: xmlGenerator.getXmlObject(),
-      vncPort: configuration.vncPort,
-      vncListen: configuration.vncListen,
-      vncPassword: configuration.vncPassword,
-      vncAutoport: configuration.vncAutoport,
-      vncType: configuration.vncType,
-    },
-  });
-
-  // Log the completion of the XML generation
-  this.debug.log('XML generation for machine completed', machine.name);
-
-  // Return the generated XML
-  return xmlGenerator;
-}
-
-
   /**
-   * This method gets a new port for the virtual machine.
-   * It uses the portfinder library to find an available port starting from 5000.
-   * It also checks the database to ensure the port is not already in use.
+   * This method generates an XML string that represents a virtual machine configuration.
+   * It uses the XMLGenerator class to set the various properties of the virtual machine.
    * 
-   * @returns A promise that resolves to a number representing the new port.
+   * @param machine - The machine object containing the details of the machine.
+   * @param template - The template object containing the configuration of the machine.
+   * @param configuration - The machine configuration object.
+   * @returns A promise that resolves to a string representing the XML configuration of the machine.
    */
-  async getNewPort(): Promise<number> {
+  async generateXML(
+    machine: Machine,
+    template: MachineTemplate,
+    configuration: MachineConfiguration,
+    newIsoPath?: string
+  ): Promise<XMLGenerator> {
+    // Log the start of the XML generation
+    this.debug.log('Starting to generate XML for machine', machine.name);
+
+    // Check if the Prisma client is set
     if (!this.prisma) {
       throw new Error('Prisma client not set');
     }
-  
-    portfinder.basePort = 5000; // set the minimum port to start searching from
-  
-    // Fetch all the ports from the database and store them in a Set
-    const machineConfigs = await this.prisma.machineConfiguration.findMany();
-    const usedPorts = new Set(machineConfigs.map(config => config.vncPort));
-  
-    let port: number;
-  
-    do {
-      port = await portfinder.getPortPromise();
-    } while (usedPorts.has(port));
-  
-    return port;
+
+    // Get the machine's internal name and operating system
+    const machineName = machine.internalName;
+    const osName = machine.os;
+
+    // Log the creation of a new XMLGenerator instance
+    this.debug.log('Creating new XMLGenerator instance for machine', machine.name);
+
+    // Create a new XMLGenerator instance
+    const xmlGenerator = new XMLGenerator(machineName, machine.id);
+
+    // Set the machine's properties
+    xmlGenerator.setMemory(template.ram);
+    xmlGenerator.setVCPUs(template.cores);
+    xmlGenerator.enableTPM('2.0');
+    xmlGenerator.setStorage(template.storage);
+    xmlGenerator.setBootDevice(['cdrom', 'hd']);
+    if (newIsoPath) {
+      xmlGenerator.addCDROM(newIsoPath, 'sata');
+    }
+
+    // Get a new port for the machine
+    this.debug.log('Getting new port for machine', machine.name);
+
+    // Add a VNC server to the machine
+    const vncPassword = xmlGenerator.addVNC(-1, true, '0.0.0.0');
+
+    // Update the machine configuration with the new port
+    configuration.vncPort = -1;
+    configuration.vncListen = '0.0.0.0';
+    configuration.vncPassword = vncPassword;
+    configuration.vncAutoport = true;
+    configuration.vncHost = process.env.APP_HOST || '0.0.0.0';
+
+    // Save the machine configuration
+    this.debug.log('Updating machine configuration in database');
+    await this.prisma.machineConfiguration.update({
+      where: { id: configuration.id },
+      data: {
+        xml: xmlGenerator.getXmlObject(),
+        vncPort: configuration.vncPort,
+        vncListen: configuration.vncListen,
+        vncPassword: configuration.vncPassword,
+        vncAutoport: configuration.vncAutoport,
+        vncType: configuration.vncType,
+      },
+    });
+
+    // Log the completion of the XML generation
+    this.debug.log('XML generation for machine completed', machine.name);
+
+    // Return the generated XML
+    return xmlGenerator;
   }
 
   /**

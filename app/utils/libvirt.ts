@@ -3,6 +3,7 @@ import ref from 'ref-napi';
 import { spawn } from 'child_process';
 import ArrayType from 'ref-array-napi';
 import { DOMParser, XMLSerializer } from 'xmldom';
+import { parseStringPromise } from 'xml2js';
 
 import { Debugger } from './debug';
 
@@ -900,6 +901,26 @@ export class Libvirt {
         }
       });
     });
+  }
+
+  async getVncPort(domainName: string): Promise<number> {
+    const domain = this.domainLookupByName(domainName);
+    const xml = this.libvirt.virDomainGetXMLDesc(domain, 0);
+    
+    if (!xml) {
+      throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_OPERATION_FAILED);
+    }
+
+    const result = await parseStringPromise(xml);
+    const graphics = result.domain.devices[0].graphics;
+
+    for (const graphic of graphics) {
+      if (graphic.$.type === 'vnc') {
+        return parseInt(graphic.$.port, 10);
+      }
+    }
+
+    return -1;
   }
 
   // Add more methods to wrap Libvirt functions

@@ -52,6 +52,15 @@ export class MachineConfigurationType {
 }
 
 
+@ObjectType()
+export class VncConfiguration {
+    @Field(() => String)
+    link: string = ''
+
+    @Field(() => String)
+    password: string = ''
+}
+
 @InputType()
 export class MachineOrderBy {
     @Field(() => MachineOrderByEnum, { nullable: true })

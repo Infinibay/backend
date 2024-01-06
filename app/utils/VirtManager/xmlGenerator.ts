@@ -106,24 +106,31 @@ export class XMLGenerator {
     return dev
   }
 
-  addVNC(port: number, autoport: boolean, listen: string): void {
+  addVNC(port: number, autoport: boolean = true, listen: string = '0.0.0.0'): string {
     this.xml.domain.devices[0].graphics = this.xml.domain.devices[0].graphics || [];
     // Check if a VNC configuration already exists
     const existingVNC = this.xml.domain.devices[0].graphics?.find((g: any) => g.$.type === 'vnc');
+
+    // Generate a random password
+    const password = Math.random().toString(36).slice(-8);
 
     if (existingVNC) {
       // Modify the existing VNC configuration
       existingVNC.$.port = String(port);
       existingVNC.$.autoport = autoport ? 'yes' : 'no';
       existingVNC.$.listen = listen;
+      existingVNC.$.passwd = password;
     } else {
       // Add a new VNC configuration
       const graphics = {
-        $: { type: 'vnc', port: String(port), autoport: autoport ? 'yes' : 'no', listen: listen },
+        $: { type: 'vnc', port: String(port), autoport: autoport ? 'yes' : 'no', listen: listen, passwd: password },
       };
       this.xml.domain.devices[0].graphics = this.xml.domain.devices[0].graphics || [];
       this.xml.domain.devices[0].graphics.push(graphics);
     }
+
+    // Return the generated password
+    return password;
   }
 
   setBootOrder(devices: string[]): void {
