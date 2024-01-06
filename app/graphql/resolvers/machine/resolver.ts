@@ -158,6 +158,57 @@ export class MachineResolver implements MachineResolverInterface {
         } as unknown as Machine // WARNING!! typescript type-check bypassed
     }
 
+    @Query(() => VncConfigurationType, { nullable: true })
+    @Authorized('USER')
+    async vncConnection(
+        @Arg('id') id: string,
+        @Ctx() context: InfinibayContext
+    ): Promise<VncConfigurationType | null> {
+        const prisma = context.prisma
+        const role = context.user?.role
+        const libvirt = new Libvirt()
+        let machine: PrismaMachine | null = null
+
+        if (role == 'ADMIN') {
+             machine = await prisma.machine.findUnique({
+                where: { id },
+                include: { configuration: true },
+            });
+        } else {
+            const machine = await prisma.machine.findFirst({
+                where: {
+                    id,
+                    userId: context.user?.id
+                },
+                include: { configuration: true },
+            });
+        }
+
+        if (!machine) {
+            return null
+        }
+
+        const configuration = await prisma.machineConfiguration.findUnique({
+            where: {
+                machineId: id
+            }
+        })
+
+        if (!configuration) {
+            return null
+        }
+        const port = await libvirt.getVncPort(id)
+
+        if (machine && machine.userId == context.user?.id) {
+            return {
+                link: `vnc://${configuration?.vncHost}:${port}`,
+                password: configuration?.vncPassword || ''
+            } || null;
+        } else {
+            return null;
+        }
+    }
+
     backgroundCode = async (id: string, context: InfinibayContext, username: string, password: string, productKey: string) => {
         try {
             const machine = await context.prisma.machine.findUnique({
@@ -178,51 +229,6 @@ export class MachineResolver implements MachineResolverInterface {
         }
     }
 
-    @Query(() => VncConfigurationType, { nullable: true })
-    @Authorized('USER')
-    async vncConnection(
-        @Arg('id') id: string,
-        @Ctx() context: InfinibayContext
-    ): Promise<VncConfigurationType | null> {
-        const prisma = context.prisma
-        const role = context.user?.role
-        const libvirt = new Libvirt()
-
-        if (role == 'ADMIN') {
-            const machine = await prisma.machine.findUnique({
-                where: { id },
-                include: { configuration: true },
-            });
-        } else {
-            const machine = await prisma.machine.findFirst({
-                where: {
-                    id,
-                    userId: context.user?.id
-                },
-                include: { configuration: true },
-            });
-
-            const configuration = await prisma.machineConfiguration.findUnique({
-                where: {
-                    machineId: id
-                }
-            })
-
-            if (!configuration) {
-                return null
-            }
-            const port = await libvirt.getVncPort(id)
-
-            if (machine && machine.userId == context.user?.id) {
-                return {
-                    link: `vnc://${configuration?.vncHost}:${port}`,
-                    password: configuration?.vncPassword || ''
-                } || null;
-            } else {
-                return null;
-            }
-        }
-        return null
-    }
+    
 }
 
