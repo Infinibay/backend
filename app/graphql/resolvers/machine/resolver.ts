@@ -149,7 +149,7 @@ export class MachineResolver implements MachineResolverInterface {
             // VirtManager to power on the machine
             await virtManager.powerOn(machine.internalName)
 
-        });
+        }, { timeout: 20000 });
 
         if (!machine) {
             throw new Error("Machine not created")
