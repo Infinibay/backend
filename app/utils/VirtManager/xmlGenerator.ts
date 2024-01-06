@@ -38,8 +38,8 @@ export class XMLGenerator {
     this.xml.domain.devices[0].tpm = [{
       $: { model: 'tpm-tis' },
       backend: [{
-        $: { type: 'emulator' },
-        encryption: [{ $: { secret: secretUUID } }]
+        $: { type: 'emulator', version: version },
+        // encryption: [{ $: { secret: secretUUID } }]
       }]
     }];
   }

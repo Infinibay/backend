@@ -157,8 +157,6 @@ export class VirtManager {
         await this.libvirt.createStorage(storageSize, storagePath);
         this.debug.log('Storage file created for machine', machine.name, storagePath);
 
-
-
         this.debug.log('Generated XML for machine', machine.name, xml);
         await this.libvirt.domainDefineXML(xml);
         this.debug.log('VM defined with XML for machine', machine.name);
