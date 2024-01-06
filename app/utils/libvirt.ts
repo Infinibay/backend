@@ -1,5 +1,6 @@
 import * as ffi from 'ffi-napi';
 import ref from 'ref-napi';
+import { spawn } from 'child_process';
 import ArrayType from 'ref-array-napi';
 import { DOMParser, XMLSerializer } from 'xmldom';
 
@@ -388,6 +389,28 @@ export class Libvirt {
       throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_OPERATION_FAILED);
     }
 
+    return result;
+  }
+
+  /**
+   * This method undefines a domain, effectively deleting it.
+   * 
+   * @param {string} domain - The name of the domain to be undefined.
+   * @returns {number} - Returns 0 on success, -1 in case of error.
+   * @throws {LibvirtError} - Throws an error if the operation fails.
+   */
+  public domainUndefine(domain: string): number {
+    this.debug.log('Undefining VM', domain);
+    const domainBuffer = this.libvirt.virDomainLookupByName(this.connection, domain);
+    this.debug.log('VM Obtained');
+    const result = this.libvirt.virDomainUndefine(domainBuffer);
+    this.debug.log('VM Undefined', result);
+  
+    if (result < 0) {
+      this.debug.log('error', 'Failed to undefine VM');
+      throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_OPERATION_FAILED);
+    }
+  
     return result;
   }
 
@@ -848,6 +871,35 @@ export class Libvirt {
     };
   
     return infoObject;
+  }
+
+  createStorage(size: number, fileName: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const cmd = 'qemu-img';
+      const args = ['create', '-f', 'qcow2', fileName, `${size}G`];
+      const childProcess = spawn(cmd, args);
+  
+      childProcess.stdout.on('data', (data) => {
+        console.log(`stdout: ${data}`);
+      });
+  
+      childProcess.stderr.on('data', (data) => {
+        console.error(`stderr: ${data}`);
+      });
+  
+      childProcess.on('error', (error) => {
+        console.error(`exec error: ${error}`);
+        reject(error);
+      });
+  
+      childProcess.on('close', (code) => {
+        if (code !== 0) {
+          reject(new Error(`qemu-img process exited with code ${code}`));
+        } else {
+          resolve();
+        }
+      });
+    });
   }
 
   // Add more methods to wrap Libvirt functions

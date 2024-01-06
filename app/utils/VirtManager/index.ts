@@ -136,6 +136,12 @@ export class VirtManager {
       // Generate the XML string for the VM
       const xmlPromise = this.generateXML(machine, template, configuration, newIsoPath);
 
+      // create storage file
+      const storagePath = `/var/lib/libvirt/images/${machine.internalName}.qcow2`;
+      const storageSize = template.storage;
+      await this.libvirt.createStorage(storageSize, storagePath);
+      this.debug.log('Storage file created for machine', machine.name, storagePath);
+
       // Start a Prisma transaction
       let transaction = async (tx: any) => {
         // Set the status of the machine to 'building'
