@@ -137,7 +137,8 @@ export class VirtManager {
       const xmlPromise = this.generateXML(machine, template, configuration, newIsoPath);
 
       // create storage file
-      const storagePath = `/var/lib/libvirt/images/${machine.internalName}.qcow2`;
+      const diskPath = process.env.DISK_PATH || '/opt/infinibay/disks';
+      const storagePath = `${diskPath}/${machine.internalName}.qcow2`;
       const storageSize = template.storage;
       await this.libvirt.createStorage(storageSize, storagePath);
       this.debug.log('Storage file created for machine', machine.name, storagePath);

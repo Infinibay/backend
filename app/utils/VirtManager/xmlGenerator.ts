@@ -68,7 +68,7 @@ export class XMLGenerator {
   }
     
   setStorage(size: number): void {
-    const diskPath = process.env.DISK_PATH || '/var/lib/libvirt/images';
+    const diskPath = process.env.DISK_PATH || '/opt/infinibay/disks';
     this.addDisk(`${diskPath}/${this.id}.img`, 'virtio', size);
   }
 
