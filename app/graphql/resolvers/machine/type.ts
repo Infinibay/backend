@@ -53,7 +53,7 @@ export class MachineConfigurationType {
 
 
 @ObjectType()
-export class VncConfiguration {
+export class VncConfigurationType {
     @Field(() => String)
     link: string = ''
 

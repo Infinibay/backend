@@ -32,8 +32,6 @@ async function bootstrap() {
     authChecker: authChecker,
   });
 
-  fs.writeFileSync('app/schema.graphql', printSchema(schema));
-
   const app = express();
   const httpServer = http.createServer(app);
 

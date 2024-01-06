@@ -9,7 +9,7 @@ import {
   } from "type-graphql"
 import { v4 as uuidv4 } from 'uuid';
 import { UserInputError } from 'apollo-server-errors'
-import { Machine, MachineConfigurationType, VncConfiguration, MachineOrderBy, CreateMachineInputType } from './type'
+import { Machine, MachineConfigurationType, VncConfigurationType, MachineOrderBy, CreateMachineInputType } from './type'
 import { PaginationInputType } from '@utils/pagination'
 import { InfinibayContext } from '@main/utils/context'
 import { VirtManager } from '@utils/VirtManager'
@@ -19,7 +19,7 @@ import { Libvirt } from '@utils/libvirt'
 export interface MachineResolverInterface {
     machine: (id: string, ctx: InfinibayContext) => Promise<Machine | null>
     machines: (pagination: PaginationInputType, orderBy: MachineOrderBy, ctx: InfinibayContext) => Promise<Machine[]>
-    vncConnection: (id: string, ctx: InfinibayContext) => Promise<VncConfiguration | null>
+    vncConnection: (id: string, ctx: InfinibayContext) => Promise<VncConfigurationType | null>
     createMachine: (input: CreateMachineInputType, ctx: InfinibayContext) => Promise<Machine>
 }
 
@@ -178,12 +178,12 @@ export class MachineResolver implements MachineResolverInterface {
         }
     }
 
-    @Query(() => MachineConfigurationType, { nullable: true })
+    @Query(() => VncConfigurationType, { nullable: true })
     @Authorized('USER')
     async vncConnection(
         @Arg('id') id: string,
         @Ctx() context: InfinibayContext
-    ): Promise<VncConfiguration | null> {
+    ): Promise<VncConfigurationType | null> {
         const prisma = context.prisma
         const role = context.user?.role
         const libvirt = new Libvirt()
