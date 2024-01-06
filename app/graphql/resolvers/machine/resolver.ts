@@ -143,23 +143,29 @@ export class MachineResolver implements MachineResolverInterface {
                 throw new Error("MachineConfiguration not created")
             }
 
-            // User VirtManager and create the machine
-            const virtManager = new VirtManager()
-            virtManager.setPrisma(tx)
-            await virtManager.createMachine(machine as any, input.username, input.password, input.productKey)
-
-            // VirtManager to power on the machine
-            await virtManager.powerOn(machine.internalName)
-
         }, { timeout: 20000 });
 
         if (!machine) {
             throw new Error("Machine not created")
         }
 
+        setImmediate(() => {
+            this.backgroundCode(machine.id, context, input.username, input.password, input.productKey);
+        });
+
         return {
             ...machine
         } as unknown as Machine // WARNING!! typescript type-check bypassed
+    }
+
+    backgroundCode = async (id: string, context: InfinibayContext, username: string, password: string, productKey: string) => {
+        // User VirtManager and create the machine
+        const virtManager = new VirtManager()
+        virtManager.setPrisma(context.prisma)
+        await virtManager.createMachine(id, username, password, productKey)
+    
+        // VirtManager to power on the machine
+        await virtManager.powerOn(id)
     }
 
     @Query(() => MachineConfigurationType, { nullable: true })

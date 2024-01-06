@@ -128,7 +128,6 @@ input PaginationInputType {
 }
 
 type Query {
-  getVncConnection(id: String!): MachineConfigurationType
   login(email: String!, password: String!): UserToken!
   machine(id: String!): Machine
   machineTemplate(id: String!): MachineTemplateType
@@ -136,6 +135,7 @@ type Query {
   machines(orderBy: MachineOrderBy, pagination: PaginationInputType): [Machine!]!
   user(id: String!): UserType!
   users(orderBy: UserOrderByInputType, pagination: PaginationInputType): [UserType!]!
+  vncConnection(id: String!): MachineConfigurationType
 }
 
 input UpdateUserInputType {
