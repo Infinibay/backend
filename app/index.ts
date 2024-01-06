@@ -10,11 +10,14 @@ import http from "node:http";
 import path from "node:path";
 import "reflect-metadata";
 import { buildSchema } from "type-graphql";
+import { printSchema } from 'graphql';
 import { PrismaClient } from "@prisma/client";
 
 import { authChecker } from './utils/authChecker';
 import { InfinibayContext } from './utils/context';
 import resolvers from './graphql/resolvers';
+
+import fs from 'fs';
 
 const prisma = new PrismaClient(); // Create a new instance of PrismaClient
 
@@ -28,6 +31,8 @@ async function bootstrap() {
     emitSchemaFile: path.resolve(__dirname, "schema.graphql"),
     authChecker: authChecker,
   });
+
+  fs.writeFileSync('app/schema.graphql', printSchema(schema));
 
   const app = express();
   const httpServer = http.createServer(app);
