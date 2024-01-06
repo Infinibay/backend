@@ -159,10 +159,15 @@ export class MachineResolver implements MachineResolverInterface {
     }
 
     backgroundCode = async (id: string, context: InfinibayContext, username: string, password: string, productKey: string) => {
+        const machine = await context.prisma.machine.findUnique({
+            where: {
+                id
+            }
+        })
         // User VirtManager and create the machine
         const virtManager = new VirtManager()
         virtManager.setPrisma(context.prisma)
-        await virtManager.createMachine(id, username, password, productKey)
+        await virtManager.createMachine(machine as any, username, password, productKey)
     
         // VirtManager to power on the machine
         await virtManager.powerOn(id)
