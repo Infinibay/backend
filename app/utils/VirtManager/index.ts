@@ -147,6 +147,7 @@ export class VirtManager {
 
         // Define the VM using the generated XML
         xml = await xmlPromise
+        this.debug.log('Generated XML for machine', machine.name, xml);
         await this.libvirt.domainDefineXML(xml);
         this.debug.log('VM defined with XML for machine', machine.name);
 
