@@ -154,7 +154,7 @@ export class VirtManager {
 
       // check if this.prisma define $transaction
       if (this.prisma.$transaction) {
-        await this.prisma.$transaction(transaction);
+        await this.prisma.$transaction(transaction, { timeout: 20000 });
       } else {
         await transaction(this.prisma);
       }
