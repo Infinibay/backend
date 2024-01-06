@@ -171,5 +171,10 @@ export class XMLGenerator {
     // Return the next bus
     return dev + incrementedChar;
   }
+
+  getStoragePath(): string {
+    const diskPath = process.env.DISK_PATH || '/opt/infinibay/disks';
+    return `${diskPath}/${this.id}.img`;
+  }
 }
 

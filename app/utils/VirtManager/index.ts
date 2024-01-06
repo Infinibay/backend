@@ -136,12 +136,7 @@ export class VirtManager {
       // Generate the XML string for the VM
       const xmlPromise = this.generateXML(machine, template, configuration, newIsoPath);
 
-      // create storage file
-      const diskPath = process.env.DISK_PATH || '/opt/infinibay/disks';
-      const storagePath = `${diskPath}/${machine.internalName}.qcow2`;
-      const storageSize = template.storage;
-      await this.libvirt.createStorage(storageSize, storagePath);
-      this.debug.log('Storage file created for machine', machine.name, storagePath);
+
 
       // Start a Prisma transaction
       let transaction = async (tx: any) => {
@@ -153,7 +148,17 @@ export class VirtManager {
         this.debug.log('Machine status set to building', machine.name);
 
         // Define the VM using the generated XML
-        xml = await xmlPromise
+        const xmlGenerator = await xmlPromise
+        xml = xmlGenerator.generate()
+
+              // create storage file
+        const storagePath = xmlGenerator.getStoragePath();
+        const storageSize = template.storage;
+        await this.libvirt.createStorage(storageSize, storagePath);
+        this.debug.log('Storage file created for machine', machine.name, storagePath);
+
+
+
         this.debug.log('Generated XML for machine', machine.name, xml);
         await this.libvirt.domainDefineXML(xml);
         this.debug.log('VM defined with XML for machine', machine.name);
@@ -204,7 +209,7 @@ async generateXML(
   template: MachineTemplate,
   configuration: MachineConfiguration,
   newIsoPath?: string
-): Promise<string> {
+): Promise<XMLGenerator> {
   // Log the start of the XML generation
   this.debug.log('Starting to generate XML for machine', machine.name);
 
@@ -264,7 +269,7 @@ async generateXML(
   this.debug.log('XML generation for machine completed', machine.name);
 
   // Return the generated XML
-  return xmlGenerator.generate();
+  return xmlGenerator;
 }
 
 
