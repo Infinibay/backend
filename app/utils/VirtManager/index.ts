@@ -131,10 +131,10 @@ export class VirtManager {
       this.debug.log('Unattended manager set for machine', machine.name);
 
       // Generate the new ISO with the auto-install script
-      const newIsoPathPromise = unattendedManager.generateNewImage();
+      const newIsoPath = await unattendedManager.generateNewImage();
 
       // Generate the XML string for the VM
-      const xmlPromise = this.generateXML(machine, template, configuration);
+      const xmlPromise = this.generateXML(machine, template, configuration, newIsoPath);
 
       // Start a Prisma transaction
       let transaction = async (tx: any) => {
@@ -150,11 +150,6 @@ export class VirtManager {
         await this.libvirt.domainDefineXML(xml);
         this.debug.log('VM defined with XML for machine', machine.name);
 
-        // Assign the new ISO to the VM's bootloader
-        // This depends on your libvirt wrapper and might look different
-        newIsoPath = await newIsoPathPromise;
-        await this.libvirt.domainSetBootloader(machine.internalName, newIsoPath);
-        this.debug.log('ISO assigned to VM bootloader for machine', machine.name);
       };
 
       // check if this.prisma define $transaction
@@ -187,49 +182,82 @@ export class VirtManager {
     }
   }
 
-  /**
-   * This method generates an XML string that represents a virtual machine configuration.
-   * It uses the XMLGenerator class to set the various properties of the virtual machine.
-   * 
-   * @param machine - The machine object containing the details of the machine.
-   * @param template - The template object containing the configuration of the machine.
-   * @param name - The name of the machine.
-   * @param osName - The name of the operating system of the machine.
-   * @returns A promise that resolves to a string representing the XML configuration of the machine.
-   */
-  async generateXML(machine: Machine, template: MachineTemplate, configuration: MachineConfiguration): Promise<string> {
-    this.debug.log('Starting to generate XML for machine', machine.name);
-    if (!this.prisma) {
-      throw new Error('Prisma client not set');
-    }
-    const name = machine.internalName;
-    const osName = machine.os;
-    this.debug.log('Creating new XMLGenerator instance for machine', machine.name);
-    const xml = new XMLGenerator(name, machine.id);
-    xml.setMemory(template.ram);
-    xml.setVCPUs(template.cores);
-    xml.setOS();
-    xml.setStorage(template.storage);
-    // TODO: In the future, when we support connecting multiple servers, the getNewPort should return the port and server ip/name/id
-    this.debug.log('Getting new port for machine', machine.name);
-    const port = await this.getNewPort();
-    xml.addVNC(port, true, '0.0.0.0');
-    // Update configuration to have the new port
-    configuration.vncPort = port;
-    configuration.vncListen = '0.0.0.0';
-    configuration.vncPassword = null;
-    configuration.vncAutoport = true;
-    // Now save the configuration
-    this.debug.log('Updating machine configuration in database');
-    await this.prisma.machineConfiguration.update({
-      where: { id: configuration.id },
-      data: configuration,
-    });
+/**
+ * This method generates an XML string that represents a virtual machine configuration.
+ * It uses the XMLGenerator class to set the various properties of the virtual machine.
+ * 
+ * @param machine - The machine object containing the details of the machine.
+ * @param template - The template object containing the configuration of the machine.
+ * @param configuration - The machine configuration object.
+ * @returns A promise that resolves to a string representing the XML configuration of the machine.
+ */
+async generateXML(
+  machine: Machine,
+  template: MachineTemplate,
+  configuration: MachineConfiguration,
+  newIsoPath?: string
+): Promise<string> {
+  // Log the start of the XML generation
+  this.debug.log('Starting to generate XML for machine', machine.name);
 
-    // xml.setNetwork(template.network);
-    this.debug.log('XML generation for machine completed', machine.name);
-    return xml.generate();
+  // Check if the Prisma client is set
+  if (!this.prisma) {
+    throw new Error('Prisma client not set');
   }
+
+  // Get the machine's internal name and operating system
+  const machineName = machine.internalName;
+  const osName = machine.os;
+
+  // Log the creation of a new XMLGenerator instance
+  this.debug.log('Creating new XMLGenerator instance for machine', machine.name);
+
+  // Create a new XMLGenerator instance
+  const xmlGenerator = new XMLGenerator(machineName, machine.id);
+
+  // Set the machine's properties
+  xmlGenerator.setMemory(template.ram);
+  xmlGenerator.setVCPUs(template.cores);
+  xmlGenerator.enableTPM('2.0');
+  xmlGenerator.setStorage(template.storage);
+  xmlGenerator.setBootDevice(['cdrom', 'hd']);
+  if (newIsoPath) {
+    xmlGenerator.addCDROM(newIsoPath, 'sata');
+  }
+
+  // Get a new port for the machine
+  this.debug.log('Getting new port for machine', machine.name);
+  const newPort = await this.getNewPort();
+
+  // Add a VNC server to the machine
+  xmlGenerator.addVNC(newPort, true, '0.0.0.0');
+
+  // Update the machine configuration with the new port
+  configuration.vncPort = newPort;
+  configuration.vncListen = '0.0.0.0';
+  configuration.vncPassword = null;
+  configuration.vncAutoport = true;
+
+  // Save the machine configuration
+  this.debug.log('Updating machine configuration in database');
+  await this.prisma.machineConfiguration.update({
+    where: { id: configuration.id },
+    data: {
+      xml: xmlGenerator.getXmlObject(),
+      vncPort: configuration.vncPort,
+      vncListen: configuration.vncListen,
+      vncPassword: configuration.vncPassword,
+      vncAutoport: configuration.vncAutoport,
+      vncType: configuration.vncType,
+    },
+  });
+
+  // Log the completion of the XML generation
+  this.debug.log('XML generation for machine completed', machine.name);
+
+  // Return the generated XML
+  return xmlGenerator.generate();
+}
 
 
   /**
@@ -266,11 +294,7 @@ export class VirtManager {
    * @returns A promise that resolves to void.
    */
   async powerOn(domainName: string): Promise<void> {
-    const domain = this.libvirt.lookupDomainByName(domainName);
-    if (!domain) {
-      throw new Error(`Domain ${domainName} not found`);
-    }
-    await this.libvirt.resume(domain);
+    await this.libvirt.resume(domainName);
   }
 
   // Alias method

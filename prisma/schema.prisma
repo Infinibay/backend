@@ -39,6 +39,7 @@ model Machine {
 
 model MachineConfiguration {
   id          String  @id @default(uuid())
+  xml         Json?
   vncPort     Int?
   vncPassword String?
   vncListen   String?
