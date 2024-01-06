@@ -267,6 +267,7 @@ export class Libvirt {
       'virConnectListDefinedDomains': ['int', ['pointer', 'pointer', 'int']],
       'virDomainGetInfo': ['int', ['pointer', 'pointer']],
       'virDomainGetName': ['string', ['pointer']],
+      'virDomainGetState': ['int', ['pointer', 'pointer', 'pointer', 'uint']],
       // Add more functions as needed
     });
   }
@@ -445,11 +446,11 @@ export class Libvirt {
   public powerOn(name: string): void {
     this.debug.log('Powering on domain', name);
     const domain = this.domainLookupByName(name);
-    const state = this.libvirt.virDomainGetState(domain);
+    const state = this.getDomainStatus(name);
 
     this.debug.log('Domain state', state);
     let result;
-    if (state === VirDomainState.VIR_DOMAIN_PAUSED) {
+    if (state === 'Paused') {
       this.debug.log('Domain is paused, resuming');
       result = this.libvirt.virDomainResume(domain);
     } else {
@@ -518,16 +519,21 @@ export class Libvirt {
     this.debug.log('Getting domain status', name);
     const domain = this.domainLookupByName(name);
     this.debug.log('Domain obtained');
-    const state = this.libvirt.virDomainGetState(domain);
-    this.debug.log('Domain state obtained', state);
 
-    if (state < 0) {
+    // Create ref objects for state and reason
+    const state = ref.alloc('int');
+    const reason = ref.alloc('int');
+
+    const result = this.libvirt.virDomainGetState(domain, state, reason, 0);
+
+    if (result < 0) {
       this.debug.log('error', 'Failed to get domain state');
       throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_OPERATION_FAILED);
     }
 
+    // Dereference the state ref object to get its value
     let status: string;
-    switch (state) {
+    switch (state.deref()) {
       case 1:
         status = 'Running';
         break;

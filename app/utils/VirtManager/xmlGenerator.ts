@@ -26,7 +26,7 @@ export class XMLGenerator {
   
   setVCPUs(count: number): void {
     this.xml.domain.vcpu = [{ _: count, $: { placement: 'static', current: count } }];
-    this.xml.domain.cpu = [{ model: [{ _: 'host-model', $: { mode: 'custom', match: 'exact' } }], topology: [{ $: { sockets: '1', cores: count.toString(), threads: '1' } }] }];
+    // this.xml.domain.cpu = [{ model: [{ _: 'host-model', $: { mode: 'custom', match: 'exact' } }], topology: [{ $: { sockets: '1', cores: count.toString(), threads: '1' } }] }];
   }
 
   setBootDevice(devices: ('fd' | 'hd' | 'cdrom' | 'network')[]): void {
