@@ -157,7 +157,7 @@ echo "${this.username} ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
     await this.executeCommand(['mkdir', '-p', path.dirname(bootImg)]);
     await this.executeCommand(['dd', 'if=/dev/zero', `of=${bootImg}`, 'bs=1M', 'count=8']);
     await this.executeCommand(['mkfs.vfat', bootImg]);
-    await this.executeCommand(['mount', '-o', 'loop', bootImg, bootImgData]);
+    await this.executeCommand(['sudo', 'mount', '-o', 'loop', bootImg, bootImgData]);
     await this.executeCommand(['mkdir', '-p', `${bootImgData}/EFI/BOOT`]);
   
     await this.executeCommand([
@@ -173,7 +173,7 @@ echo "${this.username} ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
       'echo', 'read', 'ls', 'cat', 'png', 'jpeg', 'halt', 'reboot'
     ]);
   
-    await this.executeCommand(['umount', bootImgData]);
+    await this.executeCommand(['sudo', 'umount', bootImgData]);
     await this.executeCommand(['rm', '-rf', bootImgData]);
   
     // Define the command and arguments for creating a new ISO image
