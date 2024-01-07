@@ -158,7 +158,7 @@ echo "${this.username} ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
     await this.executeCommand(['dd', 'if=/dev/zero', `of=${bootImg}`, 'bs=1M', 'count=8']);
     await this.executeCommand(['mkfs.vfat', bootImg]);
     await this.executeCommand(['sudo', 'mount', '-o', 'loop', bootImg, bootImgData]);
-    await this.executeCommand(['mkdir', '-p', `${bootImgData}/EFI/BOOT`]);
+    await this.executeCommand(['sudo', 'mkdir', '-p', `${bootImgData}/EFI/BOOT`]);
   
     await this.executeCommand([
       'grub-mkimage',
@@ -174,7 +174,7 @@ echo "${this.username} ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
     ]);
   
     await this.executeCommand(['sudo', 'umount', bootImgData]);
-    await this.executeCommand(['rm', '-rf', bootImgData]);
+    await this.executeCommand(['sudo', 'rm', '-rf', bootImgData]);
   
     // Define the command and arguments for creating a new ISO image
     const isoCreationCommandParts = [
