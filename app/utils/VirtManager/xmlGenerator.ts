@@ -46,6 +46,13 @@ export class XMLGenerator {
     }];
   }
 
+  enableACPI(): void {
+    if (!this.xml.domain.features) {
+      this.xml.domain.features = [{}];
+    }
+    this.xml.domain.features[0].acpi = [{}];
+  }
+
   setUEFI(): void {
     const efiPath = '/usr/share/OVMF/OVMF_CODE.fd';
     const nvramPath = `/opt/infinibay/uefi/${this.id}_VARS.fd`;
