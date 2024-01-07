@@ -912,14 +912,20 @@ export class Libvirt {
       throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_OPERATION_FAILED);
     }
 
-    this.debug.log('XML obtained', xml);
+    const parser = new DOMParser();
+    const xmlDoc = parser.parseFromString(xml, 'text/xml');
 
-    const result = await parseStringPromise(xml);
-    const graphics = result.domain.devices[0].graphics;
+    // Get the <graphics> elements
+    const graphicsElements = xmlDoc.getElementsByTagName('graphics');
 
-    for (const graphic of graphics) {
-      if (graphic.$.type === 'vnc') {
-        const port = parseInt(graphic.$.port, 10);
+    // Iterate over the <graphics> elements
+    for (let i = 0; i < graphicsElements.length; i++) {
+      const graphicsElement = graphicsElements[i];
+
+      // Check if the type attribute is 'vnc'
+      if (graphicsElement.getAttribute('type') === 'vnc') {
+        // Get the port attribute and parse it as an integer
+        const port = parseInt(graphicsElement.getAttribute('port'), 10);
         this.debug.log(`Found VNC port: ${port}`);
         return port;
       }
