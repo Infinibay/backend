@@ -150,8 +150,8 @@ echo "${this.username} ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
     }
   
     // Create ESP image file
-    const bootImgData = await this.executeCommand(['mktemp', '-d']);
-    const bootImgDir = await this.executeCommand(['mktemp', '-d']);
+    const bootImgDir = (await this.executeCommand(['mktemp', '-d'])).trim();
+    const bootImgData = (await this.executeCommand(['mktemp', '-d'])).trim();
     const bootImg = `${bootImgDir}/efi.img`;
   
     await this.executeCommand(['mkdir', '-p', path.dirname(bootImg)]);
