@@ -156,7 +156,7 @@ echo "${this.username} ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
       '-iso-level', '3', // Set ISO9660 conformance level (1-3)
       '-full-iso9660-filenames', // Allow full 31 character filenames
       '-volid', 'Fedora-Live', // Set the volume ID of the ISO filesystem
-      '-appid', 'Fedora Live CD', // Set the application ID of the ISO filesystem
+      '-appid', 'Fedora-Live-CD', // Set the application ID of the ISO filesystem
       '-output', newIsoPath, // Specify the filename for the output ISO image
       '-graft-points', // Specify paths for files to be added to the ISO image
       '-eltorito-alt-boot', // Specify an alternative boot image
@@ -164,7 +164,6 @@ echo "${this.username} ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
       '-no-emul-boot', // Boot image is 'no emulation' type
       // '-isohybrid-mbr', '/usr/share/syslinux/isohdpfx.bin', // this is for hybrid boot, cdrom and usb. requires syslinux
       '-isohybrid-gpt-basdat', // Create a GPT partition table for UEFI booting
-      '-no-emul-toc', // Do not emulate a table of contents
       '-boot-load-size', '4', // Set the number of virtual sectors to load in no-emulation mode
       '-boot-info-table', // Include a boot information table in the boot catalog
       extractDir // The directory where files to be added to the ISO are located
