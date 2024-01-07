@@ -906,24 +906,33 @@ export class Libvirt {
   async getVncPort(domainName: string): Promise<number> {
     this.debug.log(`Getting VNC port for domain: ${domainName}`);
     const domain = this.domainLookupByName(domainName);
+    this.debug.log('Domain obtained');
     const xml = this.libvirt.virDomainGetXMLDesc(domain, 0);
+    this.debug.log('Domain XML description obtained', xml);
     
     if (!xml) {
       throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_OPERATION_FAILED);
     }
 
+
     const parser = new DOMParser();
+    this.debug.log('Creating XML parser');
     const xmlDoc = parser.parseFromString(xml, 'text/xml');
+    this.debug.log('XML document parsed');
 
     // Get the <graphics> elements
     const graphicsElements = xmlDoc.getElementsByTagName('graphics');
 
+    this.debug.log('Graphics elements obtained');
     // Iterate over the <graphics> elements
     for (let i = 0; i < graphicsElements.length; i++) {
+      this.debug.log('Iterating over graphics elements');
       const graphicsElement = graphicsElements[i];
+      this.debug.log('Graphics element obtained');
 
       // Check if the type attribute is 'vnc'
       if (graphicsElement.getAttribute('type') === 'vnc') {
+        this.debug.log('Found VNC graphics element');
         // Get the port attribute and parse it as an integer
         const port = parseInt(graphicsElement.getAttribute('port') || '-1', 10);
         this.debug.log(`Found VNC port: ${port}`);
