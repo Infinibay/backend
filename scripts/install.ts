@@ -19,6 +19,8 @@ function prepareFolders() {
   if (!fs.existsSync('/opt/infinibay/iso/fedora')) {
     fs.mkdirSync('/opt/infinibay/iso/fedora')
   }
+
+  // disks, uefi
 }
 
 function getCurrentAndLastUbuntuVersion() {
