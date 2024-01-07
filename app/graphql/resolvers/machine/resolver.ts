@@ -197,6 +197,7 @@ export class MachineResolver implements MachineResolverInterface {
         if (!configuration) {
             return null
         }
+        libvirt.connect('qemu:///system')
         const port = await libvirt.getVncPort(machine.internalName)
 
         if (machine && machine.userId == context.user?.id) {
