@@ -1,5 +1,7 @@
 import { Application } from '@prisma/client';
 import { randomBytes, createHash } from 'crypto';
+import { spawn } from 'child_process';
+import * as fs from 'fs';
 
 import { UnattendedManagerBase } from './unattendedManagerBase';
 import { Debugger } from '@utils/debug';
@@ -124,6 +126,51 @@ echo "${this.username} ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
   # Create a single root partition using the ext4 filesystem that grows to fill the disk
   part / --fstype=ext4 --grow
   `;
+  }
+
+  protected async modifyGrubConfig(grubCfgPath: string): Promise<void> {
+    // Read the existing GRUB configuration file
+    const grubConfig = fs.readFileSync(grubCfgPath, 'utf8');
+
+    // Define the kickstart parameter
+    const kickstartParam = `inst.ks=cdrom:/ks.cfg`;
+
+    // Modify the GRUB configuration to include the kickstart file parameter
+    const modifiedGrubConfig = grubConfig.replace(/(linux.*?)(\s|$)/g, `$1 ${kickstartParam}$2`);
+
+    // Write the modified GRUB configuration back to the file
+    fs.writeFileSync(grubCfgPath, modifiedGrubConfig, 'utf8');
+  }
+
+  protected async createISO(newIsoPath: string, extractDir: string): Promise<void> {
+    // Ensure the extractDir exists and has content
+    if (!fs.existsSync(extractDir)) {
+      throw new Error('Extraction directory does not exist.');
+    }
+
+    // Split the command into parts for execCommand
+    const isoCreationCommandParts = [
+      'xorriso',
+      '-as', 'mkisofs',
+      '-iso-level', '3',
+      '-full-iso9660-filenames',
+      '-volid', 'Fedora-Live',
+      '-appid', 'Fedora Live CD',
+      '-output', newIsoPath,
+      '-graft-points',
+      '-eltorito-alt-boot',
+      '-e', 'images/efiboot.img',
+      '-no-emul-boot',
+      // '-isohybrid-mbr', '/usr/share/syslinux/isohdpfx.bin', // this is for hybrid boot, cdrom and usb. requires syslinux
+      '-isohybrid-gpt-basdat',
+      '-no-emul-toc',
+      '-boot-load-size', '4',
+      '-boot-info-table',
+      '--', extractDir
+    ];
+
+    // Use the execCommand method from the parent class
+    await this.executeCommand(isoCreationCommandParts);
   }
 
   // ... other methods ...

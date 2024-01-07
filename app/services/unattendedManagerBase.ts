@@ -121,7 +121,7 @@ export class UnattendedManagerBase {
    * @returns {Promise<void>}
    */
   protected async createISO(newIsoPath: string, extractDir: string): Promise<void> {
-    await this.executeCommand(['genisoimage', '-o', newIsoPath, extractDir]);
+    throw new Error('Not implemented');
   }
 
   /**

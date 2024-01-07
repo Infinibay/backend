@@ -132,8 +132,9 @@ async function install() {
   prepareFolders()
   downloadUbuntu()
   downloadFedora()
-  // genisoimage
+  // genisoimage ??? maybe not needed, xorriso is better
   // 7z
+  // xorriso
 }
 
 install()
