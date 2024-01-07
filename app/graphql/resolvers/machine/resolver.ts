@@ -197,7 +197,7 @@ export class MachineResolver implements MachineResolverInterface {
         if (!configuration) {
             return null
         }
-        const port = await libvirt.getVncPort(id)
+        const port = await libvirt.getVncPort(machine.internalName)
 
         if (machine && machine.userId == context.user?.id) {
             return {
