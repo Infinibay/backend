@@ -160,7 +160,7 @@ echo "${this.username} ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
       '-output', newIsoPath, // Specify the filename for the output ISO image
       '-graft-points', // Specify paths for files to be added to the ISO image
       '-eltorito-alt-boot', // Specify an alternative boot image
-      '-e', 'images/efiboot.img', // Specify the path to the EFI boot image
+      '-e', '/EFI/BOOT/BOOTX64.EFI', // Specify the path to the EFI boot image
       '-no-emul-boot', // Boot image is 'no emulation' type
       // '-isohybrid-mbr', '/usr/share/syslinux/isohdpfx.bin', // this is for hybrid boot, cdrom and usb. requires syslinux
       '-isohybrid-gpt-basdat', // Create a GPT partition table for UEFI booting
