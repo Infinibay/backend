@@ -155,7 +155,7 @@ echo "${this.username} ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
     const bootImg = `${bootImgDir}/efi.img`;
   
     await this.executeCommand(['mkdir', '-p', path.dirname(bootImg)]);
-    await this.executeCommand(['truncate', '-s', '8M', bootImg]);
+    await this.executeCommand(['dd', 'if=/dev/zero', `of=${bootImg}`, 'bs=1M', 'count=8']);
     await this.executeCommand(['mkfs.vfat', bootImg]);
     await this.executeCommand(['mount', bootImg, bootImgData]);
     await this.executeCommand(['mkdir', '-p', `${bootImgData}/EFI/BOOT`]);
