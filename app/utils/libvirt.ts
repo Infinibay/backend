@@ -904,6 +904,7 @@ export class Libvirt {
   }
 
   async getVncPort(domainName: string): Promise<number> {
+    this.debug.log(`Getting VNC port for domain: ${domainName}`);
     const domain = this.domainLookupByName(domainName);
     const xml = this.libvirt.virDomainGetXMLDesc(domain, 0);
     
@@ -911,12 +912,16 @@ export class Libvirt {
       throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_OPERATION_FAILED);
     }
 
+    this.debug.log('XML obtained', xml);
+
     const result = await parseStringPromise(xml);
     const graphics = result.domain.devices[0].graphics;
 
     for (const graphic of graphics) {
       if (graphic.$.type === 'vnc') {
-        return parseInt(graphic.$.port, 10);
+        const port = parseInt(graphic.$.port, 10);
+        this.debug.log(`Found VNC port: ${port}`);
+        return port;
       }
     }
 
