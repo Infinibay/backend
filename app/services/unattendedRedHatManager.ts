@@ -159,6 +159,8 @@ echo "${this.username} ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
     await this.executeCommand(['mkfs.vfat', bootImg]);
     await this.executeCommand(['sudo', 'mount', '-o', 'loop', bootImg, bootImgData]);
     await this.executeCommand(['sudo', 'mkdir', '-p', `${bootImgData}/EFI/BOOT`]);
+    // change owner of bootImgData to current user
+    await this.executeCommand(['sudo', 'chown', '-R', `${process.env.USER}:${process.env.USER}`, bootImgData]);
   
     await this.executeCommand([
       'grub-mkimage',
