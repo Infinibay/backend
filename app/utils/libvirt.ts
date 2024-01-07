@@ -925,7 +925,7 @@ export class Libvirt {
       // Check if the type attribute is 'vnc'
       if (graphicsElement.getAttribute('type') === 'vnc') {
         // Get the port attribute and parse it as an integer
-        const port = parseInt(graphicsElement.getAttribute('port'), 10);
+        const port = parseInt(graphicsElement.getAttribute('port') || '-1', 10);
         this.debug.log(`Found VNC port: ${port}`);
         return port;
       }
