@@ -167,7 +167,7 @@ echo "${this.username} ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
       '-no-emul-toc', // Do not emulate a table of contents
       '-boot-load-size', '4', // Set the number of virtual sectors to load in no-emulation mode
       '-boot-info-table', // Include a boot information table in the boot catalog
-      , extractDir // The directory where files to be added to the ISO are located
+      extractDir // The directory where files to be added to the ISO are located
     ];
 
     // Use the execCommand method from the parent class
