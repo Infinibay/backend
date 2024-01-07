@@ -2,6 +2,7 @@ import { Application } from '@prisma/client';
 import { randomBytes, createHash } from 'crypto';
 import { spawn } from 'child_process';
 import * as fs from 'fs';
+import * as path from 'path';
 
 import { UnattendedManagerBase } from './unattendedManagerBase';
 import { Debugger } from '@utils/debug';
@@ -147,8 +148,34 @@ echo "${this.username} ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
     if (!fs.existsSync(extractDir)) {
       throw new Error('Extraction directory does not exist.');
     }
-
-    // Split the command into parts for execCommand
+  
+    // Create ESP image file
+    const bootImgData = await this.executeCommand(['mktemp', '-d']);
+    const bootImgDir = await this.executeCommand(['mktemp', '-d']);
+    const bootImg = `${bootImgDir}/efi.img`;
+  
+    await this.executeCommand(['mkdir', '-p', path.dirname(bootImg)]);
+    await this.executeCommand(['truncate', '-s', '8M', bootImg]);
+    await this.executeCommand(['mkfs.vfat', bootImg]);
+    await this.executeCommand(['mount', bootImg, bootImgData]);
+    await this.executeCommand(['mkdir', '-p', `${bootImgData}/EFI/BOOT`]);
+  
+    await this.executeCommand([
+      'grub-mkimage',
+      '-C', 'xz',
+      '-O', 'x86_64-efi',
+      '-p', '/boot/grub',
+      '-o', `${bootImgData}/EFI/BOOT/bootx64.efi`,
+      'boot', 'linux', 'search', 'normal', 'configfile',
+      'part_gpt', 'btrfs', 'ext2', 'fat', 'iso9660', 'loopback',
+      'test', 'keystatus', 'gfxmenu', 'regexp', 'probe',
+      'efi_gop', 'efi_uga', 'all_video', 'gfxterm', 'font',
+      'echo', 'read', 'ls', 'cat', 'png', 'jpeg', 'halt', 'reboot'
+    ]);
+  
+    await this.executeCommand(['umount', bootImgData]);
+    await this.executeCommand(['rm', '-rf', bootImgData]);
+  
     // Define the command and arguments for creating a new ISO image
     const isoCreationCommandParts = [
       'xorriso',
@@ -158,12 +185,12 @@ echo "${this.username} ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
       '-V', 'Fedora_Live', // Volume ID, adjusted to comply with ISO 9660 rules
       '-J', // for Joliet directory information
       '-joliet-long', // allow Joliet file names of up to 103 Unicode characters
-      '-append_partition', '2', '0xef', `${extractDir}/EFI/BOOT/bootx64.efi`, // append the EFI boot partition
+      '-append_partition', '2', '0xef', bootImg, // append the EFI boot partition
       '-partition_cyl_align', 'all',
       '-o', newIsoPath, // output file
       extractDir // the path to the files to be included in the ISO
     ];
-
+  
     // Use the execCommand method from the parent class
     await this.executeCommand(isoCreationCommandParts);
   }

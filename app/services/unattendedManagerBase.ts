@@ -153,33 +153,35 @@ export class UnattendedManagerBase {
    * @param {string[]} commandParts - The command to execute and its arguments.
    * @returns {Promise<void>}
    */
-  protected executeCommand(commandParts: string[]): Promise<void> {
+  protected executeCommand(commandParts: string[]): Promise<string> {
     return new Promise((resolve, reject) => {
-        console.log(`Executing command: `, commandParts[0], commandParts.slice(1));
-        const process = spawn(commandParts[0], commandParts.slice(1));
-
-        process.stdout.on('data', (data) => {
-            console.log(`stdout: ${data}`);
-        });
-
-        process.stderr.on('data', (data) => {
-            console.error(`stderr: ${data}`);
-        });
-
-        process.on('close', (code) => {
-            if (code === 0) {
-                console.log(`Command executed successfully: ${commandParts.join(' ')}`);
-                resolve();
-            } else {
-                console.error(`Command failed with exit code ${code}: ${commandParts.join(' ')}`);
-                reject(new Error(`Command failed with exit code ${code}`));
-            }
-        });
-
-        process.on('error', (error) => {
-            console.error(`Error occurred while executing command: ${commandParts.join(' ')}`);
-            reject(error);
-        });
+      console.log(`Executing command: `, commandParts[0], commandParts.slice(1));
+      const process = spawn(commandParts[0], commandParts.slice(1));
+      let output = '';
+  
+      process.stdout.on('data', (data) => {
+        console.log(`stdout: ${data}`);
+        output += data;
+      });
+  
+      process.stderr.on('data', (data) => {
+        console.error(`stderr: ${data}`);
+      });
+  
+      process.on('close', (code) => {
+        if (code === 0) {
+          console.log(`Command executed successfully: ${commandParts.join(' ')}`);
+          resolve(output);
+        } else {
+          console.error(`Command failed with exit code ${code}: ${commandParts.join(' ')}`);
+          reject(new Error(`Command failed with exit code ${code}`));
+        }
+      });
+  
+      process.on('error', (error) => {
+        console.error(`Error occurred while executing command: ${commandParts.join(' ')}`);
+        reject(error);
+      });
     });
   }
 }
