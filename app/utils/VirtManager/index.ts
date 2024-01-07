@@ -231,6 +231,7 @@ export class VirtManager {
     xmlGenerator.setVCPUs(template.cores);
     xmlGenerator.enableTPM('2.0');
     xmlGenerator.setStorage(template.storage);
+    xmlGenerator.setUEFI();
     xmlGenerator.setBootDevice(['cdrom', 'hd']);
     if (newIsoPath) {
       xmlGenerator.addCDROM(newIsoPath, 'sata');

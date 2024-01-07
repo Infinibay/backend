@@ -21,7 +21,9 @@ export class XMLGenerator {
   }
   
   setMemory(size: number): void {
-    this.xml.domain.memory = [size];
+    // Convert size from Gb to KiB (1 Gb = 1024 * 1024 KiB)
+    const sizeInKiB = size * 1024 * 1024;
+    this.xml.domain.memory = [{ _: sizeInKiB, $: { unit: 'KiB' } }];
   }
   
   setVCPUs(count: number): void {
@@ -42,6 +44,14 @@ export class XMLGenerator {
         // encryption: [{ $: { secret: secretUUID } }]
       }]
     }];
+  }
+
+  setUEFI(): void {
+    const efiPath = '/usr/share/OVMF/OVMF_CODE.fd';
+    const nvramPath = `/opt/infinibay/uefi/${this.id}_VARS.fd`;
+    this.xml.domain.os[0].type[0].$.machine = 'pc-q35-2.11';
+    this.xml.domain.os[0].loader = [{ _: efiPath, $: { readonly: 'yes', type: 'pflash' } }];
+    this.xml.domain.os[0].nvram = [{ _: nvramPath }];
   }
 
   addDisk(path: string, bus: 'ide' | 'sata' | 'virtio', size: number): string {
