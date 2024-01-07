@@ -905,7 +905,7 @@ export class Libvirt {
 
   async getVncPort(domainName: string): Promise<number> {
     this.debug.log(`Getting VNC port for domain: ${domainName}`);
-    const domain = this.domainLookupByName(domainName);
+    const domain = this.libvirt.virDomainLookupByName(this.connection, domainName);
     this.debug.log('Domain obtained');
     const xml = this.libvirt.virDomainGetXMLDesc(domain, 0);
     this.debug.log('Domain XML description obtained', xml);
