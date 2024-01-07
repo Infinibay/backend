@@ -54,6 +54,7 @@ export class XMLGenerator {
   }
 
   setUEFI(): void {
+    this.enableACPI();
     const efiPath = '/usr/share/OVMF/OVMF_CODE.fd';
     const nvramPath = `/opt/infinibay/uefi/${this.id}_VARS.fd`;
     this.xml.domain.os[0].type[0].$.machine = 'pc-q35-2.11';
