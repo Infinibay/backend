@@ -3,6 +3,7 @@ import { randomBytes, createHash } from 'crypto';
 import { spawn } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as os from 'os';
 
 import { UnattendedManagerBase } from './unattendedManagerBase';
 import { Debugger } from '@utils/debug';
@@ -153,14 +154,16 @@ echo "${this.username} ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
     const bootImgDir = (await this.executeCommand(['mktemp', '-d'])).trim();
     const bootImgData = (await this.executeCommand(['mktemp', '-d'])).trim();
     const bootImg = `${bootImgDir}/efi.img`;
+    const uid = os.userInfo().uid;
+    const gid = os.userInfo().gid;
   
     await this.executeCommand(['mkdir', '-p', path.dirname(bootImg)]);
     await this.executeCommand(['dd', 'if=/dev/zero', `of=${bootImg}`, 'bs=1M', 'count=8']);
     await this.executeCommand(['mkfs.vfat', bootImg]);
-    await this.executeCommand(['sudo', 'mount', '-o', 'loop', bootImg, bootImgData]);
+    await this.executeCommand(['sudo', 'mount', '-o', `loop,uid=${uid},gid=${gid}`, bootImg, bootImgData]);
     await this.executeCommand(['sudo', 'mkdir', '-p', `${bootImgData}/EFI/BOOT`]);
     // change owner of bootImgData to current user
-    await this.executeCommand(['sudo', 'chown', '-R', `${process.env.USER}:${process.env.USER}`, bootImgData]);
+    // await this.executeCommand(['sudo', 'chown', '-R', `${process.env.USER}:${process.env.USER}`, bootImgData]);
   
     await this.executeCommand([
       'grub-mkimage',
