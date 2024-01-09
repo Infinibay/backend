@@ -138,7 +138,9 @@ part / --fstype=ext4 --grow
     const kickstartParam = `inst.ks=cdrom:/ks.cfg`;
 
     // Modify the GRUB configuration to include the kickstart file parameter
-    const modifiedGrubConfig = grubConfig.replace(/(^\s*linux\s+.*)/gm, `$1 inst.ks=cdrom:/ks.cfg`);
+    let modifiedGrubConfig = grubConfig.replace(/(^\s*linux\s+.*)/gm, `$1 inst.ks=cdrom:/ks.cfg`);
+    // Update root=.* to be root=live:CDLABEL=Infinibay
+    modifiedGrubConfig = modifiedGrubConfig.replace(/(^\s*linux\s+.*\s+root=)(.*?)(\s+.*)/gm, `$1live:CDLABEL=Infinibay $3`);
 
     // Write the modified GRUB configuration back to the file
     fs.writeFileSync(grubCfgPath, modifiedGrubConfig, 'utf8');
@@ -159,6 +161,7 @@ part / --fstype=ext4 --grow
     const isoCreationCommandParts = [
       'grub-mkrescue',
       '-o', newIsoPath, // output file
+      '-V', 'Infinibay', // Volume ID
       extractDir // the path to the files to be included in the ISO
     ];
   
