@@ -138,7 +138,7 @@ part / --fstype=ext4 --grow
     const kickstartParam = `inst.ks=cdrom:/ks.cfg`;
 
     // Modify the GRUB configuration to include the kickstart file parameter
-    const modifiedGrubConfig = grubConfig.replace(/(linux.*?)(\s|$)/g, `$1 ${kickstartParam}$2`);
+    const modifiedGrubConfig = grubConfig.replace(/(^\s*linux)(\s+.*)($)/g, `$1 $2 ${kickstartParam}$3`);
 
     // Write the modified GRUB configuration back to the file
     fs.writeFileSync(grubCfgPath, modifiedGrubConfig, 'utf8');
