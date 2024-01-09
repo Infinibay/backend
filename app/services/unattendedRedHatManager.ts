@@ -123,7 +123,7 @@ network --bootproto=dhcp --onboot=on
   private generatePartitionConfig(): string {
     return `
 # Clear all existing partitions on the disk and initialize disk label
-clearpart --all --initlabel --drives=sda
+clearpart --all --initlabel --drives=vda
 
 # Create a single root partition using the ext4 filesystem that grows to fill the disk
 part / --fstype=ext4 --grow
