@@ -134,8 +134,9 @@ async function install() {
   downloadFedora()
   // genisoimage ??? maybe not needed, xorriso is better
   // 7z
-  // xorriso
-}
+  // xorriso and grub-mkrescue
+  // isolinux
+  // syslinux
 
 install()
 // https://releases.ubuntu.com/23.10/ubuntu-23.10.1-desktop-amd64.iso

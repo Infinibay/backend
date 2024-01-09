@@ -52,15 +52,15 @@ export class UnattendedRedHatManager extends UnattendedManagerBase {
   `;
   
     return `
-  #version=RHEL8
-  ${partitionConfig}
-  ${networkConfig}
-  # System language
-  lang en_US.UTF-8
-  # Root password
-  rootpw --iscrypted ${rootPassword}
-  ${postInstallSection}
-  reboot
+#version=RHEL8
+${partitionConfig}
+${networkConfig}
+# System language
+lang en_US.UTF-8
+# Root password
+rootpw --iscrypted ${rootPassword}
+${postInstallSection}
+reboot
   `;
   }
 
@@ -115,18 +115,18 @@ echo "${this.username} ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
   private generateNetworkConfig(): string {
     // Setting up the network configuration to use DHCP
     return `
-  # Network configuration
-  network --bootproto=dhcp --onboot=on
+# Network configuration
+network --bootproto=dhcp --onboot=on
   `;
   }
 
   private generatePartitionConfig(): string {
     return `
-  # Clear all existing partitions on the disk and initialize disk label
-  clearpart --all --initlabel --drives=sda
+# Clear all existing partitions on the disk and initialize disk label
+clearpart --all --initlabel --drives=sda
 
-  # Create a single root partition using the ext4 filesystem that grows to fill the disk
-  part / --fstype=ext4 --grow
+# Create a single root partition using the ext4 filesystem that grows to fill the disk
+part / --fstype=ext4 --grow
   `;
   }
 
@@ -149,49 +149,15 @@ echo "${this.username} ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
     if (!fs.existsSync(extractDir)) {
       throw new Error('Extraction directory does not exist.');
     }
-  
-    // Create ESP image file
-    const bootImgDir = (await this.executeCommand(['mktemp', '-d'])).trim();
-    const bootImgData = (await this.executeCommand(['mktemp', '-d'])).trim();
-    const bootImg = `${bootImgDir}/efi.img`;
-    const uid = os.userInfo().uid;
-    const gid = os.userInfo().gid;
-  
-    await this.executeCommand(['mkdir', '-p', path.dirname(bootImg)]);
-    await this.executeCommand(['dd', 'if=/dev/zero', `of=${bootImg}`, 'bs=1M', 'count=8']);
-    await this.executeCommand(['mkfs.vfat', bootImg]);
-    await this.executeCommand(['sudo', 'mount', '-o', `loop,uid=${uid},gid=${gid}`, bootImg, bootImgData]);
-    await this.executeCommand(['sudo', 'mkdir', '-p', `${bootImgData}/EFI/BOOT`]);
-    // change owner of bootImgData to current user
-    // await this.executeCommand(['sudo', 'chown', '-R', `${process.env.USER}:${process.env.USER}`, bootImgData]);
-  
-    await this.executeCommand([
-      'grub-mkimage',
-      '-C', 'xz',
-      '-O', 'x86_64-efi',
-      '-p', '/boot/grub',
-      '-o', `${bootImgData}/EFI/BOOT/bootx64.efi`,
-      'boot', 'linux', 'search', 'normal', 'configfile',
-      'part_gpt', 'btrfs', 'ext2', 'fat', 'iso9660', 'loopback',
-      'test', 'keystatus', 'gfxmenu', 'regexp', 'probe',
-      'efi_gop', 'efi_uga', 'all_video', 'gfxterm', 'font',
-      'echo', 'read', 'ls', 'cat', 'png', 'jpeg', 'halt', 'reboot'
-    ]);
-  
-    await this.executeCommand(['sudo', 'umount', bootImgData]);
-    await this.executeCommand(['sudo', 'rm', '-rf', bootImgData]);
+
+    //move boot/grub2 into boot/grub
+    await this.executeCommand(['mv', path.join(extractDir, 'boot/grub2'), path.join(extractDir, 'boot/grub')]);
+
+    await this.modifyGrubConfig(path.join(extractDir, 'boot/grub/grub.cfg'));
   
     // Define the command and arguments for creating a new ISO image
     const isoCreationCommandParts = [
-      'xorriso',
-      '-as', 'mkisofs',
-      '-iso-level', '3',
-      '-r', // for Rock Ridge directory information
-      '-V', 'Fedora_Live', // Volume ID, adjusted to comply with ISO 9660 rules
-      '-J', // for Joliet directory information
-      '-joliet-long', // allow Joliet file names of up to 103 Unicode characters
-      '-append_partition', '2', '0xef', bootImg, // append the EFI boot partition
-      '-partition_cyl_align', 'all',
+      'grub-mkrescue',
       '-o', newIsoPath, // output file
       extractDir // the path to the files to be included in the ISO
     ];
