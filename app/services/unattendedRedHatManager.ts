@@ -52,20 +52,61 @@ export class UnattendedRedHatManager extends UnattendedManagerBase {
   
     return `
 #version=RHEL8
-# Repos
-repo --name=fedora --mirrorlist=http://mirrors.fedoraproject.org/metalink?repo=fedora-$releasever&arch=$basearch
-repo --name=updates --mirrorlist=http://mirrors.fedoraproject.org/metalink?repo=updates-released-f$releasever&arch=$basearch
-repo --name=updates-testing --mirrorlist=http://mirrors.fedoraproject.org/metalink?repo=updates-testing-f$releasever&arch=$basearch
-url --mirrorlist=https://mirrors.fedoraproject.org/metalink?repo=fedora-$releasever&arch=$basearch
-repo --name=google-chrome --install --baseurl="https://dl.google.com/linux/chrome/rpm/stable/x86_64" --cost=0
 
-ignoredisk --only-use=vda
-# TODO: allow for keyboard and language configuration
-keyboard --vckeymap=us --xlayouts='us'
+# Use graphical install
+graphical
+
+url --url="http://download.fedoraproject.org/pub/fedora/linux/releases/$releasever/Everything/$basearch/os/"
+
+# System language
 lang en_US.UTF-8
-timezone America/Vancouver
 
-firstboot --enable
+# Keyboard layouts
+keyboard us
+
+# Network information
+network  --bootproto=dhcp --device=eth0 --onboot=on --activate
+network  --hostname=fedora
+
+# Root password
+rootpw --iscrypted ${rootPassword}
+
+# System timezone
+timezone America/New_York --isUtc
+
+# System bootloader configuration
+bootloader --location=mbr --boot-drive=vda
+
+# Clear the Master Boot Record
+zerombr
+
+# Partition clearing information
+clearpart --all --initlabel --drives=vda
+
+# Disk partitioning information
+autopart --type=lvm
+
+# Enable repositories
+repo --name=fedora --mirrorlist=https://mirrors.fedoraproject.org/mirrorlist?repo=fedora-$(rpm -E %fedora)&arch=$basearch
+repo --name=updates --mirrorlist=https://mirrors.fedoraproject.org/mirrorlist?repo=updates-released-f$(rpm -E %fedora)&arch=$basearch
+
+# Reboot after installation
+reboot
+
+# System services
+services --enabled="chronyd"
+
+# System authorization information
+auth  --useshadow  --passalgo=sha512
+
+# Create a user
+user --name=${this.username} --password=${hashedPassword} --iscrypted --gecos="${this.username}"
+
+# Firewall configuration
+firewall --enabled --ssh
+
+# Do not configure the X Window System
+skipx
 
 ${partitionConfig}
 ${networkConfig}
@@ -77,6 +118,10 @@ ${networkConfig}
 -@dial-up
 -@input-methods
 -@standard
+
+# VM performance
+qemu-guest-agent
+spice-vdagent
 
 # Make sure to sync any additions / removals done here with
 # workstation-product-environment in comps
@@ -101,14 +146,10 @@ fedora-productimg-workstation
 -reiserfs-utils
 %end
 
-# System language
-lang en_US.UTF-8
-# Root password
-rootpw --iscrypted ${rootPassword}
-user --name=${this.username} --password=${hashedPassword} --iscrypted --gecos="${this.username}"
-
-
 ${postInstallSection}
+
+%addon com_redhat_kdump --enable --reserve-mb='auto'
+%end
 
 # Reboot After Installation
 reboot --eject
@@ -199,7 +240,7 @@ part / --fstype=ext4 --grow
 
     // Modify the GRUB configuration to include the kickstart file parameter
     let modifiedGrubConfig = grubConfig.replace(/(^\s*linux\s+.*)/gm, `$1 inst.ks=cdrom:/ks.cfg`);
-    // Update root=.* to be root=live:CDLABEL=Infinibay
+    // Update inst.stage2=.* to be inst.stage2=live:CDLABEL=Infinibay
     modifiedGrubConfig = modifiedGrubConfig.replace(/(^\s*linux\s+.*\s+inst.stage2=)(.*?)(\s+.*)/gm, `$1live:CDLABEL=Infinibay $3`);
 
     // Write the modified GRUB configuration back to the file
@@ -228,7 +269,7 @@ part / --fstype=ext4 --grow
     // Use the execCommand method from the parent class
     await this.executeCommand(isoCreationCommandParts);
     // Remove the extracted directory
-    await this.executeCommand(['rm', '-rf', extractDir]);
+    // await this.executeCommand(['rm', '-rf', extractDir]);
   }
 
   // ... other methods ...
