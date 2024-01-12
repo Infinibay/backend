@@ -49,7 +49,7 @@ export class UnattendedManagerBase {
   
       // Optional: Clean up extracted files
       this.debug.log('Cleaning up extracted files');
-      await this.cleanup(extractDir);
+      //await this.cleanup(extractDir);
   
       this.debug.log('New image generated successfully');
       return newIsoPath;
