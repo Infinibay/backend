@@ -35,6 +35,16 @@ export class XMLGenerator {
     this.xml.domain.os[0].boot = devices.map(device => ({ $: { dev: device } }));
   }
 
+  addNetworkInterface(network: string, model: string) {
+    const networkInterface = {
+      $: { type: 'network' },
+      source: [{ $: { network: network } }],
+      model: [{ $: { type: model } }],
+    };
+    this.xml.domain.devices[0].interface = this.xml.domain.devices[0].interface || [];
+    this.xml.domain.devices[0].interface.push(networkInterface);
+  }
+
   enableTPM(version: '1.2' | '2.0' = '2.0'): void {
     const secretUUID = uuidv4();
     this.xml.domain.devices[0].tpm = [{
