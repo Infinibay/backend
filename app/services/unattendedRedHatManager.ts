@@ -46,8 +46,6 @@ export class UnattendedRedHatManager extends UnattendedManagerBase {
     // Combine all post-installation commands into one %post section
     const postInstallSection = `
 %post
-  ${applicationsPostCommands}
-
 # Explicitly set graphical.target as default as this is how initial-setup detects which version to run
 systemctl set-default graphical.target
 %end
@@ -74,7 +72,7 @@ lang en_US.UTF-8
 keyboard us
 
 # Network information
-network --bootproto=dhcp --device=link --activate
+network --bootproto=dhcp --onboot=on --activate
 
 # Root password
 rootpw --lock --iscrypted locked
@@ -111,9 +109,6 @@ reboot --eject
 # Firewall configuration
 firewall --enabled --ssh
 
-${partitionConfig}
-${networkConfig}
-
 # Package Selection
 %packages
 # Install full fedora workstation (https://github.com/kororaproject/kp-config/blob/master/kickstart.d/fedora-workstation-common.ks)
@@ -148,6 +143,8 @@ fedora-productimg-workstation
 -gfs2-utils
 -reiserfs-utils
 %end
+
+${applicationsPostCommands}
 
 %addon com_redhat_kdump --enable --reserve-mb='auto'
 %end
@@ -216,7 +213,7 @@ network --bootproto=dhcp --onboot=on
 bootloader --driveorder=vda
 
 # Remove all existing partitions
-clearpart --drives=sda --all
+clearpart --drives=vda --all
 
 # zerombr
 zerombr
