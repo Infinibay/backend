@@ -95,19 +95,20 @@ async function downloadFedora() {
   // Parse the HTML to find the download link
   const $ = cheerio.load(response.data);
   const link = $('a').filter((i, el) => {
-    // The download link is in a link that ends with '.iso'
-    return ($(el).attr('href') || '').endsWith('.iso');
+    // The download link is in a link that ends with '.iso' and contains 'netinst' in the filename
+    const href = $(el).attr('href') || '';
+    return href.endsWith('.iso') && href.includes('netinst');
   }).first();
 
   const href = link?.attr('href');
   if (!href) {
-    throw new Error('No download link found');
+    throw new Error('No netinst download link found');
   }
 
   // Extract the version from the link
   const versionMatch = href.match(/x86_64-(\d+)/);
   if (!versionMatch) {
-    throw new Error('No version found in download link');
+    throw new Error('No version found in netinst download link');
   }
   const version = versionMatch[1]
 

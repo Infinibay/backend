@@ -40,27 +40,78 @@ export class UnattendedRedHatManager extends UnattendedManagerBase {
     this.debug.log('Root password generated and encrypted');
     const applicationsPostCommands = this.generateApplicationsConfig(); // Returns commands without %post and %end tags
     this.debug.log('Applications post commands generated');
-    const userPostCommands = this.generateUserConfig(); // Returns commands without %post and %end tags
     this.debug.log('User post commands generated');
+    const hashedPassword = this.encryptPassword(this.password);
   
     // Combine all post-installation commands into one %post section
     const postInstallSection = `
   %post
   ${applicationsPostCommands}
-  ${userPostCommands}
   %end
   `;
   
     return `
 #version=RHEL8
+# Repos
+repo --name=fedora --mirrorlist=http://mirrors.fedoraproject.org/metalink?repo=fedora-$releasever&arch=$basearch
+repo --name=updates --mirrorlist=http://mirrors.fedoraproject.org/metalink?repo=updates-released-f$releasever&arch=$basearch
+repo --name=updates-testing --mirrorlist=http://mirrors.fedoraproject.org/metalink?repo=updates-testing-f$releasever&arch=$basearch
+url --mirrorlist=https://mirrors.fedoraproject.org/metalink?repo=fedora-$releasever&arch=$basearch
+repo --name=google-chrome --install --baseurl="https://dl.google.com/linux/chrome/rpm/stable/x86_64" --cost=0
+
+ignoredisk --only-use=vda
+# TODO: allow for keyboard and language configuration
+keyboard --vckeymap=us --xlayouts='us'
+lang en_US.UTF-8
+timezone America/Vancouver
+
+firstboot --enable
+
 ${partitionConfig}
 ${networkConfig}
+
+# Package Selection
+%packages
+# Install full fedora workstation (https://github.com/kororaproject/kp-config/blob/master/kickstart.d/fedora-workstation-common.ks)
+# Exclude unwanted groups that fedora-live-base.ks pulls in
+-@dial-up
+-@input-methods
+-@standard
+
+# Make sure to sync any additions / removals done here with
+# workstation-product-environment in comps
+@base-x
+@core
+@firefox
+@fonts
+@gnome-desktop
+@guest-desktop-agents
+@hardware-support
+@libreoffice
+@multimedia
+@networkmanager-submodules
+@printing
+@workstation-product
+
+# Branding for the installer
+fedora-productimg-workstation
+
+# Exclude unwanted packages from @anaconda-tools group
+-gfs2-utils
+-reiserfs-utils
+%end
+
 # System language
 lang en_US.UTF-8
 # Root password
 rootpw --iscrypted ${rootPassword}
+user --name=${this.username} --password=${hashedPassword} --iscrypted --gecos="${this.username}"
+
+
 ${postInstallSection}
-reboot
+
+# Reboot After Installation
+reboot --eject
   `;
   }
 
@@ -122,8 +173,17 @@ network --bootproto=dhcp --onboot=on
 
   private generatePartitionConfig(): string {
     return `
-# Clear all existing partitions on the disk and initialize disk label
-clearpart --all --initlabel --drives=vda
+# Configure Boot Loader
+bootloader --driveorder=vda
+
+# Remove all existing partitions
+clearpart --drives=sda --all
+
+# zerombr
+zerombr
+
+#Create required partitions (BIOS boot partition and /boot)
+reqpart --add-boot
 
 # Create a single root partition using the ext4 filesystem that grows to fill the disk
 part / --fstype=ext4 --grow
@@ -140,7 +200,7 @@ part / --fstype=ext4 --grow
     // Modify the GRUB configuration to include the kickstart file parameter
     let modifiedGrubConfig = grubConfig.replace(/(^\s*linux\s+.*)/gm, `$1 inst.ks=cdrom:/ks.cfg`);
     // Update root=.* to be root=live:CDLABEL=Infinibay
-    modifiedGrubConfig = modifiedGrubConfig.replace(/(^\s*linux\s+.*\s+root=)(.*?)(\s+.*)/gm, `$1live:CDLABEL=Infinibay $3`);
+    modifiedGrubConfig = modifiedGrubConfig.replace(/(^\s*linux\s+.*\s+inst.stage2=)(.*?)(\s+.*)/gm, `$1live:CDLABEL=Infinibay $3`);
 
     // Write the modified GRUB configuration back to the file
     fs.writeFileSync(grubCfgPath, modifiedGrubConfig, 'utf8');
@@ -167,6 +227,8 @@ part / --fstype=ext4 --grow
   
     // Use the execCommand method from the parent class
     await this.executeCommand(isoCreationCommandParts);
+    // Remove the extracted directory
+    await this.executeCommand(['rm', '-rf', extractDir]);
   }
 
   // ... other methods ...
