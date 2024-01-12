@@ -45,9 +45,12 @@ export class UnattendedRedHatManager extends UnattendedManagerBase {
   
     // Combine all post-installation commands into one %post section
     const postInstallSection = `
-  %post
+%post
   ${applicationsPostCommands}
-  %end
+
+# Explicitly set graphical.target as default as this is how initial-setup detects which version to run
+systemctl set-default graphical.target
+%end
   `;
   
     return `
@@ -56,7 +59,13 @@ export class UnattendedRedHatManager extends UnattendedManagerBase {
 # Use graphical install
 graphical
 
-url --url="http://download.fedoraproject.org/pub/fedora/linux/releases/$releasever/Everything/$basearch/os/"
+repo --name=fedora --mirrorlist=https://mirrors.fedoraproject.org/mirrorlist?repo=fedora-$releasever&arch=$basearch
+repo --name=updates --mirrorlist=https://mirrors.fedoraproject.org/mirrorlist?repo=updates-released-f$releasever&arch=$basearch
+#repo --name=updates-testing --mirrorlist=https://mirrors.fedoraproject.org/mirrorlist?repo=updates-testing-f$releasever&arch=$basearch
+url --mirrorlist=https://mirrors.fedoraproject.org/mirrorlist?repo=fedora-$releasever&arch=$basearch
+
+# Enable selinux
+selinux --enforcing
 
 # System language
 lang en_US.UTF-8
@@ -65,48 +74,42 @@ lang en_US.UTF-8
 keyboard us
 
 # Network information
-network  --bootproto=dhcp --device=eth0 --onboot=on --activate
-network  --hostname=fedora
+network --bootproto=dhcp --device=link --activate
 
 # Root password
-rootpw --iscrypted ${rootPassword}
+rootpw --lock --iscrypted locked
 
 # System timezone
-timezone America/New_York --isUtc
+timezone America/New_York
 
 # System bootloader configuration
-bootloader --location=mbr --boot-drive=vda
+bootloader --timeout=1
 
 # Clear the Master Boot Record
 zerombr
 
 # Partition clearing information
-clearpart --all --initlabel --drives=vda
+# clearpart --all --initlabel --drives=vda
+clearpart --all --initlabel --disklabel=msdos
 
 # Disk partitioning information
-autopart --type=lvm
-
-# Enable repositories
-repo --name=fedora --mirrorlist=https://mirrors.fedoraproject.org/mirrorlist?repo=fedora-$(rpm -E %fedora)&arch=$basearch
-repo --name=updates --mirrorlist=https://mirrors.fedoraproject.org/mirrorlist?repo=updates-released-f$(rpm -E %fedora)&arch=$basearch
-
-# Reboot after installation
-reboot
+# autopart --type=lvm
+autopart --type=btrfs --noswap
 
 # System services
-services --enabled="chronyd"
+services --enabled=sshd,NetworkManager,chronyd
 
 # System authorization information
-auth  --useshadow  --passalgo=sha512
+#auth  --useshadow  --passalgo=sha512
 
 # Create a user
 user --name=${this.username} --password=${hashedPassword} --iscrypted --gecos="${this.username}"
 
+# Reboot After Installation
+reboot --eject
+
 # Firewall configuration
 firewall --enabled --ssh
-
-# Do not configure the X Window System
-skipx
 
 ${partitionConfig}
 ${networkConfig}
@@ -146,13 +149,8 @@ fedora-productimg-workstation
 -reiserfs-utils
 %end
 
-${postInstallSection}
-
 %addon com_redhat_kdump --enable --reserve-mb='auto'
 %end
-
-# Reboot After Installation
-reboot --eject
   `;
   }
 
@@ -242,7 +240,6 @@ part / --fstype=ext4 --grow
     let modifiedGrubConfig = grubConfig.replace(/(^\s*linux\s+.*)/gm, `$1 inst.ks=cdrom:/ks.cfg`);
     // Update inst.stage2=.* to be inst.stage2=live:CDLABEL=Infinibay
     modifiedGrubConfig = modifiedGrubConfig.replace(/(^\s*linux\s+.*\s+inst.stage2=)(.*?)(\s+.*)/gm, `$1live:CDLABEL=Infinibay $3`);
-
     // Write the modified GRUB configuration back to the file
     fs.writeFileSync(grubCfgPath, modifiedGrubConfig, 'utf8');
   }
