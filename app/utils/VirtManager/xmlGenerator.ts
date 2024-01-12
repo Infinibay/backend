@@ -38,9 +38,10 @@ export class XMLGenerator {
   addNetworkInterface(network: string, model: string) {
     const networkInterface = {
       $: { type: 'network' },
-      source: [{ $: { network: network } }],
-      model: [{ $: { type: model } }],
+      source: [{ $: { network: 'default' } }],
+      model: [{ $: { type: 'virtio' } }],
     };
+  
     this.xml.domain.devices[0].interface = this.xml.domain.devices[0].interface || [];
     this.xml.domain.devices[0].interface.push(networkInterface);
   }
