@@ -25,7 +25,8 @@ export class UnattendedManagerBase {
       this.debug.log('Validating ISO path');
       const isoPath = this.validatePath(process.env.ISO_PATH, '/opt/infinibay/iso/fedora.iso');
       this.debug.log('Generating config');
-      const configPath = await this.generateConfig();
+      const configContent = await this.generateConfig();
+      this.debug.log(configContent);
       this.debug.log('Validating output path');
       const outputPath = this.validatePath(process.env.OUTPUT_PATH, '/opt/infinibay/isos');
   
@@ -37,7 +38,7 @@ export class UnattendedManagerBase {
       extractDir = await this.extractISO(isoPath);
       if (this.configFileName) {
         this.debug.log('Adding autoinstall config file');
-        await this.addAutonistallConfigFile(configPath, extractDir, this.configFileName);
+        await this.addAutonistallConfigFile(configContent, extractDir, this.configFileName);
       } else {
         this.debug.log('Error: configFileName is not set');
         throw new Error('configFileName is not set');
