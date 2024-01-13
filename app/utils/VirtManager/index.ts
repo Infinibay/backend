@@ -233,7 +233,7 @@ export class VirtManager {
     xmlGenerator.setStorage(template.storage);
     xmlGenerator.setUEFI();
     xmlGenerator.addNetworkInterface('default', 'virtio');
-    xmlGenerator.setBootDevice(['cdrom', 'hd']);
+    xmlGenerator.setBootDevice(['hd', 'cdrom']);
     if (newIsoPath) {
       xmlGenerator.addCDROM(newIsoPath, 'sata');
     }

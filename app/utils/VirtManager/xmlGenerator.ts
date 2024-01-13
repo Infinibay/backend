@@ -31,7 +31,7 @@ export class XMLGenerator {
     // this.xml.domain.cpu = [{ model: [{ _: 'host-model', $: { mode: 'custom', match: 'exact' } }], topology: [{ $: { sockets: '1', cores: count.toString(), threads: '1' } }] }];
     this.xml.domain.vcpu = [{ _: count, $: { placement: 'static', current: count } }];
     this.xml.domain.cpu = [{
-      model: [{ _: 'core2duo', $: { mode: 'custom', match: 'exact' } }],
+      model: [{ _: 'kvm64', $: { mode: 'custom', match: 'exact' } }],
       topology: [{ $: { sockets: '1', cores: count.toString(), threads: '1' } }],
       feature: [
         // fpu: Floating Point Unit, fundamental for any modern processor. Introduced in 1985.
@@ -85,7 +85,7 @@ export class XMLGenerator {
         // popcnt: POPCNT instruction, supported by most modern CPUs. Introduced in 2008.
         { $: { name: 'popcnt', policy: 'require' } },
         // aes: Advanced Encryption Standard New Instructions, common in CPUs post-2010. Introduced in 2010.
-        { $: { name: 'aes', policy: 'require' } },
+        // { $: { name: 'aes', policy: 'require' } }, // commented because cause issues in fedora 39
         // avx: Advanced Vector Extensions, common in CPUs post-2011. Introduced in 2011.
         { $: { name: 'avx', policy: 'require' } },
         // hypervisor: Indicates that the code is running on a hypervisor. Introduced in 2005.
