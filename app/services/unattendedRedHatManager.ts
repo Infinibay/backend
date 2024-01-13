@@ -62,10 +62,10 @@ graphical
 ##repo --name=updates-testing --mirrorlist=https://mirrors.fedoraproject.org/mirrorlist?repo=updates-testing-f$releasever&arch=$basearch
 #url --mirrorlist=https://mirrors.fedoraproject.org/mirrorlist?repo=fedora-$releasever&arch=$basearch
 
-repo --name=default --mirrorlist=https://mirrors.fedoraproject.org/mirrorlist?repo=fedora-39&arch=x86_64
-repo --name=updates --mirrorlist=https://mirrors.fedoraproject.org/mirrorlist?repo=updates-released-f$39&arch=x86_64
-#repo --name=updates-testing --mirrorlist=https://mirrors.fedoraproject.org/mirrorlist?repo=updates-testing-f$releasever&arch=$basearch
-url --mirrorlist=https://mirrors.fedoraproject.org/mirrorlist?repo=fedora-39&arch=x86_64
+#repo --name=default --mirrorlist=https://mirrors.fedoraproject.org/mirrorlist?repo=fedora-39&arch=x86_64
+#repo --name=updates --mirrorlist=https://mirrors.fedoraproject.org/mirrorlist?repo=updates-released-f$39&arch=x86_64
+##repo --name=updates-testing --mirrorlist=https://mirrors.fedoraproject.org/mirrorlist?repo=updates-testing-f$releasever&arch=$basearch
+#url --mirrorlist=https://mirrors.fedoraproject.org/mirrorlist?repo=fedora-39&arch=x86_64
 
 # Enable selinux
 selinux --enforcing
@@ -118,9 +118,6 @@ firewall --enabled --ssh
 %packages
 # Install full fedora workstation (https://github.com/kororaproject/kp-config/blob/master/kickstart.d/fedora-workstation-common.ks)
 # Exclude unwanted groups that fedora-live-base.ks pulls in
--@dial-up
--@input-methods
--@standard
 
 # VM performance
 qemu-guest-agent
@@ -130,19 +127,7 @@ spice-vdagent
 # workstation-product-environment in comps
 @base-x
 @core
-@firefox
-@fonts
-@gnome-desktop
-@guest-desktop-agents
-@hardware-support
-@libreoffice
-@multimedia
-@networkmanager-submodules
-@printing
-@workstation-product
-
-# Branding for the installer
-fedora-productimg-workstation
+@Fedora Workstation
 
 # Exclude unwanted packages from @anaconda-tools group
 -gfs2-utils
