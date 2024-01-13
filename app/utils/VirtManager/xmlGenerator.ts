@@ -90,8 +90,6 @@ export class XMLGenerator {
         { $: { name: 'avx', policy: 'require' } },
         // hypervisor: Indicates that the code is running on a hypervisor. Introduced in 2005.
         { $: { name: 'hypervisor', policy: 'require' } },
-        // ... other features ...
-        { $: { name: 'kvm', policy: 'require' } },
         // Add more features as needed
       ],
     }];
@@ -135,7 +133,7 @@ export class XMLGenerator {
     this.xml.domain.features[0].hap = [{}];  // Hardware Assisted Paging, also known as Extended Page Tables (EPT) or Nested Page Tables (NPT), improves performance of address translations.
     // this.xml.domain.features[0].viridian = [{}]; // Viridian enlightenments, improves performance and compatibility on Hyper-V.
     this.xml.domain.features[0].privnet = [{}]; // Private network, improves network performance by avoiding MAC address conflicts.
-    this.xml.domain.features[0].kvm = [{ hint_dedicated: { $: { state: 'on' } } }]; // KVM features for performance improvement.
+    this.xml.domain.features[0].kvm = [{ "hint-dedicated": { $: { state: 'on' } } }]; // KVM features for performance improvement.
     this.xml.domain.features[0].pvspinlock = [{ $: { state: 'on' } }]; // Paravirtualized spinlock, for improved performance in certain scenarios.
   }
 
