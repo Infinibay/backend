@@ -270,6 +270,8 @@ export class Libvirt {
       'virDomainGetInfo': ['int', ['pointer', 'pointer']],
       'virDomainGetName': ['string', ['pointer']],
       'virDomainGetState': ['int', ['pointer', 'pointer', 'pointer', 'uint']],
+      'virDomainSuspend': ['int', ['pointer']],
+      'virDomainResume': ['int', ['pointer']],
       // Add more functions as needed
     });
   }
