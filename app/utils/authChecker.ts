@@ -3,7 +3,7 @@ import { PrismaClient } from '@prisma/client'
 import jwt from 'jsonwebtoken'
 import { Debugger } from './debug'
 
-const debug = new Debugger('authChecker');
+const debug = new Debugger('auth');
 
 export const authChecker: AuthChecker<any> = async (
     { root, args, context, info },
@@ -12,8 +12,6 @@ export const authChecker: AuthChecker<any> = async (
     const token = context.req.headers.authorization;
     const prisma = new PrismaClient()
     let decoded: any = undefined
-    console.log('AAAAAAAAAAAAAAAAAAAAAAA')
-    console.log(token)
     if (!token) {
         debug.log('No token found.');
         return false
