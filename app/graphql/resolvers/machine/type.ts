@@ -20,6 +20,9 @@ export class Machine {
     @Field(() => ID)
     id: string = ''
 
+    @Field(() => String)
+    name: string = ''
+
     @Field(() => GraphQLJSONObject)
     config: any = {}
 

@@ -489,13 +489,11 @@ export class MachineResolver implements MachineResolverInterface {
             }
 
             // stop the vm if it's running
-            if (machine.status == 'running') {
-                try {
-                    await libvirt.powerOff(machine.internalName)
-                } catch (error) {
-                    this.debug.log("Error powering off machine")
-                    this.debug.log(error as string)
-                }
+            try {
+                await libvirt.powerOff(machine.internalName)
+            } catch (error) {
+                this.debug.log("Error powering off machine")
+                this.debug.log(error as string)
             }
 
             // Destroy the machine in the hypervisor
