@@ -1,12 +1,22 @@
 import { Application } from '@prisma/client';
-import { randomBytes, createHash } from 'crypto';
-import { spawn } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
-import * as os from 'os';
 
 import { UnattendedManagerBase } from './unattendedManagerBase';
-import { Debugger } from '@utils/debug';
+
+/**
+ * UnattendedRedHatManager is a class that extends UnattendedManagerBase.
+ * It is used to generate a Kickstart configuration file for unattended Red Hat installations.
+ * The class takes a username, password, and a list of applications as parameters.
+ * It generates a configuration file that includes the user credentials and the post-installation scripts for the applications (TODO).
+ * 
+ * Usage:
+ * const unattendedManager = new UnattendedRedHatManager(username, password, applications);
+ * const config = unattendedManager.generateConfig();
+ * 
+ * For more information on Kickstart installations, refer to the Red Hat documentation:
+ * https://access.redhat.com/documentation/en-us/red_hat_enterprise_linux/7/html/installation_guide/chap-kickstart-installations
+ */
 
 export class UnattendedRedHatManager extends UnattendedManagerBase {
   private username: string;
@@ -28,28 +38,19 @@ export class UnattendedRedHatManager extends UnattendedManagerBase {
     this.debug.log('UnattendedRedHatManager initialized');
   }
 
-  
-
  generateConfig(): string {
-    this.debug.log('Generating configuration');
-    // const partitionConfig = this.generatePartitionConfig();
-    this.debug.log('Partition configuration generated');
-    // const networkConfig = this.generateNetworkConfig();
-    this.debug.log('Network configuration generated');
-    // const rootPassword = this.encryptPassword(this.generateRandomPassword(16)); // Use encryptPassword here
     this.debug.log('Root password generated and encrypted');
     const applicationsPostCommands = this.generateApplicationsConfig(); // Returns commands without %post and %end tags
     this.debug.log('Applications post commands generated');
     this.debug.log('User post commands generated');
-    // const hashedPassword = this.encryptPassword(this.password);
   
     // Combine all post-installation commands into one %post section
-    const postInstallSection = `
-%post
-# Explicitly set graphical.target as default as this is how initial-setup detects which version to run
-systemctl set-default graphical.target
-%end
-  `;
+//     const postInstallSection = `
+// %post
+// # Explicitly set graphical.target as default as this is how initial-setup detects which version to run
+// systemctl set-default graphical.target
+// %end
+//   `;
   
     return `
 #version=RHEL8
@@ -134,8 +135,6 @@ spice-vdagent
 -reiserfs-utils
 %end
 
-${applicationsPostCommands}
-
 %addon com_redhat_kdump --enable --reserve-mb='auto'
 %end
   `;
@@ -162,58 +161,6 @@ ${applicationsPostCommands}
     postInstallScript += `\n`;
 
     return postInstallScript;
-  }
-
-  private generateRandomPassword(length: number): string {
-    return randomBytes(length).toString('hex').slice(0, length);
-  }
-
-  private encryptPassword(password: string): string {
-    const salt = randomBytes(16).toString('hex');
-    const hash = createHash('sha512');
-    hash.update(password + salt);
-    const hashedPassword = hash.digest('hex');
-    return `$6$${salt}$${hashedPassword}`;
-  }
-
-  private generateUserConfig(): string {
-    const hashedPassword = this.encryptPassword(this.password);
-
-    return `
-# Create a new user
-useradd -m ${this.username}
-# Set the user's password
-echo "${this.username}:${hashedPassword}" | chpasswd -e
-# Grant sudo privileges
-echo "${this.username} ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
-`;
-  }
-
-  private generateNetworkConfig(): string {
-    // Setting up the network configuration to use DHCP
-    return `
-# Network configuration
-network --bootproto=dhcp --onboot=on
-  `;
-  }
-
-  private generatePartitionConfig(): string {
-    return `
-# Configure Boot Loader
-bootloader --driveorder=vda
-
-# Remove all existing partitions
-clearpart --drives=vda --all
-
-# zerombr
-zerombr
-
-#Create required partitions (BIOS boot partition and /boot)
-reqpart --add-boot
-
-# Create a single root partition using the ext4 filesystem that grows to fill the disk
-part / --fstype=ext4 --grow
-  `;
   }
 
   protected async modifyGrubConfig(grubCfgPath: string): Promise<void> {
@@ -254,6 +201,12 @@ part / --fstype=ext4 --grow
     await this.executeCommand(isoCreationCommandParts);
     // Remove the extracted directory
     // await this.executeCommand(['rm', '-rf', extractDir]);
+    this.cleanup(extractDir);
+  }
+
+  protected async cleanup(extractDir: string): Promise<void> {
+    // Remove the extracted directory
+    await this.executeCommand(['rm', '-rf', extractDir]);
   }
 
   // ... other methods ...
