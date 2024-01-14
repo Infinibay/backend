@@ -16,6 +16,9 @@ import { InfinibayContext } from '@main/utils/context'
 import { VirtManager } from '@utils/VirtManager'
 import { Machine as PrismaMachine } from '@prisma/client'
 import { Libvirt } from '@utils/libvirt'
+// include debugger
+import { Debugger } from '@utils/debug';
+
 // xmlGenerator
 import { XMLGenerator } from '@utils/VirtManager/xmlGenerator'
 
@@ -32,6 +35,8 @@ export interface MachineResolverInterface {
 
 @Resolver(Machine)
 export class MachineResolver implements MachineResolverInterface {
+    debug: Debugger = new Debugger('machine-resolver')
+
     @Query(() => Machine, { nullable: true })
     @Authorized('USER')
     async machine(
@@ -244,7 +249,16 @@ export class MachineResolver implements MachineResolverInterface {
         @Ctx() context: InfinibayContext
     ): Promise<SuccessType> {
         const prisma = context.prisma
-        const role = context.user?.role
+        const user = context.user
+        const role = user?.role
+
+        if (!user) {
+            return {
+                success: false,
+                message: "User not found"
+            }
+        }
+
         const libvirt = new Libvirt()
         libvirt.connect("qemu:///system")
         if (!libvirt.isConnected()) {
@@ -451,24 +465,46 @@ export class MachineResolver implements MachineResolverInterface {
 
             // Remove the uefi file
             // Assuming the uefi file path is stored in machine.uefiFilePath
-            fs.unlinkSync(uefiVarFile as string)
+            try {
+                await fs.unlinkSync(uefiVarFile as string)
+            } catch (error) {
+                this.debug.log("Error removing UEFI VAR file")
+                this.debug.log(error as string)
+            }
 
             // Remove the disk file
             // Assuming the disk file path is stored in machine.diskFilePath
             const diskFiles = xmlGenerator.getDisks()
             for (const diskFile of diskFiles) {
                 if (!fs.existsSync(diskFile)) {
-                    console.log(`Disk file ${diskFile} not found`)
+                    this.debug.log(`Disk file ${diskFile} not found`)
                     continue
                 }
-                fs.unlinkSync(diskFile)
+                try {
+                    await fs.unlinkSync(diskFile);
+                } catch (error) {
+                    this.debug.log(`Error removing disk file ${diskFile}: ${error}`);
+                    this.debug.log(error as string)
+                }
             }
 
-            // stop the vm
-            libvirt.powerOff(machine.internalName)
+            // stop the vm if it's running
+            if (machine.status == 'running') {
+                try {
+                    await libvirt.powerOff(machine.internalName)
+                } catch (error) {
+                    this.debug.log("Error powering off machine")
+                    this.debug.log(error as string)
+                }
+            }
 
             // Destroy the machine in the hypervisor
-            libvirt.domainUndefine(machine.internalName)
+            try {
+                libvirt.domainUndefine(machine.internalName)
+            } catch (error) {
+                this.debug.log("Error undefining machine")
+                this.debug.log(error as string)
+            }
 
             // Remove the machine from the database
             await prisma.machine.delete({
