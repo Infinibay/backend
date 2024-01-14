@@ -12,7 +12,10 @@ export const authChecker: AuthChecker<any> = async (
     const token = context.req.headers.authorization;
     const prisma = new PrismaClient()
     let decoded: any
+    console.log('AAAAAAAAAAAAAAAAAAAAAAA')
+    console.log(token)
     if (token){
+        
         debug.log('Token found, verifying...');
         decoded = jwt.verify(token, process.env.TOKENKEY ?? 'secret')
         if (decoded && decoded.userId) {
