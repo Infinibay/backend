@@ -27,7 +27,7 @@ export interface MachineResolverInterface {
     powerOn: (id: string, ctx: InfinibayContext) => Promise<SuccessType>
     powerOff: (id: string, ctx: InfinibayContext) => Promise<SuccessType>
     suspend: (id: string, ctx: InfinibayContext) => Promise<SuccessType>
-    destroy: (id: string, ctx: InfinibayContext) => Promise<SuccessType>
+    destroyMachine: (id: string, ctx: InfinibayContext) => Promise<SuccessType>
 }
 
 @Resolver(Machine)
@@ -387,7 +387,7 @@ export class MachineResolver implements MachineResolverInterface {
 
     @Mutation(() => SuccessType)
     @Authorized('USER')
-    async destroy(
+    async destroyMachine(
         @Arg('id') id: string,
         @Ctx() context: InfinibayContext
     ): Promise<SuccessType> {
