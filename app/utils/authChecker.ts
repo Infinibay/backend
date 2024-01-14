@@ -11,9 +11,13 @@ export const authChecker: AuthChecker<any> = async (
   ) => {
     const token = context.req.headers.authorization;
     const prisma = new PrismaClient()
-    let decoded: any
+    let decoded: any = undefined
     console.log('AAAAAAAAAAAAAAAAAAAAAAA')
     console.log(token)
+    if (!token) {
+        debug.log('No token found.');
+        return false
+    }
     if (token){
         
         debug.log('Token found, verifying...');
