@@ -505,6 +505,9 @@ export class MachineResolver implements MachineResolverInterface {
             }
 
             // Remove the machine from the database
+            await prisma.machineConfiguration.delete({
+                where: { machineId: machine.id }
+            });
             await prisma.machine.delete({
                 where: { id: machine.id },
             });
