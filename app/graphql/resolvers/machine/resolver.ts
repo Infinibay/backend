@@ -379,6 +379,14 @@ export class MachineResolver implements MachineResolverInterface {
                 message: "Machine not found"
             }
         }
+        try {
+            libvirt.suspend(machine.internalName)
+        } catch (error) {
+            return {
+                success: false,
+                message: "Error suspending machine"
+            }
+        }
         return {
             success: true,
             message: "Machine suspended"
