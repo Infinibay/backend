@@ -32,16 +32,16 @@ export class UnattendedRedHatManager extends UnattendedManagerBase {
 
  generateConfig(): string {
     this.debug.log('Generating configuration');
-    const partitionConfig = this.generatePartitionConfig();
+    // const partitionConfig = this.generatePartitionConfig();
     this.debug.log('Partition configuration generated');
-    const networkConfig = this.generateNetworkConfig();
+    // const networkConfig = this.generateNetworkConfig();
     this.debug.log('Network configuration generated');
-    const rootPassword = this.encryptPassword(this.generateRandomPassword(16)); // Use encryptPassword here
+    // const rootPassword = this.encryptPassword(this.generateRandomPassword(16)); // Use encryptPassword here
     this.debug.log('Root password generated and encrypted');
     const applicationsPostCommands = this.generateApplicationsConfig(); // Returns commands without %post and %end tags
     this.debug.log('Applications post commands generated');
     this.debug.log('User post commands generated');
-    const hashedPassword = this.encryptPassword(this.password);
+    // const hashedPassword = this.encryptPassword(this.password);
   
     // Combine all post-installation commands into one %post section
     const postInstallSection = `
@@ -106,7 +106,7 @@ services --enabled=sshd,NetworkManager,chronyd
 #auth  --useshadow  --passalgo=sha512
 
 # Create a user
-user --name=${this.username} --password=${hashedPassword} --iscrypted --gecos="${this.username}"
+user "--name=${this.username}" "--password=${this.password}" --plaintext --gecos="${this.username}"
 
 # Reboot After Installation
 reboot --eject

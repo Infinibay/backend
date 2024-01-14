@@ -7,20 +7,27 @@ import {
     Resolver,
     Ctx,
   } from "type-graphql"
+import fs from 'fs'
 import { v4 as uuidv4 } from 'uuid';
 import { UserInputError } from 'apollo-server-errors'
-import { Machine, MachineConfigurationType, VncConfigurationType, MachineOrderBy, CreateMachineInputType } from './type'
+import { Machine, VncConfigurationType, MachineOrderBy, CreateMachineInputType, SuccessType} from './type'
 import { PaginationInputType } from '@utils/pagination'
 import { InfinibayContext } from '@main/utils/context'
 import { VirtManager } from '@utils/VirtManager'
 import { Machine as PrismaMachine } from '@prisma/client'
 import { Libvirt } from '@utils/libvirt'
+// xmlGenerator
+import { XMLGenerator } from '@utils/VirtManager/xmlGenerator'
 
 export interface MachineResolverInterface {
     machine: (id: string, ctx: InfinibayContext) => Promise<Machine | null>
     machines: (pagination: PaginationInputType, orderBy: MachineOrderBy, ctx: InfinibayContext) => Promise<Machine[]>
     vncConnection: (id: string, ctx: InfinibayContext) => Promise<VncConfigurationType | null>
     createMachine: (input: CreateMachineInputType, ctx: InfinibayContext) => Promise<Machine>
+    powerOn: (id: string, ctx: InfinibayContext) => Promise<SuccessType>
+    powerOff: (id: string, ctx: InfinibayContext) => Promise<SuccessType>
+    suspend: (id: string, ctx: InfinibayContext) => Promise<SuccessType>
+    destroy: (id: string, ctx: InfinibayContext) => Promise<SuccessType>
 }
 
 @Resolver(Machine)
@@ -230,6 +237,245 @@ export class MachineResolver implements MachineResolverInterface {
         }
     }
 
-    
-}
+    @Mutation(() => SuccessType)
+    @Authorized('USER')
+    async powerOn(
+        @Arg('id') id: string,
+        @Ctx() context: InfinibayContext
+    ): Promise<SuccessType> {
+        const prisma = context.prisma
+        const role = context.user?.role
+        const libvirt = new Libvirt()
+        libvirt.connect("qemu:///system")
+        if (!libvirt.isConnected()) {
+            return {
+                success: false,
+                message: "Libvirt not connected"
+            }
+        }
+        let machine: PrismaMachine | null = null
 
+        if (role == 'ADMIN') {
+             machine = await prisma.machine.findUnique({
+                where: { id },
+                include: { configuration: true },
+            });
+        } else {
+            machine = await prisma.machine.findFirst({
+                where: {
+                    id,
+                    userId: context.user?.id
+                },
+                include: { configuration: true },
+            });
+        }
+        if (!machine) {
+            return {
+                success: false,
+                message: "Machine not found"
+            }
+        }
+        try {
+            libvirt.powerOn(machine.internalName)
+        } catch (error) {
+            return {
+                success: false,
+                message: "Error powering on machine"
+            }
+        }
+        return {
+            success: true,
+            message: "Machine powered on"
+        }   
+    }
+
+    @Mutation(() => SuccessType)
+    @Authorized('USER')
+    async powerOff(
+        @Arg('id') id: string,
+        @Ctx() context: InfinibayContext
+    ): Promise<SuccessType> {
+        const prisma = context.prisma
+        const role = context.user?.role
+        const libvirt = new Libvirt()
+        libvirt.connect("qemu:///system")
+        if (!libvirt.isConnected()) {
+            return {
+                success: false,
+                message: "Libvirt not connected"
+            }
+        }
+        let machine: PrismaMachine | null = null
+
+        if (role == 'ADMIN') {
+             machine = await prisma.machine.findUnique({
+                where: { id },
+                include: { configuration: true },
+            });
+        } else {
+            machine = await prisma.machine.findFirst({
+                where: {
+                    id,
+                    userId: context.user?.id
+                },
+                include: { configuration: true },
+            });
+        }
+        if (!machine) {
+            return {
+                success: false,
+                message: "Machine not found"
+            }
+        }
+        try {
+            libvirt.powerOff(machine.internalName)
+        } catch (error) {
+            return {
+                success: false,
+                message: "Error powering off machine"
+            }
+        }
+        return {
+            success: true,
+            message: "Machine powered off"
+        }
+    }
+
+    @Mutation(() => SuccessType)
+    @Authorized('USER')
+    async suspend(
+        @Arg('id') id: string,
+        @Ctx() context: InfinibayContext
+    ): Promise<SuccessType> {
+        const prisma = context.prisma
+        const role = context.user?.role
+        const libvirt = new Libvirt()
+        libvirt.connect("qemu:///system")
+        if (!libvirt.isConnected()) {
+            return {
+                success: false,
+                message: "Libvirt not connected"
+            }
+        }
+        let machine: PrismaMachine | null = null
+
+        if (role == 'ADMIN') {
+             machine = await prisma.machine.findUnique({
+                where: { id },
+                include: { configuration: true },
+            });
+        } else {
+            machine = await prisma.machine.findFirst({
+                where: {
+                    id,
+                    userId: context.user?.id
+                },
+                include: { configuration: true },
+            });
+        }
+        if (!machine) {
+            return {
+                success: false,
+                message: "Machine not found"
+            }
+        }
+        return {
+            success: true,
+            message: "Machine suspended"
+        }
+    }
+
+    @Mutation(() => SuccessType)
+    @Authorized('USER')
+    async destroy(
+        @Arg('id') id: string,
+        @Ctx() context: InfinibayContext
+    ): Promise<SuccessType> {
+        const prisma = context.prisma
+        const role = context.user?.role
+        const libvirt = new Libvirt()
+        libvirt.connect("qemu:///system")
+        if (!libvirt.isConnected()) {
+            return {
+                success: false,
+                message: "Libvirt not connected"
+            }
+        }
+        let machine: PrismaMachine | null = null
+
+        if (role == 'ADMIN') {
+            machine = await prisma.machine.findUnique({
+                where: { id },
+                include: { configuration: true },
+            });
+        } else {
+            machine = await prisma.machine.findFirst({
+                where: {
+                    id,
+                    userId: context.user?.id
+                },
+                include: { configuration: true },
+            });
+        }
+        if (!machine) {
+            return {
+                success: false,
+                message: "Machine not found"
+            }
+        }
+        try {
+            // Get machine configuration
+            const configuration = await prisma.machineConfiguration.findUnique({
+                where: {
+                    machineId: machine.id
+                }
+            })
+            if (!configuration) {
+                throw new Error("MachineConfiguration not found")
+            }
+            const xmlGenerator = new XMLGenerator('', '')
+            xmlGenerator.load(configuration.xml as any)
+            
+            const uefiVarFile : any = xmlGenerator.getUefiVarFile()
+            if (!uefiVarFile || uefiVarFile == '' || !fs.existsSync(uefiVarFile)) {
+                throw new Error("UEFI VAR file not found in the xml configuration")
+            }
+
+            // Remove the uefi file
+            // Assuming the uefi file path is stored in machine.uefiFilePath
+            fs.unlinkSync(uefiVarFile as string)
+
+            // Remove the disk file
+            // Assuming the disk file path is stored in machine.diskFilePath
+            const diskFiles = xmlGenerator.getDisks()
+            for (const diskFile of diskFiles) {
+                if (!fs.existsSync(diskFile)) {
+                    console.log(`Disk file ${diskFile} not found`)
+                    continue
+                }
+                fs.unlinkSync(diskFile)
+            }
+
+            // stop the vm
+            libvirt.powerOff(machine.internalName)
+
+            // Destroy the machine in the hypervisor
+            libvirt.domainUndefine(machine.internalName)
+
+            // Remove the machine from the database
+            await prisma.machine.delete({
+                where: { id: machine.id },
+            });
+        } catch (error) {
+            return {
+                success: false,
+                message: "Error destroying machine"
+            }
+        }
+        return {
+            success: true,
+            message: "Machine destroyed"
+        }
+    }
+
+}

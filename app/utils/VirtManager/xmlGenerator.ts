@@ -16,6 +16,10 @@ export class XMLGenerator {
     this.id = id;
   }
 
+  load(externalXml: any) {
+    this.xml = externalXml
+  }
+
   getXmlObject(): any {
     return this.xml;
   }
@@ -284,6 +288,14 @@ export class XMLGenerator {
   getStoragePath(): string {
     const diskPath = process.env.DISK_PATH || '/opt/infinibay/disks';
     return `${diskPath}/${this.id}.img`;
+  }
+
+  getUefiVarFile(): string {
+    return this.xml?.domain?.os?.[0]?.nvram?.[0]?._ as string
+  }
+
+  getDisks(): string[] {
+    return this.xml?.domain?.devices?.[0]?.disk?.map((disk: any) => disk.source[0].$.file) || []
   }
 }
 

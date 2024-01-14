@@ -61,6 +61,15 @@ export class VncConfigurationType {
     password: string = ''
 }
 
+@ObjectType()
+export class SuccessType {
+    @Field(() => Boolean)
+    success: boolean = false
+
+    @Field(() => String)
+    message: string = ''
+}
+
 @InputType()
 export class MachineOrderBy {
     @Field(() => MachineOrderByEnum, { nullable: true })
