@@ -40,7 +40,7 @@ export const authChecker: AuthChecker<any> = async (
                     return false
                 }
             } catch(error: any) {
-                debug.error(`Error checking ADMIN access: ${error}`);
+                debug.log('error', `Error checking ADMIN access: ${error}`);
                 return false
             }
         } else {
@@ -58,7 +58,7 @@ export const authChecker: AuthChecker<any> = async (
                     return false
                 }
             } catch(error: any) {
-                debug.error(`Error checking USER access: ${error}`);
+                debug.log('error', `Error checking USER access: ${error}`);
                 return false
             }
         }
