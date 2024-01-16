@@ -6,53 +6,60 @@ import {
     Query,
     Resolver,
   } from "type-graphql"
+import { Ctx } from 'type-graphql';
+import { InfinibayContext } from "@utils/context";
 import { UserInputError } from 'apollo-server-errors'
 import { MachineTemplateType, MachineTemplateOrderBy, MachineTemplateInputType } from './type'
 import { PaginationInputType } from '@utils/pagination'
 
 export interface MachineTemplateResolverInterface {
-    machineTemplates(pagination: PaginationInputType, orderBy: MachineTemplateOrderBy): Promise<MachineTemplateType[]>
-    createMachineTemplate(input: MachineTemplateInputType): Promise<MachineTemplateType>
-    updateMachineTemplate(id: string, input: MachineTemplateInputType): Promise<MachineTemplateType>
+    machineTemplates(pagination: PaginationInputType, orderBy: MachineTemplateOrderBy, ctx: InfinibayContext): Promise<MachineTemplateType[]>
+    createMachineTemplate(input: MachineTemplateInputType, ctx: InfinibayContext): Promise<MachineTemplateType>
+    updateMachineTemplate(id: string, input: MachineTemplateInputType, ctx: InfinibayContext): Promise<MachineTemplateType>
     // deleteMachineTemplate(id: string): Promise<MachineTemplateType>
 }
 
 @Resolver(_of => MachineTemplateType)
 export class MachineTemplateResolver implements MachineTemplateResolverInterface {
-    /*
-    machineTemplate
-        @args
-        id: ID!
-    ): Promise<MachineTemplate | null>
-    */
+    /**
+     * Retrieves a machine template by id.
+     *
+     * @param {string} id - The id of the machine template.
+     * @param {InfinibayContext} ctx - The Infinibay context.
+     *
+     * @returns {Promise<MachineTemplateType | null>} The machine template object or null if not found.
+     */
     @Query(() => MachineTemplateType, { nullable: true })
     @Authorized('ADMIN')
     async machineTemplate(
-        @Arg('id', { nullable: false }) id: string
+      @Arg('id', { nullable: false }) id: string,
+      @Ctx() ctx: InfinibayContext
     ): Promise<MachineTemplateType | null> {
-        const prisma = new PrismaClient()
-        const machineTemplate = await prisma.machineTemplate.findUnique({
+        const machineTemplate = await ctx.prisma.machineTemplate.findUnique({
             where: {
                 id
             }
         })
-        return machineTemplate
+        return machineTemplate;
     }
 
-    /*
-    machineTemplate query
-    Args:
-        Pagination args
-        OrderBy args
-    Return all the machine templates
-    */
+
+    /**
+     * Retrieves the machine templates with pagination and order by options.
+     *
+     * @param {PaginationInputType} pagination - The pagination input options.
+     * @param {MachineTemplateOrderBy} orderBy - The ordering options for machine templates.
+     * @param {InfinibayContext} ctx - The context object containing the Prisma instance.
+     * @returns {Promise<MachineTemplateType[]>} - An array of machine template objects.
+     */
     @Query(() => [MachineTemplateType])
     @Authorized('ADMIN')
     async machineTemplates(
         @Arg('pagination', { nullable: true }) pagination: PaginationInputType,
         @Arg('orderBy', { nullable: true }) orderBy: MachineTemplateOrderBy,
+        @Ctx() ctx: InfinibayContext
     ): Promise<MachineTemplateType[]> {
-        const prisma = new PrismaClient()
+        const { prisma } = ctx
         const order = orderBy ? {
             [orderBy.fieldName as keyof MachineTemplateType]: orderBy.direction
         } : undefined
@@ -66,21 +73,24 @@ export class MachineTemplateResolver implements MachineTemplateResolverInterface
         return machineTemplates
     }
 
-    /*
-    createMachineTemplate Mutation
-    Args:
-        name: String!
-        cores: Int!
-        ram: Int!
-        storage: Int!
-    Return the created machine template 
-    */
+
+    /**
+     * Create a machine template
+     *
+     * @param {MachineTemplateInputType} input - The input object for creating a machine template
+     * @param {InfinibayContext} ctx - The context object for the session
+     *
+     * @throws {UserInputError} - If the machine template already exists, or if the cores, RAM, or storage is out of range
+     *
+     * @returns {Promise<MachineTemplateType>} - The created machine template
+     */
     @Mutation(() => MachineTemplateType)
     @Authorized('ADMIN')
     async createMachineTemplate(
         @Arg('input', { nullable: false }) input: MachineTemplateInputType,
+        @Ctx() ctx: InfinibayContext
     ): Promise<MachineTemplateType> {
-        const prisma = new PrismaClient()
+        const  { prisma } = ctx
         // Check if the machine template already exists
         const machineTemplate = await prisma.machineTemplate.findFirst({
             where: {
@@ -118,23 +128,23 @@ export class MachineTemplateResolver implements MachineTemplateResolverInterface
         } as MachineTemplateType
     }
 
-    /*
-    updateMachineTemplate
-    @Args
-        id: ID!
-        name: String
-        cores: Int
-        ram: Int
-        storage: Int
-    Return the updated machine template
-    */
+    /**
+     * Updates a machine template with the specified ID.
+     *
+     * @param {string} id - The ID of the machine template to update. (Required)
+     * @param {MachineTemplateInputType} input - The updated information of the machine template. (Required)
+     * @param {InfinibayContext} ctx - The context object containing the Prisma client. (Required)
+     * @returns {Promise<MachineTemplateType>} - The updated machine template.
+     * @throws {UserInputError} - If the machine template with the specified ID is not found.
+     */
     @Mutation(() => MachineTemplateType)
     @Authorized('ADMIN')
     async updateMachineTemplate(
         @Arg('id', { nullable: false }) id: string,
-        @Arg('input', { nullable: false }) input: MachineTemplateInputType
+        @Arg('input', { nullable: false }) input: MachineTemplateInputType,
+        @Ctx() ctx: InfinibayContext
     ): Promise<MachineTemplateType> {
-        const prisma = new PrismaClient()
+        const { prisma } = ctx
         const machineTemplate = await prisma.machineTemplate.findUnique({
             where: {
                 id
