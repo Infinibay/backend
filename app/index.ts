@@ -9,7 +9,7 @@ import "reflect-metadata";
 
 // Apollo Server Related Imports
 // @ts-ignore
-import { ApolloServer, ApolloError, ApolloServerPluginLandingPageLocalDefault } from "@apollo/server/plugin/landingPage/default"
+import { ApolloServer, ApolloError } from "@apollo/server/plugin/landingPage/default"
 import { expressMiddleware } from "@apollo/server/express4";
 
 // Prisma Client and Utils
@@ -41,7 +41,6 @@ async function bootstrap() {
     csrfPrevention: true,
     cache: "bounded",
     plugins: [
-      ApolloServerPluginLandingPageLocalDefault({ embed: true }),
     ],
     formatError: (error: any) => {
       console.error(error); // Log the error
