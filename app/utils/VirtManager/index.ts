@@ -16,7 +16,7 @@ export class VirtManager {
   private prisma: PrismaClient | null = null;
   private debug: Debugger = new Debugger('virt-manager');
 
-  constructor(uri: string='qemu:///system') {
+  constructor(uri: string = 'qemu:///system') {
     this.debug.log('Creating VirtManager instance with URI', uri);
     this.libvirt = new Libvirt();
     this.uri = uri;
@@ -74,7 +74,7 @@ export class VirtManager {
    * @param productKey - The product key for the new machine.
    * @returns A promise that resolves when the machine is created.
    */
-  async createMachine(machine: Machine, username: string, password: string, productKey: string|null): Promise<void> {
+  async createMachine(machine: Machine, username: string, password: string, productKey: string | null): Promise<void> {
     this.debug.log('Creating machine', machine.name);
 
     // Check if Prisma client is set
@@ -151,7 +151,7 @@ export class VirtManager {
         const xmlGenerator = await xmlPromise
         xml = xmlGenerator.generate()
 
-              // create storage file
+        // create storage file
         const storagePath = xmlGenerator.getStoragePath();
         const storageSize = template.storage;
         await this.libvirt.createStorage(storageSize, storagePath);

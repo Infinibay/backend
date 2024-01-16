@@ -1,26 +1,38 @@
+// TypeGraphQL Decorators
 import {
     Arg,
     Authorized,
+    Ctx,
     Mutation,
-    ObjectType,
     Query,
     Resolver,
-    Ctx,
-  } from "type-graphql"
-import fs from 'fs'
-import { v4 as uuidv4 } from 'uuid';
-import { UserInputError } from 'apollo-server-errors'
-import { Machine, VncConfigurationType, MachineOrderBy, CreateMachineInputType, SuccessType} from './type'
-import { PaginationInputType } from '@utils/pagination'
-import { InfinibayContext } from '@main/utils/context'
-import { VirtManager } from '@utils/VirtManager'
-import { Machine as PrismaMachine } from '@prisma/client'
-import { Libvirt } from '@utils/libvirt'
-// include debugger
-import { Debugger } from '@utils/debug';
+} from "type-graphql";
 
-// xmlGenerator
-import { XMLGenerator } from '@utils/VirtManager/xmlGenerator'
+// Node modules
+import fs from 'fs';
+import { v4 as uuidv4 } from 'uuid';
+
+// Types
+import {
+    Machine,
+    MachineOrderBy,
+    CreateMachineInputType,
+    VncConfigurationType,
+    SuccessType,
+} from './type';
+import { PaginationInputType } from '@utils/pagination';
+
+// Database
+import { Machine as PrismaMachine } from '@prisma/client';
+
+// Contexts
+import { InfinibayContext } from '@main/utils/context';
+
+// Utils
+import { VirtManager } from '@utils/VirtManager';
+import { Libvirt } from '@utils/libvirt';
+import { Debugger } from '@utils/debug'; // Debugger tool
+import { XMLGenerator } from '@utils/VirtManager/xmlGenerator'; // XML Generator tool
 
 export interface MachineResolverInterface {
     machine: (id: string, ctx: InfinibayContext) => Promise<Machine | null>
@@ -77,23 +89,22 @@ export class MachineResolver implements MachineResolverInterface {
         @Arg('orderBy', { nullable: true }) orderBy: MachineOrderBy,
         @Ctx() context: InfinibayContext
     ): Promise<Machine[]> {
-        const prisma = context.prisma
-        const role = context.user?.role
-        const order = { [(orderBy?.fieldName ?? 'createdAt') as string]: orderBy?.direction ?? 'desc' }
-        if (role == 'ADMIN') {
-            return await prisma.machine.findMany({
-                ...pagination,
-                orderBy: [{...order}]
-            }) as Machine[] | []
-        } else {
-            return await prisma.machine.findMany({
-                ...pagination,
-                orderBy: [{...order}],
-                where: {
-                    userId: context.user?.id
-                }
-            }) as Machine[] | []
+        const prisma = context.prisma;
+        const role = context.user?.role;
+        const order = { [(orderBy?.fieldName ?? 'createdAt') as string]: orderBy?.direction ?? 'desc' };
+
+        let whereClause = {};
+        if (role != 'ADMIN') {
+            whereClause = {
+                userId: context.user?.id
+            }
         }
+
+        return await prisma.machine.findMany({
+            ...pagination,
+            orderBy: [{ ...order }],
+            where: whereClause
+        }) as Machine[] | [];
     }
 
     @Mutation(() => Machine)
@@ -111,7 +122,7 @@ export class MachineResolver implements MachineResolverInterface {
         await prisma.$transaction(async (tx: any) => {
 
             const internalName = uuidv4()
-        
+
             // Create the machine
             machine = await tx.machine.create({
                 data: {
@@ -170,6 +181,26 @@ export class MachineResolver implements MachineResolverInterface {
         } as unknown as Machine // WARNING!! typescript type-check bypassed
     }
 
+    backgroundCode = async (id: string, context: InfinibayContext, username: string, password: string, productKey: string) => {
+        try {
+            const machine = await context.prisma.machine.findUnique({
+                where: {
+                    id
+                }
+            })
+            // User VirtManager and create the machine
+            const virtManager = new VirtManager()
+            virtManager.setPrisma(context.prisma)
+            await virtManager.createMachine(machine as any, username, password, productKey)
+
+            // VirtManager to power on the machine
+            await virtManager.powerOn(machine?.internalName as string)
+        } catch (error) {
+            console.log("Error creating machine in background job")
+            console.log(error)
+        }
+    }
+
     @Query(() => VncConfigurationType, { nullable: true })
     @Authorized('USER')
     async vncConnection(
@@ -182,12 +213,12 @@ export class MachineResolver implements MachineResolverInterface {
         let machine: PrismaMachine | null = null
 
         if (role == 'ADMIN') {
-             machine = await prisma.machine.findUnique({
+            machine = await prisma.machine.findUnique({
                 where: { id },
                 include: { configuration: true },
             });
         } else {
-            const machine = await prisma.machine.findFirst({
+            machine = await prisma.machine.findFirst({
                 where: {
                     id,
                     userId: context.user?.id
@@ -222,26 +253,6 @@ export class MachineResolver implements MachineResolverInterface {
         }
     }
 
-    backgroundCode = async (id: string, context: InfinibayContext, username: string, password: string, productKey: string) => {
-        try {
-            const machine = await context.prisma.machine.findUnique({
-                where: {
-                    id
-                }
-            })
-            // User VirtManager and create the machine
-            const virtManager = new VirtManager()
-            virtManager.setPrisma(context.prisma)
-            await virtManager.createMachine(machine as any, username, password, productKey)
-        
-            // VirtManager to power on the machine
-            await virtManager.powerOn(machine?.internalName as string)
-        } catch (error) {
-            console.log("Error creating machine in background job")
-            console.log(error)
-        }
-    }
-
     @Mutation(() => SuccessType)
     @Authorized('USER')
     async powerOn(
@@ -270,7 +281,7 @@ export class MachineResolver implements MachineResolverInterface {
         let machine: PrismaMachine | null = null
 
         if (role == 'ADMIN') {
-             machine = await prisma.machine.findUnique({
+            machine = await prisma.machine.findUnique({
                 where: { id },
                 include: { configuration: true },
             });
@@ -300,7 +311,7 @@ export class MachineResolver implements MachineResolverInterface {
         return {
             success: true,
             message: "Machine powered on"
-        }   
+        }
     }
 
     @Mutation(() => SuccessType)
@@ -322,7 +333,7 @@ export class MachineResolver implements MachineResolverInterface {
         let machine: PrismaMachine | null = null
 
         if (role == 'ADMIN') {
-             machine = await prisma.machine.findUnique({
+            machine = await prisma.machine.findUnique({
                 where: { id },
                 include: { configuration: true },
             });
@@ -374,7 +385,7 @@ export class MachineResolver implements MachineResolverInterface {
         let machine: PrismaMachine | null = null
 
         if (role == 'ADMIN') {
-             machine = await prisma.machine.findUnique({
+            machine = await prisma.machine.findUnique({
                 where: { id },
                 include: { configuration: true },
             });
@@ -457,8 +468,8 @@ export class MachineResolver implements MachineResolverInterface {
             }
             const xmlGenerator = new XMLGenerator('', '')
             xmlGenerator.load(configuration.xml as any)
-            
-            const uefiVarFile : any = xmlGenerator.getUefiVarFile()
+
+            const uefiVarFile: any = xmlGenerator.getUefiVarFile()
             if (!uefiVarFile || uefiVarFile == '' || !fs.existsSync(uefiVarFile)) {
                 throw new Error("UEFI VAR file not found in the xml configuration")
             }

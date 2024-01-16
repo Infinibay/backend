@@ -1,23 +1,24 @@
-import { ApolloServer } from "@apollo/server";
-import { ApolloError /*, AuthenticationError, UserInputError*/ } from 'apollo-server';
-import { ApolloServerPluginLandingPageLocalDefault } from "@apollo/server/plugin/landingPage/default";
-import { expressMiddleware } from "@apollo/server/express4";
-import bodyParser from "body-parser";
-import cors from "cors";
-import "dotenv/config";
+// External Libraries
 import express from "express";
 import http from "node:http";
 import path from "node:path";
+import cors from "cors";
+import bodyParser from "body-parser";
+import "dotenv/config";
 import "reflect-metadata";
-import { buildSchema } from "type-graphql";
-import { printSchema } from 'graphql';
-import { PrismaClient } from "@prisma/client";
 
+// Apollo Server Related Imports
+// @ts-ignore
+import { ApolloServer, ApolloError, ApolloServerPluginLandingPageLocalDefault } from "@apollo/server";
+import { expressMiddleware } from "@apollo/server/express4";
+
+// Prisma Client and Utils
+import { PrismaClient } from "@prisma/client";
+import { buildSchema } from "type-graphql";
 import { authChecker } from './utils/authChecker';
 import { InfinibayContext } from './utils/context';
 import resolvers from './graphql/resolvers';
 
-import fs from 'fs';
 
 const prisma = new PrismaClient(); // Create a new instance of PrismaClient
 
@@ -52,10 +53,10 @@ async function bootstrap() {
   // Start server
   await server.start();
   app.use("/graphql", cors<cors.CorsRequest>(), bodyParser.json(), expressMiddleware(server, {
-      context: async ({ req, res }): Promise<InfinibayContext> => {
-        return { req, res, prisma, user: null } as InfinibayContext; // Add prisma to the context
-      },
-    }),
+    context: async ({ req, res }): Promise<InfinibayContext> => {
+      return { req, res, prisma, user: null } as InfinibayContext; // Add prisma to the context
+    },
+  }),
   );
 
   // Now that the HTTP server is fully set up, we can listen to it
