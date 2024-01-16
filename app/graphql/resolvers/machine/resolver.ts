@@ -195,6 +195,16 @@ export class MachineResolver implements MachineResolverInterface {
 
             // VirtManager to power on the machine
             await virtManager.powerOn(machine?.internalName as string)
+            // update the machine status to running
+            await context.prisma.machine.update({
+                where: {
+                    id
+                },
+                data: {
+                    status: 'running'
+                }
+            }
+        )
         } catch (error) {
             console.log("Error creating machine in background job")
             console.log(error)
@@ -308,6 +318,14 @@ export class MachineResolver implements MachineResolverInterface {
                 message: "Error powering on machine"
             }
         }
+
+        await prisma.machine.update({
+            where: {
+                id
+            }, data: {
+                status: 'running'
+            }
+        })
         return {
             success: true,
             message: "Machine powered on"
@@ -360,6 +378,13 @@ export class MachineResolver implements MachineResolverInterface {
                 message: "Error powering off machine"
             }
         }
+        await prisma.machine.update({
+            where: {
+                id
+            }, data: {
+                status: 'off'
+            }
+        })
         return {
             success: true,
             message: "Machine powered off"
@@ -412,6 +437,13 @@ export class MachineResolver implements MachineResolverInterface {
                 message: "Error suspending machine"
             }
         }
+        await prisma.machine.update({
+            where: {
+                id
+            }, data: {
+                status: 'suspended'
+            }
+        })
         return {
             success: true,
             message: "Machine suspended"
