@@ -9,7 +9,7 @@ import "reflect-metadata";
 
 // Apollo Server Related Imports
 // @ts-ignore
-import { ApolloServer, ApolloError } from "@apollo/server/plugin/landingPage/default"
+import { ApolloServer, ApolloError } from '@apollo/server';
 import { expressMiddleware } from "@apollo/server/express4";
 
 // Prisma Client and Utils
