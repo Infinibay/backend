@@ -1,6 +1,9 @@
 # Node.js dependencies
 node_modules/
 
+# Intellij IDEA
+.idea/
+
 # Prisma
 .prisma/
 prisma/migrations/
