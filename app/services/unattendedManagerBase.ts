@@ -18,6 +18,14 @@ export class UnattendedManagerBase {
     return '';
   }
 
+
+
+  /**
+   * Generates a new image.
+   *
+   * @returns A Promise that resolves to the path of the generated image.
+   * @throws If there is an error generating the image.
+   */
   async generateNewImage(): Promise<string> {
     this.debug.log('Starting to generate new image');
     let extractDir: string | null = null;
@@ -29,11 +37,11 @@ export class UnattendedManagerBase {
       this.debug.log(configContent);
       this.debug.log('Validating output path');
       const outputPath = this.validatePath(process.env.OUTPUT_PATH, '/opt/infinibay/isos');
-  
+
       this.debug.log('Generating random file name for new ISO');
       const newIsoName = this.generateRandomFileName();
       const newIsoPath = path.join(outputPath, newIsoName);
-  
+
       this.debug.log('Extracting ISO');
       extractDir = await this.extractISO(isoPath);
       if (this.configFileName) {
@@ -46,11 +54,11 @@ export class UnattendedManagerBase {
       this.debug.log('Creating new ISO');
       await this.createISO(newIsoPath, extractDir);
       // TODO: We may need to delete the iso file in the future, after finishing the installation process
-  
+
       // Optional: Clean up extracted files
       this.debug.log('Cleaning up extracted files');
-      //await this.cleanup(extractDir);
-  
+      await this.cleanup(extractDir);
+
       this.debug.log('New image generated successfully');
       return newIsoPath;
     } catch (error) {
@@ -133,20 +141,20 @@ export class UnattendedManagerBase {
    */
   protected async cleanup(extractDir: string): Promise<void> {
     try {
-        // Safety check: Ensure extractDir is not undefined and is the expected path
-        if (!extractDir || !extractDir.includes('expected_path_identifier')) {
-            throw new Error('Invalid directory path for cleanup.');
-        }
+      // Safety check: Ensure extractDir is not undefined and is the expected path
+      if (!extractDir || !extractDir.includes('expected_path_identifier')) {
+        throw new Error('Invalid directory path for cleanup.');
+      }
 
-        console.log(`Starting cleanup of directory: ${extractDir}`);
-        await fsPromises.rm(extractDir, { recursive: true, force: true });
-        console.log(`Successfully cleaned up directory: ${extractDir}`);
+      console.log(`Starting cleanup of directory: ${extractDir}`);
+      await fsPromises.rm(extractDir, { recursive: true, force: true });
+      console.log(`Successfully cleaned up directory: ${extractDir}`);
     } catch (error) {
-        console.error(`Error during cleanup: ${error}`);
-        // Handle or rethrow error based on your error handling strategy
+      console.error(`Error during cleanup: ${error}`);
+      // Handle or rethrow error based on your error handling strategy
     }
-}
-  
+  }
+
   /**
    * This method executes a command using the spawn function from the 'child_process' module.
    * It takes an array of command parts as input, where the first element is the command and the rest are the arguments.
@@ -159,16 +167,16 @@ export class UnattendedManagerBase {
       console.log(`Executing command: `, commandParts[0], commandParts.slice(1));
       const process = spawn(commandParts[0], commandParts.slice(1));
       let output = '';
-  
+
       process.stdout.on('data', (data) => {
         console.log(`stdout: ${data}`);
         output += data;
       });
-  
+
       process.stderr.on('data', (data) => {
         console.error(`stderr: ${data}`);
       });
-  
+
       process.on('close', (code) => {
         if (code === 0) {
           console.log(`Command executed successfully: ${commandParts.join(' ')}`);
@@ -178,7 +186,7 @@ export class UnattendedManagerBase {
           reject(new Error(`Command failed with exit code ${code}`));
         }
       });
-  
+
       process.on('error', (error) => {
         console.error(`Error occurred while executing command: ${commandParts.join(' ')}`);
         reject(error);

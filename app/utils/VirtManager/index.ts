@@ -1,7 +1,6 @@
 import fs from 'fs';
-import portfinder from 'portfinder';
 import { MachineConfiguration, PrismaClient } from '@prisma/client';
-import { Libvirt, VirDomainState } from '@utils/libvirt';
+import { Libvirt } from '@utils/libvirt';
 import { Machine, MachineTemplate } from '@prisma/client';
 
 import { XMLGenerator } from './xmlGenerator';
@@ -11,14 +10,13 @@ import { UnattendedRedHatManager } from '@services/unattendedRedHatManager';
 import { Debugger } from '@utils/debug';
 
 export class VirtManager {
-  private libvirt: Libvirt;
-  private uri: string;
+  private libvirt = new Libvirt()
+  private uri: string = ''
   private prisma: PrismaClient | null = null;
   private debug: Debugger = new Debugger('virt-manager');
 
   constructor(uri: string = 'qemu:///system') {
     this.debug.log('Creating VirtManager instance with URI', uri);
-    this.libvirt = new Libvirt();
     this.uri = uri;
     this.connect();
   }
@@ -41,22 +39,6 @@ export class VirtManager {
 
     // Connect to the hypervisor
     this.libvirt.connect(this.uri);
-  }
-
-  async listMachines(): Promise<string[]> {
-    try {
-
-      // Get the list of all domains
-      const domains = await this.libvirt.listAllDomains();
-
-      // Disconnect from the hypervisor
-      this.libvirt.disconnect();
-
-      return domains;
-    } catch (error) {
-      console.error(`Error listing machines: ${error}`);
-      return [];
-    }
   }
 
   /**
@@ -158,7 +140,7 @@ export class VirtManager {
         this.debug.log('Storage file created for machine', machine.name, storagePath);
 
         this.debug.log('Generated XML for machine', machine.name, xml);
-        await this.libvirt.domainDefineXML(xml);
+        this.libvirt.domainDefineXML(xml);
         this.debug.log('VM defined with XML for machine', machine.name);
 
       };
@@ -196,10 +178,11 @@ export class VirtManager {
   /**
    * This method generates an XML string that represents a virtual machine configuration.
    * It uses the XMLGenerator class to set the various properties of the virtual machine.
-   * 
+   *
    * @param machine - The machine object containing the details of the machine.
    * @param template - The template object containing the configuration of the machine.
    * @param configuration - The machine configuration object.
+   * @param newIsoPath - The path to the new ISO file.
    * @returns A promise that resolves to a string representing the XML configuration of the machine.
    */
   async generateXML(
@@ -218,7 +201,6 @@ export class VirtManager {
 
     // Get the machine's internal name and operating system
     const machineName = machine.internalName;
-    const osName = machine.os;
 
     // Log the creation of a new XMLGenerator instance
     this.debug.log('Creating new XMLGenerator instance for machine', machine.name);
@@ -274,62 +256,12 @@ export class VirtManager {
 
   /**
    * This method powers on a virtual machine.
-   * 
+   *
    * @param domainName - The name of the domain.
    * @returns A promise that resolves to void.
    */
   async powerOn(domainName: string): Promise<void> {
-    await this.libvirt.resume(domainName);
-  }
-
-  // Alias method
-  public resume = this.powerOn;
-
-  /**
-   * This method powers off a virtual machine.
-   * 
-   * @param domainName - The name of the domain.
-   * @returns A promise that resolves to void.
-   */
-  async powerOff(domainName: string): Promise<void> {
-    const domain = this.libvirt.lookupDomainByName(domainName);
-    if (!domain) {
-      throw new Error(`Domain ${domainName} not found`);
-    }
-    await this.libvirt.powerOff(domain);
-  }
-
-  async suspend(domainName: string): Promise<void> {
-    const domain = this.libvirt.lookupDomainByName(domainName);
-    if (!domain) {
-      throw new Error(`Domain ${domainName} not found`);
-    }
-    await this.libvirt.suspend(domain);
-  }
-
-  async getDomainStatus(domainName: string): Promise<string> {
-    const domain = this.libvirt.lookupDomainByName(domainName);
-    if (!domain) {
-      throw new Error(`Domain ${domainName} not found`);
-    }
-
-    const info = await this.libvirt.domainGetInfo(domain);
-    const state = info.state;
-
-    switch (state) {
-      case VirDomainState.VIR_DOMAIN_RUNNING:
-        return 'running';
-      case VirDomainState.VIR_DOMAIN_PAUSED:
-        return 'paused';
-      case VirDomainState.VIR_DOMAIN_SHUTDOWN:
-        return 'shutdown';
-      case VirDomainState.VIR_DOMAIN_CRASHED:
-        return 'crashed';
-      case VirDomainState.VIR_DOMAIN_PMSUSPENDED:
-        return 'suspended';
-      default:
-        return 'unknown';
-    }
+    this.libvirt.resume(domainName);
   }
 }
 

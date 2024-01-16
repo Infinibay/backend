@@ -38,20 +38,20 @@ export class UnattendedRedHatManager extends UnattendedManagerBase {
     this.debug.log('UnattendedRedHatManager initialized');
   }
 
- generateConfig(): string {
+  generateConfig(): string {
     this.debug.log('Root password generated and encrypted');
     const applicationsPostCommands = this.generateApplicationsConfig(); // Returns commands without %post and %end tags
     this.debug.log('Applications post commands generated');
     this.debug.log('User post commands generated');
-  
+
     // Combine all post-installation commands into one %post section
-//     const postInstallSection = `
-// %post
-// # Explicitly set graphical.target as default as this is how initial-setup detects which version to run
-// systemctl set-default graphical.target
-// %end
-//   `;
-  
+    //     const postInstallSection = `
+    // %post
+    // # Explicitly set graphical.target as default as this is how initial-setup detects which version to run
+    // systemctl set-default graphical.target
+    // %end
+    //   `;
+
     return `
 #version=RHEL8
 
@@ -145,7 +145,7 @@ spice-vdagent
     let postInstallScript = `\n`;
 
     // Filter applications for those compatible with Red Hat
-    const redHatApps = this.applications.filter(app => 
+    const redHatApps = this.applications.filter(app =>
       app.os.includes('redhat')
     );
 
@@ -188,7 +188,7 @@ spice-vdagent
     await this.executeCommand(['mv', path.join(extractDir, 'boot/grub2'), path.join(extractDir, 'boot/grub')]);
 
     await this.modifyGrubConfig(path.join(extractDir, 'boot/grub/grub.cfg'));
-  
+
     // Define the command and arguments for creating a new ISO image
     const isoCreationCommandParts = [
       'grub-mkrescue',
@@ -196,18 +196,11 @@ spice-vdagent
       '-V', 'Infinibay', // Volume ID
       extractDir // the path to the files to be included in the ISO
     ];
-  
+
     // Use the execCommand method from the parent class
     await this.executeCommand(isoCreationCommandParts);
     // Remove the extracted directory
-    // await this.executeCommand(['rm', '-rf', extractDir]);
-    this.cleanup(extractDir);
-  }
-
-  protected async cleanup(extractDir: string): Promise<void> {
-    // Remove the extracted directory
     await this.executeCommand(['rm', '-rf', extractDir]);
   }
-
   // ... other methods ...
 }
