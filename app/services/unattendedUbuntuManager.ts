@@ -1,11 +1,11 @@
+import * as pass from '@utils/password'
 import { Application } from '@prisma/client';
 import * as fs from 'fs';
-import * as os from 'os';
 import * as path from 'path';
-import { promises as fsPromises } from 'fs';
 import * as yaml from 'js-yaml';
 
 import { UnattendedManagerBase } from './unattendedManagerBase';
+import { cryptPassword } from "@utils/password";
 
 export class UnattendedUbuntuManager extends UnattendedManagerBase {
   private username: string;
@@ -20,14 +20,18 @@ export class UnattendedUbuntuManager extends UnattendedManagerBase {
     this.configFileName = 'autoinstall.yaml';
   }
 
-  generateConfig(): string {
+  async generateConfig(): Promise<string> {
     const config = {
       version: 1,
       identity: {
         realname: this.username,
         username: this.username,
-        password: this.password,
+        password: pass.cryptPassword(this.password),
       },
+      keyboard: {
+        layout: 'us'
+      },
+      locale: 'en_US',
       network: {
         network: {
           version: 2,
@@ -38,18 +42,22 @@ export class UnattendedUbuntuManager extends UnattendedManagerBase {
           },
         },
       },
+      timezone: 'America/Vancouver',
+      apt: {
+        geoip: true
+      },
       storage: {
         layout: {
           name: 'lvm',
         },
         filesystems: [
           {
-            device: '/dev/sda1',
+            device: '/dev/vda',
             format: 'ext4',
           },
         ],
       },
-      'late-commands': this.applications.map(app => this.getUbuntuInstallCommand(app)),
+      // 'late-commands': this.applications.map(app => this.getUbuntuInstallCommand(app)),
     };
 
     return yaml.dump(config);
@@ -61,5 +69,26 @@ export class UnattendedUbuntuManager extends UnattendedManagerBase {
         return app.installCommand[i];
       }
     }
+  }
+
+  async addAutoinstallConfigFile(content: string, extractDir: string, filename: string) {
+    const filePath = path.join(extractDir, filename);
+    await fs.promises.writeFile(filePath, content);
+  }
+
+  async modifyBootConfig(grubCfgPath: string) {
+    let config = fs.readFileSync(grubCfgPath, 'utf8');
+
+    config = config.replace(
+      /(linux\s.*\squiet)/,
+      '$1 autoinstall ds=nocloud-net;s=http://{{IP}}:{{PORT}}/'
+    );
+
+    fs.writeFileSync(grubCfgPath, config);
+  }
+
+  // Inherited from UnattendedManagerBase
+  async createISO(isoPath: string, extractDir: string) {
+    // ...
   }
 }

@@ -14,7 +14,7 @@ export class UnattendedManagerBase {
 
   configFileName: string | null = null;
 
-  public generateConfig(): string {
+  public async generateConfig(): Promise<string> {
     return '';
   }
 

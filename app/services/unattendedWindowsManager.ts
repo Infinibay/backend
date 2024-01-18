@@ -20,16 +20,16 @@ export interface ComponentConfig {
 
 /**
  * This class is used to generate an unattended Windows XML file.
- * 
+ *
  * Example usage:
- * 
+ *
  * const generator = new UnattendedWindowsManager(
  *     'admin',
  *     'password',
  *     'productKey',
  *     applications
  * );
- * 
+ *
  * const xml = generator.generateNewImage();
  */
 
@@ -60,11 +60,11 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
   /**
    * This method creates a base component with the specified pass.
    * The component is created with the base configuration defined in COMPONENT_BASE_CONFIG.
-   * 
+   *
    * @param pass - The pass for which the component is being created.
-   * 
+   *
    * @returns An object representing the base component.
-   * 
+   *
    * For more information on passes, refer to:
    * https://docs.microsoft.com/en-us/windows-hardware/manufacture/desktop/windows-setup-automation-overview
    */
@@ -82,9 +82,9 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
   /**
    * This method adds the AutoLogon component to the provided component.
    * The AutoLogon component is used to automatically log on to the computer and is configured with the username and password provided.
-   * 
+   *
    * @param component - The component to which the AutoLogon component is being added.
-   * 
+   *
    * For more information on the AutoLogon component, refer to:
    * https://docs.microsoft.com/en-us/windows-hardware/customize/desktop/unattend/microsoft-windows-shell-setup-autologon
    */
@@ -101,9 +101,9 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
   /**
    * This method adds the ProductKey component to the provided component.
    * The ProductKey component is used to specify the product key for the Windows installation.
-   * 
+   *
    * @param component - The component to which the ProductKey component is being added.
-   * 
+   *
    * For more information on the ProductKey component, refer to:
    * https://docs.microsoft.com/en-us/windows-hardware/customize/desktop/unattend/microsoft-windows-setup-productkey
    */
@@ -116,9 +116,9 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
   /**
    * This method adds the OOBE (Out of Box Experience) component to the provided component.
    * The OOBE component is used to customize the initial Windows setup experience.
-   * 
+   *
    * @param component - The component to which the OOBE component is being added.
-   * 
+   *
    * For more information on the OOBE component, refer to:
    * https://docs.microsoft.com/en-us/windows-hardware/customize/desktop/unattend/microsoft-windows-shell-setup-oobe
    */
@@ -138,9 +138,9 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
   /**
    * This method adds the DiskConfiguration component to the provided component.
    * The DiskConfiguration component is used to specify the disk configuration for the Windows installation.
-   * 
+   *
    * @param component - The component to which the DiskConfiguration component is being added.
-   * 
+   *
    * For more information on the DiskConfiguration component, refer to:
    * https://docs.microsoft.com/en-us/windows-hardware/customize/desktop/unattend/microsoft-windows-setup-diskconfiguration
    */
@@ -202,9 +202,9 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
    * This method is used to add user accounts to the component.
    * It sets the AdministratorPassword and creates a LocalAccount with the provided username and password.
    * The created LocalAccount is added to the Administrators group.
-   * 
+   *
    * @param component - The component to which the UserAccounts are being added.
-   * 
+   *
    * For more information on the UserAccounts component, refer to:
    * https://docs.microsoft.com/en-us/windows-hardware/customize/desktop/unattend/microsoft-windows-shell-setup-useraccounts
    */
@@ -234,13 +234,13 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
 
   /**
    * This method is used to add applications to the settings.
-   * It iterates over the applications and for each application that supports 'windows', 
+   * It iterates over the applications and for each application that supports 'windows',
    * it creates a 'specialize' component with a 'FirstLogonCommands' section.
    * The 'FirstLogonCommands' section contains a 'SynchronousCommand' to install the application.
    * The created component is then added to the settings.
-   * 
+   *
    * @param settings - The settings to which the applications are being added.
-   * 
+   *
    * For more information on the 'FirstLogonCommands' component, refer to:
    * https://docs.microsoft.com/en-us/windows-hardware/customize/desktop/unattend/microsoft-windows-shell-setup-firstlogoncommands
    */
@@ -272,7 +272,7 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
    * the 'OOBE' logic, the disk configuration logic, and the applications.
    * Finally, it builds and returns the XML string.
    */
-  generateConfig(): string {
+  async generateConfig(): Promise<string> {
     const builder = new Builder();
     const settings: any[] = [];
 

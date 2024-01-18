@@ -9,11 +9,11 @@ import { UnattendedManagerBase } from './unattendedManagerBase';
  * It is used to generate a Kickstart configuration file for unattended Red Hat installations.
  * The class takes a username, password, and a list of applications as parameters.
  * It generates a configuration file that includes the user credentials and the post-installation scripts for the applications (TODO).
- * 
+ *
  * Usage:
  * const unattendedManager = new UnattendedRedHatManager(username, password, applications);
  * const config = unattendedManager.generateConfig();
- * 
+ *
  * For more information on Kickstart installations, refer to the Red Hat documentation:
  * https://access.redhat.com/documentation/en-us/red_hat_enterprise_linux/7/html/installation_guide/chap-kickstart-installations
  */
@@ -38,7 +38,7 @@ export class UnattendedRedHatManager extends UnattendedManagerBase {
     this.debug.log('UnattendedRedHatManager initialized');
   }
 
-  generateConfig(): string {
+  async generateConfig(): Promise<string> {
     this.debug.log('Root password generated and encrypted');
     const applicationsPostCommands = this.generateApplicationsConfig(); // Returns commands without %post and %end tags
     this.debug.log('Applications post commands generated');
