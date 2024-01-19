@@ -13,11 +13,18 @@ export class UnattendedUbuntuManager extends UnattendedManagerBase {
   private applications: Application[];
 
   constructor(username: string, password: string, applications: Application[]) {
-    super()
+    super();
+    this.debug.log('Initializing UnattendedRedHatManager');
+    if (!username || !password) {
+      this.debug.log('error', 'Username and password are required');
+      throw new Error('Username and password are required');
+    }
+    this.isoPath = path.join(process.env.ISO_PATH ?? '/opt/infinibay/iso', 'ubuntu.iso');
     this.username = username;
     this.password = password;
     this.applications = applications;
-    this.configFileName = 'autoinstall.yaml';
+    this.configFileName = 'autoinstall.yml';
+    this.debug.log('UnattendedRedHatManager initialized');
   }
 
   /**

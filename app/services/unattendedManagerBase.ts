@@ -13,12 +13,11 @@ export class UnattendedManagerBase {
   protected debug: Debugger = new Debugger('unattended-manager-base');
 
   configFileName: string | null = null;
+  isoPath: string | null = null;
 
   public async generateConfig(): Promise<string> {
     return '';
   }
-
-
 
   /**
    * Generates a new image.
@@ -31,7 +30,9 @@ export class UnattendedManagerBase {
     let extractDir: string | null = null;
     try {
       this.debug.log('Validating ISO path');
-      const isoPath = this.validatePath(process.env.ISO_PATH, '/opt/infinibay/iso/fedora.iso');
+      if (!this.isoPath) {
+        throw Error('No ISO path specified');
+      }
       this.debug.log('Generating config');
       const configContent = await this.generateConfig();
       this.debug.log(configContent);
@@ -43,7 +44,7 @@ export class UnattendedManagerBase {
       const newIsoPath = path.join(outputPath, newIsoName);
 
       this.debug.log('Extracting ISO');
-      extractDir = await this.extractISO(isoPath);
+      extractDir = await this.extractISO(this.isoPath);
       if (this.configFileName) {
         this.debug.log('Adding autoinstall config file');
         await this.addAutonistallConfigFile(configContent, extractDir, this.configFileName);
