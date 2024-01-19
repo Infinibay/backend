@@ -23,7 +23,7 @@ export class UnattendedUbuntuManager extends UnattendedManagerBase {
     this.username = username;
     this.password = password;
     this.applications = applications;
-    this.configFileName = 'autoinstall.yml';
+    this.configFileName = 'autoinstall/user-data'
     this.debug.log('UnattendedRedHatManager initialized');
   }
 
@@ -79,6 +79,7 @@ export class UnattendedUbuntuManager extends UnattendedManagerBase {
       // 'late-commands': this.applications.map(app => this.getUbuntuInstallCommand(app)),
     };
 
+
     return yaml.dump(config);
   }
 
@@ -102,14 +103,23 @@ export class UnattendedUbuntuManager extends UnattendedManagerBase {
    * @return {Promise<void>}
    */
   async modifyGrubConfig(grubCfgPath: string) {
-    let config = fs.readFileSync(grubCfgPath, 'utf8');
+    /*
+    Overwrite grubCfgPath with the following:
+    menuentry "Autoinstall Ubuntu Server" {
+        set gfxpayload=keep
+        linux   /casper/vmlinuz quiet autoinstall ds=nocloud\;s=/cdrom/server/  ---
+        initrd  /casper/initrd
+    }
+     */
+    const content:string = `
+menuentry "Autoinstall Ubuntu Server" {
+    set gfxpayload=keep
+    linux   /casper/vmlinuz quiet autoinstall ds=nocloud\\;s=/cdrom/autoinstall/  ---
+    initrd  /casper/initrd
+}
+`;
+    await fs.promises.writeFile(grubCfgPath, content);
 
-    config = config.replace(
-      /(linux\s.*\squiet)/,
-      `$1 autoinstall ds=cdrom`
-    );
-
-    fs.writeFileSync(grubCfgPath, config);
   }
 
   /**
@@ -126,7 +136,13 @@ export class UnattendedUbuntuManager extends UnattendedManagerBase {
       throw new Error('Extraction directory does not exist.');
     }
 
+    await fs.promises.mkdir(path.join(extractDir, 'autoinstall'), { recursive: true });
+    // create empty file in autoinstall/meta-data
+    await fs.promises.writeFile(path.join(extractDir, 'autoinstall/meta-data'), '');
+
     await this.modifyGrubConfig(path.join(extractDir, 'boot/grub/grub.cfg'));
+
+
 
     // Define the command and arguments for creating a new ISO image
     const isoCreationCommandParts = [
