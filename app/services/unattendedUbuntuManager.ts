@@ -35,55 +35,57 @@ export class UnattendedUbuntuManager extends UnattendedManagerBase {
    */
   async generateConfig(): Promise<string> {
     const config = {
-      version: 1, // Specifies the version of the configuration. Currently, it is set to 1.
+      autoinstall: {
+        version: 1, // Specifies the version of the configuration. Currently, it is set to 1.
 
-      identity: {
-        realname: this.username, // Sets the real name of the user.
-        username: this.username, // Sets the username of the user.
-        password: pass.cryptPassword(this.password), // Sets the encrypted password for the user.
-      },
+        identity: {
+          realname: this.username, // Sets the real name of the user.
+          username: this.username, // Sets the username of the user.
+          password: pass.cryptPassword(this.password), // Sets the encrypted password for the user.
+        },
 
-      keyboard: {
-        layout: 'us' // Sets the keyboard layout. Here, the keyboard layout is set to 'us' (United States).
-      },
+        keyboard: {
+          layout: 'us' // Sets the keyboard layout. Here, the keyboard layout is set to 'us' (United States).
+        },
 
-      locale: 'en_US', // Sets the system locale.
+        locale: 'en_US', // Sets the system locale.
 
-      network: {
         network: {
-          version: 2, // Specifies the version of the network configuration.
-          ethernets: {
-            enp3s0: {
-              dhcp4: true, // The Ethernet interface 'enp3s0' is set to use IPv4 DHCP for obtaining network configuration.
+          network: {
+            version: 2, // Specifies the version of the network configuration.
+            ethernets: {
+              enp3s0: {
+                dhcp4: true, // The Ethernet interface 'enp3s0' is set to use IPv4 DHCP for obtaining network configuration.
+              },
             },
           },
         },
-      },
 
-      timezone: 'America/Vancouver', // Sets the system timezone.
+        timezone: 'America/Vancouver', // Sets the system timezone.
 
-      // apt: {
-      //   geoip: true // Configures the system's Advanced Packaging Tool (APT) to use GeoIP. The system will try to determine the best package source/server based on geographic location.
-      // },
+        // apt: {
+        //   geoip: true // Configures the system's Advanced Packaging Tool (APT) to use GeoIP. The system will try to determine the best package source/server based on geographic location.
+        // },
 
-      // Add the 'packages' property
-      packages: [
-        'ubuntu-desktop',
-        'qemu-guest-agent',
-      ],
-
-      storage: {
-        layout: {
-          name: 'lvm', // Specifies the storage layout to use Logical Volume Management (LVM).
-        },
-        filesystems: [
-          {
-            device: '/dev/vda', // Defines the storage device to be used.
-            format: 'ext4', // Sets the format of the file system. Here, one ext4 filesystem is to be created.
-          },
+        // Add the 'packages' property
+        packages: [
+          'ubuntu-desktop',
+          'qemu-guest-agent',
         ],
-      },
-      // 'late-commands': this.applications.map(app => this.getUbuntuInstallCommand(app)),
+
+        storage: {
+          layout: {
+            name: 'lvm', // Specifies the storage layout to use Logical Volume Management (LVM).
+          },
+          filesystems: [
+            {
+              device: '/dev/vda', // Defines the storage device to be used.
+              format: 'ext4', // Sets the format of the file system. Here, one ext4 filesystem is to be created.
+            },
+          ],
+        },
+        // 'late-commands': this.applications.map(app => this.getUbuntuInstallCommand(app)),
+      }
     };
 
     // Append '#cloud-config' to the beginning of the config
