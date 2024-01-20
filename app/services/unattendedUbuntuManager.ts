@@ -24,7 +24,7 @@ export class UnattendedUbuntuManager extends UnattendedManagerBase {
     this.username = username;
     this.password = password;
     this.applications = applications;
-    this.configFileName = 'user-data'
+    this.configFileName = 'user-data.txt'
     this.debug.log('UnattendedRedHatManager initialized');
   }
 
@@ -121,7 +121,7 @@ export class UnattendedUbuntuManager extends UnattendedManagerBase {
     const content:string = `
 menuentry "Autoinstall Ubuntu Server" {
     set gfxpayload=keep
-    linux   /casper/vmlinuz quiet autoinstall quiet  ---
+    linux   /casper/vmlinuz quiet autoinstall quiet ds='nocloud;s=/cdrom/' --- ---
     initrd  /casper/initrd
 }
 `;
