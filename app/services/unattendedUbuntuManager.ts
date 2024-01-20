@@ -66,6 +66,12 @@ export class UnattendedUbuntuManager extends UnattendedManagerBase {
         geoip: true // Configures the system's Advanced Packaging Tool (APT) to use GeoIP. The system will try to determine the best package source/server based on geographic location.
       },
 
+      // Add the 'packages' property
+      packages: [
+        'ubuntu-desktop',
+        'qemu-guest-agent',
+      ],
+
       storage: {
         layout: {
           name: 'lvm', // Specifies the storage layout to use Logical Volume Management (LVM).
