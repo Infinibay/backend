@@ -34,11 +34,14 @@ export class UnattendedUbuntuManager extends UnattendedManagerBase {
    * @returns {Promise<string>} A promise that resolves to the generated configuration file.
    */
   async generateConfig(): Promise<string> {
+    //generate a random hostname, like ubuntu-xhsdDx
+    const hostname = 'ubuntu-' + Math.random().toString(36).substring(7);
     const config = {
       autoinstall: {
         version: 1, // Specifies the version of the configuration. Currently, it is set to 1.
 
         identity: {
+          hostname: hostname,
           realname: this.username, // Sets the real name of the user.
           username: this.username, // Sets the username of the user.
           password: pass.cryptPassword(this.password), // Sets the encrypted password for the user.
