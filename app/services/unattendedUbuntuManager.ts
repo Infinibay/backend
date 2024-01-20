@@ -6,6 +6,7 @@ import * as yaml from 'js-yaml';
 
 import { UnattendedManagerBase } from './unattendedManagerBase';
 import { cryptPassword } from "@utils/password";
+import { promises as fsPromises } from "fs";
 
 export class UnattendedUbuntuManager extends UnattendedManagerBase {
   private username: string;
@@ -122,6 +123,14 @@ menuentry "Autoinstall Ubuntu Server" {
 
   }
 
+  protected async addAutonistallConfigFile(content: string, extractDir: string, fileName: string): Promise<void> {
+    await fs.promises.mkdir(path.join(extractDir, 'autoinstall'), { recursive: true });
+    this.debug.log(`Starting to add Autonistall Config File: ${fileName}`);
+    const destPath = path.join(extractDir, fileName);
+    await fsPromises.writeFile(destPath, content);
+    this.debug.log(`Successfully added Autonistall Config File: ${fileName}`);
+  }
+
   /**
    * Create a new ISO image with the specified path and extract directory.
    *
@@ -136,7 +145,6 @@ menuentry "Autoinstall Ubuntu Server" {
       throw new Error('Extraction directory does not exist.');
     }
 
-    await fs.promises.mkdir(path.join(extractDir, 'autoinstall'), { recursive: true });
     // create empty file in autoinstall/meta-data
     await fs.promises.writeFile(path.join(extractDir, 'autoinstall/meta-data'), '');
 
