@@ -80,8 +80,8 @@ export class UnattendedUbuntuManager extends UnattendedManagerBase {
       // 'late-commands': this.applications.map(app => this.getUbuntuInstallCommand(app)),
     };
 
-
-    return yaml.dump(config);
+    // Append '#cloud-config' to the beginning of the config
+    return '#cloud-config\n' + yaml.dump(config);
   }
 
   private getUbuntuInstallCommand(app: Application): string | undefined {
