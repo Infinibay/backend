@@ -62,9 +62,9 @@ export class UnattendedUbuntuManager extends UnattendedManagerBase {
 
       timezone: 'America/Vancouver', // Sets the system timezone.
 
-      apt: {
-        geoip: true // Configures the system's Advanced Packaging Tool (APT) to use GeoIP. The system will try to determine the best package source/server based on geographic location.
-      },
+      // apt: {
+      //   geoip: true // Configures the system's Advanced Packaging Tool (APT) to use GeoIP. The system will try to determine the best package source/server based on geographic location.
+      // },
 
       // Add the 'packages' property
       packages: [
