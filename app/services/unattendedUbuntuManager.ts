@@ -24,7 +24,7 @@ export class UnattendedUbuntuManager extends UnattendedManagerBase {
     this.username = username;
     this.password = password;
     this.applications = applications;
-    this.configFileName = 'autoinstall/user-data'
+    this.configFileName = 'user-data'
     this.debug.log('UnattendedRedHatManager initialized');
   }
 
@@ -115,20 +115,12 @@ export class UnattendedUbuntuManager extends UnattendedManagerBase {
     const content:string = `
 menuentry "Autoinstall Ubuntu Server" {
     set gfxpayload=keep
-    linux   /casper/vmlinuz quiet autoinstall ds=nocloud\\;s=/cdrom/autoinstall/  ---
+    linux   /casper/vmlinuz quiet autoinstall quiet  ---
     initrd  /casper/initrd
 }
 `;
     await fs.promises.writeFile(grubCfgPath, content);
 
-  }
-
-  protected async addAutonistallConfigFile(content: string, extractDir: string, fileName: string): Promise<void> {
-    await fs.promises.mkdir(path.join(extractDir, 'autoinstall'), { recursive: true });
-    this.debug.log(`Starting to add Autonistall Config File: ${fileName}`);
-    const destPath = path.join(extractDir, fileName);
-    await fsPromises.writeFile(destPath, content);
-    this.debug.log(`Successfully added Autonistall Config File: ${fileName}`);
   }
 
   /**
@@ -146,7 +138,7 @@ menuentry "Autoinstall Ubuntu Server" {
     }
 
     // create empty file in autoinstall/meta-data
-    await fs.promises.writeFile(path.join(extractDir, 'autoinstall/meta-data'), '');
+    await fs.promises.writeFile(path.join(extractDir, 'meta-data'), '');
 
     await this.modifyGrubConfig(path.join(extractDir, 'boot/grub/grub.cfg'));
 
