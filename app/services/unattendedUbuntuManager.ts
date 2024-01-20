@@ -24,7 +24,7 @@ export class UnattendedUbuntuManager extends UnattendedManagerBase {
     this.username = username;
     this.password = password;
     this.applications = applications;
-    this.configFileName = 'user-data.txt'
+    this.configFileName = 'user-data'
     this.debug.log('UnattendedRedHatManager initialized');
   }
 
