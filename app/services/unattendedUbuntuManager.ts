@@ -145,6 +145,7 @@ menuentry "Autoinstall Ubuntu Server" {
 
     // create empty file in autoinstall/meta-data
     await fs.promises.writeFile(path.join(extractDir, 'meta-data'), '');
+    await fs.promises.writeFile(path.join(extractDir, 'vendor-data'), '');
 
     await this.modifyGrubConfig(path.join(extractDir, 'boot/grub/grub.cfg'));
 
