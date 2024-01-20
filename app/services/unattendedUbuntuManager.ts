@@ -57,8 +57,8 @@ export class UnattendedUbuntuManager extends UnattendedManagerBase {
           network: {
             version: 2, // Specifies the version of the network configuration.
             ethernets: {
-              enp3s0: {
-                dhcp4: true, // The Ethernet interface 'enp3s0' is set to use IPv4 DHCP for obtaining network configuration.
+              enp1s0: {
+                dhcp4: true, // The Ethernet interface 'enp1s0' is set to use IPv4 DHCP for obtaining network configuration.
               },
             },
           },
