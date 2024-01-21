@@ -83,6 +83,9 @@ export class UnattendedUbuntuManager extends UnattendedManagerBase {
           'qemu-guest-agent',
         ],
 
+        codecs: true,
+        drivers: true,
+
         storage: {
           layout: {
             name: 'lvm', // Specifies the storage layout to use Logical Volume Management (LVM).
@@ -95,7 +98,7 @@ export class UnattendedUbuntuManager extends UnattendedManagerBase {
           ],
         },
         'late-commands': [
-          "eject -tr /dev/cdrom"
+          "eject /dev/cdrom"
         ],
         // 'late-commands': this.applications.map(app => this.getUbuntuInstallCommand(app)),
       }
