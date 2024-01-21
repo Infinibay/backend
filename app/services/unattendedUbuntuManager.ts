@@ -78,6 +78,8 @@ export class UnattendedUbuntuManager extends UnattendedManagerBase {
         // Add the 'packages' property
         packages: [
           'ubuntu-desktop',
+          'gnome-software',
+          'firefox',
           'qemu-guest-agent',
         ],
 
@@ -92,6 +94,9 @@ export class UnattendedUbuntuManager extends UnattendedManagerBase {
             },
           ],
         },
+        'late-commands': [
+          "eject -tr /dev/cdrom"
+        ],
         // 'late-commands': this.applications.map(app => this.getUbuntuInstallCommand(app)),
       }
     };
