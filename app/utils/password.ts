@@ -1,4 +1,4 @@
-import unixcrypt from "unixcrypt";
+import  { encrypt } from "unixcrypt";
 /**
  * Crypts the given password using SHA-512 algorithm and returns the encrypted password in crypt library format.
  *
@@ -6,5 +6,5 @@ import unixcrypt from "unixcrypt";
  * @returns {string} - The encrypted password in crypt library format.
  */
 export function cryptPassword(password: string): string {
-  return unixcrypt.encrypt(password)
+  return encrypt(password)
 }
