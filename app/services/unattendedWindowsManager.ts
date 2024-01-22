@@ -334,7 +334,7 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
       '-iso-level', '3',
       '-full-iso9660-filenames',
       '-volid', 'Infinibay',
-      '-eltorito-boot', path.join(extractDir, 'boot/etfsboot.com'),
+      '-eltorito-boot', 'boot/etfsboot.com',
       '-no-emul-boot',
       '-boot-load-size', '8',
       '-boot-info-table',
