@@ -99,136 +99,126 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
           // language: 'neutral',
           // versionScope: 'nonSxS'
         },
-        _: []
+        settings: []
       }
     }
 
     let windowsPE = {
-      settings: {
-        $: {
-          pass: 'windowsPE'
-        },
-        _: [
-          {
-            component: {
-              $: {
-                name: 'Microsoft-Windows-International-Core-WinPE',
-                processorArchitecture: 'amd64',
-                publicKeyToken: '31bf3856ad364e35',
-                language: 'neutral',
-                versionScope: 'nonSxS'
-              },
-              SetupUILanguage: {
-                UILanguage: 'en-US'
-              },
-              InputLocale: 'en-US',
-              SystemLocale: 'en-US',
-              UILanguage: 'en-US',
-              UserLocale: 'en-US'
-            }
+      $: {
+        pass: 'windowsPE'
+      },
+      component: [
+        {
+          $: {
+            name: 'Microsoft-Windows-International-Core-WinPE',
+            processorArchitecture: 'amd64',
+            publicKeyToken: '31bf3856ad364e35',
+            language: 'neutral',
+            versionScope: 'nonSxS'
           },
-          {
-            component: {
-              $: {
-                name: 'Microsoft-Windows-Setup',
-                processorArchitecture: 'amd64',
-                publicKeyToken: '31bf3856ad364e35',
-                language: 'neutral',
-                versionScope: 'nonSxS'
-              },
-              ImageInstall: {
-                OSImage: {
-                  InstallTo: {
-                    DiskID: 0,
-                    PartitionID: 2
-                  }
-                }
-              },
-              UserData: {
-                ProductKey: {
-                  // This product key does not activate windows, just set the version to install, in our case
-                  // we use windows 10 home or 11 home. Both keys are Windows Generic key.
-                  // DON'T WORRY, IT'S 100 LEGAL, these are not stolen keys, are just generic one used by
-                  // microsoft to specify the version
-                  // https://devicepartner.microsoft.com/en-us/communications/comm-windows-10-build
-                  // https://learn.microsoft.com/en-us/windows-server/get-started/kms-client-activation-keys
-                  Key: 'TX9XD-98N7V-6WMQ6-BX7FG-H8Q99' // both 10 home and 11 home use the same generic key
-                },
-                AcceptEula: true
-              },
-              DiskConfiguration: {
+          SetupUILanguage: {
+            UILanguage: 'en-US'
+          },
+          InputLocale: 'en-US',
+          SystemLocale: 'en-US',
+          UILanguage: 'en-US',
+          UserLocale: 'en-US'
+        },
+      {
+          $: {
+            name: 'Microsoft-Windows-Setup',
+            processorArchitecture: 'amd64',
+            publicKeyToken: '31bf3856ad364e35',
+            language: 'neutral',
+            versionScope: 'nonSxS'
+          },
+          ImageInstall: {
+            OSImage: {
+              InstallTo: {
                 DiskID: 0,
-                WillWipeDisk: true,
-                CreatePartitions: [
-                  {
-                    CreatePartition: {
-                      $: {
-                        'wcm:action': 'add'
-                      },
-                      Order: 1,
-                      Type: 'Primary',
-                      Size: 300
-                    }
-                  },
-                  {
-                    CreatePartition: {
-                      $: {
-                        'wcm:action': 'add'
-                      },
-                      Order: 2,
-                      Type: 'Primary',
-                      Extend: true
-                    }
-                  }
-                ],
-                ModifyPartitions: [
-                  {
-                    ModifyPartition: {
-                      $: {
-                        'wcm:action': 'add'
-                      },
-                      Order: 1,
-                      PartitionID: 1,
-                      Label: 'System',
-                      Format: 'NTFS',
-                      Active: true
-                    }
-                  },
-                  {
-                    ModifyPartition: {
-                      $: {
-                        'wcm:action': 'add'
-                      },
-                      Order: 2,
-                      PartitionID: 2,
-                      Label: 'Windows',
-                      Letter: 'C',
-                      Format: 'NTFS'
-                    }
-                  }
-                ],
-                WillShowUI: 'OnError'
+                PartitionID: 2
               }
             }
+          },
+          UserData: {
+            ProductKey: {
+              // This product key does not activate windows, just set the version to install, in our case
+              // we use windows 10 home or 11 home. Both keys are Windows Generic key.
+              // DON'T WORRY, IT'S 100 LEGAL, these are not stolen keys, are just generic one used by
+              // microsoft to specify the version
+              // https://devicepartner.microsoft.com/en-us/communications/comm-windows-10-build
+              // https://learn.microsoft.com/en-us/windows-server/get-started/kms-client-activation-keys
+              Key: 'TX9XD-98N7V-6WMQ6-BX7FG-H8Q99' // both 10 home and 11 home use the same generic key
+            },
+            AcceptEula: true
+          },
+          DiskConfiguration: {
+            DiskID: 0,
+            WillWipeDisk: true,
+            CreatePartitions: [
+              {
+                CreatePartition: {
+                  $: {
+                    'wcm:action': 'add'
+                  },
+                  Order: 1,
+                  Type: 'Primary',
+                  Size: 300
+                }
+              },
+              {
+                CreatePartition: {
+                  $: {
+                    'wcm:action': 'add'
+                  },
+                  Order: 2,
+                  Type: 'Primary',
+                  Extend: true
+                }
+              }
+            ],
+            ModifyPartitions: [
+              {
+                ModifyPartition: {
+                  $: {
+                    'wcm:action': 'add'
+                  },
+                  Order: 1,
+                  PartitionID: 1,
+                  Label: 'System',
+                  Format: 'NTFS',
+                  Active: true
+                }
+              },
+              {
+                ModifyPartition: {
+                  $: {
+                    'wcm:action': 'add'
+                  },
+                  Order: 2,
+                  PartitionID: 2,
+                  Label: 'Windows',
+                  Letter: 'C',
+                  Format: 'NTFS'
+                }
+              }
+            ],
+            WillShowUI: 'OnError'
           }
-        ]
-      },
+        }
+      ]
     }
 
     const generalize = {
-      settings: {
-        $: {
-          pass: 'generalize'
-        }
+      $: {
+        pass: 'generalize'
       }
     }
 
     // Right now, does nothing, but could be used to modify windows register and enable or dissable features
     const specialize = {
-      settings: {
-        $: {
-          pass: 'specialize'
-        }
+      $: {
+        pass: 'specialize'
       },
       component: {
         $: {
@@ -242,91 +232,81 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
     }
 
     const auditSystem = {
-      settings: {
-        $: {
-          pass: 'auditSystem'
-        }
+      $: {
+        pass: 'auditSystem'
       }
     }
 
     const auditUser = {
-      settings: {
-        $: {
-          pass: 'auditUser'
-        }
+      $: {
+        pass: 'auditUser'
       }
     }
 
     let oobeSystem: any = {
-      settings: {
-        $: {
-          pass: 'oobeSystem'
-        }
+      $: {
+        pass: 'oobeSystem'
       },
-      _: [
+      component: [
         {
-          component: {
-            $: {
-              name: 'Microsoft-Windows-International-Core',
-              processorArchitecture: 'amd64',
-              publicKeyToken: '31bf3856ad364e35',
-              language: 'neutral',
-              versionScope: 'nonSxS'
-            },
-            SetupUILanguage: {
-              UILanguage: 'en-US'
-            },
-            InputLocale: 'en-US',
-            SystemLocale: 'en-US',
-            UILanguage: 'en-US',
-            UserLocale: 'en-US'
-          }
+          $: {
+            name: 'Microsoft-Windows-International-Core',
+            processorArchitecture: 'amd64',
+            publicKeyToken: '31bf3856ad364e35',
+            language: 'neutral',
+            versionScope: 'nonSxS'
+          },
+          SetupUILanguage: {
+            UILanguage: 'en-US'
+          },
+          InputLocale: 'en-US',
+          SystemLocale: 'en-US',
+          UILanguage: 'en-US',
+          UserLocale: 'en-US'
         },
         {
-          component: {
-            $: {
-              name: 'Microsoft-Windows-Shell-Setup',
-              processorArchitecture: 'amd64',
-              publicKeyToken: '31bf3856ad364e35',
-              language: 'neutral',
-              versionScope: 'nonSxS'
-            },
-            UserAccounts: {
-              LocalAccounts: {
-                LocalAccount: {
-                  $: {
-                    'wcm:action': 'add'
-                  },
-                  Name: this.username,
-                  Group: 'Administrators',
-                  Password: {
-                    Value: this.password,
-                    PlainText: true
-                  }
+          $: {
+            name: 'Microsoft-Windows-Shell-Setup',
+            processorArchitecture: 'amd64',
+            publicKeyToken: '31bf3856ad364e35',
+            language: 'neutral',
+            versionScope: 'nonSxS'
+          },
+          UserAccounts: {
+            LocalAccounts: {
+              LocalAccount: {
+                $: {
+                  'wcm:action': 'add'
+                },
+                Name: this.username,
+                Group: 'Administrators',
+                Password: {
+                  Value: this.password,
+                  PlainText: true
                 }
               }
-            },
-            OOBE: {
-              ProtectYourPC: 3, // Turn off sharing data and things like that
-              HideEULAPage: true,
-              HideWirelessSetupInOOBE: true
             }
+          },
+          OOBE: {
+            ProtectYourPC: 3, // Turn off sharing data and things like that
+            HideEULAPage: true,
+            HideWirelessSetupInOOBE: true
           }
         }
       ]
     }
 
     if (this.productKey) {
-      oobeSystem['_'][1]['component']["ProductKey"] = this.productKey
+      oobeSystem['component'][1]["ProductKey"] = this.productKey
     }
 
     // lets add everything to root component
-    root['unattend']['_'].push(windowsPE)
-    root['unattend']['_'].push(generalize)
-    root['unattend']['_'].push(specialize)
-    root['unattend']['_'].push(auditSystem)
-    root['unattend']['_'].push(auditUser)
-    root['unattend']['_'].push(oobeSystem)
+    root['unattend']['settings'].push(windowsPE)
+    root['unattend']['settings'].push(generalize)
+    root['unattend']['settings'].push(specialize)
+    root['unattend']['settings'].push(auditSystem)
+    root['unattend']['settings'].push(auditUser)
+    root['unattend']['settings'].push(oobeSystem)
 
     return builder.buildObject({});
   }
