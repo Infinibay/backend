@@ -46,14 +46,14 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
   private version: number = 0;
   private username: string = '';
   private password: string = '';
-  private productKey: string | null = null;
+  private productKey: string | undefined = undefined;
   private applications: Application[] = [];
 
   constructor(
     version: number,
     username: string,
     password: string,
-    productKey: string | null,
+    productKey: string | undefined,
     applications: Application[]
   ) {
     super();

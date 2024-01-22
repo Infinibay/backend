@@ -147,7 +147,7 @@ export class CreateMachineInputType {
     password: string = ''
 
     @Field(() => String, { nullable: true })
-    productKey?: string | null = null
+    productKey?: string | undefined
 
     @Field(() => [MachineApplicationInputType])
     applications: MachineApplicationInputType[] = []

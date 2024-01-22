@@ -181,7 +181,7 @@ export class MachineResolver implements MachineResolverInterface {
         } as unknown as Machine // WARNING!! typescript type-check bypassed
     }
 
-    backgroundCode = async (id: string, context: InfinibayContext, username: string, password: string, productKey: string) => {
+    backgroundCode = async (id: string, context: InfinibayContext, username: string, password: string, productKey: string | undefined) => {
         try {
             const machine = await context.prisma.machine.findUnique({
                 where: {

@@ -56,7 +56,7 @@ export class VirtManager {
    * @param productKey - The product key for the new machine.
    * @returns A promise that resolves when the machine is created.
    */
-  async createMachine(machine: Machine, username: string, password: string, productKey: string | null): Promise<void> {
+  async createMachine(machine: Machine, username: string, password: string, productKey: string | undefined): Promise<void> {
     this.debug.log('Creating machine', machine.name);
 
     // Check if Prisma client is set
