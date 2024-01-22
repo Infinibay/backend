@@ -43,193 +43,26 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
     xmlns: 'http://schemas.microsoft.com/WMIConfig/2002/State',
   };
 
+  private version: number = 0;
+  private username: string = '';
+  private password: string = '';
+  private productKey: string | null = null;
+  private applications: Application[] = [];
+
   constructor(
-    private username: string,
-    private password: string,
-    private productKey: string | null,
-    private applications: Application[]
+    version: number,
+    username: string,
+    password: string,
+    productKey: string | null,
+    applications: Application[]
   ) {
     super();
     this.configFileName = 'autounattend.xml';
+    this.version = version;
     this.username = username;
     this.password = password;
     this.productKey = productKey;
     this.applications = applications;
-  }
-
-  /**
-   * This method creates a base component with the specified pass.
-   * The component is created with the base configuration defined in COMPONENT_BASE_CONFIG.
-   *
-   * @param pass - The pass for which the component is being created.
-   *
-   * @returns An object representing the base component.
-   *
-   * For more information on passes, refer to:
-   * https://docs.microsoft.com/en-us/windows-hardware/manufacture/desktop/windows-setup-automation-overview
-   */
-  private createBaseComponent(pass: string): any {
-    return {
-      $: { pass },
-      component: [
-        {
-          $: UnattendedWindowsManager.COMPONENT_BASE_CONFIG,
-        },
-      ],
-    };
-  }
-
-  /**
-   * This method adds the AutoLogon component to the provided component.
-   * The AutoLogon component is used to automatically log on to the computer and is configured with the username and password provided.
-   *
-   * @param component - The component to which the AutoLogon component is being added.
-   *
-   * For more information on the AutoLogon component, refer to:
-   * https://docs.microsoft.com/en-us/windows-hardware/customize/desktop/unattend/microsoft-windows-shell-setup-autologon
-   */
-  private addAutoLogon(component: any): void {
-    component.component[0].AutoLogon = [
-      {
-        Password: [{ Value: this.password }],
-        Enabled: ['true'],
-        Username: [this.username],
-      },
-    ];
-  }
-
-  /**
-   * This method adds the ProductKey component to the provided component.
-   * The ProductKey component is used to specify the product key for the Windows installation.
-   *
-   * @param component - The component to which the ProductKey component is being added.
-   *
-   * For more information on the ProductKey component, refer to:
-   * https://docs.microsoft.com/en-us/windows-hardware/customize/desktop/unattend/microsoft-windows-setup-productkey
-   */
-  private addProductKey(component: any): void {
-    if (this.productKey) {
-      component.component[0].ProductKey = [this.productKey];
-    }
-  }
-
-  /**
-   * This method adds the OOBE (Out of Box Experience) component to the provided component.
-   * The OOBE component is used to customize the initial Windows setup experience.
-   *
-   * @param component - The component to which the OOBE component is being added.
-   *
-   * For more information on the OOBE component, refer to:
-   * https://docs.microsoft.com/en-us/windows-hardware/customize/desktop/unattend/microsoft-windows-shell-setup-oobe
-   */
-  private addOOBE(component: any): void {
-    component.component[0].OOBE = [
-      {
-        HideEULAPage: ['true'],
-        HideOEMRegistrationScreen: ['true'],
-        HideOnlineAccountScreens: ['true'],
-        HideWirelessSetupInOOBE: ['true'],
-        SkipUserOOBE: ['true'],
-        SkipMachineOOBE: ['true'],
-      },
-    ];
-  }
-
-  /**
-   * This method adds the DiskConfiguration component to the provided component.
-   * The DiskConfiguration component is used to specify the disk configuration for the Windows installation.
-   *
-   * @param component - The component to which the DiskConfiguration component is being added.
-   *
-   * For more information on the DiskConfiguration component, refer to:
-   * https://docs.microsoft.com/en-us/windows-hardware/customize/desktop/unattend/microsoft-windows-setup-diskconfiguration
-   */
-  private addDiskConfiguration(component: any): void {
-    component.component[0]['DiskConfiguration'] = [
-      {
-        Disk: [
-          {
-            $: { 'wcm:action': 'add' },
-            DiskID: ['0'],
-            WillWipeDisk: ['true'],
-            CreatePartitions: [
-              {
-                CreatePartition: [
-                  {
-                    $: { 'wcm:action': 'add' },
-                    Order: ['1'],
-                    Type: ['Primary'],
-                    Extend: ['true'],
-                  },
-                ],
-              },
-            ],
-            ModifyPartitions: [
-              {
-                ModifyPartition: [
-                  {
-                    $: { 'wcm:action': 'add' },
-                    Order: ['1'],
-                    PartitionID: ['1'],
-                    Format: ['NTFS'],
-                    Label: ['Windows'],
-                    Active: ['true'],
-                  },
-                ],
-              },
-            ],
-          },
-        ],
-        ImageInstall: [
-          {
-            OSImage: [
-              {
-                InstallTo: [
-                  {
-                    DiskID: ['0'],
-                    PartitionID: ['1'],
-                  },
-                ],
-              },
-            ],
-          },
-        ],
-      },
-    ];
-  }
-
-  /**
-   * This method is used to add user accounts to the component.
-   * It sets the AdministratorPassword and creates a LocalAccount with the provided username and password.
-   * The created LocalAccount is added to the Administrators group.
-   *
-   * @param component - The component to which the UserAccounts are being added.
-   *
-   * For more information on the UserAccounts component, refer to:
-   * https://docs.microsoft.com/en-us/windows-hardware/customize/desktop/unattend/microsoft-windows-shell-setup-useraccounts
-   */
-  private addUserAccounts(component: any): void {
-    component.component[0]['UserAccounts'] = {
-      AdministratorPassword: {
-        Value: this.password,
-        PlainText: ['true']
-      },
-      LocalAccounts: {
-        LocalAccount: [
-          {
-            $: { 'wcm:action': 'add' },
-            Name: this.username,
-            Password: {
-              Value: this.password,
-              PlainText: ['true']
-            },
-            Group: ['Administrators'],
-            DisplayName: this.username,
-            Description: 'Local administrator account'
-          }
-        ]
-      }
-    };
   }
 
   /**
@@ -245,65 +78,295 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
    * https://docs.microsoft.com/en-us/windows-hardware/customize/desktop/unattend/microsoft-windows-shell-setup-firstlogoncommands
    */
   private addApplicationsToSettings(settings: any[]): void {
-    this.applications.forEach((app, appIndex) => {
-      app.os.forEach((os, osIndex) => {
-        if (os === 'windows') {
-          const appComponent = this.createBaseComponent('specialize');
-          appComponent.component[0]['FirstLogonCommands'] = {
-            SynchronousCommand: [
-              {
-                $: { 'wcm:action': 'add' },
-                Order: [appIndex.toString()],
-                CommandLine: app.installCommand[osIndex],
-                Description: 'Install ' + app.name,
-              },
-            ],
-          };
-          settings.push(appComponent);
-        }
-      });
-    });
   }
 
   /**
-   * This method is used to generate the XML for the unattended Windows installation.
-   * It first creates a new XML builder, then initializes an empty settings array.
-   * It then creates and adds various components to the settings array, such as the 'specialize' pass logic,
-   * the 'OOBE' logic, the disk configuration logic, and the applications.
-   * Finally, it builds and returns the XML string.
+   * Generates a configuration string using XML format for a specific software.
+   *
+   * @returns {Promise<string>} The generated configuration string.
    */
   async generateConfig(): Promise<string> {
     const builder = new Builder();
     const settings: any[] = [];
-
-    // Specialize pass logic
-    const specializeComponent = this.createBaseComponent('specialize');
-    this.addAutoLogon(specializeComponent);
-    this.addProductKey(specializeComponent);
-    this.addUserAccounts(specializeComponent);
-    settings.push(specializeComponent);
-
-    // OOBE logic
-    const oobeComponent = this.createBaseComponent('oobeSystem');
-    this.addOOBE(oobeComponent);
-    settings.push(oobeComponent);
-
-    // Disk configuration logic
-    const diskConfigComponent = this.createBaseComponent('windowsPE');
-    this.addDiskConfiguration(diskConfigComponent);
-    settings.push(diskConfigComponent);
-
-    // Add applications
-    this.addApplicationsToSettings(settings);
-
-    const obj = {
+    let root: any = {
       unattend: {
-        $: { xmlns: 'urn:schemas-microsoft-com:unattend' },
-        settings,
-      },
-    };
+        $: {
+          xmlns: 'urn:schemas-microsoft-com:unattend',
+          'xmlns:wcm': 'http://schemas.microsoft.com/WMIConfig/2002/State'
+          // processorArchitecture: 'amd64',
+          // publicKeyToken: '31bf3856ad364e35',
+          // language: 'neutral',
+          // versionScope: 'nonSxS'
+        },
+        _: []
+      }
+    }
 
-    return builder.buildObject(obj);
+    let windowsPE = {
+      settings: {
+        $: {
+          pass: 'windowsPE'
+        },
+        _: [
+          {
+            component: {
+              $: {
+                name: 'Microsoft-Windows-International-Core-WinPE',
+                processorArchitecture: 'amd64',
+                publicKeyToken: '31bf3856ad364e35',
+                language: 'neutral',
+                versionScope: 'nonSxS'
+              },
+              SetupUILanguage: {
+                UILanguage: 'en-US'
+              },
+              InputLocale: 'en-US',
+              SystemLocale: 'en-US',
+              UILanguage: 'en-US',
+              UserLocale: 'en-US'
+            }
+          },
+          {
+            component: {
+              $: {
+                name: 'Microsoft-Windows-Setup',
+                processorArchitecture: 'amd64',
+                publicKeyToken: '31bf3856ad364e35',
+                language: 'neutral',
+                versionScope: 'nonSxS'
+              },
+              ImageInstall: {
+                OSImage: {
+                  InstallTo: {
+                    DiskID: 0,
+                    PartitionID: 2
+                  }
+                }
+              },
+              UserData: {
+                ProductKey: {
+                  // This product key does not activate windows, just set the version to install, in our case
+                  // we use windows 10 home or 11 home. Both keys are Windows Generic key.
+                  // DON'T WORRY, IT'S 100 LEGAL, these are not stolen keys, are just generic one used by
+                  // microsoft to specify the version
+                  // https://devicepartner.microsoft.com/en-us/communications/comm-windows-10-build
+                  // https://learn.microsoft.com/en-us/windows-server/get-started/kms-client-activation-keys
+                  Key: 'TX9XD-98N7V-6WMQ6-BX7FG-H8Q99' // both 10 home and 11 home use the same generic key
+                },
+                AcceptEula: true
+              },
+              DiskConfiguration: {
+                DiskID: 0,
+                WillWipeDisk: true,
+                CreatePartitions: [
+                  {
+                    CreatePartition: {
+                      $: {
+                        'wcm:action': 'add'
+                      },
+                      Order: 1,
+                      Type: 'Primary',
+                      Size: 300
+                    }
+                  },
+                  {
+                    CreatePartition: {
+                      $: {
+                        'wcm:action': 'add'
+                      },
+                      Order: 2,
+                      Type: 'Primary',
+                      Extend: true
+                    }
+                  }
+                ],
+                ModifyPartitions: [
+                  {
+                    ModifyPartition: {
+                      $: {
+                        'wcm:action': 'add'
+                      },
+                      Order: 1,
+                      PartitionID: 1,
+                      Label: 'System',
+                      Format: 'NTFS',
+                      Active: true
+                    }
+                  },
+                  {
+                    ModifyPartition: {
+                      $: {
+                        'wcm:action': 'add'
+                      },
+                      Order: 2,
+                      PartitionID: 2,
+                      Label: 'Windows',
+                      Letter: 'C',
+                      Format: 'NTFS'
+                    }
+                  }
+                ],
+                WillShowUI: 'OnError'
+              }
+            }
+          }
+        ]
+      },
+    }
+
+    const generalize = {
+      settings: {
+        $: {
+          pass: 'generalize'
+        }
+      }
+    }
+
+    // Right now, does nothing, but could be used to modify windows register and enable or dissable features
+    const specialize = {
+      settings: {
+        $: {
+          pass: 'specialize'
+        }
+      },
+      component: {
+        $: {
+          name: 'Microsoft-Windows-Deployment',
+          processorArchitecture: 'amd64',
+          publicKeyToken: '31bf3856ad364e35',
+          language: 'neutral',
+          versionScope: 'nonSxS'
+        },
+      }
+    }
+
+    const auditSystem = {
+      settings: {
+        $: {
+          pass: 'auditSystem'
+        }
+      }
+    }
+
+    const auditUser = {
+      settings: {
+        $: {
+          pass: 'auditUser'
+        }
+      }
+    }
+
+    let oobeSystem: any = {
+      settings: {
+        $: {
+          pass: 'oobeSystem'
+        }
+      },
+      _: [
+        {
+          component: {
+            $: {
+              name: 'Microsoft-Windows-International-Core',
+              processorArchitecture: 'amd64',
+              publicKeyToken: '31bf3856ad364e35',
+              language: 'neutral',
+              versionScope: 'nonSxS'
+            },
+            SetupUILanguage: {
+              UILanguage: 'en-US'
+            },
+            InputLocale: 'en-US',
+            SystemLocale: 'en-US',
+            UILanguage: 'en-US',
+            UserLocale: 'en-US'
+          }
+        },
+        {
+          component: {
+            $: {
+              name: 'Microsoft-Windows-Shell-Setup',
+              processorArchitecture: 'amd64',
+              publicKeyToken: '31bf3856ad364e35',
+              language: 'neutral',
+              versionScope: 'nonSxS'
+            },
+            UserAccounts: {
+              LocalAccounts: {
+                LocalAccount: {
+                  $: {
+                    'wcm:action': 'add'
+                  },
+                  Name: this.username,
+                  Group: 'Administrators',
+                  Password: {
+                    Value: this.password,
+                    PlainText: true
+                  }
+                }
+              }
+            },
+            OOBE: {
+              ProtectYourPC: 3, // Turn off sharing data and things like that
+              HideEULAPage: true,
+              HideWirelessSetupInOOBE: true
+            }
+          }
+        }
+      ]
+    }
+
+    if (this.productKey) {
+      oobeSystem['_'][1]['component']["ProductKey"] = this.productKey
+    }
+
+    // lets add everything to root component
+    root['_'].push(windowsPE)
+    root['_'].push(generalize)
+    root['_'].push(specialize)
+    root['_'].push(auditSystem)
+    root['_'].push(auditUser)
+    root['_'].push(oobeSystem)
+
+    return builder.buildObject({});
+  }
+
+  /**
+   * Creates a new ISO image from the specified extracted directory.
+   *
+   * @param {string} newIsoPath - The path where the new ISO image should be saved.
+   * @param {string} extractDir - The path of the directory from which to create the new ISO image.
+   * @throws {Error} If the extraction directory does not exist.
+   * @returns {Promise<void>} A Promise that resolves when the ISO image is created and the extracted directory is removed.
+   */
+  async createISO(newIsoPath: string, extractDir: string) {
+    // Ensure the extractDir exists and has content
+    if (!fs.existsSync(extractDir)) {
+      throw new Error('Extraction directory does not exist.');
+    }
+
+    // save the config to
+    const imageName = "windows" + this.version.toString() + ".iso";
+    // Define the command and arguments for creating a new ISO image
+    const isoCreationCommandParts = [
+      'xorriso',
+      '-as', 'mkisofs',
+      '-iso-level', '3',
+      '-full-iso9660-filenames',
+      '-volid', 'Infinibay',
+      '-eltorito-boot', 'boot/etfsboot.com',
+      '-no-emul-boot',
+      '-boot-load-size', '8',
+      '-boot-info-table',
+      '-isohybrid-uefi-b',
+      '-o', newIsoPath,
+      extractDir,
+    ];
+
+    // Create a new ISO image
+    await this.executeCommand(isoCreationCommandParts);
+
+    // Remove the extracted directory
+    await this.executeCommand(['rm', '-rf', extractDir]);
   }
 }
 
