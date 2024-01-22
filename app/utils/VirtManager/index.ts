@@ -94,8 +94,11 @@ export class VirtManager {
       // Determine the OS and use the corresponding unattended manager
       let unattendedManager;
       switch (machine.os) {
-        case 'windows':
-          unattendedManager = new UnattendedWindowsManager(username, password, productKey, applicationData);
+        case 'windows10':
+          unattendedManager = new UnattendedWindowsManager(10, username, password, productKey, applicationData);
+          break;
+        case 'windows11':
+          unattendedManager = new UnattendedWindowsManager(11, username, password, productKey, applicationData);
           break;
         case 'ubuntu':
           unattendedManager = new UnattendedUbuntuManager(username, password, applicationData);
