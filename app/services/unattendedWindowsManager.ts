@@ -321,12 +321,12 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
     }
 
     // lets add everything to root component
-    root['_'].push(windowsPE)
-    root['_'].push(generalize)
-    root['_'].push(specialize)
-    root['_'].push(auditSystem)
-    root['_'].push(auditUser)
-    root['_'].push(oobeSystem)
+    root['unattend']['_'].push(windowsPE)
+    root['unattend']['_'].push(generalize)
+    root['unattend']['_'].push(specialize)
+    root['unattend']['_'].push(auditSystem)
+    root['unattend']['_'].push(auditUser)
+    root['unattend']['_'].push(oobeSystem)
 
     return builder.buildObject({});
   }
