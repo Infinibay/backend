@@ -338,7 +338,7 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
       '-no-emul-boot',
       '-boot-load-size', '8',
       '-boot-info-table',
-      '-isohybrid-uefi-b',
+      // '-isohybrid-uefi-b',
       '-o', newIsoPath,
       extractDir,
     ];
@@ -350,4 +350,3 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
     await this.executeCommand(['rm', '-rf', extractDir]);
   }
 }
-
