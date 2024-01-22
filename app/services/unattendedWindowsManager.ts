@@ -63,6 +63,7 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
     this.password = password;
     this.productKey = productKey;
     this.applications = applications;
+    this.isoPath = path.join(process.env.ISO_PATH ?? '/opt/infinibay/iso', 'windows' + this.version.toString() + '.iso');
   }
 
   /**
