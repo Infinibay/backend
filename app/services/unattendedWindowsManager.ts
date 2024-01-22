@@ -308,7 +308,7 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
     root['unattend']['settings'].push(auditUser)
     root['unattend']['settings'].push(oobeSystem)
 
-    return builder.buildObject({});
+    return builder.buildObject(root);
   }
 
   /**
