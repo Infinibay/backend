@@ -330,12 +330,16 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
     // Define the command and arguments for creating a new ISO image
     // mkisofs -D -r -V "WIN11_CUSTOM" -cache-inodes -J -l -b "boot/etfsboot.com" -c "boot/boot.cat" -no-emul-boot -boot-load-size 4 -boot-info-table -o ./windows11_custom.iso ./newWindows
     const isoCreationCommandParts = [
-      'mkiso',
+      'mkisofs', // Changed 'mkiso' to 'mkisofs', assuming it's a typo
       '-D',
       '-r',
       '-V', 'Infinibay',
       '-cache-inodes',
-      'J', '-l',
+      '-J', // Fixed 'J' to '-J'
+      '-l',
+      '-iso-level', '3',  // Added for ISO9660 Level 3 to support large files
+      '-udf',             // Added for UDF support
+      '-allow-limited-size', // Added to bypass file size limit checks
       '-b', 'boot/etfsboot.com',
       '-c', 'boot/boot.cat',
       '-no-emul-boot',
