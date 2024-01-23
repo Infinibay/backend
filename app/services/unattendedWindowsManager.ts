@@ -337,9 +337,9 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
       '-cache-inodes',
       '-J', // Fixed 'J' to '-J'
       '-l',
-      '-iso-level', '3',  // Added for ISO9660 Level 3 to support large files
+      // '-iso-level', '3',  // Added for ISO9660 Level 3 to support large files
       '-udf',             // Added for UDF support
-      '-allow-limited-size', // Added to bypass file size limit checks
+      // '-allow-limited-size', // Added to bypass file size limit checks
       '-b', 'boot/etfsboot.com',
       '-c', 'boot/boot.cat',
       '-no-emul-boot',
