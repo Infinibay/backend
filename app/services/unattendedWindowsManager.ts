@@ -328,19 +328,21 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
     // save the config to
     const imageName = "windows" + this.version.toString() + ".iso";
     // Define the command and arguments for creating a new ISO image
+    // mkisofs -D -r -V "WIN11_CUSTOM" -cache-inodes -J -l -b "boot/etfsboot.com" -c "boot/boot.cat" -no-emul-boot -boot-load-size 4 -boot-info-table -o ./windows11_custom.iso ./newWindows
     const isoCreationCommandParts = [
-      'xorriso',
-      '-as', 'mkisofs',
-      '-iso-level', '3',
-      '-full-iso9660-filenames',
-      '-volid', 'Infinibay',
-      '-eltorito-boot', 'boot/etfsboot.com',
+      'mkiso',
+      '-D',
+      '-r',
+      '-V', 'Infinibay',
+      '-cache-inodes',
+      'J', '-l',
+      '-b', 'boot/etfsboot.com',
+      '-c', 'boot/boot.cat',
       '-no-emul-boot',
-      '-boot-load-size', '8',
+      '-boot-load-size', '4',
       '-boot-info-table',
-      '-isohybrid-gpt-basdat',
       '-o', newIsoPath,
-      extractDir,
+      extractDir
     ];
 
     // Create a new ISO image
