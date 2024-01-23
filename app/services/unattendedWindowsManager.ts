@@ -333,7 +333,7 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
       'mkisofs', // Changed 'mkiso' to 'mkisofs', assuming it's a typo
       '-D',
       '-r',
-      '-V', 'Infinibay',
+      '-V', 'CCCOMA_X64FRE_EN-US_DV9',
       '-cache-inodes',
       '-J', // Fixed 'J' to '-J'
       '-l',
