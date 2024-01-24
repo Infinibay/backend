@@ -353,7 +353,6 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
       '-e', 'efi/boot/bootx64.efi',
       '-no-emul-boot',
       '-isohybrid-gpt-basdat',
-      '-allow-limited-size',
       '-o', newIsoPath,
       extractDir
     ];
