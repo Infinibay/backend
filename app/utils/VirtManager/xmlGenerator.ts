@@ -13,7 +13,7 @@ export class XMLGenerator {
 
   constructor(name: string, id: string, os: string) {
     this.xml = { domain: { $: { type: 'kvm' }, name: [name], devices: [{ controller: [{ $: { type: 'sata', index: '0' } }] }] } };
-    this.xml.domain.os = [{ type: [{ _: 'hvm', $: { arch: 'x86_64', machine: 'pc' } }] }];
+    this.xml.domain.os = [{ type: [{ _: 'hvm', $: { arch: 'x86_64', machine: 'q35' } }] }];
     this.id = id;
     this.os = os;
   }
@@ -37,67 +37,69 @@ export class XMLGenerator {
     // this.xml.domain.cpu = [{ model: [{ _: 'host-model', $: { mode: 'custom', match: 'exact' } }], topology: [{ $: { sockets: '1', cores: count.toString(), threads: '1' } }] }];
     this.xml.domain.vcpu = [{ _: count, $: { placement: 'static', current: count } }];
     this.xml.domain.cpu = [{
-      model: [{ _: 'kvm64', $: { mode: 'custom', match: 'exact' } }],
+      mode: 'host-model',
+      model: { $: { fallback: 'allow' } },
+      // model: [{ _: 'kvm64', $: { mode: 'custom', match: 'exact' } }],
       topology: [{ $: { sockets: '1', cores: count.toString(), threads: '1' } }],
-      feature: [
-        // fpu: Floating Point Unit, fundamental for any modern processor. Introduced in 1985.
-        { $: { name: 'fpu', policy: 'require' } },
-        // vme: Virtual 8086 Mode Enhancements, commonly supported. Introduced in 1985.
-        { $: { name: 'vme', policy: 'require' } },
-        // de: Debugging Extensions. Introduced in 1990.
-        { $: { name: 'de', policy: 'require' } },
-        // pse: Page Size Extensions, for larger pages in memory management. Introduced in 1995.
-        { $: { name: 'pse', policy: 'require' } },
-        // tsc: Time Stamp Counter, for timing and performance monitoring. Introduced in 1995.
-        { $: { name: 'tsc', policy: 'require' } },
-        // msr: Model-Specific Registers, used for various control and configuration settings. Introduced in 1995.
-        { $: { name: 'msr', policy: 'require' } },
-        // pae: Physical Address Extension, for accessing more than 4 GB of RAM. Introduced in 1995.
-        { $: { name: 'pae', policy: 'require' } },
-        // mce: Machine Check Exception, for error detection and handling. Introduced in 1995.
-        { $: { name: 'mce', policy: 'require' } },
-        // cx8: CMPXCHG8 instruction, for atomic operations on 64-bit data. Introduced in 1995.
-        { $: { name: 'cx8', policy: 'require' } },
-        // apic: Advanced Programmable Interrupt Controller, for handling interrupts. Introduced in 1995.
-        { $: { name: 'apic', policy: 'require' } },
-        // sep: SYSENTER and SYSEXIT instructions, for efficient transitions between user and kernel modes. Introduced in 1997.
-        { $: { name: 'sep', policy: 'require' } },
-        // mtrr: Memory Type Range Registers, for memory type and caching control. Introduced in 1997.
-        { $: { name: 'mtrr', policy: 'require' } },
-        // pge: Page Global Enable, for global page mapping in TLB. Introduced in 1997.
-        { $: { name: 'pge', policy: 'require' } },
-        // cmov: Conditional Move Instructions, for efficient conditional operations. Introduced in 1997.
-        { $: { name: 'cmov', policy: 'require' } },
-        // pat: Page Attribute Table, for fine-grained control of memory caching. Introduced in 1997.
-        { $: { name: 'pat', policy: 'require' } },
-        // clflush: Cache Line Flush instruction, used for cache control. Introduced in 1999.
-        { $: { name: 'clflush', policy: 'require' } },
-        // mmx: MultiMedia Extensions, for SIMD operations. Introduced in 1997.
-        { $: { name: 'mmx', policy: 'require' } },
-        // fxsr: FXSAVE and FXRSTOR instructions, for saving and restoring FPU context. Introduced in 1999.
-        { $: { name: 'fxsr', policy: 'require' } },
-        // sse: Streaming SIMD Extensions, for SIMD operations. Introduced in 1999.
-        { $: { name: 'sse', policy: 'require' } },
-        // sse2: Streaming SIMD Extensions 2, further SIMD enhancements. Introduced in 2001.
-        { $: { name: 'sse2', policy: 'require' } },
-        // sse3: Streaming SIMD Extensions 3. Introduced in 2004.
-        // { $: { name: 'sse3', policy: 'require' } },
-        // ssse3: Supplemental Streaming SIMD Extensions 3, for enhanced SIMD capabilities. Introduced in 2006.
-        { $: { name: 'ssse3', policy: 'require' } },
-        // sse4.1: Streaming SIMD Extensions 4.1. Introduced in 2007.
-        { $: { name: 'sse4.1', policy: 'require' } },
-        // sse4.2: Streaming SIMD Extensions 4.2. Introduced in 2008.
-        { $: { name: 'sse4.2', policy: 'require' } },
-        // popcnt: POPCNT instruction, supported by most modern CPUs. Introduced in 2008.
-        { $: { name: 'popcnt', policy: 'require' } },
-        // aes: Advanced Encryption Standard New Instructions, common in CPUs post-2010. Introduced in 2010.
-        // { $: { name: 'aes', policy: 'require' } }, // commented because cause issues in fedora 39
-        // avx: Advanced Vector Extensions, common in CPUs post-2011. Introduced in 2011.
-        { $: { name: 'avx', policy: 'require' } },
-        // hypervisor: Indicates that the code is running on a hypervisor. Introduced in 2005.
-        { $: { name: 'hypervisor', policy: 'require' } },
-        // Add more features as needed
-      ],
+      // feature: [
+      //   // fpu: Floating Point Unit, fundamental for any modern processor. Introduced in 1985.
+      //   { $: { name: 'fpu', policy: 'require' } },
+      //   // vme: Virtual 8086 Mode Enhancements, commonly supported. Introduced in 1985.
+      //   { $: { name: 'vme', policy: 'require' } },
+      //   // de: Debugging Extensions. Introduced in 1990.
+      //   { $: { name: 'de', policy: 'require' } },
+      //   // pse: Page Size Extensions, for larger pages in memory management. Introduced in 1995.
+      //   { $: { name: 'pse', policy: 'require' } },
+      //   // tsc: Time Stamp Counter, for timing and performance monitoring. Introduced in 1995.
+      //   { $: { name: 'tsc', policy: 'require' } },
+      //   // msr: Model-Specific Registers, used for various control and configuration settings. Introduced in 1995.
+      //   { $: { name: 'msr', policy: 'require' } },
+      //   // pae: Physical Address Extension, for accessing more than 4 GB of RAM. Introduced in 1995.
+      //   { $: { name: 'pae', policy: 'require' } },
+      //   // mce: Machine Check Exception, for error detection and handling. Introduced in 1995.
+      //   { $: { name: 'mce', policy: 'require' } },
+      //   // cx8: CMPXCHG8 instruction, for atomic operations on 64-bit data. Introduced in 1995.
+      //   { $: { name: 'cx8', policy: 'require' } },
+      //   // apic: Advanced Programmable Interrupt Controller, for handling interrupts. Introduced in 1995.
+      //   { $: { name: 'apic', policy: 'require' } },
+      //   // sep: SYSENTER and SYSEXIT instructions, for efficient transitions between user and kernel modes. Introduced in 1997.
+      //   { $: { name: 'sep', policy: 'require' } },
+      //   // mtrr: Memory Type Range Registers, for memory type and caching control. Introduced in 1997.
+      //   { $: { name: 'mtrr', policy: 'require' } },
+      //   // pge: Page Global Enable, for global page mapping in TLB. Introduced in 1997.
+      //   { $: { name: 'pge', policy: 'require' } },
+      //   // cmov: Conditional Move Instructions, for efficient conditional operations. Introduced in 1997.
+      //   { $: { name: 'cmov', policy: 'require' } },
+      //   // pat: Page Attribute Table, for fine-grained control of memory caching. Introduced in 1997.
+      //   { $: { name: 'pat', policy: 'require' } },
+      //   // clflush: Cache Line Flush instruction, used for cache control. Introduced in 1999.
+      //   { $: { name: 'clflush', policy: 'require' } },
+      //   // mmx: MultiMedia Extensions, for SIMD operations. Introduced in 1997.
+      //   { $: { name: 'mmx', policy: 'require' } },
+      //   // fxsr: FXSAVE and FXRSTOR instructions, for saving and restoring FPU context. Introduced in 1999.
+      //   { $: { name: 'fxsr', policy: 'require' } },
+      //   // sse: Streaming SIMD Extensions, for SIMD operations. Introduced in 1999.
+      //   { $: { name: 'sse', policy: 'require' } },
+      //   // sse2: Streaming SIMD Extensions 2, further SIMD enhancements. Introduced in 2001.
+      //   { $: { name: 'sse2', policy: 'require' } },
+      //   // sse3: Streaming SIMD Extensions 3. Introduced in 2004.
+      //   { $: { name: 'sse3', policy: 'require' } },
+      //   // ssse3: Supplemental Streaming SIMD Extensions 3, for enhanced SIMD capabilities. Introduced in 2006.
+      //   { $: { name: 'ssse3', policy: 'require' } },
+      //   // sse4.1: Streaming SIMD Extensions 4.1. Introduced in 2007.
+      //   { $: { name: 'sse4.1', policy: 'require' } },
+      //   // sse4.2: Streaming SIMD Extensions 4.2. Introduced in 2008.
+      //   { $: { name: 'sse4.2', policy: 'require' } },
+      //   // popcnt: POPCNT instruction, supported by most modern CPUs. Introduced in 2008.
+      //   { $: { name: 'popcnt', policy: 'require' } },
+      //   // aes: Advanced Encryption Standard New Instructions, common in CPUs post-2010. Introduced in 2010.
+      //   { $: { name: 'aes', policy: 'require' } }, // commented because cause issues in fedora 39
+      //   // avx: Advanced Vector Extensions, common in CPUs post-2011. Introduced in 2011.
+      //   { $: { name: 'avx', policy: 'require' } },
+      //   // hypervisor: Indicates that the code is running on a hypervisor. Introduced in 2005.
+      //   { $: { name: 'hypervisor', policy: 'require' } },
+      //   // Add more features as needed
+      // ],
     }];
   }
 
@@ -154,7 +156,6 @@ export class XMLGenerator {
       efiPath = '/usr/share/OVMF/OVMF_CODE.fd';
       nvramPath = `/opt/infinibay/uefi/${this.id}_VARS.fd`;
     }
-    this.xml.domain.os[0].type[0].$.machine = 'pc-q35-2.11';
     this.xml.domain.os[0].loader = [{ _: efiPath, $: { readonly: 'yes', type: 'pflash' } }];
     this.xml.domain.os[0].nvram = [{ _: nvramPath }];
   }
