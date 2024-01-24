@@ -148,7 +148,7 @@ export class XMLGenerator {
     let efiPath: string
     let nvramPath: string
     if (this.os == 'windows11' || this.os == 'windows10') {
-      efiPath = '/usr/share/OVMF/OVMF_CODE.msfd';
+      efiPath = '/usr/share/OVMF/OVMF_CODE.ms.fd';
       nvramPath = `/opt/infinibay/uefi/${this.id}_VARS.ms.fd`;
     } else {
       efiPath = '/usr/share/OVMF/OVMF_CODE.fd';
