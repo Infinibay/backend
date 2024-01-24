@@ -153,56 +153,62 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
             AcceptEula: true
           },
           DiskConfiguration: {
-            DiskID: 0,
-            WillWipeDisk: true,
-            CreatePartitions: [
-              {
-                CreatePartition: {
-                  $: {
-                    'wcm:action': 'add'
-                  },
-                  Order: 1,
-                  Type: 'Primary',
-                  Size: 300
-                }
+            Disk: {
+              $: {
+                'wcm:action': 'add'
               },
-              {
-                CreatePartition: {
-                  $: {
-                    'wcm:action': 'add'
-                  },
-                  Order: 2,
-                  Type: 'Primary',
-                  Extend: true
+              DiskID: 0,
+              WillWipeDisk: true,
+              CreatePartitions: [
+                {
+                  CreatePartition: {
+                    $: {
+                      'wcm:action': 'add'
+                    },
+                    Order: 1,
+                    Type: 'Primary',
+                    Size: 300
+                  }
+                },
+                {
+                  CreatePartition: {
+                    $: {
+                      'wcm:action': 'add'
+                    },
+                    Order: 2,
+                    Type: 'Primary',
+                    Extend: true
+                  }
                 }
-              }
-            ],
-            ModifyPartitions: [
-              {
-                ModifyPartition: {
-                  $: {
-                    'wcm:action': 'add'
-                  },
-                  Order: 1,
-                  PartitionID: 1,
-                  Label: 'System',
-                  Format: 'NTFS',
-                  Active: true
+              ],
+              ModifyPartitions: [
+                {
+                  ModifyPartition: {
+                    $: {
+                      'wcm:action': 'add'
+                    },
+                    Order: 1,
+                    PartitionID: 1,
+                    Label: 'System',
+                    Format: 'NTFS',
+                    Active: true
+                  }
+                },
+                {
+                  ModifyPartition: {
+                    $: {
+                      'wcm:action': 'add'
+                    },
+                    Order: 2,
+                    PartitionID: 2,
+                    Label: 'Windows',
+                    Letter: 'C',
+                    Format: 'NTFS'
+                  }
                 }
-              },
-              {
-                ModifyPartition: {
-                  $: {
-                    'wcm:action': 'add'
-                  },
-                  Order: 2,
-                  PartitionID: 2,
-                  Label: 'Windows',
-                  Letter: 'C',
-                  Format: 'NTFS'
-                }
-              }
-            ],
+              ],
+            },
+
             WillShowUI: 'OnError'
           }
         }
@@ -348,7 +354,7 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
       '-eltorito-alt-boot',
       '-eltorito-platform', 'efi',
       '-no-emul-boot',
-      '-b', 'efi/microsoft/boot/efisys.bin',
+      '-b', 'efi/microsoft/boot/efisys_noprompt.bin',
       '-eltorito-alt-boot',
       '-e', 'efi/boot/bootx64.efi',
       '-no-emul-boot',
