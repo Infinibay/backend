@@ -9,11 +9,13 @@ export enum NetworkModel {
 export class XMLGenerator {
   private xml: any;
   private id: string;
-  
-  constructor(name: string, id: string) {
+  private os: string;
+
+  constructor(name: string, id: string, os: string) {
     this.xml = { domain: { $: { type: 'kvm' }, name: [name], devices: [{ controller: [{ $: { type: 'sata', index: '0' } }] }] } };
     this.xml.domain.os = [{ type: [{ _: 'hvm', $: { arch: 'x86_64', machine: 'pc' } }] }];
     this.id = id;
+    this.os = os;
   }
 
   load(externalXml: any) {
@@ -23,13 +25,13 @@ export class XMLGenerator {
   getXmlObject(): any {
     return this.xml;
   }
-  
+
   setMemory(size: number): void {
     // Convert size from Gb to KiB (1 Gb = 1024 * 1024 KiB)
     const sizeInKiB = size * 1024 * 1024;
     this.xml.domain.memory = [{ _: sizeInKiB, $: { unit: 'KiB' } }];
   }
-  
+
   setVCPUs(count: number): void {
     // this.xml.domain.vcpu = [{ _: count, $: { placement: 'static', current: count } }];
     // this.xml.domain.cpu = [{ model: [{ _: 'host-model', $: { mode: 'custom', match: 'exact' } }], topology: [{ $: { sockets: '1', cores: count.toString(), threads: '1' } }] }];
@@ -109,7 +111,7 @@ export class XMLGenerator {
       source: [{ $: { network: network } }],
       model: [{ $: { type: model } }],
     };
-  
+
     this.xml.domain.devices[0].interface = this.xml.domain.devices[0].interface || [];
     this.xml.domain.devices[0].interface.push(networkInterface);
     // TODO: Add bandwidth quota
@@ -143,8 +145,15 @@ export class XMLGenerator {
 
   setUEFI(): void {
     this.enableFeatures();
-    const efiPath = '/usr/share/OVMF/OVMF_CODE.fd';
-    const nvramPath = `/opt/infinibay/uefi/${this.id}_VARS.fd`;
+    let efiPath: string
+    let nvramPath: string
+    if (this.os == 'windows11' || this.os == 'windows10') {
+      efiPath = '/usr/share/OVMF/OVMF_CODE.msfd';
+      nvramPath = `/opt/infinibay/uefi/${this.id}_VARS.ms.fd`;
+    } else {
+      efiPath = '/usr/share/OVMF/OVMF_CODE.fd';
+      nvramPath = `/opt/infinibay/uefi/${this.id}_VARS.fd`;
+    }
     this.xml.domain.os[0].type[0].$.machine = 'pc-q35-2.11';
     this.xml.domain.os[0].loader = [{ _: efiPath, $: { readonly: 'yes', type: 'pflash' } }];
     this.xml.domain.os[0].nvram = [{ _: nvramPath }];
@@ -172,7 +181,7 @@ export class XMLGenerator {
     this.xml.domain.devices[0].disk.push(disk);
     return dev
   }
-    
+
   setStorage(size: number): void {
     const diskPath = process.env.DISK_PATH || '/opt/infinibay/disks';
     this.addDisk(`${diskPath}/${this.id}.img`, 'virtio', size);
@@ -242,7 +251,7 @@ export class XMLGenerator {
   setBootOrder(devices: string[]): void {
     this.xml.domain.os[0].boot = devices.map(device => ({ $: { dev: device } }));
   }
-  
+
   generate(): string {
     // Convert the JSON object to XML
     const builder = new xml2js.Builder();
@@ -252,7 +261,7 @@ export class XMLGenerator {
   /**
    * Get the next available bus for a device
    * @param dev The device to get the next bus for
-   * 
+   *
    * Example:
    * Lest suppose that the xml has sda, sdb and vda
    * getNextBus('sd') -> 'sdc'
@@ -262,25 +271,25 @@ export class XMLGenerator {
   protected getNextBus(dev: string): string {
     // Get all devices
     const devices = this.xml.domain.devices[0].disk || [];
-  
+
     // Filter devices that use the same bus type
     const sameBusDevices = devices.filter((device: any) => device.target[0].$.dev.startsWith(dev));
-  
+
     // If no devices are using the bus, return the first one
     if (sameBusDevices.length === 0) {
       return dev + 'a';
     }
-  
+
     // Sort devices alphabetically
     sameBusDevices.sort((a: any, b: any) => a.target[0].$.dev.localeCompare(b.target[0].$.dev));
-  
+
     // Get the last device in the sorted list
     const lastDevice = sameBusDevices[sameBusDevices.length - 1];
-  
+
     // Get the last character of the last device and increment it
     const lastChar = lastDevice.target[0].$.dev.slice(-1);
     const incrementedChar = String.fromCharCode(lastChar.charCodeAt(0) + 1);
-  
+
     // Return the next bus
     return dev + incrementedChar;
   }

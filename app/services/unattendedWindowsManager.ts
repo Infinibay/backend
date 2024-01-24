@@ -328,23 +328,32 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
     // save the config to
     const imageName = "windows" + this.version.toString() + ".iso";
     // Define the command and arguments for creating a new ISO image
-    // mkisofs -D -r -V "WIN11_CUSTOM" -cache-inodes -J -l -b "boot/etfsboot.com" -c "boot/boot.cat" -no-emul-boot -boot-load-size 4 -boot-info-table -o ./windows11_custom.iso ./newWindows
+    /*
+    mkisofs -b boot/etfsboot.com -no-emul-boot -c BOOT.CAT -iso-level 4 -J -l -D -N -joliet-long -relaxed-filenames -v -V "Custom" -udf -boot-info-table -eltorito-alt-boot -eltorito-boot efi/microsoft/boot/efisys_noprompt.bin -no-emul-boot -o install.iso -allow-limited-size /tmp/extracted_iso_1705986374004/
+
+    xorriso -as mkisofs -iso-level 4 -l -R -D -volid "CCCOMA_X64FRE_EN-US_DV9" -b boot/etfsboot.com -no-emul-boot -boot-load-size 8 -hide boot.catalog -eltorito-alt-boot -eltorito-platform efi -no-emul-boot -b efi/microsoft/boot/efisys.bin -eltorito-alt-boot -e efi/boot/bootx64.efi -no-emul-boot -isohybrid-gpt-basdat -o install.iso newWin
+     */
     const isoCreationCommandParts = [
-      'mkisofs', // Changed 'mkiso' to 'mkisofs', assuming it's a typo
-      '-D',
-      '-r',
-      '-V', 'CCCOMA_X64FRE_EN-US_DV9',
-      '-cache-inodes',
-      '-J', // Fixed 'J' to '-J'
+      'xorriso',
+      '-as', 'mkisofs',
+      '-iso-level', '4',
       '-l',
-      // '-iso-level', '3',  // Added for ISO9660 Level 3 to support large files
-      '-udf',             // Added for UDF support
-      '-allow-limited-size', // Added to bypass file size limit checks
+      '-R',
+      '-D',
+      '-volid', 'CCCOMA_X64FRE_EN-US_DV9',
       '-b', 'boot/etfsboot.com',
-      '-c', 'boot/boot.cat',
       '-no-emul-boot',
-      '-boot-load-size', '4',
-      '-boot-info-table',
+      '-boot-load-size', '8',
+      '-hide', 'boot.catalog',
+      '-eltorito-alt-boot',
+      '-eltorito-platform', 'efi',
+      '-no-emul-boot',
+      '-b', 'efi/microsoft/boot/efisys.bin',
+      '-eltorito-alt-boot',
+      '-e', 'efi/boot/bootx64.efi',
+      '-no-emul-boot',
+      '-isohybrid-gpt-basdat',
+      '-allow-limited-size',
       '-o', newIsoPath,
       extractDir
     ];
