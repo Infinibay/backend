@@ -498,7 +498,7 @@ export class MachineResolver implements MachineResolverInterface {
             if (!configuration) {
                 throw new Error("MachineConfiguration not found")
             }
-            const xmlGenerator = new XMLGenerator('', '')
+            const xmlGenerator = new XMLGenerator('', '', '')
             xmlGenerator.load(configuration.xml as any)
 
             const uefiVarFile: any = xmlGenerator.getUefiVarFile()

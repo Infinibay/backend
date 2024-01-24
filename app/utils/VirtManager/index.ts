@@ -209,7 +209,7 @@ export class VirtManager {
     this.debug.log('Creating new XMLGenerator instance for machine', machine.name);
 
     // Create a new XMLGenerator instance
-    const xmlGenerator = new XMLGenerator(machineName, machine.id);
+    const xmlGenerator = new XMLGenerator(machineName, machine.id, machine.os);
 
     // Set the machine's properties
     xmlGenerator.setMemory(template.ram);
