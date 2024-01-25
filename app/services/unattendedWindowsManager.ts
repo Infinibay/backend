@@ -124,7 +124,7 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
           UILanguage: 'en-US',
           UserLocale: 'en-US'
         },
-      {
+        {
           $: {
             name: 'Microsoft-Windows-Setup',
             processorArchitecture: 'amd64',
@@ -159,31 +159,26 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
               },
               DiskID: 0,
               WillWipeDisk: true,
-              CreatePartitions: [
-                {
-                  CreatePartition: {
-                    $: {
-                      'wcm:action': 'add'
-                    },
-                    Order: 1,
-                    Type: 'Primary',
-                    Size: 300
-                  }
+              CreatePartitions: {
+                CreatePartition: [{
+                  $: {
+                    'wcm:action': 'add'
+                  },
+                  Order: 1,
+                  Type: 'Primary',
+                  Size: 300
                 },
                 {
-                  CreatePartition: {
-                    $: {
-                      'wcm:action': 'add'
-                    },
-                    Order: 2,
-                    Type: 'Primary',
-                    Extend: true
-                  }
-                }
-              ],
-              ModifyPartitions: [
-                {
-                  ModifyPartition: {
+                  $: {
+                    'wcm:action': 'add'
+                  },
+                  Order: 2,
+                  Type: 'Primary',
+                  Extend: true
+                }]
+              },
+              ModifyPartitions: {
+                  ModifyPartition: [{
                     $: {
                       'wcm:action': 'add'
                     },
@@ -192,10 +187,8 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
                     Label: 'System',
                     Format: 'NTFS',
                     Active: true
-                  }
-                },
-                {
-                  ModifyPartition: {
+                  },
+                  {
                     $: {
                       'wcm:action': 'add'
                     },
@@ -204,9 +197,8 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
                     Label: 'Windows',
                     Letter: 'C',
                     Format: 'NTFS'
-                  }
-                }
-              ],
+                  }]
+                },
             },
 
             WillShowUI: 'OnError'

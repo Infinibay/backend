@@ -149,13 +149,8 @@ export class XMLGenerator {
     this.enableFeatures();
     let efiPath: string
     let nvramPath: string
-    if (this.os == 'windows11' || this.os == 'windows10') {
-      efiPath = '/usr/share/OVMF/OVMF_CODE.ms.fd';
-      nvramPath = `/opt/infinibay/uefi/${this.id}_VARS.ms.fd`;
-    } else {
-      efiPath = '/usr/share/OVMF/OVMF_CODE.fd';
-      nvramPath = `/opt/infinibay/uefi/${this.id}_VARS.fd`;
-    }
+    efiPath = '/usr/share/OVMF/OVMF_CODE.fd';
+    nvramPath = `/opt/infinibay/uefi/${this.id}_VARS.fd`;
     this.xml.domain.os[0].loader = [{ _: efiPath, $: { readonly: 'yes', type: 'pflash' } }];
     this.xml.domain.os[0].nvram = [{ _: nvramPath }];
   }
