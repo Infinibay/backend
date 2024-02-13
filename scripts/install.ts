@@ -69,7 +69,7 @@ async function downloadUbuntu() {
   // Now, download the ISO file
   const url = `https://releases.ubuntu.com/${version}/${exactVersion}`;
   console.log("Final link is", url)
-  
+
   const writer = fs.createWriteStream(`/opt/infinibay/iso/ubuntu/ubuntu.iso`);
 
   const download = await axios.get(url, { responseType: 'stream' });
@@ -133,11 +133,18 @@ async function install() {
   prepareFolders()
   downloadUbuntu()
   downloadFedora()
+  // BASIC APPS
+  // cpu-checker for kvm-ok
+  // qemu-kvm libvirt-daemon-system bridge-utils
+  // nodej npm
+
+
   // genisoimage ??? maybe not needed, xorriso is better
   // 7z
   // xorriso and grub-mkrescue
   // isolinux
   // syslinux
+}
 
 install()
 // https://releases.ubuntu.com/23.10/ubuntu-23.10.1-desktop-amd64.iso
