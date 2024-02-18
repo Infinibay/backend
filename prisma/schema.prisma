@@ -22,6 +22,25 @@ model User {
   VM Machine[]
 }
 
+model Node {
+  id              String @id @default(uuid())
+  name            String
+  currentRaid     String
+  nextRaid        String?
+  cpuFlags        Json
+  ram             Int
+  cores           Int
+  disks           Disk[]
+}
+
+model Disk {
+  id              String @id @default(uuid())
+  path            String
+  nodeId          String
+  node            Node @relation(fields: [nodeId], references: [id])
+  status          String
+}
+
 model Machine {
   id                 String  @id @default(uuid())
   name               String
