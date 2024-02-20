@@ -8,4 +8,5 @@ export interface InfinibayContext {
   // user should be of User prisma type or null
   user: User | null
   prisma: PrismaClient
+  setupMode: boolean
 }

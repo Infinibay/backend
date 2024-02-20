@@ -66,7 +66,16 @@ export const authChecker: AuthChecker<any> = async (
                 return false
             }
         }
-    } else {
+    } else if (level = 'SETUP_MODE') {
+      if (context.setupMode) {
+        debug.log('Access granted for SETUP_MODE.');
+        return true
+      } else {
+        debug.log('Access denied for SETUP_MODE.');
+        return false
+      }
+    }
+    else {
         debug.log('No level found, access denied.');
         return false
     }
