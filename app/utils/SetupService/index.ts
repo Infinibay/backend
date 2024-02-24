@@ -123,11 +123,19 @@ class SetupService {
 	 * This includes HDDs, SSDs, and NVMe drives.
 	 * @returns {any[]} A list of block devices.
 	 */
-	listBlockDevices(): any[] {
-		// Execute a system command to list block devices
-		// Filter out USB devices
-		// Return the list of devices
-	}
+async listBlockDevices(): Promise<any[]> {
+    try {
+        const devices = await si.blockDevices();
+        return devices.map(device => ({
+            path: device.name,
+            type: device.type,
+            size: device.size
+        }));
+    } catch (error) {
+        this.debug.log('error', `Error listing block devices: ${error}`);
+        return [];
+    }
+}
 
 	/**
 	 * Saves the detected block devices into the database.
@@ -146,24 +154,55 @@ class SetupService {
 	detectBestRaid(): string {
 		// Analyze `this.blockDevices` to determine the number of disks
 		// Return the best RAID level based on the number of disks
+		const numDisks = this.blockDevices.length;
+
+        if (numDisks >= 4) {
+            return 'raid10';
+        } else if (numDisks === 3) {
+            return 'raid5';
+        } else if (numDisks === 2) {
+            return 'raid1';
+        } else {
+            // For a single disk, RAID is not applicable, but returning 'single' as a placeholder
+            return 'single';
+        }
 	}
 
 	/**
-	 * Creates the master Btrfs volume.
-	 * This volume is mounted at /mnt/storage.
-	 */
-	createBtrfsVolume(): void {
-		// Determine the RAID level using `detectBestRaid`
-		// Execute system commands to create and mount the Btrfs volume
+     * Creates the master Btrfs volume.
+     * This volume is mounted at /mnt/storage.
+     */
+	async createBtrfsVolume(): Promise<void> {
+		const raidLevel = this.detectBestRaid();
+		const devicePaths = this.blockDevices.map(device => device.path);
+
+		// Adjust command for single disk (no RAID)
+		let createVolumeCmd = raidLevel === 'single' 
+				? ['mkfs.btrfs', ...devicePaths]
+				: ['mkfs.btrfs', '-d', raidLevel, ...devicePaths];
+
+		try {
+				// Execute the command to create the Btrfs volume
+				await this.exec(['sudo', ...createVolumeCmd]);
+				this.debug.log('info', `Btrfs volume created successfully.`);
+		} catch (error) {
+				this.debug.log('error', `Error in createBtrfsVolume: ${error}`);
+		}
 	}
 
 	/**
-	 * Performs the operation to create the RAID level.
-	 * This is a separate step from creating the Btrfs volume.
+	 * Mounts the Btrfs volume at /mnt/storage.
+	 * @param {string} devicePath - The device path to mount.
 	 */
-	createRaid(): void {
-		// Use the RAID level determined by `detectBestRaid`
-		// Execute system commands to create the RAID
+	async mountVolume(devicePath: string): Promise<void> {
+			const mountCmd = ['sudo', 'mount', devicePath, '/mnt/storage'];
+
+			try {
+					await this.exec(mountCmd);
+					this.debug.log('info', `Btrfs volume mounted at /mnt/storage successfully.`);
+			} catch (error) {
+					this.debug.log('error', `Error mounting Btrfs volume: ${error}`);
+			}
 	}
 
 	/**
