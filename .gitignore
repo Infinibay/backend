@@ -71,3 +71,4 @@ typings/
 
 # VSCode settings
 .vscode/
+.aider*

@@ -1,16 +1,8 @@
-import * as ffi from 'ffi-napi';
-import ref from 'ref-napi';
-import { spawn } from 'child_process';
-import ArrayType from 'ref-array-napi';
+import { Connection, Machine as VirtualMachine, StoragePool, StorageVol, Network } from 'libvirt-node';
 import { DOMParser, XMLSerializer } from 'xmldom';
 import { parseStringPromise } from 'xml2js';
 
 import { Debugger } from './debug';
-
-
-const voidPtr = ref.refType(ref.types.void);
-const charPtr = ref.refType('char')
-const charPtrArray = ArrayType(charPtr)
 
 // https://libvirt.org/html/libvirt-libvirt-domain.html#virDomainInfoPtr
 // const VirDomainInfo = StructType({
@@ -239,35 +231,7 @@ class LibvirtError extends Error {
  * libvirt.disconnect();
  */
 export class Libvirt {
-  public static readonly libInstance: any = new ffi.Library('libvirt.so', {
-    // Map the Libvirt functions
-    'virConnectOpen': ['pointer', ['string']],
-    'virConnectClose': ['int', ['pointer']],
-    'virDomainLookupByName': ['pointer', ['pointer', 'string']],
-    'virDomainCreate': ['int', ['pointer']],
-    'virDomainDestroy': ['int', ['pointer']],
-    'virDomainDefineXML': ['pointer', ['pointer', 'string']],
-    'virDomainUndefine': ['int', ['pointer']], // Add this line
-    'virDomainUpdateDeviceFlags': ['int', ['pointer', 'string', 'int']], // Add this line
-    'virStoragePoolLookupByName': ['pointer', ['pointer', 'string']],
-    'virStorageVolCreateXML': ['pointer', ['pointer', 'string', 'int']],
-    'virStoragePoolDefineXML': ['pointer', ['pointer', 'string', 'int']],
-    'virStoragePoolCreate': ['int', ['pointer', 'int']],
-    'virNetworkDefineXML': ['pointer', ['pointer', 'string']],
-    'virNetworkCreate': ['int', ['pointer']],
-    'virNetworkLookupByName': ['pointer', ['pointer', 'string']],
-    'virDomainAttachDevice': ['int', ['pointer', 'string']],
-    'virDomainGetXMLDesc': ['string', ['pointer', 'int']], // Add this line
-    'virConnectListAllDomains': ['int', ['pointer', 'pointer', 'int']],
-    'virConnectListDefinedDomains': ['int', ['pointer', 'pointer', 'int']],
-    'virDomainGetInfo': ['int', ['pointer', 'pointer']],
-    'virDomainGetName': ['string', ['pointer']],
-    'virDomainGetState': ['int', ['pointer', 'pointer', 'pointer', 'uint']],
-    'virDomainSuspend': ['int', ['pointer']],
-    'virDomainResume': ['int', ['pointer']],
-    // Add more functions as needed
-  })
-  private connection: Buffer | null = null;
+  private connection: Connection | null = null;
   private debug: Debugger = new Debugger('libvirt');
 
   constructor() {
@@ -282,17 +246,20 @@ export class Libvirt {
    * @returns {Buffer | null} - A buffer representing the connection, or null if the connection fails.
    * @throws {LibvirtError} - Throws an error if the connection fails.
    */
-  public connect(uri: string): Buffer | null {
+  public connect(uri: string): Connection | null {
     this.debug.log('Connecting to hypervisor');
-    const libvirt = Libvirt.libInstance
-    this.connection = libvirt.virConnectOpen(uri);
-
-    if (this.connection && this.connection.isNull()) {
+    try {
+      this.connection = Connection.open(uri);
+    } catch (error) {
       this.debug.log('error', 'Failed to connect to hypervisor');
       throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_NO_CONNECT);
     }
 
-    this.debug.log('Connected to hypervisor');
+    if (this.connection && !this.connection.isAlive()) {
+      this.debug.log('error', 'Failed to connect to hypervisor');
+      throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_NO_CONNECT);
+    }
+
     return this.connection;
   }
 
@@ -302,7 +269,7 @@ export class Libvirt {
    * @returns {boolean} - Returns true if there is an active connection, false otherwise.
    */
   public isConnected(): boolean {
-    return this.connection !== null && !this.connection.isNull();
+    return this.connection !== null && this.connection.isAlive();
   }
 
   /**
@@ -312,17 +279,16 @@ export class Libvirt {
    */
   public close(): void {
     this.debug.log('Closing connection to hypervisor');
-    const libvirt = Libvirt.libInstance
     if (this.connection) {
-      const result = libvirt.virConnectClose(this.connection);
-      this.debug.log('Closed connection to hypervisor');
+      try {
+        const result = this.connection.close();
+        this.debug.log('Closed connection to hypervisor');
 
-      if (result < 0) {
+        this.connection = null;
+      } catch (error) {
         this.debug.log('error', 'Failed to close connection to hypervisor');
         throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_INTERNAL_ERROR);
       }
-
-      this.connection = null;
     }
   }
 
@@ -337,20 +303,23 @@ export class Libvirt {
    * This method looks up a domain by its name.
    * 
    * @param {string} name - The name of the domain to look up.
-   * @returns {Buffer} - A buffer representing the domain.
+   * @returns {VirtualMachine} - A buffer representing the domain.
    * @throws {LibvirtError} - Throws an error if the domain does not exist.
    */
-  public domainLookupByName(name: string): Buffer {
+  public domainLookupByName(name: string): VirtualMachine {
     this.debug.log('Looking up domain by name', name);
-    const libvirt = Libvirt.libInstance
-    const domain = libvirt.virDomainLookupByName(this.connection, name);
+    if (!this.connection) {
+      this.debug.log('error', 'Failed to find the domain');
+      throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_NO_CONNECT);
+    }
+    try {
+      const domain = VirtualMachine.lookupByName(name, this.connection);
 
-    if (domain.isNull()) {
+      return domain;
+    } catch (error) {
       this.debug.log('error', 'Failed to find the domain');
       throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_NO_DOMAIN);
     }
-
-    return domain;
   }
 
   /**
@@ -360,20 +329,19 @@ export class Libvirt {
    * @returns {number} - Returns 0 on success, -1 in case of error.
    * @throws {LibvirtError} - Throws an error if the operation fails.
    */
-  public domainCreate(domain: string): number {
+  public domainCreate(domain: string): void {
     this.debug.log('Starting VM', domain);
-    const libvirt = Libvirt.libInstance
-    const domainBuffer = libvirt.virDomainLookupByName(this.connection, domain);
-    this.debug.log('VM Obtained');
-    const result = libvirt.virDomainCreate(domainBuffer);
-    this.debug.log('VM Started', result);
+    try {
+      const virtualMachine = this.domainLookupByName(domain);
+      this.debug.log('VM Obtained');
+      const result = virtualMachine.create();
+      this.debug.log('VM Started');
 
-    if (result < 0) {
+      return;
+    } catch (error) {
       this.debug.log('error', 'Failed to start VM');
       throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_OPERATION_FAILED);
     }
-
-    return result;
   }
 
   /**
@@ -383,20 +351,19 @@ export class Libvirt {
    * @returns {number} - Returns 0 on success, -1 in case of error.
    * @throws {LibvirtError} - Throws an error if the operation fails.
    */
-  public domainDestroy(domain: string): number {
+  public domainDestroy(domain: string): void {
     this.debug.log('Destroying VM', domain);
-    const libvirt = Libvirt.libInstance
-    const domainBuffer = libvirt.virDomainLookupByName(this.connection, domain);
-    this.debug.log('VM Obtained');
-    const result = libvirt.virDomainDestroy(domainBuffer);
-    this.debug.log('VM Destroyed', result);
+    try {
+      const virtualMachine = this.domainLookupByName(domain);
+      this.debug.log('VM Obtained');
+      virtualMachine.destroy();
+      this.debug.log('VM Destroyed');
 
-    if (result < 0) {
+      return;
+    } catch (error) {
       this.debug.log('error', 'Failed to destroy VM');
       throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_OPERATION_FAILED);
     }
-
-    return result;
   }
 
   /**
@@ -406,20 +373,18 @@ export class Libvirt {
    * @returns {number} - Returns 0 on success, -1 in case of error.
    * @throws {LibvirtError} - Throws an error if the operation fails.
    */
-  public domainUndefine(domain: string): number {
-    this.debug.log('Undefining VM', domain)
-    const libvirt = Libvirt.libInstance
-    const domainBuffer = libvirt.virDomainLookupByName(this.connection, domain);
-    this.debug.log('VM Obtained');
-    const result = libvirt.virDomainUndefine(domainBuffer);
-    this.debug.log('VM Undefined', result);
-
-    if (result < 0) {
+  public domainUndefine(domain: string): void {
+    this.debug.log('Undefining VM', domain);
+    try {
+      const virtualMachine = this.domainLookupByName(domain);
+      this.debug.log('VM Obtained');
+      virtualMachine.undefine();
+      this.debug.log('VM Undefined');
+      return;
+    } catch (error) {
       this.debug.log('error', 'Failed to undefine VM');
       throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_OPERATION_FAILED);
     }
-
-    return result;
   }
 
   /**
@@ -429,17 +394,20 @@ export class Libvirt {
    * @returns {Buffer} - A buffer representing the defined domain.
    * @throws {LibvirtError} - Throws an error if the domain definition is invalid.
    */
-  public domainDefineXML(xml: string): Buffer {
+  public domainDefineXML(xml: string): VirtualMachine {
     this.debug.log('Defining domain from XML', xml);
-    const libvirt = Libvirt.libInstance
-    const domain = libvirt.virDomainDefineXML(this.connection, xml);
-
-    if (domain.isNull()) {
-      this.debug.log('error', 'Failed to define domain from XML');
+    try {
+      if (!this.connection) {
+        this.debug.log('error', 'Failed to define domain from XML');
+        throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_NO_CONNECT);
+      }
+      const machine = VirtualMachine.defineXml(this.connection, xml);
+      this.debug.log('Domain defined successfully');
+      return machine;
+    } catch (error) {
+      this.debug.log('error', 'Failed to define domain from XML', error instanceof Error ? error.message : String(error));
       throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_INVALID_ARG);
     }
-
-    return domain;
   }
 
   /**
@@ -450,23 +418,23 @@ export class Libvirt {
    * @returns {Buffer} - A buffer representing the updated domain.
    * @throws {LibvirtError} - Throws an error if the domain does not exist, if the new XML configuration is invalid, or if the operation fails.
    */
-  public updateDomain(name: string, newXml: string): Buffer {
+  public updateDomain(name: string, newXml: string): VirtualMachine {
     this.debug.log('Updating domain', name, newXml);
-    const libvirt = Libvirt.libInstance
+    if (!this.connection) {
+      this.debug.log('error', 'Failed to update domain');
+      throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_NO_CONNECT);
+    }
+
     // Lookup the domain by its name
-    const domain = this.domainLookupByName(name);
+    const domain = VirtualMachine.lookupByName(name, this.connection);
 
     this.debug.log('Undefining the old domain');
     // Undefine the old domain
-    const undefineResult = libvirt.virDomainUndefine(domain);
-    if (undefineResult < 0) {
-      this.debug.log('error', 'Failed to undefine the old domain');
-      throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_INTERNAL_ERROR);
-    }
+    domain.undefine();
 
     this.debug.log('Defining a new domain with the updated XML');
     // Define a new domain with the updated XML
-    const newDomain = this.domainDefineXML(newXml);
+    const newDomain = VirtualMachine.defineXml(this.connection, newXml);
     return newDomain;
   }
 
@@ -478,26 +446,33 @@ export class Libvirt {
    */
   public powerOn(name: string): void {
     this.debug.log('Powering on domain', name);
-    const libvirt = Libvirt.libInstance
 
-    const domain = this.domainLookupByName(name);
-    const state = this.getDomainStatus(name);
-
-    this.debug.log('Domain state', state);
-    let result;
-    if (state === 'Paused') {
-      this.debug.log('Domain is paused, resuming');
-      result = libvirt.virDomainResume(domain);
-    } else {
-      this.debug.log('Domain is not paused, creating');
-      result = libvirt.virDomainCreate(domain);
+    if (!this.connection) {
+      this.debug.log('error', 'No connection available');
+      throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_NO_CONNECT);
     }
 
-    if (result < 0) {
-      this.debug.log('error', 'Failed to power on domain');
+    try {
+      const domain = VirtualMachine.lookupByName(name, this.connection);
+      const info = domain.getInfo();
+      
+      this.debug.log('Domain state', info.state);
+      
+      if (info.state === 3) { // VIR_DOMAIN_PAUSED
+        this.debug.log('Domain is paused, resuming');
+        domain.resume();
+      } else if (info.state === 5) { // VIR_DOMAIN_SHUTOFF
+        this.debug.log('Domain is shutoff, creating');
+        domain.create();
+      } else {
+        this.debug.log('Domain is already running or in an unexpected state');
+      }
+
+      this.debug.log('Domain powered on successfully');
+    } catch (error) {
+      this.debug.log('error', 'Failed to power on domain', error instanceof Error ? error.message : String(error));
       throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_OPERATION_FAILED);
     }
-    this.debug.log('Domain powered on successfully');
   }
 
   // alias methos
@@ -511,17 +486,23 @@ export class Libvirt {
    */
   public powerOff(name: string): void {
     this.debug.log('Powering off domain', name);
-    const libvirt = Libvirt.libInstance
-    const domain = this.domainLookupByName(name);
-    this.debug.log('Domain obtained');
-    const result = libvirt.virDomainDestroy(domain);
-    this.debug.log('Domain destroy result', result);
 
-    if (result < 0) {
-      this.debug.log('error', 'Failed to power off domain');
+    if (!this.connection) {
+      this.debug.log('error', 'No connection available');
+      throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_NO_CONNECT);
+    }
+
+    try {
+      const domain = VirtualMachine.lookupByName(name, this.connection);
+      this.debug.log('Domain obtained');
+      
+      domain.destroy();
+      
+      this.debug.log('Domain powered off successfully');
+    } catch (error) {
+      this.debug.log('error', 'Failed to power off domain', error instanceof Error ? error.message : String(error));
       throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_OPERATION_FAILED);
     }
-    this.debug.log('Domain powered off successfully');
   }
 
   /**
@@ -532,17 +513,23 @@ export class Libvirt {
    */
   public suspend(name: string): void {
     this.debug.log('Suspending domain', name);
-    const libvirt = Libvirt.libInstance
-    const domain = this.domainLookupByName(name);
-    this.debug.log('Domain obtained');
-    const result = libvirt.virDomainSuspend(domain);
-    this.debug.log('Domain suspend result', result);
 
-    if (result < 0) {
-      this.debug.log('error', 'Failed to suspend domain');
+    if (!this.connection) {
+      this.debug.log('error', 'No connection available');
+      throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_NO_CONNECT);
+    }
+
+    try {
+      const domain = VirtualMachine.lookupByName(name, this.connection);
+      this.debug.log('Domain obtained');
+      
+      domain.suspend();
+      
+      this.debug.log('Domain suspended successfully');
+    } catch (error) {
+      this.debug.log('error', 'Failed to suspend domain', error instanceof Error ? error.message : String(error));
       throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_OPERATION_FAILED);
     }
-    this.debug.log('Domain suspended successfully');
   }
 
   /**
@@ -554,50 +541,51 @@ export class Libvirt {
    */
   public getDomainStatus(name: string): string {
     this.debug.log('Getting domain status', name);
-    const libvirt = Libvirt.libInstance
-    const domain = this.domainLookupByName(name);
-    this.debug.log('Domain obtained');
 
-    // Create ref objects for state and reason
-    const state = ref.alloc('int');
-    const reason = ref.alloc('int');
+    if (!this.connection) {
+      this.debug.log('error', 'No connection available');
+      throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_NO_CONNECT);
+    }
 
-    const result = libvirt.virDomainGetState(domain, state, reason, 0);
+    try {
+      const domain = VirtualMachine.lookupByName(name, this.connection);
+      this.debug.log('Domain obtained');
 
-    if (result < 0) {
-      this.debug.log('error', 'Failed to get domain state');
+      const info = domain.getInfo();
+      let status: string;
+
+      switch (info.state) {
+        case 1:
+          status = 'Running';
+          break;
+        case 2:
+          status = 'Blocked';
+          break;
+        case 3:
+          status = 'Paused';
+          break;
+        case 4:
+          status = 'Shutdown';
+          break;
+        case 5:
+          status = 'Shutoff';
+          break;
+        case 6:
+          status = 'Crashed';
+          break;
+        case 7:
+          status = 'PMSuspended';
+          break;
+        default:
+          status = 'Unknown';
+      }
+
+      this.debug.log('Domain status', status);
+      return status;
+    } catch (error) {
+      this.debug.log('error', 'Failed to get domain status', error instanceof Error ? error.message : String(error));
       throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_OPERATION_FAILED);
     }
-
-    // Dereference the state ref object to get its value
-    let status: string;
-    switch (state.deref()) {
-      case 1:
-        status = 'Running';
-        break;
-      case 2:
-        status = 'Blocked';
-        break;
-      case 3:
-        status = 'Paused';
-        break;
-      case 4:
-        status = 'Shutdown';
-        break;
-      case 5:
-        status = 'Shutoff';
-        break;
-      case 6:
-        status = 'Crashed';
-        break;
-      case 7:
-        status = 'PMSuspended';
-        break;
-      default:
-        status = 'Unknown';
-    }
-    this.debug.log('Domain status', status);
-    return status;
   }
 
   /**
@@ -608,24 +596,29 @@ export class Libvirt {
    * @returns {Buffer} - A buffer representing the created disk.
    * @throws {LibvirtError} - Throws an error if the disk definition is invalid or if the operation fails.
    */
-  public createDisk(poolName: string, xml: string): Buffer {
+  public createDisk(poolName: string, xml: string): StorageVol {
     this.debug.log('Creating disk in pool', poolName, 'with XML');
-    const libvirt = Libvirt.libInstance
-    // Lookup the storage pool by its name
-    const pool = libvirt.virStoragePoolLookupByName(this.connection, poolName);
-    this.debug.log('Storage pool obtained');
+    
+    try {
+      if (!this.connection) {
+        this.debug.log('error', 'No connection available');
+        throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_NO_CONNECT);
+      }
 
-    // Create the storage volume
-    const volume = libvirt.virStorageVolCreateXML(pool, xml, 0);
-    this.debug.log('Storage volume created');
+      // Lookup the storage pool by its name
+      const pool = StoragePool.lookupByName(this.connection, poolName);
+      this.debug.log('Storage pool obtained');
 
-    if (volume.isNull()) {
-      this.debug.log('error', 'Failed to create storage volume');
+      // Create the storage volume
+      const volume = StorageVol.createXml(pool, xml, 0);
+      this.debug.log('Storage volume created');
+
+      this.debug.log('Disk created successfully');
+      return volume;
+    } catch (error) {
+      this.debug.log('error', 'Failed to create storage volume', error instanceof Error ? error.message : String(error));
       throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_OPERATION_FAILED);
     }
-
-    this.debug.log('Disk created successfully');
-    return volume;
   }
 
   /**
@@ -635,29 +628,24 @@ export class Libvirt {
    * @returns {Buffer} - A buffer representing the created storage pool.
    * @throws {LibvirtError} - Throws an error if the storage pool definition is invalid or if the operation fails.
    */
-  public createStoragePool(xml: string): Buffer {
+  public createStoragePool(xml: string): StoragePool {
     this.debug.log('Defining storage pool from XML', xml);
-    const libvirt = Libvirt.libInstance
-    // Define the storage pool
-    const pool = libvirt.virStoragePoolDefineXML(this.connection, xml, 0);
 
-    if (pool.isNull()) {
-      this.debug.log('error', 'Failed to define storage pool from XML');
+    try {
+      if (!this.connection) {
+        this.debug.log('error', 'No connection available');
+        throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_NO_CONNECT);
+      }
+
+      // Define and create the storage pool
+      const pool = StoragePool.createXml(this.connection, xml, 0);
+      this.debug.log('Storage pool defined and created successfully');
+
+      return pool;
+    } catch (error) {
+      this.debug.log('error', 'Failed to create storage pool', error instanceof Error ? error.message : String(error));
       throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_OPERATION_FAILED);
     }
-    this.debug.log('Storage pool defined successfully');
-
-    // Create (start) the storage pool
-    this.debug.log('Creating storage pool');
-    const result = libvirt.virStoragePoolCreate(pool, 0);
-
-    if (result < 0) {
-      this.debug.log('error', 'Failed to create storage pool');
-      throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_OPERATION_FAILED);
-    }
-    this.debug.log('Storage pool created successfully');
-
-    return pool;
   }
 
   /**
@@ -667,29 +655,29 @@ export class Libvirt {
    * @returns {Buffer} - A buffer representing the created network.
    * @throws {LibvirtError} - Throws an error if the network definition is invalid or if the operation fails.
    */
-  public createNetwork(xml: string): Buffer {
+  public createNetwork(xml: string): Network {
     this.debug.log('Defining network from XML', xml);
-    const libvirt = Libvirt.libInstance
-    // Define the network
-    const network = libvirt.virNetworkDefineXML(this.connection, xml);
 
-    if (network.isNull()) {
-      this.debug.log('error', 'Failed to define network from XML');
+    try {
+      if (!this.connection) {
+        this.debug.log('error', 'No connection available');
+        throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_NO_CONNECT);
+      }
+
+      // Define the network
+      const network = Network.createXml(this.connection, xml, 0);
+      this.debug.log('Network defined successfully');
+
+      // Create (start) the network
+      this.debug.log('Creating network');
+      await network.create();
+      this.debug.log('Network created successfully');
+
+      return network;
+    } catch (error) {
+      this.debug.log('error', 'Failed to create network', error instanceof Error ? error.message : String(error));
       throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_OPERATION_FAILED);
     }
-    this.debug.log('Network defined successfully');
-
-    // Create (start) the network
-    this.debug.log('Creating network');
-    const result = libvirt.virNetworkCreate(network);
-
-    if (result < 0) {
-      this.debug.log('error', 'Failed to create network');
-      throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_OPERATION_FAILED);
-    }
-    this.debug.log('Network created successfully');
-
-    return network;
   }
 
   /**

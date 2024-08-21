@@ -1,6 +1,6 @@
 import fs from 'fs';
 import { MachineConfiguration, PrismaClient } from '@prisma/client';
-import { Libvirt } from '@utils/libvirt';
+import { Connection, Machine as VirtualMachine, StoragePool, StorageVol } from 'libvirt-node';
 import { Machine, MachineTemplate } from '@prisma/client';
 
 import { XMLGenerator } from './xmlGenerator';
@@ -10,7 +10,7 @@ import { UnattendedRedHatManager } from '@services/unattendedRedHatManager';
 import { Debugger } from '@utils/debug';
 
 export class VirtManager {
-  private libvirt = new Libvirt()
+  private libvirt: Connection | null = null
   private uri: string = ''
   private prisma: PrismaClient | null = null;
   private debug: Debugger = new Debugger('virt-manager');
@@ -33,12 +33,14 @@ export class VirtManager {
     }
 
     // If already connected, disconnect first
-    if (this.libvirt.isConnected()) {
-      this.libvirt.disconnect();
+    if (this.libvirt) {
+      this.libvirt = null;
+      // TODO: implement close
+      //this.libvirt.close();
     }
 
     // Connect to the hypervisor
-    this.libvirt.connect(this.uri);
+    this.libvirt = Connection.open(this.uri);
   }
 
   /**
@@ -139,13 +141,42 @@ export class VirtManager {
         // create storage file
         const storagePath = xmlGenerator.getStoragePath();
         const storageSize = template.storage;
-        await this.libvirt.createStorage(storageSize, storagePath);
-        this.debug.log('Storage file created for machine', machine.name, storagePath);
+        // Create a storage pool if it doesn't exist
+        const poolName = 'default';
+        let storagePool: StoragePool | null = null;
+        if (!this.libvirt) {
+          throw new Error('Libvirt connection not established');
+        }
+        try {
+          storagePool = StoragePool.lookupByName(this.libvirt, poolName);
+        } catch (error) {
+          // If the pool doesn't exist, create it
+          const poolXml = `
+            <pool type='dir'>
+              <name>${poolName}</name>
+              <target>
+                <path>/var/lib/libvirt/images</path>
+              </target>
+            </pool>
+          `;
+          storagePool = StoragePool.defineXml(this.libvirt, poolXml);
+          storagePool.create(0);
+        }
 
-        this.debug.log('Generated XML for machine', machine.name, xml);
-        this.libvirt.domainDefineXML(xml);
+        // Create the storage volume
+        const volXml = `
+          <volume>
+            <name>${machine.name}.qcow2</name>
+            <allocation>0</allocation>
+            <capacity unit="G">${storageSize}</capacity>
+            <target>
+              <path>${storagePath}</path>
+              <format type='qcow2'/>
+            </target>
+          </volume>
+        `;
+        const storageVol = StoragePool.createXml(this.libvirt, volXml, 0);
         this.debug.log('VM defined with XML for machine', machine.name);
-
       };
 
       // check if this.prisma define $transaction
@@ -264,7 +295,11 @@ export class VirtManager {
    * @returns A promise that resolves to void.
    */
   async powerOn(domainName: string): Promise<void> {
-    this.libvirt.resume(domainName);
+    if (!this.libvirt) {
+      throw new Error('Libvirt connection is not established');
+    }
+    const domain = VirtualMachine.lookupByName(domainName, this.libvirt);
+    domain.resume();
   }
 }
 
