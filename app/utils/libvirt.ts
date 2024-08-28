@@ -313,7 +313,7 @@ export class Libvirt {
       throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_NO_CONNECT);
     }
     try {
-      const domain = VirtualMachine.lookupByName(name, this.connection);
+      const domain = VirtualMachine.lookupByName(this.connection, name);
 
       return domain;
     } catch (error) {
@@ -426,7 +426,7 @@ export class Libvirt {
     }
 
     // Lookup the domain by its name
-    const domain = VirtualMachine.lookupByName(name, this.connection);
+    const domain = VirtualMachine.lookupByName(this.connection, name);
 
     this.debug.log('Undefining the old domain');
     // Undefine the old domain
@@ -453,7 +453,7 @@ export class Libvirt {
     }
 
     try {
-      const domain = VirtualMachine.lookupByName(name, this.connection);
+      const domain = VirtualMachine.lookupByName(this.connection, name);
       const info = domain.getInfo();
       
       this.debug.log('Domain state', info.state);
@@ -493,7 +493,7 @@ export class Libvirt {
     }
 
     try {
-      const domain = VirtualMachine.lookupByName(name, this.connection);
+      const domain = VirtualMachine.lookupByName(this.connection, name);
       this.debug.log('Domain obtained');
       
       domain.destroy();
@@ -520,7 +520,7 @@ export class Libvirt {
     }
 
     try {
-      const domain = VirtualMachine.lookupByName(name, this.connection);
+      const domain = VirtualMachine.lookupByName(this.connection, name);
       this.debug.log('Domain obtained');
       
       domain.suspend();
@@ -548,7 +548,7 @@ export class Libvirt {
     }
 
     try {
-      const domain = VirtualMachine.lookupByName(name, this.connection);
+      const domain = VirtualMachine.lookupByName(this.connection, name);
       this.debug.log('Domain obtained');
 
       const info = domain.getInfo();
@@ -665,12 +665,12 @@ export class Libvirt {
       }
 
       // Define the network
-      const network = Network.createXml(this.connection, xml, 0);
+      const network = Network.createXml(this.connection, xml);
       this.debug.log('Network defined successfully');
 
       // Create (start) the network
       this.debug.log('Creating network');
-      await network.create();
+      network.create();
       this.debug.log('Network created successfully');
 
       return network;
@@ -689,25 +689,35 @@ export class Libvirt {
    */
   public addDomainToNetwork(domainName: string, networkName: string): void {
     this.debug.log('Adding domain to network', domainName, networkName);
-    const libvirt = Libvirt.libInstance
-    const domain = this.domainLookupByName(domainName);
-    this.debug.log('Domain obtained');
-    const network = libvirt.virNetworkLookupByName(this.connection, networkName);
-    this.debug.log('Network obtained');
 
-    if (network.isNull()) {
-      this.debug.log('error', 'Network not found');
-      throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_NO_NETWORK);
-    }
+    try {
+      if (!this.connection) {
+        this.debug.log('error', 'No connection available');
+        throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_NO_CONNECT);
+      }
 
-    const result = libvirt.virDomainAttachDevice(domain, `<interface type='network'><source network='${networkName}'/></interface>`);
-    this.debug.log('Domain attach device result', result);
+      const domain = VirtualMachine.lookupByName(this.connection, domainName);
+      this.debug.log('Domain obtained');
 
-    if (result < 0) {
-      this.debug.log('error', 'Failed to add domain to network');
+      // Verify that the network exists before proceeding
+      // This check is important for:
+      // 1. Validating the network's existence
+      // 2. Ensuring consistency in error handling
+      // 3. Potential future use if additional network operations are needed
+      // 4. Early error detection for debugging purposes
+      const network = Network.lookupByName(this.connection, networkName);
+      this.debug.log('Network obtained');
+
+      const interfaceXml = `<interface type='network'><source network='${networkName}'/></interface>`;
+      domain.attachDevice(interfaceXml, 0);
+      this.debug.log('Domain attached to network successfully');
+    } catch (error) {
+      this.debug.log('error', 'Failed to add domain to network', error instanceof Error ? error.message : String(error));
+      if (error instanceof Error && error.message.includes('no network')) {
+        throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_NO_NETWORK);
+      }
       throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_OPERATION_FAILED);
     }
-    this.debug.log('Domain added to network successfully');
   }
 
   /**
@@ -719,25 +729,30 @@ export class Libvirt {
    */
   public removeDomainFromNetwork(domainName: string, networkName: string): void {
     this.debug.log('Removing domain from network', domainName, networkName);
-    const libvirt = Libvirt.libInstance
-    const domain = this.domainLookupByName(domainName);
-    this.debug.log('Domain obtained');
-    const network = libvirt.virNetworkLookupByName(this.connection, networkName);
-    this.debug.log('Network obtained');
 
-    if (network.isNull()) {
-      this.debug.log('error', 'Network not found');
-      throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_NO_NETWORK);
-    }
+    try {
+      if (!this.connection) {
+        this.debug.log('error', 'No connection available');
+        throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_NO_CONNECT);
+      }
 
-    const result = libvirt.virDomainDetachDevice(domain, `<interface type='network'><source network='${networkName}'/></interface>`);
-    this.debug.log('Domain detach device result', result);
+      const domain = VirtualMachine.lookupByName(this.connection, domainName);
+      this.debug.log('Domain obtained');
 
-    if (result < 0) {
-      this.debug.log('error', 'Failed to remove domain from network');
+      // Verify that the network exists before proceeding
+      const network = Network.lookupByName(this.connection, networkName);
+      this.debug.log('Network obtained');
+
+      const interfaceXml = `<interface type='network'><source network='${networkName}'/></interface>`;
+      domain.detachDevice(interfaceXml, 0);
+      this.debug.log('Domain detached from network successfully');
+    } catch (error) {
+      this.debug.log('error', 'Failed to remove domain from network', error instanceof Error ? error.message : String(error));
+      if (error instanceof Error && error.message.includes('no network')) {
+        throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_NO_NETWORK);
+      }
       throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_OPERATION_FAILED);
     }
-    this.debug.log('Domain removed from network successfully');
   }
 
   /**
@@ -748,212 +763,220 @@ export class Libvirt {
    */
   public getDomainNetworks(domainName: string): string[] {
     this.debug.log('Getting domain networks', domainName);
-    const libvirt = Libvirt.libInstance
-    const domain = this.domainLookupByName(domainName);
-    this.debug.log('Domain obtained');
-    const xml = libvirt.virDomainGetXMLDesc(domain, 0);
-    this.debug.log('Domain XML description obtained');
-    const xmlDoc = new DOMParser().parseFromString(xml, 'text/xml');
-    this.debug.log('XML document parsed');
-    const interfaces = xmlDoc.getElementsByTagName('interface');
-    this.debug.log('Interfaces obtained');
+    
+    if (!this.connection) {
+      this.debug.log('error', 'No connection available');
+      throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_NO_CONNECT);
+    }
 
-    const networks = Array.from(interfaces)
-      .map((iface: any) => iface.getElementsByTagName('source')[0])
-      .filter((source: Element | null) => source && source.getAttribute('network'))
-      .map((source: Element) => source.getAttribute('network') as string);
-    this.debug.log('Networks obtained', networks.join(', '));
+    try {
+      const domain = VirtualMachine.lookupByName(this.connection, domainName);
+      this.debug.log('Domain obtained');
 
-    return networks;
+      const xml = domain.getXmlDesc(0);
+      this.debug.log('Domain XML description obtained');
+
+      // Parse the XML string
+      const parser = new DOMParser();
+      const xmlDoc = parser.parseFromString(xml, 'text/xml');
+      this.debug.log('XML document parsed');
+
+      const interfaces = xmlDoc.getElementsByTagName('interface');
+      this.debug.log('Interfaces obtained');
+
+      const networks = Array.from(interfaces)
+        .map(iface => iface.getElementsByTagName('source')[0])
+        .filter(source => source && source.getAttribute('network'))
+        .map(source => source.getAttribute('network') as string);
+      
+      this.debug.log('Networks obtained', networks.join(', '));
+
+      return networks;
+    } catch (error) {
+      this.debug.log('error', 'Failed to get domain networks', error instanceof Error ? error.message : String(error));
+      throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_OPERATION_FAILED);
+    }
   }
 
   async domainSetBootloader(domainName: string, isoPath: string): Promise<void> {
     this.debug.log('Setting bootloader for domain', domainName, 'with ISO path', isoPath);
-    const libvirt = Libvirt.libInstance
-    // const domainNameBuffer = Buffer.from(domainName +'\0', 'utf-8');
-    // Fetch the domain's XML definition
-    const domain = this.domainLookupByName(domainName);
-    const xml = libvirt.virDomainGetXMLDesc(domain, 0);
 
-    // Parse the XML
-    let xmlDoc = new DOMParser().parseFromString(xml, 'text/xml');
-
-    // Find the <os> element
-    let osElement = xmlDoc.getElementsByTagName('os')[0];
-
-    //
-
-    // Create a new <boot> element
-    const bootElement = xmlDoc.createElement('boot');
-    bootElement.setAttribute('dev', 'cdrom');
-    // bootElement.setAttribute('order', '1');  // Boot order 1 is the first device to try. It does not start on 0
-
-    // Append the <boot> element to the <os> element
-    if (osElement.hasChildNodes()) {
-      osElement.insertBefore(bootElement, osElement.firstChild);
-    } else {
-      // If targetNode has no children, appendChild will work like prepend
-      osElement.appendChild(bootElement);
+    if (!this.connection) {
+      this.debug.log('error', 'No connection available');
+      throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_NO_CONNECT);
     }
 
-    // Serialize the modified XML
-    const newXml = new XMLSerializer().serializeToString(xmlDoc);
-    this.debug.log('Modified XML serialized');
+    try {
+      // Lookup the domain
+      const domain = VirtualMachine.lookupByName(this.connection, domainName);
+      this.debug.log('Domain obtained');
 
-    // Redefine the domain with the modified XML
-    libvirt.virDomainDefineXML(domain, Buffer.from(newXml + '\0', 'utf-8'));
-    this.debug.log('Domain redefined with modified XML');
+      // Get the XML description
+      const xml = domain.getXmlDesc(0);
+      this.debug.log('Domain XML description obtained');
 
-    const diskXml = `<disk type='file' device='disk'>
-      <driver name='qemu' type='raw'/>
-      <source file='${isoPath}'/>
-      <target dev='hda' bus='ide'/>
-      <address type='drive' controller='0' bus='0' target='0' unit='0'/>
-    </disk>`;
+      // Parse the XML string
+      const parser = new DOMParser();
+      let xmlDoc = parser.parseFromString(xml, 'text/xml');
 
-    // Set the ISO path for the domain's CDROM device
-    // This method overwrite ONLY the given devices, in this case, the cdroom
-    const deviceAdded = libvirt.virDomainUpdateDeviceFlags(domain,
-      Buffer.from(diskXml + '\0', 'utf-8'),
-      virDomainModificationImpact.VIR_DOMAIN_AFFECT_CONFIG);
+      // Find the <os> element
+      let osElement = xmlDoc.getElementsByTagName('os')[0];
 
-    if (deviceAdded < 0) {
-      this.debug.log('error', 'Failed to set ISO path for domain\'s CDROM device');
+      // Create a new <boot> element
+      const bootElement = xmlDoc.createElement('boot');
+      bootElement.setAttribute('dev', 'cdrom');
+
+      // Append the <boot> element to the <os> element
+      if (osElement.hasChildNodes()) {
+        osElement.insertBefore(bootElement, osElement.firstChild);
+      } else {
+        osElement.appendChild(bootElement);
+      }
+
+      // Serialize the modified XML
+      const newXml = new XMLSerializer().serializeToString(xmlDoc);
+      this.debug.log('Modified XML serialized');
+
+      // Redefine the domain with the modified XML
+      VirtualMachine.defineXml(this.connection, newXml);
+      this.debug.log('Domain redefined with modified XML');
+
+      const diskXml = `<disk type='file' device='disk'>
+        <driver name='qemu' type='raw'/>
+        <source file='${isoPath}'/>
+        <target dev='hda' bus='ide'/>
+        <address type='drive' controller='0' bus='0' target='0' unit='0'/>
+      </disk>`;
+
+      // Update the domain's device
+      domain.updateDevice(diskXml, 1);  // 1 corresponds to VIR_DOMAIN_AFFECT_CONFIG, persistent
+      this.debug.log('ISO path set for domain\'s CDROM device');
+
+    } catch (error) {
+      this.debug.log('error', 'Failed to set bootloader for domain', error instanceof Error ? error.message : String(error));
       throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_OPERATION_FAILED);
-    } else {
-      this.debug.log('ISO path set for domain\'s CDROM device', deviceAdded);
     }
-
-
-    // Reload the xml
-    xmlDoc = new DOMParser().parseFromString(xml, 'text/xml');
-    this.debug.log('XML document reloaded');
   }
 
   public listAllDomains(): string[] {
-    const libvirt = Libvirt.libInstance
-    // Get the number of domains
-    const numDomains = libvirt.virConnectNumOfDomains(this.connection);
+    if (!this.connection) {
+      throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_NO_CONNECT);
+    }
 
-    // Allocate memory for the names
-    const namesPtr = new charPtrArray(numDomains);
-
-    // Get the domain names
-    const result = libvirt.virConnectListDefinedDomains(this.connection, namesPtr, numDomains);
-
-    if (result < 0) {
+    try {
+      const domains = this.connection.listAllDomains(0); // 0 means no flags, list all domains
+      return domains.map(domain => {
+        const name = domain.getName();
+        return name;
+      });
+    } catch (error) {
+      this.debug.log('error', 'Failed to list all domains', error instanceof Error ? error.message : String(error));
       throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_OPERATION_FAILED);
     }
-
-    // Convert the names to a JavaScript array
-    const names = [];
-    for (let i = 0; i < numDomains; i++) {
-      const name: any = namesPtr[i];
-      if (name.isNull()) {
-        break;
-      }
-      const string = ref.readCString(name);
-      names.push(string);
-    }
-
-    return names;
   }
 
   lookupDomainByName(name: string): string {
-    const libvirt = Libvirt.libInstance
-    return libvirt.virDomainLookupByName(this.connection, name).toString();
+    if (!this.connection) {
+      throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_NO_CONNECT);
+    }
+    try {
+      const domain = VirtualMachine.lookupByName(this.connection, name);
+      return domain.getName();
+    } catch (error) {
+      this.debug.log('error', 'Failed to lookup domain by name', error instanceof Error ? error.message : String(error));
+      throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_NO_DOMAIN);
+    }
   }
 
   domainGetInfo(name: string): any {
-    const libvirt = Libvirt.libInstance
-    const domain = this.domainLookupByName(name);
-    const info: any = {}
-    const result = libvirt.virDomainGetInfo(domain, info.ref());
+    if (!this.connection) {
+      throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_NO_CONNECT);
+    }
+    try {
+      const domain = VirtualMachine.lookupByName(this.connection, name);
+      const info = domain.getInfo();
 
-    if (result < 0) {
+      return {
+        state: info.state,
+        maxMem: info.maxMem,
+        memory: info.memory,
+        nrVirtCpu: info.nrVirtCpu,
+        cpuTime: info.cpuTime
+      };
+    } catch (error) {
+      this.debug.log('error', 'Failed to get domain info', error instanceof Error ? error.message : String(error));
       throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_OPERATION_FAILED);
     }
-
-    // Convert the returned struct to a JavaScript object
-    const infoObject: any = {
-      state: info.state,
-      maxMem: info.maxMem,
-      memory: info.memory,
-      nrVirtCpu: info.nrVirtCpu,
-      cpuTime: info.cpuTime,
-    };
-
-    return infoObject;
   }
 
-  createStorage(size: number, fileName: string): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const cmd = 'qemu-img';
-      const args = ['create', '-f', 'qcow2', fileName, `${size}G`];
-      const childProcess = spawn(cmd, args);
+  async createStorage(size: number, fileName: string): Promise<void> {
+    if (!this.connection) {
+      throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_NO_CONNECT);
+    }
 
-      childProcess.stdout.on('data', (data) => {
-        console.log(`stdout: ${data}`);
-      });
+    try {
+      // Assuming we have a default storage pool, if not, you might need to create or specify one
+      const storagePool = StoragePool.lookupByName(this.connection, 'default');
+      
+      const volumeXml = `
+        <volume>
+          <name>${fileName}</name>
+          <allocation>0</allocation>
+          <capacity unit="G">${size}</capacity>
+          <target>
+            <format type="qcow2"/>
+          </target>
+        </volume>
+      `;
 
-      childProcess.stderr.on('data', (data) => {
-        console.error(`stderr: ${data}`);
-      });
+      const volume = StorageVol.createXml(storagePool, volumeXml, 0);
+      
+      if (!volume) {
+        throw new Error('Failed to create storage volume');
+      }
 
-      childProcess.on('error', (error) => {
-        console.error(`exec error: ${error}`);
-        reject(error);
-      });
-
-      childProcess.on('close', (code) => {
-        if (code !== 0) {
-          reject(new Error(`qemu-img process exited with code ${code}`));
-        } else {
-          resolve();
-        }
-      });
-    });
+      this.debug.log('Storage volume created successfully');
+    } catch (error) {
+      this.debug.log('error', 'Failed to create storage', error instanceof Error ? error.message : String(error));
+      throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_OPERATION_FAILED);
+    }
   }
 
   async getVncPort(domainName: string): Promise<number> {
-    const libvirt = Libvirt.libInstance
     this.debug.log(`Getting VNC port for domain: ${domainName}`);
-    const domain = libvirt.virDomainLookupByName(this.connection, domainName);
-    this.debug.log('Domain obtained');
-    const xml = libvirt.virDomainGetXMLDesc(domain, 0);
-    this.debug.log('Domain XML description obtained', xml);
+    if (!this.connection) {
+      throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_NO_CONNECT);
+    }
 
-    if (!xml) {
+    try {
+      const domain = VirtualMachine.lookupByName(this.connection, domainName);
+      this.debug.log('Domain obtained');
+
+      const xml = domain.getXMLDesc(0);
+      this.debug.log('Domain XML description obtained');
+
+      // Parse the XML string
+      const parser = new DOMParser();
+      const xmlDoc = parser.parseFromString(xml, 'text/xml');
+
+      // Get the <graphics> elements
+      const graphicsElements = xmlDoc.getElementsByTagName('graphics');
+
+      // Iterate over the <graphics> elements
+      for (const graphicsElement of graphicsElements) {
+        if (graphicsElement.getAttribute('type') === 'vnc') {
+          const port = parseInt(graphicsElement.getAttribute('port') || '-1', 10);
+          this.debug.log(`Found VNC port: ${port}`);
+          return port;
+        }
+      }
+
+      this.debug.log('No VNC port found');
+      return -1;
+    } catch (error) {
+      this.debug.log('error', 'Failed to get VNC port', error instanceof Error ? error.message : String(error));
       throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_OPERATION_FAILED);
     }
-
-
-    const parser = new DOMParser();
-    this.debug.log('Creating XML parser');
-    const xmlDoc = parser.parseFromString(xml, 'text/xml');
-    this.debug.log('XML document parsed');
-
-    // Get the <graphics> elements
-    const graphicsElements = xmlDoc.getElementsByTagName('graphics');
-
-    this.debug.log('Graphics elements obtained');
-    // Iterate over the <graphics> elements
-    for (let i = 0; i < graphicsElements.length; i++) {
-      this.debug.log('Iterating over graphics elements');
-      const graphicsElement = graphicsElements[i];
-      this.debug.log('Graphics element obtained');
-
-      // Check if the type attribute is 'vnc'
-      if (graphicsElement.getAttribute('type') === 'vnc') {
-        this.debug.log('Found VNC graphics element');
-        // Get the port attribute and parse it as an integer
-        const port = parseInt(graphicsElement.getAttribute('port') || '-1', 10);
-        this.debug.log(`Found VNC port: ${port}`);
-        return port;
-      }
-    }
-
-    return -1;
   }
 
   // Add more methods to wrap Libvirt functions
