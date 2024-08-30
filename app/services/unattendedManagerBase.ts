@@ -37,7 +37,7 @@ export class UnattendedManagerBase {
       const configContent = await this.generateConfig();
       this.debug.log(configContent);
       this.debug.log('Validating output path');
-      const outputPath = this.validatePath(process.env.ISO_OUTPUT_PATH, '/opt/infinibay/isos');
+      const outputPath = this.validatePath(path.join(process.env.INFINIBAY_BASE_DIR ?? '/opt/infinibay', 'iso'), '/opt/infinibay/isos');
 
       this.debug.log('Generating random file name for new ISO');
       const newIsoName = this.generateRandomFileName();

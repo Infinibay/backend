@@ -1,5 +1,6 @@
 import xml2js from 'xml2js';
 import { v4 as uuidv4 } from 'uuid';
+import path from 'path';
 
 export enum NetworkModel {
   VIRTIO = 'virtio',
@@ -179,7 +180,7 @@ export class XMLGenerator {
   }
 
   setStorage(size: number): void {
-    const diskPath = process.env.DISK_PATH || '/opt/infinibay/disks';
+    const diskPath = path.join(process.env.INFINIBAY_BASE_DIR ?? '/opt/infinibay', 'disks') || '/opt/infinibay/disks';
     this.addDisk(`${diskPath}/${this.id}.img`, 'virtio', size);
   }
 
@@ -291,8 +292,8 @@ export class XMLGenerator {
   }
 
   getStoragePath(): string {
-    const diskPath = process.env.DISK_PATH || '/opt/infinibay/disks';
-    return `${diskPath}/${this.id}.img`;
+    const diskPath = path.join(process.env.INFINIBAY_BASE_DIR ?? '/opt/infinibay', 'disks') || '/opt/infinibay/disks';
+    return path.join(diskPath, `${this.id}.img`);
   }
 
   getUefiVarFile(): string {

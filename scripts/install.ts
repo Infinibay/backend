@@ -1,26 +1,21 @@
 import axios from 'axios';
 import fs from 'fs';
 import cheerio from 'cheerio';
+import dotenv from 'dotenv';
+import path from 'path';
 
 function prepareFolders() {
-  if (!fs.existsSync('/opt/')) {
-    fs.mkdirSync('/opt')
-  }
-  if (!fs.existsSync('/opt/infinibay')) {
-    fs.mkdirSync('/opt/infinibay')
-  }
-  if (!fs.existsSync('/opt/infinibay/iso')) {
-    fs.mkdirSync('/opt/infinibay/iso')
-  }
-  if (!fs.existsSync('/opt/infinibay/iso/ubuntu')) {
-    fs.mkdirSync('/opt/infinibay/iso/ubuntu')
-  }
-  // fedora
-  if (!fs.existsSync('/opt/infinibay/iso/fedora')) {
-    fs.mkdirSync('/opt/infinibay/iso/fedora')
-  }
+  // Load environment variables
+  dotenv.config();
 
-  // disks, uefi
+  const baseDir = process.env.INFINIBAY_BASE_DIR || '/opt/infinibay';
+  const isoDir = path.join(baseDir, 'iso');
+
+  [baseDir, isoDir, path.join(isoDir, 'ubuntu'), path.join(isoDir, 'fedora'), path.join(baseDir, 'disks'), path.join(baseDir, 'isos')].forEach(dir => {
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+  });
 }
 
 function getCurrentAndLastUbuntuVersion() {

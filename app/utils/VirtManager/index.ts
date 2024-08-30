@@ -298,7 +298,7 @@ export class VirtManager {
     if (!this.libvirt) {
       throw new Error('Libvirt connection is not established');
     }
-    const domain = VirtualMachine.lookupByName(domainName, this.libvirt);
+    const domain = VirtualMachine.lookupByName(this.libvirt, domainName);
     domain.resume();
   }
 }

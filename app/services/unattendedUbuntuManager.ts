@@ -20,7 +20,7 @@ export class UnattendedUbuntuManager extends UnattendedManagerBase {
       this.debug.log('error', 'Username and password are required');
       throw new Error('Username and password are required');
     }
-    this.isoPath = path.join(process.env.ISO_PATH ?? '/opt/infinibay/iso', 'ubuntu.iso');
+    this.isoPath = path.join(path.join(process.env.INFINIBAY_BASE_DIR ?? '/opt/infinibay', 'iso'), 'ubuntu.iso');
     this.username = username;
     this.password = password;
     this.applications = applications;
