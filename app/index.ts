@@ -9,7 +9,8 @@ import "reflect-metadata";
 
 // Apollo Server Related Imports
 // @ts-ignore
-import { ApolloServer, ApolloError } from '@apollo/server';
+import { ApolloServer } from '@apollo/server';
+import { GraphQLError } from 'graphql';
 import { expressMiddleware } from "@apollo/server/express4";
 
 // Prisma Client and Utils
@@ -45,7 +46,7 @@ async function bootstrap() {
     formatError: (error: any) => {
       console.error(error); // Log the error
       // Return a generic error message to the client
-      return new ApolloError('Internal server error');
+      return new GraphQLError('Internal server error');
     },
   });
 
