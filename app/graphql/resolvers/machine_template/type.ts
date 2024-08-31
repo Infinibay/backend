@@ -21,7 +21,7 @@ export class MachineTemplateType {
   @Field(() => Int)
   storage: number = 0
 
-  @Field(() => Int)
+  @Field(() => Date)
   createdAt: Date = new Date()
 }
 
