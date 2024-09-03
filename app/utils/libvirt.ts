@@ -916,7 +916,7 @@ export class Libvirt {
 
     try {
       // Assuming we have a default storage pool, if not, you might need to create or specify one
-      const storagePool = StoragePool.lookupByName(this.connection, 'default');
+      const storagePool = StoragePool.lookupByName(this.connection, process.env.INFINIBAY_STORAGE_POOL ?? 'default');
       
       const volumeXml = `
         <volume>
@@ -952,29 +952,39 @@ export class Libvirt {
       const domain = VirtualMachine.lookupByName(this.connection, domainName);
       this.debug.log('Domain obtained');
 
-      const xml = domain.getXMLDesc(0);
-      this.debug.log('Domain XML description obtained');
+      let xml: string;
+      try {
+        xml = domain.getXmlDesc(0);
+        this.debug.log('Domain XML description obtained');
+      } catch (error) {
+        this.debug.log('error', `Failed to get domain XML description for ${domainName}`);
+        this.debug.log(error instanceof Error ? error.message : String(error));
+        throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_OPERATION_FAILED);
+      }
 
       // Parse the XML string
       const parser = new DOMParser();
       const xmlDoc = parser.parseFromString(xml, 'text/xml');
-
       // Get the <graphics> elements
       const graphicsElements = xmlDoc.getElementsByTagName('graphics');
-
+      // Check if graphicsElements is a valid NodeList
+    if (graphicsElements && graphicsElements.length > 0) {
       // Iterate over the <graphics> elements
-      for (const graphicsElement of graphicsElements) {
+      for (let i = 0; i < graphicsElements.length; i++) {
+        const graphicsElement = graphicsElements[i];
         if (graphicsElement.getAttribute('type') === 'vnc') {
           const port = parseInt(graphicsElement.getAttribute('port') || '-1', 10);
           this.debug.log(`Found VNC port: ${port}`);
           return port;
         }
       }
+    }
 
       this.debug.log('No VNC port found');
       return -1;
     } catch (error) {
-      this.debug.log('error', 'Failed to get VNC port', error instanceof Error ? error.message : String(error));
+      this.debug.log('error', 'Failed to get VNC port');
+      this.debug.log(error instanceof Error ? error.message : String(error));
       throw new LibvirtError(LibvirtErrorCodes.VIR_ERR_OPERATION_FAILED);
     }
   }

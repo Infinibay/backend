@@ -8,7 +8,7 @@ input CreateMachineInputType {
   name: String! = ""
   os: MachineOs! = WINDOWS10
   password: String! = ""
-  productKey: String! = ""
+  productKey: String
   templateId: String! = ""
   username: String! = ""
 }
@@ -27,15 +27,20 @@ A date-time string at UTC, such as 2007-12-03T10:15:30Z, compliant with the `dat
 """
 scalar DateTimeISO
 
+type DyummyType {
+  value: String!
+}
+
 """
 The `JSONObject` scalar type represents JSON objects as specified by [ECMA-404](http://www.ecma-international.org/publications/files/ECMA-ST/ECMA-404.pdf).
 """
 scalar JSONObject
 
 type Machine {
-  config: JSONObject!
-  createAt: DateTimeISO!
+  config: JSONObject
+  createAt: DateTimeISO
   id: ID!
+  name: String!
   status: String!
   template: MachineTemplateType
   templateId: String!
@@ -96,7 +101,7 @@ enum MachineTemplateOrderByField {
 
 type MachineTemplateType {
   cores: Int!
-  createdAt: Int!
+  createdAt: DateTimeISO!
   description: String
   id: ID!
   name: String
@@ -108,6 +113,11 @@ type Mutation {
   createMachine(input: CreateMachineInputType!): Machine!
   createMachineTemplate(input: MachineTemplateInputType!): MachineTemplateType!
   createUser(input: CreateUserInputType!): UserType!
+  destroyMachine(id: String!): SuccessType!
+  powerOff(id: String!): SuccessType!
+  powerOn(id: String!): SuccessType!
+  setupNode: DyummyType!
+  suspend(id: String!): SuccessType!
   updateMachineTemplate(id: String!, input: MachineTemplateInputType!): MachineTemplateType!
   updateUser(id: String!, input: UpdateUserInputType!): UserType!
 }
@@ -123,6 +133,7 @@ input PaginationInputType {
 }
 
 type Query {
+  checkSetupStatus: DyummyType!
   login(email: String!, password: String!): UserToken!
   machine(id: String!): Machine
   machineTemplate(id: String!): MachineTemplateType
@@ -131,6 +142,11 @@ type Query {
   user(id: String!): UserType!
   users(orderBy: UserOrderByInputType, pagination: PaginationInputType): [UserType!]!
   vncConnection(id: String!): VncConfigurationType
+}
+
+type SuccessType {
+  message: String!
+  success: Boolean!
 }
 
 input UpdateUserInputType {

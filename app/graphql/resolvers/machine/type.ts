@@ -23,8 +23,8 @@ export class Machine {
     @Field(() => String)
     name: string = ''
 
-    @Field(() => GraphQLJSONObject)
-    config: any = {}
+    @Field(() => GraphQLJSONObject, { nullable: true })
+    config: any | null = null
 
     @Field(() => String)
     status: MachineStatus = MachineStatus.STOPPED
@@ -35,8 +35,8 @@ export class Machine {
     @Field(() => String)
     templateId: string = ''
 
-    @Field(() => Date)
-    createAt: Date = new Date()
+    @Field(() => Date, { nullable: true })
+    createAt: Date | null = null
 
     @Field(() => MachineTemplateType, { nullable: true })
     template?: MachineTemplateType

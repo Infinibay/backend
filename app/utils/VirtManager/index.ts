@@ -1,4 +1,6 @@
 import fs from 'fs';
+import { execSync } from 'child_process';
+
 import { MachineConfiguration, PrismaClient } from '@prisma/client';
 import { Connection, Machine as VirtualMachine, StoragePool, StorageVol } from 'libvirt-node';
 import { Machine, MachineTemplate } from '@prisma/client';
@@ -142,41 +144,102 @@ export class VirtManager {
         const storagePath = xmlGenerator.getStoragePath();
         const storageSize = template.storage;
         // Create a storage pool if it doesn't exist
-        const poolName = 'default';
+        const poolName = process.env.INFINIBAY_STORAGE_POOL_NAME ?? 'default';
         let storagePool: StoragePool | null = null;
         if (!this.libvirt) {
           throw new Error('Libvirt connection not established');
         }
         try {
+          this.debug.log('Looking up storage pool -----------------', poolName);
           storagePool = StoragePool.lookupByName(this.libvirt, poolName);
+
+          // Check if the pool is active, if not, activate it
+          if (!storagePool.isActive()) {
+            this.debug.log('Storage pool is inactive, starting it');
+            storagePool.create(0);
+          }
         } catch (error) {
-          // If the pool doesn't exist, create it
+          this.debug.log('Storage pool not found, creating it');
+          // const uuid = crypto.randomUUID();
           const poolXml = `
             <pool type='dir'>
               <name>${poolName}</name>
               <target>
-                <path>/var/lib/libvirt/images</path>
+                <path>${process.env.INFINIBAY_BASE_DIR ?? '/opt/infinibay'}/disks</path>
               </target>
             </pool>
           `;
+          this.debug.log('Storage pool XML', poolXml);
+          // VIR_STORAGE_POOL_CREATE_WITH_BUILD_OVERWRITE	=	2 (0x2; 1 << 1)	
+          // Create the pool and perform pool build using the VIR_STORAGE_POOL_BUILD_OVERWRITE flag.
           storagePool = StoragePool.defineXml(this.libvirt, poolXml);
+          storagePool.build(0);
+          storagePool.create(0);
+          storagePool.setAutostart(true);
+          this.debug.log('Storage pool built', machine.name);
+        }
+
+        // Ensure the pool is active
+        if (!storagePool.isActive()) {
           storagePool.create(0);
         }
 
-        // Create the storage volume
+        // Create the storage volume with appropriate permissions
+        const uid = execSync('id -u libvirt-qemu').toString().trim();
+        const gid = execSync('getent group kvm').toString().trim().split(':')[2];
         const volXml = `
           <volume>
-            <name>${machine.name}.qcow2</name>
-            <allocation>0</allocation>
+            <name>${machine.internalName}-main.qcow2</name>
             <capacity unit="G">${storageSize}</capacity>
             <target>
-              <path>${storagePath}</path>
               <format type='qcow2'/>
             </target>
           </volume>
         `;
-        const storageVol = StoragePool.createXml(this.libvirt, volXml, 0);
-        this.debug.log('VM defined with XML for machine', machine.name);
+
+        let vm: VirtualMachine | null = null;
+        try {
+          this.debug.log(`Creating storage volume for machine ${machine.name} volXml: ${volXml} in pool ${poolName}`);
+          const vol = StorageVol.createXml(storagePool, volXml, 0);
+          this.debug.log(`Storage volume created: ${vol}`);
+          // Define the VM using the generated XML
+          try {
+            vm = VirtualMachine.defineXml(this.libvirt, xml);
+            if (!vm) {
+            throw new Error('Failed to define VM');
+            }
+            this.debug.log('VM defined successfully', machine.name);
+          } catch (error) {
+            console.error(`Error defining VM: ${error}, xml: ${xml}`);
+            throw error;
+          }
+
+          // Start the VM
+          if (!vm) {
+            throw new Error('VM not found');
+          }
+          try {
+            const result = vm.create();
+            if (result !== 0) {
+            throw new Error('Failed to start VM');
+            }
+            this.debug.log('VM started successfully', machine.name);
+          } catch (error) {
+            console.error(`Error starting VM: ${error}`);
+            throw error;
+          }
+
+          // Update machine status to 'running'
+          await tx.machine.update({
+            where: { id: machine.id },
+            data: { status: 'running' },
+          });
+          this.debug.log('Machine status updated to running', machine.name);
+          this.debug.log('VM defined with XML for machine', machine.name);
+        } catch (error) {
+          console.error(`Error creating storage volume: ${error}, volXml: ${volXml}`);
+          throw error;
+        }
       };
 
       // check if this.prisma define $transaction
@@ -198,6 +261,21 @@ export class VirtManager {
       if (newIsoPath) {
         console.log('Deleting ISO')
         fs.unlinkSync(newIsoPath);
+      }
+
+      // We need to delete the volume if it exists
+      let vol: StorageVol | null = null;
+      try {
+        if (!this.libvirt) {
+          throw new Error('Libvirt connection not established');
+        }
+        let pool = StoragePool.lookupByName(this.libvirt, process.env.INFINIBAY_STORAGE_POOL ?? 'default');
+        vol = StorageVol.lookupByName(pool, `${machine.name}.qcow2`);
+        if (vol) {
+          vol.delete(0);
+        }
+      } catch (error) {
+        console.error(`Error rolling back storage volume: ${error}`);
       }
 
       // Delete the XML

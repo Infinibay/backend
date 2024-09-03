@@ -1,7 +1,7 @@
 import xml2js from 'xml2js';
 import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
-
+import fs from 'fs';
 export enum NetworkModel {
   VIRTIO = 'virtio',
   E1000 = 'e1000',
@@ -150,8 +150,22 @@ export class XMLGenerator {
     this.enableFeatures();
     let efiPath: string
     let nvramPath: string
-    efiPath = '/usr/share/OVMF/OVMF_CODE.fd';
-    nvramPath = `/opt/infinibay/uefi/${this.id}_VARS.fd`;
+
+    // Check for OVMF files in different possible locations
+    const possibleEfiPaths = [
+      '/usr/share/OVMF/OVMF_CODE.fd',
+      '/usr/share/OVMF/OVMF_CODE_4M.fd',
+      '/usr/share/edk2/ovmf/OVMF_CODE.fd',
+      '/usr/share/qemu/OVMF_CODE.fd'
+    ];
+
+    efiPath = possibleEfiPaths.find(p => fs.existsSync(p)) || '';
+
+    if (!efiPath) {
+      throw new Error('UEFI firmware file (OVMF_CODE.fd or OVMF_CODE_4M.fd) not found. Please install OVMF package.');
+    }
+
+    nvramPath = path.join(process.env.INFINIBAY_BASE_DIR ?? '/opt/infinibay', 'uefi', `${this.id}_VARS.fd`);
     this.xml.domain.os[0].loader = [{ _: efiPath, $: { readonly: 'yes', type: 'pflash' } }];
     this.xml.domain.os[0].nvram = [{ _: nvramPath }];
   }
@@ -181,7 +195,7 @@ export class XMLGenerator {
 
   setStorage(size: number): void {
     const diskPath = path.join(process.env.INFINIBAY_BASE_DIR ?? '/opt/infinibay', 'disks') || '/opt/infinibay/disks';
-    this.addDisk(`${diskPath}/${this.id}.img`, 'virtio', size);
+    this.addDisk(`${diskPath}/${this.xml.domain.name[0]}-main.qcow2`, 'virtio', size);
   }
 
   addNetwork(model: NetworkModel, network: string): void {

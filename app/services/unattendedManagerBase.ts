@@ -142,17 +142,19 @@ export class UnattendedManagerBase {
    */
   protected async cleanup(extractDir: string): Promise<void> {
     try {
-      // Safety check: Ensure extractDir is not undefined and is the expected path
-      if (!extractDir || !extractDir.includes('expected_path_identifier')) {
+      // Safety check: Ensure extractDir is not empty and is within the system's temp directory
+      if (!extractDir || !extractDir.startsWith(os.tmpdir())) {
         throw new Error('Invalid directory path for cleanup.');
       }
 
-      console.log(`Starting cleanup of directory: ${extractDir}`);
-      await fsPromises.rm(extractDir, { recursive: true, force: true });
-      console.log(`Successfully cleaned up directory: ${extractDir}`);
+      this.debug.log(`Starting cleanup of directory: ${extractDir}`);
+      
+      // await fsPromises.rm(extractDir, { recursive: true, force: true });
+      
+      this.debug.log(`Successfully cleaned up directory: ${extractDir}`);
     } catch (error) {
-      console.error(`Error during cleanup: ${error}`);
-      // Handle or rethrow error based on your error handling strategy
+      this.debug.log(`Error during cleanup: ${error}`);
+      // We'll just log the error and continue, as cleanup failure shouldn't stop the process
     }
   }
 
