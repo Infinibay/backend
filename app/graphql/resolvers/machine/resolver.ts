@@ -30,7 +30,9 @@ import { InfinibayContext } from '@main/utils/context';
 
 // Utils
 import { VirtManager } from '@utils/VirtManager';
-import { Libvirt } from '@utils/libvirt';
+import { VncPortService } from '@utils/VirtManager/vncPortService';
+// import { Libvirt } from '@utils/libvirt';
+import { Connection, Machine as VirtualMachine, StoragePool, StorageVol, Network, Error as iLibvirtError } from 'libvirt-node';
 import { Debugger } from '@utils/debug'; // Debugger tool
 import { XMLGenerator } from '@utils/VirtManager/xmlGenerator'; // XML Generator tool
 
@@ -219,7 +221,7 @@ export class MachineResolver implements MachineResolverInterface {
     ): Promise<VncConfigurationType | null> {
         const prisma = context.prisma
         const role = context.user?.role
-        const libvirt = new Libvirt()
+        const libvirtConnection = Connection.open('qemu:///system')
         let machine: PrismaMachine | null = null
 
         if (role == 'ADMIN') {
@@ -250,9 +252,8 @@ export class MachineResolver implements MachineResolverInterface {
         if (!configuration) {
             return null
         }
-        libvirt.connect('qemu:///system')
-        const port = await libvirt.getVncPort(machine.internalName)
-        this.debug.log(`-----------VNC port: ${port}`)
+        // const port = await libvirt.getVncPort(machine.internalName)
+        const port = await new VncPortService().getVncPort(machine.internalName)
 
         if (machine && machine.userId == context.user?.id) {
             return {
@@ -281,9 +282,8 @@ export class MachineResolver implements MachineResolverInterface {
             }
         }
 
-        const libvirt = new Libvirt()
-        libvirt.connect("qemu:///system")
-        if (!libvirt.isConnected()) {
+        const libvirtConnection = Connection.open('qemu:///system')
+        if (libvirtConnection == null) {
             return {
                 success: false,
                 message: "Libvirt not connected"
@@ -311,9 +311,15 @@ export class MachineResolver implements MachineResolverInterface {
                 message: "Machine not found"
             }
         }
-        try {
-            libvirt.powerOn(machine.internalName)
-        } catch (error) {
+
+        const domain = VirtualMachine.lookupByName(libvirtConnection, machine.internalName)
+        if (domain == null) {
+            return {
+                success: false,
+                message: "Error powering on machine. Machine not found"
+            }
+        }
+        if (domain.resume() == null) {
             return {
                 success: false,
                 message: "Error powering on machine"
@@ -341,9 +347,8 @@ export class MachineResolver implements MachineResolverInterface {
     ): Promise<SuccessType> {
         const prisma = context.prisma
         const role = context.user?.role
-        const libvirt = new Libvirt()
-        libvirt.connect("qemu:///system")
-        if (!libvirt.isConnected()) {
+        const libvirtConnection = Connection.open('qemu:///system')
+        if (libvirtConnection == null) {
             return {
                 success: false,
                 message: "Libvirt not connected"
@@ -371,9 +376,14 @@ export class MachineResolver implements MachineResolverInterface {
                 message: "Machine not found"
             }
         }
-        try {
-            libvirt.powerOff(machine.internalName)
-        } catch (error) {
+        const domain = VirtualMachine.lookupByName(libvirtConnection, machine.internalName)
+        if (domain == null) {
+            return {
+                success: false,
+                message: "Error powering off machine. Machine not found"
+            }
+        }
+        if (domain.destroy() == null) {
             return {
                 success: false,
                 message: "Error powering off machine"
@@ -400,9 +410,8 @@ export class MachineResolver implements MachineResolverInterface {
     ): Promise<SuccessType> {
         const prisma = context.prisma
         const role = context.user?.role
-        const libvirt = new Libvirt()
-        libvirt.connect("qemu:///system")
-        if (!libvirt.isConnected()) {
+        const libvirtConnection = Connection.open('qemu:///system')
+        if (libvirtConnection == null) {
             return {
                 success: false,
                 message: "Libvirt not connected"
@@ -430,9 +439,14 @@ export class MachineResolver implements MachineResolverInterface {
                 message: "Machine not found"
             }
         }
-        try {
-            libvirt.suspend(machine.internalName)
-        } catch (error) {
+        const domain = VirtualMachine.lookupByName(libvirtConnection, machine.internalName)
+        if (domain == null) {
+            return {
+                success: false,
+                message: "Error suspending machine. Machine not found"
+            }
+        }
+        if (domain.suspend() == null) {
             return {
                 success: false,
                 message: "Error suspending machine"
@@ -459,9 +473,8 @@ export class MachineResolver implements MachineResolverInterface {
     ): Promise<SuccessType> {
         const prisma = context.prisma
         const role = context.user?.role
-        const libvirt = new Libvirt()
-        libvirt.connect("qemu:///system")
-        if (!libvirt.isConnected()) {
+        const libvirtConnection = Connection.open('qemu:///system')
+        if (libvirtConnection == null) {
             return {
                 success: false,
                 message: "Libvirt not connected"
@@ -533,19 +546,17 @@ export class MachineResolver implements MachineResolverInterface {
             }
 
             // stop the vm if it's running
-            try {
-                await libvirt.powerOff(machine.internalName)
-            } catch (error) {
-                this.debug.log("Error powering off machine")
-                this.debug.log(error as string)
+            let domain = VirtualMachine.lookupByName(libvirtConnection, machine.internalName)
+            if (domain == null) {
+                throw new Error("Error powering off machine. Machine not found")
+            }
+            if (domain.destroy() == null) {
+                throw new Error("Error powering off machine")
             }
 
             // Destroy the machine in the hypervisor
-            try {
-                libvirt.domainUndefine(machine.internalName)
-            } catch (error) {
-                this.debug.log("Error undefining machine")
-                this.debug.log(error as string)
+            if (domain.undefine() == null) {
+                throw new Error("Error undefining machine")
             }
 
             // Remove the machine from the database

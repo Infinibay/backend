@@ -1,19 +1,13 @@
-import fs from 'fs';
-import { execSync } from 'child_process';
+import { PrismaClient } from '@prisma/client';
+import { Connection, Machine as VirtualMachine, StoragePool, StorageVol, Error as LibvirtError, ErrorNumber } from 'libvirt-node';
+import { Machine, } from '@prisma/client';
+import { CreateMachineService } from '@utils/VirtManager/createMachineService';
 
-import { MachineConfiguration, PrismaClient } from '@prisma/client';
-import { Connection, Machine as VirtualMachine, StoragePool, StorageVol } from 'libvirt-node';
-import { Machine, MachineTemplate } from '@prisma/client';
-
-import { XMLGenerator } from './xmlGenerator';
-import { UnattendedWindowsManager } from '@services/unattendedWindowsManager'
-import { UnattendedUbuntuManager } from '@services/unattendedUbuntuManager';
-import { UnattendedRedHatManager } from '@services/unattendedRedHatManager';
 import { Debugger } from '@utils/debug';
 
 export class VirtManager {
-  private libvirt: Connection | null = null
-  private uri: string = ''
+  private libvirt: Connection | null = null;
+  private uri: string = '';
   private prisma: PrismaClient | null = null;
   private debug: Debugger = new Debugger('virt-manager');
 
@@ -35,14 +29,16 @@ export class VirtManager {
     }
 
     // If already connected, disconnect first
-    if (this.libvirt) {
-      this.libvirt = null;
-      // TODO: implement close
-      //this.libvirt.close();
+    if (this.libvirt !== null) {
+      this.libvirt.close();
     }
 
     // Connect to the hypervisor
     this.libvirt = Connection.open(this.uri);
+
+    if (!this.libvirt) {
+      throw new Error('Failed to connect to hypervisor');
+    }
   }
 
   /**
@@ -62,308 +58,8 @@ export class VirtManager {
    */
   async createMachine(machine: Machine, username: string, password: string, productKey: string | undefined): Promise<void> {
     this.debug.log('Creating machine', machine.name);
-
-    // Check if Prisma client is set
-    if (!this.prisma) {
-      throw new Error('Prisma client not set');
-    }
-
-    // Fetch the machine template
-    const template = await this.prisma.machineTemplate.findUnique({ where: { id: machine.templateId } });
-    let configuration: MachineConfiguration | null = await this.prisma.machineConfiguration.findUnique({ where: { machineId: machine.id } });
-    if (!template) {
-      throw new Error('Template not found for machine ' + machine.name);
-    }
-    if (!configuration) {
-      throw new Error('Configuration not found for machine ' + machine.name);
-    }
-
-    let xml: string | null = null
-    let newIsoPath: string | null = null
-    try {
-      // Fetch the applications related to the machine
-      const applications = await this.prisma.machineApplication.findMany({
-        where: {
-          machineId: machine.id,
-        },
-        include: {
-          application: true,
-        },
-      });
-      this.debug.log('Fetched applications for machine', machine.name);
-
-      // Extract the application data from the query result
-      const applicationData = applications.map((ma) => ma.application);
-
-      // Determine the OS and use the corresponding unattended manager
-      let unattendedManager;
-      switch (machine.os) {
-        case 'windows10':
-          unattendedManager = new UnattendedWindowsManager(10, username, password, productKey, applicationData);
-          break;
-        case 'windows11':
-          unattendedManager = new UnattendedWindowsManager(11, username, password, productKey, applicationData);
-          break;
-        case 'ubuntu':
-          unattendedManager = new UnattendedUbuntuManager(username, password, applicationData);
-          break;
-        case 'fedora': // fedora or redhat
-          unattendedManager = new UnattendedRedHatManager(username, password, applicationData);
-          break;
-        case 'redhat':
-          unattendedManager = new UnattendedRedHatManager(username, password, applicationData);
-          break;
-        // ...add more cases as needed...
-        default:
-          throw new Error(`Unsupported OS: ${machine.os}`);
-      }
-      this.debug.log('Unattended manager set for machine', machine.name);
-
-      // Generate the new ISO with the auto-install script
-      const newIsoPath = await unattendedManager.generateNewImage();
-
-      // Generate the XML string for the VM
-      const xmlPromise = this.generateXML(machine, template, configuration, newIsoPath);
-
-
-
-      // Start a Prisma transaction
-      let transaction = async (tx: any) => {
-        // Set the status of the machine to 'building'
-        await tx.machine.update({
-          where: { id: machine.id },
-          data: { status: 'building' },
-        });
-        this.debug.log('Machine status set to building', machine.name);
-
-        // Define the VM using the generated XML
-        const xmlGenerator = await xmlPromise
-        xml = xmlGenerator.generate()
-
-        // create storage file
-        const storagePath = xmlGenerator.getStoragePath();
-        const storageSize = template.storage;
-        // Create a storage pool if it doesn't exist
-        const poolName = process.env.INFINIBAY_STORAGE_POOL_NAME ?? 'default';
-        let storagePool: StoragePool | null = null;
-        if (!this.libvirt) {
-          throw new Error('Libvirt connection not established');
-        }
-        try {
-          this.debug.log('Looking up storage pool -----------------', poolName);
-          storagePool = StoragePool.lookupByName(this.libvirt, poolName);
-
-          // Check if the pool is active, if not, activate it
-          if (!storagePool.isActive()) {
-            this.debug.log('Storage pool is inactive, starting it');
-            storagePool.create(0);
-          }
-        } catch (error) {
-          this.debug.log('Storage pool not found, creating it');
-          // const uuid = crypto.randomUUID();
-          const poolXml = `
-            <pool type='dir'>
-              <name>${poolName}</name>
-              <target>
-                <path>${process.env.INFINIBAY_BASE_DIR ?? '/opt/infinibay'}/disks</path>
-              </target>
-            </pool>
-          `;
-          this.debug.log('Storage pool XML', poolXml);
-          // VIR_STORAGE_POOL_CREATE_WITH_BUILD_OVERWRITE	=	2 (0x2; 1 << 1)	
-          // Create the pool and perform pool build using the VIR_STORAGE_POOL_BUILD_OVERWRITE flag.
-          storagePool = StoragePool.defineXml(this.libvirt, poolXml);
-          storagePool.build(0);
-          storagePool.create(0);
-          storagePool.setAutostart(true);
-          this.debug.log('Storage pool built', machine.name);
-        }
-
-        // Ensure the pool is active
-        if (!storagePool.isActive()) {
-          storagePool.create(0);
-        }
-
-        // Create the storage volume with appropriate permissions
-        const uid = execSync('id -u libvirt-qemu').toString().trim();
-        const gid = execSync('getent group kvm').toString().trim().split(':')[2];
-        const volXml = `
-          <volume>
-            <name>${machine.internalName}-main.qcow2</name>
-            <capacity unit="G">${storageSize}</capacity>
-            <target>
-              <format type='qcow2'/>
-            </target>
-          </volume>
-        `;
-
-        let vm: VirtualMachine | null = null;
-        try {
-          this.debug.log(`Creating storage volume for machine ${machine.name} volXml: ${volXml} in pool ${poolName}`);
-          const vol = StorageVol.createXml(storagePool, volXml, 0);
-          this.debug.log(`Storage volume created: ${vol}`);
-          // Define the VM using the generated XML
-          try {
-            vm = VirtualMachine.defineXml(this.libvirt, xml);
-            if (!vm) {
-            throw new Error('Failed to define VM');
-            }
-            this.debug.log('VM defined successfully', machine.name);
-          } catch (error) {
-            console.error(`Error defining VM: ${error}, xml: ${xml}`);
-            throw error;
-          }
-
-          // Start the VM
-          if (!vm) {
-            throw new Error('VM not found');
-          }
-          try {
-            const result = vm.create();
-            if (result !== 0) {
-            throw new Error('Failed to start VM');
-            }
-            this.debug.log('VM started successfully', machine.name);
-          } catch (error) {
-            console.error(`Error starting VM: ${error}`);
-            throw error;
-          }
-
-          // Update machine status to 'running'
-          await tx.machine.update({
-            where: { id: machine.id },
-            data: { status: 'running' },
-          });
-          this.debug.log('Machine status updated to running', machine.name);
-          this.debug.log('VM defined with XML for machine', machine.name);
-        } catch (error) {
-          console.error(`Error creating storage volume: ${error}, volXml: ${volXml}`);
-          throw error;
-        }
-      };
-
-      // check if this.prisma define $transaction
-      if (this.prisma.$transaction) {
-        await this.prisma.$transaction(transaction, { timeout: 20000 });
-      } else {
-        await transaction(this.prisma);
-      }
-    } catch (error) {
-      console.error(`Error creating machine: ${error}`);
-      // print stack trace
-      if (error instanceof Error) {
-        console.log(error.stack); // This will log the stack trace
-      }
-
-      console.log('Rolling back')
-
-      // Delete the ISO
-      if (newIsoPath) {
-        console.log('Deleting ISO')
-        fs.unlinkSync(newIsoPath);
-      }
-
-      // We need to delete the volume if it exists
-      let vol: StorageVol | null = null;
-      try {
-        if (!this.libvirt) {
-          throw new Error('Libvirt connection not established');
-        }
-        let pool = StoragePool.lookupByName(this.libvirt, process.env.INFINIBAY_STORAGE_POOL ?? 'default');
-        vol = StorageVol.lookupByName(pool, `${machine.name}.qcow2`);
-        if (vol) {
-          vol.delete(0);
-        }
-      } catch (error) {
-        console.error(`Error rolling back storage volume: ${error}`);
-      }
-
-      // Delete the XML
-      if (xml) {
-        console.log('Deleting XML')
-        // fs.unlinkSync(xml);
-      }
-      throw new Error('Error creating machine');
-    }
-  }
-
-  /**
-   * This method generates an XML string that represents a virtual machine configuration.
-   * It uses the XMLGenerator class to set the various properties of the virtual machine.
-   *
-   * @param machine - The machine object containing the details of the machine.
-   * @param template - The template object containing the configuration of the machine.
-   * @param configuration - The machine configuration object.
-   * @param newIsoPath - The path to the new ISO file.
-   * @returns A promise that resolves to a string representing the XML configuration of the machine.
-   */
-  async generateXML(
-    machine: Machine,
-    template: MachineTemplate,
-    configuration: MachineConfiguration,
-    newIsoPath?: string
-  ): Promise<XMLGenerator> {
-    // Log the start of the XML generation
-    this.debug.log('Starting to generate XML for machine', machine.name);
-
-    // Check if the Prisma client is set
-    if (!this.prisma) {
-      throw new Error('Prisma client not set');
-    }
-
-    // Get the machine's internal name and operating system
-    const machineName = machine.internalName;
-
-    // Log the creation of a new XMLGenerator instance
-    this.debug.log('Creating new XMLGenerator instance for machine', machine.name);
-
-    // Create a new XMLGenerator instance
-    const xmlGenerator = new XMLGenerator(machineName, machine.id, machine.os);
-
-    // Set the machine's properties
-    xmlGenerator.setMemory(template.ram);
-    xmlGenerator.setVCPUs(template.cores);
-    xmlGenerator.enableTPM('2.0');
-    xmlGenerator.setStorage(template.storage);
-    xmlGenerator.setUEFI();
-    xmlGenerator.addNetworkInterface('default', 'virtio');
-    xmlGenerator.setBootDevice(['hd', 'cdrom']);
-    if (newIsoPath) {
-      xmlGenerator.addCDROM(newIsoPath, 'sata');
-    }
-
-    // Get a new port for the machine
-    this.debug.log('Getting new port for machine', machine.name);
-
-    // Add a VNC server to the machine
-    const vncPassword = xmlGenerator.addVNC(-1, true, '0.0.0.0');
-
-    // Update the machine configuration with the new port
-    configuration.vncPort = -1;
-    configuration.vncListen = '0.0.0.0';
-    configuration.vncPassword = vncPassword;
-    configuration.vncAutoport = true;
-    configuration.vncHost = process.env.APP_HOST || '0.0.0.0';
-
-    // Save the machine configuration
-    this.debug.log('Updating machine configuration in database');
-    await this.prisma.machineConfiguration.update({
-      where: { id: configuration.id },
-      data: {
-        xml: xmlGenerator.getXmlObject(),
-        vncPort: configuration.vncPort,
-        vncListen: configuration.vncListen,
-        vncPassword: configuration.vncPassword,
-        vncAutoport: configuration.vncAutoport,
-        vncType: configuration.vncType,
-      },
-    });
-
-    // Log the completion of the XML generation
-    this.debug.log('XML generation for machine completed', machine.name);
-
-    // Return the generated XML
-    return xmlGenerator;
+    let service: CreateMachineService =new CreateMachineService(this.uri, this.prisma);
+    await service.create(machine, username, password, productKey);
   }
 
   /**
@@ -377,6 +73,9 @@ export class VirtManager {
       throw new Error('Libvirt connection is not established');
     }
     const domain = VirtualMachine.lookupByName(this.libvirt, domainName);
+    if (!domain) {
+      throw new Error(`Domain ${domainName} not found`);
+    }
     domain.resume();
   }
 }
