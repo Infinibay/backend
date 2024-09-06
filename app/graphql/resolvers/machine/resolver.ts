@@ -1,87 +1,37 @@
-// TypeGraphQL Decorators
-import {
-    Arg,
-    Authorized,
-    Ctx,
-    Mutation,
-    Query,
-    Resolver,
-} from "type-graphql";
-
-// Node modules
-import fs from 'fs';
+import { Arg, Authorized, Ctx, Mutation, Query, Resolver } from "type-graphql";
+import fs from 'fs/promises';
 import { v4 as uuidv4 } from 'uuid';
-
-// Types
 import {
     Machine,
     MachineOrderBy,
     CreateMachineInputType,
     VncConfigurationType,
     SuccessType,
+    MachineStatus,
+    MachineConfigurationType,
 } from './type';
 import { PaginationInputType } from '@utils/pagination';
-
-// Database
-import { Machine as PrismaMachine } from '@prisma/client';
-
-// Contexts
 import { InfinibayContext } from '@main/utils/context';
-
-// Utils
 import { VirtManager } from '@utils/VirtManager';
 import { VncPortService } from '@utils/VirtManager/vncPortService';
-// import { Libvirt } from '@utils/libvirt';
-import { Connection, Machine as VirtualMachine, StoragePool, StorageVol, Network, Error as iLibvirtError } from 'libvirt-node';
-import { Debugger } from '@utils/debug'; // Debugger tool
-import { XMLGenerator } from '@utils/VirtManager/xmlGenerator'; // XML Generator tool
+import { Connection, Machine as VirtualMachine } from 'libvirt-node';
+import { Debugger } from '@utils/debug';
+import { XMLGenerator } from '@utils/VirtManager/xmlGenerator';
+import { existsSync } from 'fs';
 
-export interface MachineResolverInterface {
-    machine: (id: string, ctx: InfinibayContext) => Promise<Machine | null>
-    machines: (pagination: PaginationInputType, orderBy: MachineOrderBy, ctx: InfinibayContext) => Promise<Machine[]>
-    vncConnection: (id: string, ctx: InfinibayContext) => Promise<VncConfigurationType | null>
-    createMachine: (input: CreateMachineInputType, ctx: InfinibayContext) => Promise<Machine>
-    powerOn: (id: string, ctx: InfinibayContext) => Promise<SuccessType>
-    powerOff: (id: string, ctx: InfinibayContext) => Promise<SuccessType>
-    suspend: (id: string, ctx: InfinibayContext) => Promise<SuccessType>
-    destroyMachine: (id: string, ctx: InfinibayContext) => Promise<SuccessType>
-}
-
-@Resolver(Machine)
-export class MachineResolver implements MachineResolverInterface {
-    debug: Debugger = new Debugger('machine-resolver')
+@Resolver()
+export class MachineQueries {
+    private debug = new Debugger('machine-queries');
 
     @Query(() => Machine, { nullable: true })
     @Authorized('USER')
     async machine(
         @Arg('id') id: string,
-        @Ctx() context: InfinibayContext
+        @Ctx() { prisma, user }: InfinibayContext
     ): Promise<Machine | null> {
-        const prisma = context.prisma
-        /*
-        If the user has the user role, only has access to his own vm. If it's an admin, can access al the vms.
-        */
-        const role = context.user?.role
-        if (role == 'ADMIN') {
-            return await prisma.machine.findUnique({
-                where: {
-                    id
-                }
-            }) as Machine | null
-        } else {
-            const machine = await prisma.machine.findFirst({
-                where: {
-                    id,
-                    userId: context.user?.id
-                }
-            }) as Machine | null
-
-            if (machine && machine.userId == context.user?.id) {
-                return machine
-            } else {
-                return null
-            }
-        }
+        const isAdmin = user?.role === 'ADMIN';
+        const whereClause = isAdmin ? { id } : { id, userId: user?.id };
+        return await prisma.machine.findFirst({ where: whereClause }) as Machine | null;
     }
 
     @Query(() => [Machine])
@@ -89,179 +39,150 @@ export class MachineResolver implements MachineResolverInterface {
     async machines(
         @Arg('pagination', { nullable: true }) pagination: PaginationInputType,
         @Arg('orderBy', { nullable: true }) orderBy: MachineOrderBy,
-        @Ctx() context: InfinibayContext
+        @Ctx() { prisma, user }: InfinibayContext
     ): Promise<Machine[]> {
-        const prisma = context.prisma;
-        const role = context.user?.role;
-        const order = { [(orderBy?.fieldName ?? 'createdAt') as string]: orderBy?.direction ?? 'desc' };
+        const isAdmin = user?.role === 'ADMIN';
+        const whereClause = isAdmin ? {} : { userId: user?.id };
+        const order = { [(orderBy?.fieldName ?? 'createdAt')]: orderBy?.direction ?? 'desc' };
 
-        let whereClause = {};
-        if (role != 'ADMIN') {
-            whereClause = {
-                userId: context.user?.id
-            }
-        }
-
-        return await prisma.machine.findMany({
+        const machines = await prisma.machine.findMany({
             ...pagination,
-            orderBy: [{ ...order }],
-            where: whereClause
-        }) as Machine[] | [];
-    }
-
-    @Mutation(() => Machine)
-    @Authorized('ADMIN')
-    async createMachine(
-        @Arg('input') input: CreateMachineInputType,
-        @Ctx() context: InfinibayContext
-    ): Promise<Machine> {
-        const prisma = context.prisma
-        const user = context.user
-        let machine: PrismaMachine = {} as PrismaMachine
-        // Validate everything
-        // TODO: Validate the input
-
-        await prisma.$transaction(async (tx: any) => {
-
-            const internalName = uuidv4()
-
-            // Create the machine
-            machine = await tx.machine.create({
-                data: {
-                    name: input.name,
-                    userId: user?.id,
-                    status: 'building',
-                    os: input.os,
-                    templateId: input.templateId,
-                    internalName: internalName,
-                }
-            })
-            if (!machine) {
-                throw new Error("Machine not created")
-            }
-
-            // Create Machine-Application relationship
-            for (const application of input.applications) {
-                let app = await tx.machineApplication.create({
-                    data: {
-                        machineId: machine.id,
-                        applicationId: application.applicationId
-                    }
-                })
-                if (!app) {
-                    throw new Error("Machine-Application relationship not created")
-                }
-            }
-
-            // Create MachineConfiguration
-            const configuration = await tx.machineConfiguration.create({
-                data: {
-                    machineId: machine.id,
-                    vncPort: 0,
-                    vncListen: '0.0.0.0',
-                    vncPassword: null,
-                    vncAutoport: false,
-                }
-            })
-
-            if (!configuration) {
-                throw new Error("MachineConfiguration not created")
-            }
-
-        }, { timeout: 20000 });
-
-        if (!machine) {
-            throw new Error("Machine not created")
-        }
-
-        setImmediate(() => {
-            this.backgroundCode(machine.id, context, input.username, input.password, input.productKey);
+            orderBy: [order],
+            where: whereClause,
+            include: { configuration: true } // Include the configuration
         });
 
-        return {
-            ...machine
-        } as unknown as Machine // WARNING!! typescript type-check bypassed
-    }
-
-    backgroundCode = async (id: string, context: InfinibayContext, username: string, password: string, productKey: string | undefined) => {
-        try {
-            const machine = await context.prisma.machine.findUnique({
-                where: {
-                    id
-                }
-            })
-            // User VirtManager and create the machine
-            const virtManager = new VirtManager()
-            virtManager.setPrisma(context.prisma)
-            await virtManager.createMachine(machine as any, username, password, productKey)
-
-            // VirtManager to power on the machine
-            await virtManager.powerOn(machine?.internalName as string)
-            // update the machine status to running
-            await context.prisma.machine.update({
-                where: {
-                    id
-                },
-                data: {
-                    status: 'running'
-                }
-            }
-        )
-        } catch (error) {
-            console.log("Error creating machine in background job")
-            console.log(error)
-        }
+        return machines.map(machine => ({
+            ...machine,
+            config: {
+                port: machine.configuration?.vncPort || 0,
+                address: machine.configuration?.vncHost || '0.0.0.0',
+                password: machine.configuration?.vncPassword || '',
+                listen: machine.configuration?.vncListen || '0.0.0.0',
+                autoport: machine.configuration?.vncAutoport || false,
+                type: machine.configuration?.vncType || 'vnc',
+            } as MachineConfigurationType,
+            status: machine.status as MachineStatus,
+            createdAt: machine.createdAt || null,
+            userId: machine.userId || '',
+            templateId: machine.templateId || '',
+            os: machine.os || '',
+        }));
     }
 
     @Query(() => VncConfigurationType, { nullable: true })
     @Authorized('USER')
     async vncConnection(
         @Arg('id') id: string,
-        @Ctx() context: InfinibayContext
+        @Ctx() { prisma, user }: InfinibayContext
     ): Promise<VncConfigurationType | null> {
-        const prisma = context.prisma
-        const role = context.user?.role
-        const libvirtConnection = Connection.open('qemu:///system')
-        let machine: PrismaMachine | null = null
+        const isAdmin = user?.role === 'ADMIN';
+        const whereClause = isAdmin ? { id } : { id, userId: user?.id };
+        const machine = await prisma.machine.findFirst({
+            where: whereClause,
+            include: { configuration: true },
+        });
 
-        if (role == 'ADMIN') {
-            machine = await prisma.machine.findUnique({
-                where: { id },
-                include: { configuration: true },
+        if (!machine || !machine.configuration) return null;
+
+        const port = await new VncPortService().getVncPort(machine.internalName);
+        return {
+            link: `vnc://${machine.configuration.vncHost}:${port}`,
+            password: machine.configuration.vncPassword || ''
+        };
+    }
+}
+
+@Resolver()
+export class MachineMutations {
+    private debug = new Debugger('machine-mutations');
+
+    @Mutation(() => Machine)
+    @Authorized('ADMIN')
+    async createMachine(
+        @Arg('input') input: CreateMachineInputType,
+        @Ctx() { prisma, user }: InfinibayContext
+    ): Promise<Machine> {
+        const internalName = uuidv4();
+
+        const machine = await prisma.$transaction(async (tx: any) => {
+            const createdMachine = await tx.machine.create({
+                data: {
+                    name: input.name,
+                    userId: user?.id,
+                    status: 'building',
+                    os: input.os,
+                    templateId: input.templateId,
+                    internalName,
+                }
             });
-        } else {
-            machine = await prisma.machine.findFirst({
-                where: {
-                    id,
-                    userId: context.user?.id
-                },
-                include: { configuration: true },
+
+            if (!createdMachine) {
+                throw new Error("Machine not created");
+            }
+
+            for (const application of input.applications) {
+                const app = await tx.machineApplication.create({
+                    data: {
+                        machineId: createdMachine.id,
+                        applicationId: application.applicationId
+                    }
+                });
+                if (!app) {
+                    throw new Error("Machine-Application relationship not created");
+                }
+            }
+
+            const configuration = await tx.machineConfiguration.create({
+                data: {
+                    machineId: createdMachine.id,
+                    vncPort: 0,
+                    vncListen: '0.0.0.0',
+                    vncPassword: null,
+                    vncAutoport: false,
+                }
             });
-        }
+
+            if (!configuration) {
+                throw new Error("MachineConfiguration not created");
+            }
+
+            return createdMachine;
+        }, { timeout: 20000 });
 
         if (!machine) {
-            return null
+            throw new Error("Machine not created");
         }
 
-        const configuration = await prisma.machineConfiguration.findUnique({
-            where: {
-                machineId: id
-            }
-        })
+        setImmediate(() => {
+            this.backgroundCode(machine.id, prisma, user, input.username, input.password, input.productKey);
+        });
 
-        if (!configuration) {
-            return null
-        }
-        // const port = await libvirt.getVncPort(machine.internalName)
-        const port = await new VncPortService().getVncPort(machine.internalName)
+        return machine;
+    }
 
-        if (machine && machine.userId == context.user?.id) {
-            return {
-                link: `vnc://${configuration?.vncHost}:${port}`,
-                password: configuration?.vncPassword || ''
-            } || null;
-        } else {
-            return null;
+    private backgroundCode = async (id: string, prisma: any, user: any, username: string, password: string, productKey: string | undefined) => {
+        try {
+            const machine = await prisma.machine.findUnique({
+                where: {
+                    id
+                }
+            });
+            const virtManager = new VirtManager();
+            virtManager.setPrisma(prisma);
+            await virtManager.createMachine(machine as any, username, password, productKey);
+            await virtManager.powerOn(machine?.internalName as string);
+            await prisma.machine.update({
+                where: {
+                    id
+                },
+                data: {
+                    status: 'running'
+                }
+            });
+        } catch (error) {
+            console.log("Error creating machine in background job");
+            console.log(error);
         }
     }
 
@@ -269,313 +190,188 @@ export class MachineResolver implements MachineResolverInterface {
     @Authorized('USER')
     async powerOn(
         @Arg('id') id: string,
-        @Ctx() context: InfinibayContext
+        @Ctx() { prisma, user }: InfinibayContext
     ): Promise<SuccessType> {
-        const prisma = context.prisma
-        const user = context.user
-        const role = user?.role
-
-        if (!user) {
-            return {
-                success: false,
-                message: "User not found"
-            }
-        }
-
-        const libvirtConnection = Connection.open('qemu:///system')
-        if (libvirtConnection == null) {
-            return {
-                success: false,
-                message: "Libvirt not connected"
-            }
-        }
-        let machine: PrismaMachine | null = null
-
-        if (role == 'ADMIN') {
-            machine = await prisma.machine.findUnique({
-                where: { id },
-                include: { configuration: true },
-            });
-        } else {
-            machine = await prisma.machine.findFirst({
-                where: {
-                    id,
-                    userId: context.user?.id
-                },
-                include: { configuration: true },
-            });
-        }
-        if (!machine) {
-            return {
-                success: false,
-                message: "Machine not found"
-            }
-        }
-
-        const domain = VirtualMachine.lookupByName(libvirtConnection, machine.internalName)
-        if (domain == null) {
-            return {
-                success: false,
-                message: "Error powering on machine. Machine not found"
-            }
-        }
-        if (domain.resume() == null) {
-            return {
-                success: false,
-                message: "Error powering on machine"
-            }
-        }
-
-        await prisma.machine.update({
-            where: {
-                id
-            }, data: {
-                status: 'running'
-            }
-        })
-        return {
-            success: true,
-            message: "Machine powered on"
-        }
+        return this.changeMachineState(id, prisma, user, 'powerOn', 'running');
     }
 
     @Mutation(() => SuccessType)
     @Authorized('USER')
     async powerOff(
         @Arg('id') id: string,
-        @Ctx() context: InfinibayContext
+        @Ctx() { prisma, user }: InfinibayContext
     ): Promise<SuccessType> {
-        const prisma = context.prisma
-        const role = context.user?.role
-        const libvirtConnection = Connection.open('qemu:///system')
-        if (libvirtConnection == null) {
-            return {
-                success: false,
-                message: "Libvirt not connected"
-            }
-        }
-        let machine: PrismaMachine | null = null
-
-        if (role == 'ADMIN') {
-            machine = await prisma.machine.findUnique({
-                where: { id },
-                include: { configuration: true },
-            });
-        } else {
-            machine = await prisma.machine.findFirst({
-                where: {
-                    id,
-                    userId: context.user?.id
-                },
-                include: { configuration: true },
-            });
-        }
-        if (!machine) {
-            return {
-                success: false,
-                message: "Machine not found"
-            }
-        }
-        const domain = VirtualMachine.lookupByName(libvirtConnection, machine.internalName)
-        if (domain == null) {
-            return {
-                success: false,
-                message: "Error powering off machine. Machine not found"
-            }
-        }
-        if (domain.destroy() == null) {
-            return {
-                success: false,
-                message: "Error powering off machine"
-            }
-        }
-        await prisma.machine.update({
-            where: {
-                id
-            }, data: {
-                status: 'off'
-            }
-        })
-        return {
-            success: true,
-            message: "Machine powered off"
-        }
+        return this.changeMachineState(id, prisma, user, 'destroy', 'off');
     }
 
     @Mutation(() => SuccessType)
     @Authorized('USER')
     async suspend(
         @Arg('id') id: string,
-        @Ctx() context: InfinibayContext
+        @Ctx() { prisma, user }: InfinibayContext
     ): Promise<SuccessType> {
-        const prisma = context.prisma
-        const role = context.user?.role
-        const libvirtConnection = Connection.open('qemu:///system')
-        if (libvirtConnection == null) {
-            return {
-                success: false,
-                message: "Libvirt not connected"
-            }
-        }
-        let machine: PrismaMachine | null = null
-
-        if (role == 'ADMIN') {
-            machine = await prisma.machine.findUnique({
-                where: { id },
-                include: { configuration: true },
-            });
-        } else {
-            machine = await prisma.machine.findFirst({
-                where: {
-                    id,
-                    userId: context.user?.id
-                },
-                include: { configuration: true },
-            });
-        }
-        if (!machine) {
-            return {
-                success: false,
-                message: "Machine not found"
-            }
-        }
-        const domain = VirtualMachine.lookupByName(libvirtConnection, machine.internalName)
-        if (domain == null) {
-            return {
-                success: false,
-                message: "Error suspending machine. Machine not found"
-            }
-        }
-        if (domain.suspend() == null) {
-            return {
-                success: false,
-                message: "Error suspending machine"
-            }
-        }
-        await prisma.machine.update({
-            where: {
-                id
-            }, data: {
-                status: 'suspended'
-            }
-        })
-        return {
-            success: true,
-            message: "Machine suspended"
-        }
+        return this.changeMachineState(id, prisma, user, 'suspend', 'suspended');
     }
 
+    /**
+     * Destroys a virtual machine and cleans up associated resources.
+     * 
+     * @param id - The ID of the machine to destroy.
+     * @param prisma - The Prisma client for database operations.
+     * @param user - The current user context.
+     * @returns A SuccessType indicating the result of the operation.
+     */
     @Mutation(() => SuccessType)
     @Authorized('USER')
     async destroyMachine(
         @Arg('id') id: string,
-        @Ctx() context: InfinibayContext
+        @Ctx() { prisma, user }: InfinibayContext
     ): Promise<SuccessType> {
-        const prisma = context.prisma
-        const role = context.user?.role
-        const libvirtConnection = Connection.open('qemu:///system')
-        if (libvirtConnection == null) {
-            return {
-                success: false,
-                message: "Libvirt not connected"
-            }
-        }
-        let machine: PrismaMachine | null = null
+        // Check if the user has permission to destroy this machine
+        const isAdmin = user?.role === 'ADMIN';
+        const whereClause = isAdmin ? { id } : { id, userId: user?.id };
+        const machine = await prisma.machine.findFirst({ where: whereClause });
 
-        if (role == 'ADMIN') {
-            machine = await prisma.machine.findUnique({
-                where: { id },
-                include: { configuration: true },
-            });
-        } else {
-            machine = await prisma.machine.findFirst({
-                where: {
-                    id,
-                    userId: context.user?.id
-                },
-                include: { configuration: true },
-            });
-        }
         if (!machine) {
-            return {
-                success: false,
-                message: "Machine not found"
-            }
+            return { success: false, message: "Machine not found" };
         }
-        try {
-            // Get machine configuration
-            const configuration = await prisma.machineConfiguration.findUnique({
-                where: {
-                    machineId: machine.id
-                }
-            })
-            if (!configuration) {
-                throw new Error("MachineConfiguration not found")
-            }
-            const xmlGenerator = new XMLGenerator('', '', '')
-            xmlGenerator.load(configuration.xml as any)
 
-            const uefiVarFile: any = xmlGenerator.getUefiVarFile()
-            if (!uefiVarFile || uefiVarFile == '' || !fs.existsSync(uefiVarFile)) {
-                throw new Error("UEFI VAR file not found in the xml configuration")
-            }
+        // Connect to libvirt
+        const libvirtConnection = Connection.open('qemu:///system');
+        if (!libvirtConnection) {
+            return { success: false, message: "Libvirt not connected" };
+        }
 
-            // Remove the uefi file
-            // Assuming the uefi file path is stored in machine.uefiFilePath
+        // Look up the domain (VM) by name
+        const domain = VirtualMachine.lookupByName(libvirtConnection, machine.internalName);
+        if (domain === null) {
+            return { success: false, message: "Error destroying machine. Machine not found" };
+        }
+
+        // Perform destruction process within a transaction
+        return prisma.$transaction(async (tx) => {
             try {
-                await fs.unlinkSync(uefiVarFile as string)
+                // Retrieve machine configuration
+                const configuration = await tx.machineConfiguration.findUnique({
+                    where: { machineId: machine.id }
+                });
+                if (!configuration) throw new Error("MachineConfiguration not found");
+
+                // Load XML configuration
+                const xmlGenerator = new XMLGenerator('', '', '');
+                xmlGenerator.load(configuration.xml);
+
+                // Attempt to forcefully stop the VM (ignore errors if already stopped)
+                // We ignore the error because domain object can not be null at this point.
+                // The mutation has an early return if the domain is not found.
+                //@ts-ignore
+                await domain.destroy().catch(() => {});
+
+                // Undefine the domain from libvirt
+                if (domain.undefine() === null) throw new Error("Failed to undefine domain");
+
+
+                // Prepare list of files to delete (UEFI var file and disk files)
+                const filesToDelete = [
+                    xmlGenerator.getUefiVarFile(),
+                    ...xmlGenerator.getDisks()
+                ].filter(file => file && existsSync(file));
+
+                // Delete associated files
+                await Promise.all(filesToDelete.map(file => 
+                    fs.unlink(file).catch(e => this.debug.log(`Error deleting ${file}: ${e}`))
+                ));
+
+                // Remove database records
+                await tx.machineConfiguration.delete({ where: { machineId: machine.id } });
+                await tx.machine.delete({ where: { id: machine.id } });
+
+                return { success: true, message: "Machine destroyed" };
             } catch (error) {
-                this.debug.log("Error removing UEFI VAR file")
-                this.debug.log(error as string)
+                this.debug.log(`Error destroying machine: ${error}`);
+                throw error; // Propagate error to rollback transaction
             }
-
-            // Remove the disk file
-            // Assuming the disk file path is stored in machine.diskFilePath
-            const diskFiles = xmlGenerator.getDisks()
-            for (const diskFile of diskFiles) {
-                if (!fs.existsSync(diskFile)) {
-                    this.debug.log(`Disk file ${diskFile} not found`)
-                    continue
-                }
-                try {
-                    await fs.unlinkSync(diskFile);
-                } catch (error) {
-                    this.debug.log(`Error removing disk file ${diskFile}: ${error}`);
-                    this.debug.log(error as string)
-                }
-            }
-
-            // stop the vm if it's running
-            let domain = VirtualMachine.lookupByName(libvirtConnection, machine.internalName)
-            if (domain == null) {
-                throw new Error("Error powering off machine. Machine not found")
-            }
-            if (domain.destroy() == null) {
-                throw new Error("Error powering off machine")
-            }
-
-            // Destroy the machine in the hypervisor
-            if (domain.undefine() == null) {
-                throw new Error("Error undefining machine")
-            }
-
-            // Remove the machine from the database
-            await prisma.machineConfiguration.delete({
-                where: { machineId: machine.id }
-            });
-            await prisma.machine.delete({
-                where: { id: machine.id },
-            });
-        } catch (error) {
-            return {
-                success: false,
-                message: "Error destroying machine"
-            }
-        }
-        return {
-            success: true,
-            message: "Machine destroyed"
-        }
+        });
     }
 
+    /**
+     * Changes the state of a virtual machine.
+     * 
+     * @param id - The ID of the machine to change state.
+     * @param prisma - The Prisma client for database operations.
+     * @param user - The user requesting the state change.
+     * @param action - The action to perform: 'powerOn', 'destroy', or 'suspend'.
+     * @param newStatus - The new status to set: 'running', 'off', or 'suspended'.
+     * @returns A SuccessType object indicating the result of the operation.
+     */
+    private async changeMachineState(
+        id: string,
+        prisma: any,
+        user: any,
+        action: 'powerOn' | 'destroy' | 'suspend',
+        newStatus: 'running' | 'off' | 'suspended'
+    ): Promise<SuccessType> {
+        let libvirtConnection: Connection | null = null;
+        try {
+            // Check if the user is an admin or the owner of the machine
+            const isAdmin = user?.role === 'ADMIN';
+            const whereClause = isAdmin ? { id } : { id, userId: user?.id };
+
+            // Retrieve the machine from the database
+            const machine = await prisma.machine.findFirst({ where: whereClause });
+            if (!machine) {
+                return { success: false, message: "Machine not found" };
+            }
+
+            // Establish connection to libvirt
+            libvirtConnection = Connection.open('qemu:///system');
+            if (!libvirtConnection) {
+                throw new Error("Libvirt not connected");
+            }
+
+            // Look up the virtual machine (domain) in libvirt
+            const domain = VirtualMachine.lookupByName(libvirtConnection, machine.internalName);
+            if (!domain) {
+                throw new Error(`Machine ${machine.internalName} not found in libvirt`);
+            }
+
+            // Perform the requested action on the domain
+            let result;
+            switch (action) {
+                case 'powerOn':
+                    result = await domain.create();
+                    break;
+                case 'destroy':
+                    result = await domain.destroy();
+                    break;
+                case 'suspend':
+                    result = await domain.suspend();
+                    break;
+                default:
+                    throw new Error(`Invalid action: ${action}`);
+            }
+
+            // Check if the action was successful
+            if (result !== 0) {
+                throw new Error(`Error performing ${action} on machine`);
+            }
+
+            // Update the machine's status in the database
+            await prisma.machine.update({
+                where: { id },
+                data: { status: newStatus }
+            });
+
+            return { success: true, message: `Machine ${newStatus}` };
+        } catch (error) {
+            // Log the error and return a failure response
+            this.debug.log(`Error changing machine state: ${error}`);
+            return { success: false, message: (error as Error).message || `Error changing machine state` };
+        } finally {
+            // Ensure the libvirt connection is closed, even if an error occurred
+            if (libvirtConnection) {
+                libvirtConnection.close();
+            }
+        }
+    }
 }

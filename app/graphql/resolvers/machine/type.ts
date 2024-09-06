@@ -36,7 +36,7 @@ export class Machine {
     templateId: string = ''
 
     @Field(() => Date, { nullable: true })
-    createAt: Date | null = null
+    createdAt: Date | null = null
 
     @Field(() => MachineTemplateType, { nullable: true })
     template?: MachineTemplateType

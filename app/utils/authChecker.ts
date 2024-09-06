@@ -1,85 +1,89 @@
-import { AuthChecker } from 'type-graphql'
-import { PrismaClient } from '@prisma/client'
-import jwt from 'jsonwebtoken'
-import { Debugger } from './debug'
+import { AuthChecker } from 'type-graphql';
+import { PrismaClient, User } from '@prisma/client';
+import jwt from 'jsonwebtoken';
+import { Debugger } from './debug';
 
 const debug = new Debugger('auth');
+const prisma = new PrismaClient();
 
-export const authChecker: AuthChecker<any> = async (
-    { root, args, context, info },
-    level: any // ADMIN, USER
-  ) => {
+interface DecodedToken {
+    userId: string;
+    userRole: string;
+}
+
+export const authChecker: AuthChecker<{ req: any; user: User; setupMode: boolean }> = async (
+    { context },
+    roles
+) => {
     const token = context.req.headers.authorization;
-    const prisma = new PrismaClient()
-    let decoded: any = undefined
+
     if (!token) {
         debug.log('No token found.');
-        return false
+        return false;
     }
-    if (token){
-        debug.log('Token found, verifying...');
-        decoded = jwt.verify(token, process.env.TOKENKEY ?? 'secret')
-        if (decoded && decoded.userId) {
+
+    try {
+        const decoded = jwt.verify(token, process.env.TOKENKEY || 'secret') as DecodedToken;
+
+        if (decoded.userId) {
             debug.log('Token verified, fetching user...');
             const user = await prisma.user.findUnique({
-                where: {
-                    id: decoded.userId
-                }
-            })
-            context.user = user
-            debug.log('User fetched successfully.');
+                where: { id: decoded.userId },
+            });
+
+            if (user) {
+                context.user = user;
+                debug.log('User fetched successfully.');
+            }
         }
-    } else {
-        debug.log('No token found.');
+
+        return checkAccess(decoded, roles, context);
+    } catch (error) {
+        debug.log('error', `Error verifying token: ${error}`);
+        return false;
+    }
+};
+
+function checkAccess(decoded: DecodedToken, roles: string[], context: { setupMode: boolean }): boolean {
+    if (roles.includes('ADMIN')) {
+        return checkAdminAccess(decoded);
     }
 
-    if (level == 'ADMIN') {
-        if (token) {
-            try {
-                if (decoded && decoded.userRole == 'ADMIN') {
-                    debug.log('Access granted for ADMIN.');
-                    return true
-                } else {
-                    debug.log('Access denied for ADMIN.');
-                    return false
-                }
-            } catch(error: any) {
-                debug.log('error', `Error checking ADMIN access: ${error}`);
-                return false
-            }
-        } else {
-            debug.log('No token found, access denied for ADMIN.');
-            return false
-        }
-    } else if (level == 'USER') {
-        if (token) {
-            try {
-                if (decoded.userId) {
-                    debug.log('Access granted for USER.');
-                    return true
-                } else {
-                    debug.log('Access denied for USER.');
-                    return false
-                }
-            } catch(error: any) {
-                debug.log('error', `Error checking USER access: ${error}`);
-                return false
-            }
-        }
-    } else if (level = 'SETUP_MODE') {
-      if (context.setupMode) {
+    if (roles.includes('USER')) {
+        return checkUserAccess(decoded);
+    }
+
+    if (roles.includes('SETUP_MODE')) {
+        return checkSetupModeAccess(context);
+    }
+
+    debug.log('No valid role found, access denied.');
+    return false;
+}
+
+function checkAdminAccess(decoded: DecodedToken): boolean {
+    if (decoded.userRole === 'ADMIN') {
+        debug.log('Access granted for ADMIN.');
+        return true;
+    }
+    debug.log('Access denied for ADMIN.');
+    return false;
+}
+
+function checkUserAccess(decoded: DecodedToken): boolean {
+    if (decoded.userId) {
+        debug.log('Access granted for USER.');
+        return true;
+    }
+    debug.log('Access denied for USER.');
+    return false;
+}
+
+function checkSetupModeAccess(context: { setupMode: boolean }): boolean {
+    if (context.setupMode) {
         debug.log('Access granted for SETUP_MODE.');
-        return true
-      } else {
-        debug.log('Access denied for SETUP_MODE.');
-        return false
-      }
+        return true;
     }
-    else {
-        debug.log('No level found, access denied.');
-        return false
-    }
-
-    debug.log('Access granted by default.');
-    return true; // or 'false' if access is denied
-  };
+    debug.log('Access denied for SETUP_MODE.');
+    return false;
+}

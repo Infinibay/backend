@@ -38,7 +38,7 @@ scalar JSONObject
 
 type Machine {
   config: JSONObject
-  createAt: DateTimeISO
+  createdAt: DateTimeISO
   id: ID!
   name: String!
   status: String!
