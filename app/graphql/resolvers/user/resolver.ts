@@ -4,21 +4,24 @@ import jwt from 'jsonwebtoken'
 import {
     Arg,
     Authorized,
+    Ctx,
     Mutation,
     Query,
     Resolver,
-  } from "type-graphql"
+} from "type-graphql"
 import { UserInputError, AuthenticationError } from 'apollo-server-errors'
 import { UserType, UserToken, UserOrderByInputType, CreateUserInputType, UpdateUserInputType } from './type'
 import { PaginationInputType } from '@utils/pagination'
+import { InfinibayContext } from '@utils/context'
 
 export interface UserResolverInterface {
-    user(id: string): Promise<UserType | undefined>;
+    currentUser(context: InfinibayContext): Promise<UserType | null>;
+    user(id: string): Promise<UserType | null>;
     users(
         orderBy: UserOrderByInputType,
         pagination: PaginationInputType
     ): Promise<UserType[]>;
-    login(email: string, password: string): Promise<UserToken>;
+    login(email: string, password: string): Promise<UserToken | null>;
     createUser(
         input: CreateUserInputType
     ): Promise<UserType>
@@ -30,6 +33,17 @@ export interface UserResolverInterface {
 
 @Resolver(_of => UserType)
 export class UserResolver implements UserResolverInterface {
+
+    @Query(() => UserType)
+    @Authorized('USER')
+    async currentUser(@Ctx() context: InfinibayContext): Promise<UserType | null> {
+        if (!context.user) {
+            return null;
+        }
+        return context.user;
+    }
+
+
     /*
     user Query
     @Args:
@@ -40,12 +54,13 @@ export class UserResolver implements UserResolverInterface {
     @Authorized('ADMIN')
     async user(
         @Arg('id') id: string
-    ): Promise<UserType | undefined> {
+    ): Promise<UserType | null> {
         const prisma = new PrismaClient()
-        const user = await prisma.user.findUnique({ where: { id }})
+        const user = await prisma.user.findUnique({ where: { id } })
         // thrwo exception if user not found
         if (!user) {
-            throw new UserInputError('User not found')
+            // throw new UserInputError('User not found')
+            return null;
         }
         return user
     }
@@ -53,7 +68,7 @@ export class UserResolver implements UserResolverInterface {
     /*
     users query
     @Args:
-        orderBy: OrderByInputType
+        orderBy: OrderByInputType 
         pagination: PaginationInputType
     Require auth('ADMIN')
     */
@@ -97,15 +112,17 @@ export class UserResolver implements UserResolverInterface {
     async login(
         @Arg('email') email: string,
         @Arg('password') password: string
-    ): Promise<UserToken> {
+    ): Promise<UserToken | null> {
         const prisma = new PrismaClient()
-        const user = await prisma.user.findUnique({ where: { email }})
+        const user = await prisma.user.findUnique({ where: { email } })
         if (!user) {
-            throw new UserInputError('User not found')
+            // throw new UserInputError('User not found')
+            return null;
         }
         const passwordMatch = await bcrypt.compare(password, user.password)
         if (!passwordMatch) {
-            throw new AuthenticationError('Invalid password')
+            return null;
+            // throw new AuthenticationError('Invalid password')
         }
         // Now that we know the user is valid, we can generate a token
         const token = jwt.sign({ userId: user.id, userRole: user.role }, process.env.JWT_SECRET ?? 'secret')
@@ -129,21 +146,21 @@ export class UserResolver implements UserResolverInterface {
         @Arg('input', { nullable: false }) input: CreateUserInputType
     ): Promise<UserType> {
         const prisma = new PrismaClient()
-    
+
         // Check if password and password confirmation match
         if (input.password !== input.passwordConfirmation) {
             throw new UserInputError('Password and password confirmation do not match')
         }
 
         // Check if the user email already does not exist in db
-        const userExists = await prisma.user.findUnique({ where: { email: input.email }})
+        const userExists = await prisma.user.findUnique({ where: { email: input.email } })
         if (userExists) {
             throw new UserInputError('User already exists')
         }
-    
+
         // Encrypt the password with bcrypt
         const hashedPassword = await bcrypt.hash(input.password, parseInt(process.env.BCRYPT_ROUNDS || '10'))
-    
+
         // Create the user with the hashed password
         const user = await prisma.user.create({
             data: {
@@ -155,7 +172,7 @@ export class UserResolver implements UserResolverInterface {
                 deleted: false,
             }
         })
-    
+
         return Promise.resolve(user)
     }
 
@@ -178,7 +195,7 @@ export class UserResolver implements UserResolverInterface {
         @Arg('input', { nullable: false }) input: UpdateUserInputType
     ): Promise<UserType> {
         const prisma = new PrismaClient()
-        const user = await prisma.user.findUnique({ where: { id }})
+        const user = await prisma.user.findUnique({ where: { id } })
         if (!user) {
             throw new UserInputError('User not found')
         }

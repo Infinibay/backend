@@ -106,3 +106,11 @@ model Notification {
   id      String          @id @default(uuid())
   message String?
 }
+
+model Department {
+  id            String   @id @default(uuid())
+  name          String
+  createdAt     DateTime @default(now())
+  internetSpeed Int?     // in Mbps
+  ipSubnet      String?
+}

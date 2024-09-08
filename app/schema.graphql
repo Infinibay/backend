@@ -27,6 +27,14 @@ A date-time string at UTC, such as 2007-12-03T10:15:30Z, compliant with the `dat
 """
 scalar DateTimeISO
 
+type DepartmentType {
+  createdAt: DateTimeISO!
+  id: ID!
+  internetSpeed: Int
+  ipSubnet: String
+  name: String!
+}
+
 type DyummyType {
   value: String!
 }
@@ -110,6 +118,7 @@ type MachineTemplateType {
 }
 
 type Mutation {
+  createDepartment(name: String!): DepartmentType!
   createMachine(input: CreateMachineInputType!): Machine!
   createMachineTemplate(input: MachineTemplateInputType!): MachineTemplateType!
   createUser(input: CreateUserInputType!): UserType!
@@ -134,6 +143,9 @@ input PaginationInputType {
 
 type Query {
   checkSetupStatus: DyummyType!
+  currentUser: UserType!
+  department(id: String!): DepartmentType
+  departments: [DepartmentType!]!
   login(email: String!, password: String!): UserToken!
   machine(id: String!): Machine
   machineTemplate(id: String!): MachineTemplateType
@@ -187,6 +199,7 @@ type UserToken {
 """User model"""
 type UserType {
   createdAt: DateTimeISO!
+  email: String!
   firstName: String!
   id: ID!
   lastName: String!

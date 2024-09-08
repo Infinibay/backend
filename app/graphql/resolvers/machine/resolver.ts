@@ -10,6 +10,8 @@ import {
     MachineStatus,
     MachineConfigurationType,
 } from './type';
+import { UserType } from '../user/type';
+import { MachineTemplateType } from '../machine_template/type';
 import { PaginationInputType } from '@utils/pagination';
 import { InfinibayContext } from '@main/utils/context';
 import { VirtManager } from '@utils/VirtManager';
@@ -18,6 +20,42 @@ import { Connection, Machine as VirtualMachine } from 'libvirt-node';
 import { Debugger } from '@utils/debug';
 import { XMLGenerator } from '@utils/VirtManager/xmlGenerator';
 import { existsSync } from 'fs';
+
+async function transformMachine(prismaMachine: any, prisma: any): Promise<Machine> {
+    // TODO: fix n+1 problem
+    const user = prismaMachine.userId ? await prisma.user.findUnique({ where: { id: prismaMachine.userId } }) : null;
+    const template = prismaMachine.templateId ? await prisma.machineTemplate.findUnique({ where: { id: prismaMachine.templateId } }) : null;
+
+    return {
+        ...prismaMachine,
+        user: user ? {
+            id: user.id,
+            firstName: user.firstName,
+            lastName: user.lastName,
+            email: user.email,
+            role: user.role,
+            createdAt: user.createdAt
+        } as UserType : undefined,
+        template: template ? {
+            id: template.id,
+            name: template.name,
+            description: template.description,
+            cores: template.cores,
+            ram: template.ram,
+            storage: template.storage,
+            createdAt: template.createdAt
+        } as MachineTemplateType : undefined,
+        config: prismaMachine.configuration ? {
+            port: prismaMachine.configuration.vncPort || 0,
+            address: prismaMachine.configuration.vncHost || '0.0.0.0',
+            password: prismaMachine.configuration.vncPassword || '',
+            listen: prismaMachine.configuration.vncListen || '0.0.0.0',
+            autoport: prismaMachine.configuration.vncAutoport || false,
+            type: prismaMachine.configuration.vncType || 'vnc',
+        } as MachineConfigurationType : null,
+        status: prismaMachine.status as MachineStatus,
+    };
+}
 
 @Resolver()
 export class MachineQueries {
@@ -31,7 +69,11 @@ export class MachineQueries {
     ): Promise<Machine | null> {
         const isAdmin = user?.role === 'ADMIN';
         const whereClause = isAdmin ? { id } : { id, userId: user?.id };
-        return await prisma.machine.findFirst({ where: whereClause }) as Machine | null;
+        const prismaMachine = await prisma.machine.findFirst({
+            where: whereClause,
+            include: { configuration: true }
+        });
+        return prismaMachine ? await transformMachine(prismaMachine, prisma) : null;
     }
 
     @Query(() => [Machine])
@@ -45,29 +87,14 @@ export class MachineQueries {
         const whereClause = isAdmin ? {} : { userId: user?.id };
         const order = { [(orderBy?.fieldName ?? 'createdAt')]: orderBy?.direction ?? 'desc' };
 
-        const machines = await prisma.machine.findMany({
+        const prismaMachines = await prisma.machine.findMany({
             ...pagination,
             orderBy: [order],
             where: whereClause,
-            include: { configuration: true } // Include the configuration
+            include: { configuration: true }
         });
 
-        return machines.map(machine => ({
-            ...machine,
-            config: {
-                port: machine.configuration?.vncPort || 0,
-                address: machine.configuration?.vncHost || '0.0.0.0',
-                password: machine.configuration?.vncPassword || '',
-                listen: machine.configuration?.vncListen || '0.0.0.0',
-                autoport: machine.configuration?.vncAutoport || false,
-                type: machine.configuration?.vncType || 'vnc',
-            } as MachineConfigurationType,
-            status: machine.status as MachineStatus,
-            createdAt: machine.createdAt || null,
-            userId: machine.userId || '',
-            templateId: machine.templateId || '',
-            os: machine.os || '',
-        }));
+        return Promise.all(prismaMachines.map(m => transformMachine(m, prisma)));
     }
 
     @Query(() => VncConfigurationType, { nullable: true })
@@ -147,7 +174,7 @@ export class MachineMutations {
                 throw new Error("MachineConfiguration not created");
             }
 
-            return createdMachine;
+            return await transformMachine(createdMachine, prisma);
         }, { timeout: 20000 });
 
         if (!machine) {
@@ -158,7 +185,7 @@ export class MachineMutations {
             this.backgroundCode(machine.id, prisma, user, input.username, input.password, input.productKey);
         });
 
-        return machine;
+        return await transformMachine(machine, prisma);
     }
 
     private backgroundCode = async (id: string, prisma: any, user: any, username: string, password: string, productKey: string | undefined) => {
@@ -265,7 +292,7 @@ export class MachineMutations {
                 // We ignore the error because domain object can not be null at this point.
                 // The mutation has an early return if the domain is not found.
                 //@ts-ignore
-                await domain.destroy().catch(() => {});
+                await domain.destroy().catch(() => { });
 
                 // Undefine the domain from libvirt
                 if (domain.undefine() === null) throw new Error("Failed to undefine domain");
@@ -278,7 +305,7 @@ export class MachineMutations {
                 ].filter(file => file && existsSync(file));
 
                 // Delete associated files
-                await Promise.all(filesToDelete.map(file => 
+                await Promise.all(filesToDelete.map(file =>
                     fs.unlink(file).catch(e => this.debug.log(`Error deleting ${file}: ${e}`))
                 ));
 

@@ -10,7 +10,7 @@ import { PaginationInputType, OrderByDirection } from '@utils/pagination'
 
 @ObjectType({ description: 'User model' })
 export class UserType {
-    @Field(type => ID, { nullable: false})  
+    @Field(type => ID, { nullable: false })
     id: string = ''
     // Add the rest of the fields, like firstName, lastName, role, etc
     @Field({ nullable: false })
@@ -23,10 +23,13 @@ export class UserType {
     role: string = ''
 
     @Field({ nullable: false })
+    email: string = ''
+
+    @Field({ nullable: false })
     createdAt: Date = new Date()
 }
 
-@ObjectType({ description: 'Token used to log in'})
+@ObjectType({ description: 'Token used to log in' })
 export class UserToken {
     @Field({ nullable: false })
     token: string = ''
@@ -102,6 +105,6 @@ export class UpdateUserInputType {
     @Field(() => String, { nullable: true })
     passwordConfirmation: string | undefined = ''
 
-    @Field(() => UserRole, { nullable: true})
+    @Field(() => UserRole, { nullable: true })
     role: UserRole | undefined = UserRole.USER
 }
