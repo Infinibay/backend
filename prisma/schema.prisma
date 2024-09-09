@@ -54,6 +54,8 @@ model Machine {
   user               User?           @relation(fields: [userId], references: [id])
   applications       MachineApplication[]
   configuration      MachineConfiguration?
+  departmentId       String?
+  department         Department?     @relation(fields: [departmentId], references: [id])
 }
 
 model MachineConfiguration {
@@ -74,7 +76,9 @@ model MachineTemplate {
   name          String
   description   String?
   cores         Int
+  /// In GB
   ram           Int
+  /// In GB
   storage       Int
   createdAt     DateTime @default(now())
   machines      Machine[]
@@ -113,4 +117,5 @@ model Department {
   createdAt     DateTime @default(now())
   internetSpeed Int?     // in Mbps
   ipSubnet      String?
+  machines      Machine[]
 }

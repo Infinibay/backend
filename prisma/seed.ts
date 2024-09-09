@@ -17,6 +17,24 @@ async function main() {
       // Add other fields as necessary
     },
   });
+
+  // Create Default department
+  await prisma.department.create({
+    data: {
+      name: "Default",
+      // description: "Default department for new machines",
+    },
+  });
+
+  await prisma.machineTemplate.create({
+    data: {
+      name: "Basic",
+      description: "A basic machine template.",
+      cores: 4,
+      ram: 8,
+      storage: 70
+    }
+  });
 }
 
 main()

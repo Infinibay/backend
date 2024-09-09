@@ -25,6 +25,7 @@ async function transformMachine(prismaMachine: any, prisma: any): Promise<Machin
     // TODO: fix n+1 problem
     const user = prismaMachine.userId ? await prisma.user.findUnique({ where: { id: prismaMachine.userId } }) : null;
     const template = prismaMachine.templateId ? await prisma.machineTemplate.findUnique({ where: { id: prismaMachine.templateId } }) : null;
+    const department = prismaMachine.departmentId ? await prisma.department.findUnique({ where: { id: prismaMachine.departmentId } }) : null;
 
     return {
         ...prismaMachine,
@@ -45,6 +46,12 @@ async function transformMachine(prismaMachine: any, prisma: any): Promise<Machin
             storage: template.storage,
             createdAt: template.createdAt
         } as MachineTemplateType : undefined,
+        department: department ? {
+            id: department.id,
+            name: department.name,
+            description: department.description,
+            createdAt: department.createdAt
+        } : undefined,
         config: prismaMachine.configuration ? {
             port: prismaMachine.configuration.vncPort || 0,
             address: prismaMachine.configuration.vncHost || '0.0.0.0',
@@ -133,6 +140,15 @@ export class MachineMutations {
         const internalName = uuidv4();
 
         const machine = await prisma.$transaction(async (tx: any) => {
+            // Find the Default department
+            const defaultDepartment = await tx.department.findFirst({
+                where: { name: "Default" }
+            });
+
+            if (!defaultDepartment) {
+                throw new Error("Default department not found");
+            }
+
             const createdMachine = await tx.machine.create({
                 data: {
                     name: input.name,
@@ -141,6 +157,7 @@ export class MachineMutations {
                     os: input.os,
                     templateId: input.templateId,
                     internalName,
+                    departmentId: defaultDepartment.id, // Assign to Default department
                 }
             });
 
