@@ -82,6 +82,16 @@ model MachineTemplate {
   storage       Int
   createdAt     DateTime @default(now())
   machines      Machine[]
+  categoryId    String?
+  category      MachineTemplateCategory? @relation(fields: [categoryId], references: [id])
+}
+
+model MachineTemplateCategory {
+  id          String @id @default(uuid())
+  name        String
+  description String?
+  templates   MachineTemplate[]
+  createdAt   DateTime @default(now())
 }
 
 model Application {

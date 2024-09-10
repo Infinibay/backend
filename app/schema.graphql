@@ -84,7 +84,20 @@ enum MachineOs {
   WINDOWS11
 }
 
+input MachineTemplateCategoryInputType {
+  description: String = null
+  name: String! = ""
+}
+
+type MachineTemplateCategoryType {
+  createdAt: DateTimeISO!
+  description: String
+  id: ID!
+  name: String!
+}
+
 input MachineTemplateInputType {
+  categoryId: ID = null
   cores: Int! = 0
   description: String! = ""
   name: String! = ""
@@ -108,6 +121,7 @@ enum MachineTemplateOrderByField {
 }
 
 type MachineTemplateType {
+  categoryId: ID
   cores: Int!
   createdAt: DateTimeISO!
   description: String
@@ -121,6 +135,7 @@ type Mutation {
   createDepartment(name: String!): DepartmentType!
   createMachine(input: CreateMachineInputType!): Machine!
   createMachineTemplate(input: MachineTemplateInputType!): MachineTemplateType!
+  createMachineTemplateCategory(input: MachineTemplateCategoryInputType!): MachineTemplateCategoryType!
   createUser(input: CreateUserInputType!): UserType!
   destroyMachine(id: String!): SuccessType!
   powerOff(id: String!): SuccessType!
@@ -128,6 +143,7 @@ type Mutation {
   setupNode: DyummyType!
   suspend(id: String!): SuccessType!
   updateMachineTemplate(id: String!, input: MachineTemplateInputType!): MachineTemplateType!
+  updateMachineTemplateCategory(id: String!, input: MachineTemplateCategoryInputType!): MachineTemplateCategoryType!
   updateUser(id: String!, input: UpdateUserInputType!): UserType!
 }
 
@@ -149,6 +165,8 @@ type Query {
   login(email: String!, password: String!): UserToken!
   machine(id: String!): Machine
   machineTemplate(id: String!): MachineTemplateType
+  machineTemplateCategories: [MachineTemplateCategoryType!]!
+  machineTemplateCategory(id: String!): MachineTemplateCategoryType
   machineTemplates(orderBy: MachineTemplateOrderBy, pagination: PaginationInputType): [MachineTemplateType!]!
   machines(orderBy: MachineOrderBy, pagination: PaginationInputType): [Machine!]!
   user(id: String!): UserType!

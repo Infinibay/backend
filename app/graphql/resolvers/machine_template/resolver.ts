@@ -1,11 +1,11 @@
 import { PrismaClient } from '@prisma/client'
 import {
-    Arg,
-    Authorized,
-    Mutation,
-    Query,
-    Resolver,
-  } from "type-graphql"
+  Arg,
+  Authorized,
+  Mutation,
+  Query,
+  Resolver,
+} from "type-graphql"
 import { Ctx } from 'type-graphql';
 import { InfinibayContext } from "@utils/context";
 import { UserInputError } from 'apollo-server-errors'
@@ -13,10 +13,9 @@ import { MachineTemplateType, MachineTemplateOrderBy, MachineTemplateInputType }
 import { PaginationInputType } from '@utils/pagination'
 
 export interface MachineTemplateResolverInterface {
-    machineTemplates(pagination: PaginationInputType, orderBy: MachineTemplateOrderBy, ctx: InfinibayContext): Promise<MachineTemplateType[]>
-    createMachineTemplate(input: MachineTemplateInputType, ctx: InfinibayContext): Promise<MachineTemplateType>
-    updateMachineTemplate(id: string, input: MachineTemplateInputType, ctx: InfinibayContext): Promise<MachineTemplateType>
-    // deleteMachineTemplate(id: string): Promise<MachineTemplateType>
+  machineTemplates(pagination: PaginationInputType, orderBy: MachineTemplateOrderBy, ctx: InfinibayContext): Promise<MachineTemplateType[]>
+  createMachineTemplate(input: MachineTemplateInputType, ctx: InfinibayContext): Promise<MachineTemplateType>
+  updateMachineTemplate(id: string, input: MachineTemplateInputType, ctx: InfinibayContext): Promise<MachineTemplateType>
 }
 
 const MAX_CORES = 64;
@@ -42,14 +41,12 @@ export class MachineTemplateResolver implements MachineTemplateResolverInterface
     @Arg('id', { nullable: false }) id: string,
     @Ctx() ctx: InfinibayContext
   ): Promise<MachineTemplateType | null> {
-      const machineTemplate = await ctx.prisma.machineTemplate.findUnique({
-          where: {
-              id
-          }
-      })
-      return machineTemplate;
+    const machineTemplate = await ctx.prisma.machineTemplate.findUnique({
+      where: { id },
+      include: { category: true }
+    })
+    return machineTemplate;
   }
-
 
   /**
    * Retrieves the machine templates with pagination and order by options.
@@ -74,7 +71,8 @@ export class MachineTemplateResolver implements MachineTemplateResolverInterface
     const machineTemplates = await prisma.machineTemplate.findMany({
       orderBy: order,
       skip,
-      take
+      take,
+      include: { category: true }
     });
 
     return machineTemplates;
@@ -97,7 +95,6 @@ export class MachineTemplateResolver implements MachineTemplateResolverInterface
     return pagination && pagination.take ? pagination.take : 20;
   }
 
-
   /**
    * Create a machine template
    *
@@ -114,30 +111,31 @@ export class MachineTemplateResolver implements MachineTemplateResolverInterface
     @Arg('input', { nullable: false }) input: MachineTemplateInputType,
     @Ctx() ctx: InfinibayContext
   ): Promise<MachineTemplateType> {
-    const  { prisma } = ctx
+    const { prisma } = ctx
 
-    await this.checkMachineTemplateExistence(input.name, prisma); // Extracted method for checking existence
+    await this.checkMachineTemplateExistence(input.name, prisma);
 
-    this.checkConstraintValidity(input.cores, MIN_CORES, MAX_CORES, "Cores must be between 1 and 64"); // Extracted method to check constraints
+    this.checkConstraintValidity(input.cores, MIN_CORES, MAX_CORES, "Cores must be between 1 and 64");
     this.checkConstraintValidity(input.ram, MIN_RAM, MAX_RAM, "RAM must be between 1 and 512")
     this.checkConstraintValidity(input.storage, MIN_STORAGE, MAX_STORAGE, 'Storage must be between 1 and 1024');
 
     const createdMachineTemplate = await prisma.machineTemplate.create({
       data: {
         name: input.name,
+        description: input.description,
         cores: input.cores,
         ram: input.ram,
-        storage: input.storage
-      }
+        storage: input.storage,
+        categoryId: input.categoryId
+      },
+      include: { category: true }
     })
 
-    return  {
-      ...createdMachineTemplate,
-    } as MachineTemplateType //Removing the unnecessary usage of createdMachineTemplate object properties by using spread operator.
+    return createdMachineTemplate as MachineTemplateType;
   }
 
   // Method for checking if machine template exists
-  checkMachineTemplateExistence = async (name: string, prisma: PrismaClient)=> {
+  checkMachineTemplateExistence = async (name: string, prisma: PrismaClient) => {
     const existingTemplate = await prisma.machineTemplate.findFirst({
       where: { name }
     })
@@ -146,7 +144,7 @@ export class MachineTemplateResolver implements MachineTemplateResolverInterface
     }
   }
 
-// Method for verifying the constraints on cores, RAM, and storage
+  // Method for verifying the constraints on cores, RAM, and storage
   checkConstraintValidity(value: number, min: number, max: number, errorMsg: string) {
     if (value < min || value > max) {
       throw new UserInputError(errorMsg);
@@ -191,8 +189,17 @@ export class MachineTemplateResolver implements MachineTemplateResolverInterface
   }
 
   updateMachineTemplateInDb = async (prisma: PrismaClient, id: string, input: MachineTemplateInputType): Promise<MachineTemplateType> => {
-    // Be sure that you don't have fields in input that are not supposed to be updated. This would cause a security loophole.
-    return await prisma.machineTemplate.update({ where: { id }, data: input })
+    return await prisma.machineTemplate.update({
+      where: { id },
+      data: {
+        name: input.name,
+        description: input.description,
+        cores: input.cores,
+        ram: input.ram,
+        storage: input.storage,
+        categoryId: input.categoryId
+      },
+      include: { category: true }
+    })
   }
 }
-

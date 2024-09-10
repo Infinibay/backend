@@ -3,26 +3,29 @@ import { OrderByDirection } from '@utils/pagination'
 
 @ObjectType()
 export class MachineTemplateType {
-  @Field(() => ID)
-  id: string = ''
+    @Field(() => ID)
+    id: string = ''
 
-  @Field(() => String, { nullable: true })
-  name: string | null = null
+    @Field(() => String, { nullable: true })
+    name: string | null = null
 
-  @Field(() => String, { nullable: true })
-  description: string | null = null
+    @Field(() => String, { nullable: true })
+    description: string | null = null
 
-  @Field(() => Int)
-  cores: number = 0
+    @Field(() => Int)
+    cores: number = 0
 
-  @Field(() => Int)
-  ram: number = 0
+    @Field(() => Int)
+    ram: number = 0
 
-  @Field(() => Int)
-  storage: number = 0
+    @Field(() => Int)
+    storage: number = 0
 
-  @Field(() => Date)
-  createdAt: Date = new Date()
+    @Field(() => Date)
+    createdAt: Date = new Date()
+
+    @Field(() => ID, { nullable: true })
+    categoryId: string | null = null
 }
 
 @InputType()
@@ -57,7 +60,7 @@ export class MachineTemplateInputType {
 
     @Field(() => String)
     description: string = ''
-    
+
     @Field(() => Int)
     cores: number = 0
 
@@ -66,5 +69,7 @@ export class MachineTemplateInputType {
 
     @Field(() => Int)
     storage: number = 0
-}
 
+    @Field(() => ID, { nullable: true })
+    categoryId: string | null = null
+}
