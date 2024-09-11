@@ -145,3 +145,9 @@ function fetchUserData(userId: number): User {
 ### **8.2. Architecture Documentation**
 - Keep architecture diagrams and system documentation up-to-date. Use tools like UML or C4 diagrams to visualize the system structure and component interactions.
 
+---
+
+## **9. Extras**
+
+1. Ignore lib/ and node_modules folders. Those are external libraries
+2. When testing anything that is related to libvirt (lib/libvirt-node), just mock the result in the tests
