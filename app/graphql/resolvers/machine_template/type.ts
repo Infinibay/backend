@@ -55,21 +55,21 @@ registerEnumType(MachineTemplateOrderByEnum, {
 
 @InputType()
 export class MachineTemplateInputType {
-    @Field(() => String)
+    @Field(() => String, {description: "The name of the machine template"})
     name: string = ''
 
-    @Field(() => String)
+    @Field(() => String, {description: "A brief description of the machine template"})
     description: string = ''
 
-    @Field(() => Int)
+    @Field(() => Int, {description: "The number of cores for the machine"})
     cores: number = 0
 
-    @Field(() => Int)
+    @Field(() => Int, {description: "The amount of RAM (in GB) for the machine"})
     ram: number = 0
 
-    @Field(() => Int)
+    @Field(() => Int, {description: "The storage space (in GB) for the machine"})
     storage: number = 0
 
-    @Field(() => ID, { nullable: true })
+    @Field(() => ID, { nullable: true, description: "The ID of the category for the machine template"})
     categoryId: string | null = null
 }

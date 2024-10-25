@@ -97,11 +97,22 @@ type MachineTemplateCategoryType {
 }
 
 input MachineTemplateInputType {
+  """The ID of the category for the machine template"""
   categoryId: ID = null
+
+  """The number of cores for the machine"""
   cores: Int! = 0
+
+  """A brief description of the machine template"""
   description: String! = ""
+
+  """The name of the machine template"""
   name: String! = ""
+
+  """The amount of RAM (in GB) for the machine"""
   ram: Int! = 0
+
+  """The storage space (in GB) for the machine"""
   storage: Int! = 0
 }
 
