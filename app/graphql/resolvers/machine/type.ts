@@ -3,6 +3,7 @@ import { GraphQLJSONObject } from 'graphql-type-json'
 import { OrderByDirection } from '@utils/pagination'
 import { MachineTemplateType } from '@resolvers/machine_template/type'
 import { UserType } from '@resolvers/user/type'
+import { DepartmentType } from '../department/type'
 // Create Machine type (check prisma Machine model)
 /*
 model Machine {
@@ -40,6 +41,9 @@ export class Machine {
 
     @Field(() => MachineTemplateType, { nullable: true })
     template?: MachineTemplateType
+
+    @Field(() => DepartmentType, { nullable: true })
+    department?: DepartmentType
 
     @Field(() => UserType, { nullable: true })
     user?: UserType

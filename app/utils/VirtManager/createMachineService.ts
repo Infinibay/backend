@@ -117,10 +117,17 @@ export class CreateMachineService {
     private async createStorageVolume(storagePool: StoragePool, machine: Machine, storageSize: number): Promise<StorageVol> {
         const volXml = `
     <volume>
-      <name>${machine.internalName}-main.qcow2</name>
-      <capacity unit="G">${storageSize}</capacity>
-      <target>
-        <format type='qcow2'/>
+        <name>${machine.internalName}-main.qcow2</name>
+         <allocation>0</allocation>
+         <capacity unit="G">${storageSize}</capacity>
+         <target>
+            <format type='qcow2'/>
+            <compat>1.1</compat>
+            <nocow/>
+            <features>
+              <lazy_refcounts/>
+              <extended_l2/>
+          </features>
       </target>
     </volume>
   `;
@@ -169,7 +176,7 @@ export class CreateMachineService {
         if (!this.prisma!.$transaction) {
             await transactionBody(this.prisma);
         } else {
-            await this.prisma!.$transaction(transactionBody, {timeout: 20000});
+            await this.prisma!.$transaction(transactionBody, { timeout: 20000 });
         }
     }
 
@@ -275,6 +282,7 @@ export class CreateMachineService {
         xmlGenerator.setBootDevice(['hd', 'cdrom']);
         if (newIsoPath) {
             xmlGenerator.addCDROM(newIsoPath, 'sata');
+            xmlGenerator.addVirtIODrivers();
         }
 
         // Get a new port for the machine

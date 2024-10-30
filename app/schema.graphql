@@ -47,6 +47,7 @@ scalar JSONObject
 type Machine {
   config: JSONObject
   createdAt: DateTimeISO
+  department: DepartmentType
   id: ID!
   name: String!
   status: String!
@@ -148,6 +149,7 @@ type Mutation {
   createMachineTemplate(input: MachineTemplateInputType!): MachineTemplateType!
   createMachineTemplateCategory(input: MachineTemplateCategoryInputType!): MachineTemplateCategoryType!
   createUser(input: CreateUserInputType!): UserType!
+  destroyDepartment(id: String!): DepartmentType!
   destroyMachine(id: String!): SuccessType!
   powerOff(id: String!): SuccessType!
   powerOn(id: String!): SuccessType!
@@ -173,6 +175,7 @@ type Query {
   currentUser: UserType!
   department(id: String!): DepartmentType
   departments: [DepartmentType!]!
+  findDepartmentByName(name: String!): DepartmentType
   login(email: String!, password: String!): UserToken!
   machine(id: String!): Machine
   machineTemplate(id: String!): MachineTemplateType

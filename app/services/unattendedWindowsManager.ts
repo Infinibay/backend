@@ -10,12 +10,12 @@ import { UnattendedManagerBase } from './unattendedManagerBase';
 
 
 export interface ComponentConfig {
-    name: string;
-    processorArchitecture: string;
-    publicKeyToken: string;
-    language: string;
-    versionScope: string;
-    xmlns: string;
+  name: string;
+  processorArchitecture: string;
+  publicKeyToken: string;
+  language: string;
+  versionScope: string;
+  xmlns: string;
 }
 
 /**
@@ -166,7 +166,7 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
                   },
                   Order: 1,
                   Type: 'Primary',
-                  Size: 300
+                  Size: 900
                 },
                 {
                   $: {
@@ -174,72 +174,105 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
                   },
                   Order: 2,
                   Type: 'Primary',
-                  Extend: true
+                  // Extend: true
                 }]
               },
               ModifyPartitions: {
-                  ModifyPartition: [{
-                    $: {
-                      'wcm:action': 'add'
-                    },
-                    Order: 1,
-                    PartitionID: 1,
-                    Label: 'System',
-                    Format: 'NTFS',
-                    Active: true
+                ModifyPartition: [{
+                  $: {
+                    'wcm:action': 'add'
                   },
-                  {
-                    $: {
-                      'wcm:action': 'add'
-                    },
-                    Order: 2,
-                    PartitionID: 2,
-                    Label: 'Windows',
-                    Letter: 'C',
-                    Format: 'NTFS'
-                  }]
+                  Order: 1,
+                  PartitionID: 1,
+                  Label: 'System',
+                  Format: 'FAT32',
+                  Active: true
                 },
+                {
+                  $: {
+                    'wcm:action': 'add'
+                  },
+                  Order: 2,
+                  PartitionID: 2,
+                  Label: 'Windows',
+                  Letter: 'C',
+                  Format: 'NTFS'
+                }]
+              },
             },
-
             WillShowUI: 'OnError'
+          },
+        },
+        {
+          $: {
+            name: "Microsoft-Windows-PnpCustomizationsWinPE",
+            processorArchitecture: "amd64",
+            publicKeyToken: "31bf3856ad364e35",
+            language: "neutral",
+            versionScope: "nonSxS"
+          },
+          DriverPaths: {
+            PathAndCredentials: {
+              $: {
+                'wcm:action': 'add',
+                'wcm:keyValue': '1'
+              },
+              Path: (this.version >= 11 ? 'E:\\amd64\\w11' : 'D:\\amd64\\w10'),
+              Credentials: {
+                Domain: '',
+                Username: '',
+                Password: ''
+              }
+            }
           }
         }
       ]
-    }
+    };
 
     const generalize = {
       $: {
         pass: 'generalize'
       }
-    }
+    };
 
     // Right now, does nothing, but could be used to modify windows register and enable or dissable features
     const specialize = {
       $: {
         pass: 'specialize'
       },
-      component: {
-        $: {
-          name: 'Microsoft-Windows-Deployment',
-          processorArchitecture: 'amd64',
-          publicKeyToken: '31bf3856ad364e35',
-          language: 'neutral',
-          versionScope: 'nonSxS'
+      component: [
+        {
+          $: {
+            name: 'Microsoft-Windows-Deployment',
+            processorArchitecture: 'amd64',
+            publicKeyToken: '31bf3856ad364e35',
+            language: 'neutral',
+            versionScope: 'nonSxS'
+          },
         },
-      }
-    }
+        {
+          $: {
+            name: 'Microsoft-Windows-PnpCustomizationsNonWinPE',
+            processorArchitecture: 'amd64',
+            publicKeyToken: '31bf3856ad364e35',
+            language: 'neutral',
+            versionScope: 'nonSxS'
+          }
+        }
+      ]
+    };
 
     const auditSystem = {
       $: {
         pass: 'auditSystem'
       }
-    }
+    };
 
     const auditUser = {
       $: {
         pass: 'auditUser'
       }
-    }
+    };
 
     let oobeSystem: any = {
       $: {
@@ -306,7 +339,9 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
     root['unattend']['settings'].push(auditUser)
     root['unattend']['settings'].push(oobeSystem)
 
-    return builder.buildObject(root);
+    let response = builder.buildObject(root)
+    console.log(response);
+    return response;
   }
 
   /**
@@ -328,7 +363,7 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
     // Define the command and arguments for creating a new ISO image
     /*
     mkisofs -b boot/etfsboot.com -no-emul-boot -c BOOT.CAT -iso-level 4 -J -l -D -N -joliet-long -relaxed-filenames -v -V "Custom" -udf -boot-info-table -eltorito-alt-boot -eltorito-boot efi/microsoft/boot/efisys_noprompt.bin -no-emul-boot -o install.iso -allow-limited-size /tmp/extracted_iso_1705986374004/
-
+  
     xorriso -as mkisofs -iso-level 4 -l -R -D -volid "CCCOMA_X64FRE_EN-US_DV9" -b boot/etfsboot.com -no-emul-boot -boot-load-size 8 -hide boot.catalog -eltorito-alt-boot -eltorito-platform efi -no-emul-boot -b efi/microsoft/boot/efisys.bin -eltorito-alt-boot -e efi/boot/bootx64.efi -no-emul-boot -isohybrid-gpt-basdat -o install.iso newWin
      */
     const isoCreationCommandParts = [

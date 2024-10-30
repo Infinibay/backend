@@ -148,9 +148,9 @@ export class UnattendedManagerBase {
       }
 
       this.debug.log(`Starting cleanup of directory: ${extractDir}`);
-      
+
       // await fsPromises.rm(extractDir, { recursive: true, force: true });
-      
+
       this.debug.log(`Successfully cleaned up directory: ${extractDir}`);
     } catch (error) {
       this.debug.log(`Error during cleanup: ${error}`);

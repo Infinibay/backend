@@ -26,6 +26,8 @@ async function transformMachine(prismaMachine: any, prisma: any): Promise<Machin
     const user = prismaMachine.userId ? await prisma.user.findUnique({ where: { id: prismaMachine.userId } }) : null;
     const template = prismaMachine.templateId ? await prisma.machineTemplate.findUnique({ where: { id: prismaMachine.templateId } }) : null;
     const department = prismaMachine.departmentId ? await prisma.department.findUnique({ where: { id: prismaMachine.departmentId } }) : null;
+    const vncHost = prismaMachine.configuration.vncHost || process.env.VNC_HOST || 'localhost';
+    const vncPort = await new VncPortService().getVncPort(prismaMachine.internalName);
 
     return {
         ...prismaMachine,
@@ -53,13 +55,10 @@ async function transformMachine(prismaMachine: any, prisma: any): Promise<Machin
             createdAt: department.createdAt
         } : undefined,
         config: prismaMachine.configuration ? {
-            port: prismaMachine.configuration.vncPort || 0,
-            address: prismaMachine.configuration.vncHost || '0.0.0.0',
-            password: prismaMachine.configuration.vncPassword || '',
-            listen: prismaMachine.configuration.vncListen || '0.0.0.0',
-            autoport: prismaMachine.configuration.vncAutoport || false,
-            type: prismaMachine.configuration.vncType || 'vnc',
-        } as MachineConfigurationType : null,
+            vnc: "vnc://" + prismaMachine.configuration.vncPassword + "@" + vncHost + ":" + vncPort,
+            vncListen: prismaMachine.configuration.vncListen || '0.0.0.0',
+            vncAutoport: prismaMachine.configuration.vncAutoport || false,
+        } : null,
         status: prismaMachine.status as MachineStatus,
     };
 }
@@ -78,7 +77,7 @@ export class MachineQueries {
         const whereClause = isAdmin ? { id } : { id, userId: user?.id };
         const prismaMachine = await prisma.machine.findFirst({
             where: whereClause,
-            include: { configuration: true }
+            include: { configuration: true, department: true, template: true, user: true }
         });
         return prismaMachine ? await transformMachine(prismaMachine, prisma) : null;
     }
@@ -98,7 +97,7 @@ export class MachineQueries {
             ...pagination,
             orderBy: [order],
             where: whereClause,
-            include: { configuration: true }
+            include: { configuration: true, department: true, template: true, user: true }
         });
 
         return Promise.all(prismaMachines.map(m => transformMachine(m, prisma)));
@@ -114,14 +113,14 @@ export class MachineQueries {
         const whereClause = isAdmin ? { id } : { id, userId: user?.id };
         const machine = await prisma.machine.findFirst({
             where: whereClause,
-            include: { configuration: true },
+            include: { configuration: true, department: true, template: true, user: true }
         });
 
         if (!machine || !machine.configuration) return null;
 
         const port = await new VncPortService().getVncPort(machine.internalName);
         return {
-            link: `vnc://${machine.configuration.vncHost}:${port}`,
+            link: `vnc://${machine.configuration.vncHost || process.env.VNC_HOST || 'localhost'}:${port}`,
             password: machine.configuration.vncPassword || ''
         };
     }
@@ -225,7 +224,6 @@ export class MachineMutations {
                 }
             });
         } catch (error) {
-            console.log("Error creating machine in background job");
             console.log(error);
         }
     }
@@ -383,13 +381,19 @@ export class MachineMutations {
             let result;
             switch (action) {
                 case 'powerOn':
-                    result = await domain.create();
+                    result = await domain.create() || 0;
                     break;
                 case 'destroy':
-                    result = await domain.destroy();
+                    try {
+                        result = await domain.destroy() || 0;
+                    } catch (error) {
+                        console.log(error);
+                        result = 0;
+                        // result = await domain.destroy(libvirt.VIR_DOMAIN_DESTROY_GRACEFUL);
+                    }
                     break;
                 case 'suspend':
-                    result = await domain.suspend();
+                    result = await domain.suspend() || 0;
                     break;
                 default:
                     throw new Error(`Invalid action: ${action}`);
@@ -397,7 +401,7 @@ export class MachineMutations {
 
             // Check if the action was successful
             if (result !== 0) {
-                throw new Error(`Error performing ${action} on machine`);
+                throw new Error(`Error performing ${action} on machine ${result}`);
             }
 
             // Update the machine's status in the database
