@@ -1,4 +1,5 @@
 import { Resolver, Query, Mutation, Arg, Ctx, Authorized } from 'type-graphql';
+import { UserInputError } from 'apollo-server-errors'
 import { DepartmentType } from './type';
 import { InfinibayContext } from '../../../utils/context';
 
@@ -9,14 +10,22 @@ export class DepartmentResolver {
   async departments(
     @Ctx() { prisma }: InfinibayContext
   ): Promise<DepartmentType[]> {
-    const departments = await prisma.department.findMany();
-    return departments.map(dept => ({
-      id: dept.id,
-      name: dept.name,
-      createdAt: dept.createdAt,
-      internetSpeed: dept.internetSpeed || undefined,
-      ipSubnet: dept.ipSubnet || undefined
-    }));
+    const departments = await prisma.department.findMany({ include: { machines: true } });
+    let response = [];
+    for (let index = 0; index < departments.length; index++) {
+      const dep = departments[index];
+      response.push({
+        id: dep.id,
+        name: dep.name,
+        createdAt: dep.createdAt,
+        internetSpeed: dep.internetSpeed || undefined,
+        ipSubnet: dep.ipSubnet || undefined,
+        totalMachines: dep.machines.length,
+      });
+
+    }
+
+    return response;
   }
 
   @Query(() => DepartmentType, { nullable: true })
@@ -26,7 +35,8 @@ export class DepartmentResolver {
     @Ctx() { prisma }: InfinibayContext
   ): Promise<DepartmentType | null> {
     const department = await prisma.department.findUnique({
-      where: { id }
+      where: { id },
+      include: { machines: true }
     });
 
     if (!department) {
@@ -38,7 +48,8 @@ export class DepartmentResolver {
       name: department.name,
       createdAt: department.createdAt,
       internetSpeed: department.internetSpeed || undefined,
-      ipSubnet: department.ipSubnet || undefined
+      ipSubnet: department.ipSubnet || undefined,
+      totalMachines: department.machines.length,
     };
   }
 
@@ -56,7 +67,8 @@ export class DepartmentResolver {
       name: department.name,
       createdAt: department.createdAt,
       internetSpeed: department.internetSpeed || undefined,
-      ipSubnet: department.ipSubnet || undefined
+      ipSubnet: department.ipSubnet || undefined,
+      totalMachines: 0,
     };
   }
 
@@ -72,8 +84,16 @@ export class DepartmentResolver {
       where: { id }
     });
     if (!department) {
-      throw new Error('Department not found');
+      throw new UserInputError('Department not found');
     }
+    // check if there are machines in the department, if yes, error, if no, delete it
+    const machines = await prisma.machine.findMany({
+      where: { departmentId: id }
+    });
+    if (machines.length > 0) {
+      throw new UserInputError('Cannot delete department with machines');
+    }
+    // delete department
     const deletedDepartment = await prisma.department.delete({
       where: { id }
     });
@@ -82,7 +102,8 @@ export class DepartmentResolver {
       name: deletedDepartment.name,
       createdAt: deletedDepartment.createdAt,
       internetSpeed: deletedDepartment.internetSpeed || undefined,
-      ipSubnet: deletedDepartment.ipSubnet || undefined
+      ipSubnet: deletedDepartment.ipSubnet || undefined,
+      totalMachines: 0,
     };
   }
 
@@ -94,7 +115,8 @@ export class DepartmentResolver {
     @Ctx() { prisma }: InfinibayContext
   ): Promise<DepartmentType | null> {
     const department = await prisma.department.findFirst({
-      where: { name }
+      where: { name },
+      include: { machines: true }
     });
     if (!department) {
       return null;
@@ -104,7 +126,8 @@ export class DepartmentResolver {
       name: department.name,
       createdAt: department.createdAt,
       internetSpeed: department.internetSpeed || undefined,
-      ipSubnet: department.ipSubnet || undefined
+      ipSubnet: department.ipSubnet || undefined,
+      totalMachines: department.machines.length,
     };
   }
 }

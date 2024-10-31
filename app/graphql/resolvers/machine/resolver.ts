@@ -1,4 +1,5 @@
 import { Arg, Authorized, Ctx, Mutation, Query, Resolver } from "type-graphql";
+import { UserInputError } from "apollo-server-core";
 import fs from 'fs/promises';
 import { v4 as uuidv4 } from 'uuid';
 import {
@@ -145,7 +146,7 @@ export class MachineMutations {
             });
 
             if (!defaultDepartment) {
-                throw new Error("Default department not found");
+                throw new UserInputError("Default department not found");
             }
 
             const createdMachine = await tx.machine.create({
@@ -161,7 +162,7 @@ export class MachineMutations {
             });
 
             if (!createdMachine) {
-                throw new Error("Machine not created");
+                throw new UserInputError("Machine not created");
             }
 
             for (const application of input.applications) {
@@ -172,7 +173,7 @@ export class MachineMutations {
                     }
                 });
                 if (!app) {
-                    throw new Error("Machine-Application relationship not created");
+                    throw new UserInputError("Machine-Application relationship not created");
                 }
             }
 
@@ -187,14 +188,14 @@ export class MachineMutations {
             });
 
             if (!configuration) {
-                throw new Error("MachineConfiguration not created");
+                throw new UserInputError("MachineConfiguration not created");
             }
 
             return await transformMachine(createdMachine, prisma);
         }, { timeout: 20000 });
 
         if (!machine) {
-            throw new Error("Machine not created");
+            throw new UserInputError("Machine not created");
         }
 
         setImmediate(() => {
@@ -297,7 +298,7 @@ export class MachineMutations {
                 const configuration = await tx.machineConfiguration.findUnique({
                     where: { machineId: machine.id }
                 });
-                if (!configuration) throw new Error("MachineConfiguration not found");
+                if (!configuration) throw new UserInputError("MachineConfiguration not found");
 
                 // Load XML configuration
                 const xmlGenerator = new XMLGenerator('', '', '');
@@ -310,7 +311,7 @@ export class MachineMutations {
                 await domain.destroy().catch(() => { });
 
                 // Undefine the domain from libvirt
-                if (domain.undefine() === null) throw new Error("Failed to undefine domain");
+                if (domain.undefine() === null) throw new UserInputError("Failed to undefine domain");
 
 
                 // Prepare list of files to delete (UEFI var file and disk files)
@@ -396,12 +397,12 @@ export class MachineMutations {
                     result = await domain.suspend() || 0;
                     break;
                 default:
-                    throw new Error(`Invalid action: ${action}`);
+                    throw new UserInputError(`Invalid action: ${action}`);
             }
 
             // Check if the action was successful
             if (result !== 0) {
-                throw new Error(`Error performing ${action} on machine ${result}`);
+                throw new UserInputError(`Error performing ${action} on machine ${result}`);
             }
 
             // Update the machine's status in the database

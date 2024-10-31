@@ -16,4 +16,7 @@ export class DepartmentType {
 
   @Field({ nullable: true })
   ipSubnet?: string;
+
+  @Field(() => Number, { nullable: true })
+  totalMachines?: number;
 }
