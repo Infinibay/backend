@@ -137,8 +137,16 @@ export class MachineMutations {
         @Arg('input') input: CreateMachineInputType,
         @Ctx() { prisma, user }: InfinibayContext
     ): Promise<Machine> {
-        const internalName = uuidv4();
+        // First verify the template exists
+        const template = await prisma.machineTemplate.findUnique({
+            where: { id: input.templateId }
+        });
 
+        if (!template) {
+            throw new UserInputError("Machine template not found");
+        }
+
+        const internalName = uuidv4();
         const machine = await prisma.$transaction(async (tx: any) => {
             // Find the Default department
             const defaultDepartment = await tx.department.findFirst({
@@ -157,7 +165,22 @@ export class MachineMutations {
                     os: input.os,
                     templateId: input.templateId,
                     internalName,
-                    departmentId: defaultDepartment.id, // Assign to Default department
+                    departmentId: defaultDepartment.id,
+                    configuration: {
+                        create: {
+                            vncPort: 0,
+                            vncListen: '0.0.0.0',
+                            vncHost: process.env.VNC_HOST || 'localhost',
+                            vncPassword: null,
+                            vncAutoport: false,
+                        }
+                    }
+                },
+                include: {
+                    configuration: true,
+                    department: true,
+                    template: true,
+                    user: true
                 }
             });
 
@@ -165,44 +188,24 @@ export class MachineMutations {
                 throw new UserInputError("Machine not created");
             }
 
+            // Create application associations
             for (const application of input.applications) {
-                const app = await tx.machineApplication.create({
+                await tx.machineApplication.create({
                     data: {
                         machineId: createdMachine.id,
                         applicationId: application.applicationId
                     }
                 });
-                if (!app) {
-                    throw new UserInputError("Machine-Application relationship not created");
-                }
             }
 
-            const configuration = await tx.machineConfiguration.create({
-                data: {
-                    machineId: createdMachine.id,
-                    vncPort: 0,
-                    vncListen: '0.0.0.0',
-                    vncPassword: null,
-                    vncAutoport: false,
-                }
-            });
-
-            if (!configuration) {
-                throw new UserInputError("MachineConfiguration not created");
-            }
-
-            return await transformMachine(createdMachine, prisma);
-        }, { timeout: 20000 });
-
-        if (!machine) {
-            throw new UserInputError("Machine not created");
-        }
+            return createdMachine;
+        });
 
         setImmediate(() => {
             this.backgroundCode(machine.id, prisma, user, input.username, input.password, input.productKey);
         });
 
-        return await transformMachine(machine, prisma);
+        return machine;
     }
 
     private backgroundCode = async (id: string, prisma: any, user: any, username: string, password: string, productKey: string | undefined) => {
@@ -308,10 +311,11 @@ export class MachineMutations {
                 // We ignore the error because domain object can not be null at this point.
                 // The mutation has an early return if the domain is not found.
                 //@ts-ignore
-                await domain.destroy().catch(() => { });
+                await domain.destroy();
 
                 // Undefine the domain from libvirt
-                if (domain.undefine() === null) throw new UserInputError("Failed to undefine domain");
+                console.log("Undefining domain");
+                domain.undefine();
 
 
                 // Prepare list of files to delete (UEFI var file and disk files)
@@ -319,6 +323,7 @@ export class MachineMutations {
                     xmlGenerator.getUefiVarFile(),
                     ...xmlGenerator.getDisks()
                 ].filter(file => file && existsSync(file));
+                console.log("Removing files", filesToDelete);
 
                 // Delete associated files
                 await Promise.all(filesToDelete.map(file =>

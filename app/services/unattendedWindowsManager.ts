@@ -94,14 +94,10 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
         $: {
           xmlns: 'urn:schemas-microsoft-com:unattend',
           'xmlns:wcm': 'http://schemas.microsoft.com/WMIConfig/2002/State'
-          // processorArchitecture: 'amd64',
-          // publicKeyToken: '31bf3856ad364e35',
-          // language: 'neutral',
-          // versionScope: 'nonSxS'
         },
         settings: []
       }
-    }
+    };
 
     let windowsPE = {
       $: {
@@ -119,9 +115,10 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
           SetupUILanguage: {
             UILanguage: 'en-US'
           },
-          InputLocale: 'en-US',
+          InputLocale: '0409:00000409',
           SystemLocale: 'en-US',
           UILanguage: 'en-US',
+          UILanguageFallback: 'en-US',
           UserLocale: 'en-US'
         },
         {
@@ -132,26 +129,6 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
             language: 'neutral',
             versionScope: 'nonSxS'
           },
-          ImageInstall: {
-            OSImage: {
-              InstallTo: {
-                DiskID: 0,
-                PartitionID: 2
-              }
-            }
-          },
-          UserData: {
-            ProductKey: {
-              // This product key does not activate windows, just set the version to install, in our case
-              // we use windows 10 home or 11 home. Both keys are Windows Generic key.
-              // DON'T WORRY, IT'S 100 LEGAL, these are not stolen keys, are just generic one used by
-              // microsoft to specify the version
-              // https://devicepartner.microsoft.com/en-us/communications/comm-windows-10-build
-              // https://learn.microsoft.com/en-us/windows-server/get-started/kms-client-activation-keys
-              Key: 'TX9XD-98N7V-6WMQ6-BX7FG-H8Q99' // both 10 home and 11 home use the same generic key
-            },
-            AcceptEula: true
-          },
           DiskConfiguration: {
             Disk: {
               $: {
@@ -160,48 +137,101 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
               DiskID: 0,
               WillWipeDisk: true,
               CreatePartitions: {
-                CreatePartition: [{
-                  $: {
-                    'wcm:action': 'add'
+                CreatePartition: [
+                  {
+                    $: {
+                      'wcm:action': 'add'
+                    },
+                    Order: 1,
+                    Type: 'Primary',
+                    Size: 300
                   },
-                  Order: 1,
-                  Type: 'Primary',
-                  Size: 900
-                },
-                {
-                  $: {
-                    'wcm:action': 'add'
+                  {
+                    $: {
+                      'wcm:action': 'add'
+                    },
+                    Order: 2,
+                    Type: 'EFI',
+                    Size: 500
                   },
-                  Order: 2,
-                  Type: 'Primary',
-                  // Extend: true
-                }]
+                  {
+                    $: {
+                      'wcm:action': 'add'
+                    },
+                    Order: 3,
+                    Type: 'MSR',
+                    Size: 128
+                  },
+                  {
+                    $: {
+                      'wcm:action': 'add'
+                    },
+                    Order: 4,
+                    Type: 'Primary',
+                    Extend: true
+                  }
+                ]
               },
               ModifyPartitions: {
-                ModifyPartition: [{
-                  $: {
-                    'wcm:action': 'add'
+                ModifyPartition: [
+                  {
+                    $: {
+                      'wcm:action': 'add'
+                    },
+                    Order: 1,
+                    PartitionID: 1,
+                    Label: 'WINRE',
+                    Format: 'NTFS',
+                    TypeID: 'DE94BBA4-06D1-4D40-A16A-BFD50179D6AC'
                   },
-                  Order: 1,
-                  PartitionID: 1,
-                  Label: 'System',
-                  Format: 'FAT32',
-                  Active: true
-                },
-                {
-                  $: {
-                    'wcm:action': 'add'
+                  {
+                    $: {
+                      'wcm:action': 'add'
+                    },
+                    Order: 2,
+                    PartitionID: 2,
+                    Label: 'System',
+                    Format: 'FAT32'
                   },
-                  Order: 2,
-                  PartitionID: 2,
-                  Label: 'Windows',
-                  Letter: 'C',
-                  Format: 'NTFS'
-                }]
-              },
-            },
-            WillShowUI: 'OnError'
+                  {
+                    $: {
+                      'wcm:action': 'add'
+                    },
+                    Order: 3,
+                    PartitionID: 3
+                  },
+                  {
+                    $: {
+                      'wcm:action': 'add'
+                    },
+                    Order: 4,
+                    PartitionID: 4,
+                    Label: 'MainDiskName',
+                    Letter: 'C',
+                    Format: 'NTFS'
+                  }
+                ]
+              }
+            }
           },
+          ImageInstall: {
+            OSImage: {
+              InstallTo: {
+                DiskID: 0,
+                PartitionID: 4
+              },
+              InstallToAvailablePartition: false
+            }
+          },
+          UserData: {
+            ProductKey: {
+              Key: 'W269N-WFGWX-YVC9B-4J6C9-T83GX',
+              WillShowUI: 'Never'
+            },
+            AcceptEula: true,
+            FullName: this.username,
+            Organization: 'OrgName'
+          }
         },
         {
           $: {
@@ -217,7 +247,7 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
                 'wcm:action': 'add',
                 'wcm:keyValue': '1'
               },
-              Path: (this.version >= 11 ? 'E:\\amd64\\w11' : 'D:\\amd64\\w10'),
+              Path: (this.version >= 11 ? 'E:\\amd64\\w11' : 'E:\\amd64\\w10'),
               Credentials: {
                 Domain: '',
                 Username: '',
@@ -229,54 +259,45 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
       ]
     };
 
-    const generalize = {
+    let offlineServicing = {
       $: {
-        pass: 'generalize'
-      }
-    };
-
-    // Right now, does nothing, but could be used to modify windows register and enable or dissable features
-    const specialize = {
-      $: {
-        pass: 'specialize'
+        pass: 'offlineServicing'
       },
       component: [
         {
           $: {
-            name: 'Microsoft-Windows-Deployment',
+            name: 'Microsoft-Windows-LUA-Settings',
             processorArchitecture: 'amd64',
             publicKeyToken: '31bf3856ad364e35',
             language: 'neutral',
             versionScope: 'nonSxS'
           },
-        },
-        {
-          $: {
-            name: 'Microsoft-Windows-PnpCustomizationsNonWinPE',
-            processorArchitecture: 'amd64',
-            publicKeyToken: '31bf3856ad364e35',
-            language: 'neutral',
-            versionScope: 'nonSxS'
-          }
+          EnableLUA: false
         }
       ]
     };
 
-    const auditSystem = {
+    let generalize = {
       $: {
-        pass: 'auditSystem'
-      }
+        pass: 'generalize'
+      },
+      component: [
+        {
+          $: {
+            name: 'Microsoft-Windows-Security-SPP',
+            processorArchitecture: 'amd64',
+            publicKeyToken: '31bf3856ad364e35',
+            language: 'neutral',
+            versionScope: 'nonSxS'
+          },
+          SkipRearm: 1
+        }
+      ]
     };
 
-    const auditUser = {
+    let specialize = {
       $: {
-        pass: 'auditUser'
-      }
-    };
-
-    let oobeSystem: any = {
-      $: {
-        pass: 'oobeSystem'
+        pass: 'specialize'
       },
       component: [
         {
@@ -287,13 +308,31 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
             language: 'neutral',
             versionScope: 'nonSxS'
           },
-          SetupUILanguage: {
-            UILanguage: 'en-US'
-          },
-          InputLocale: 'en-US',
+          InputLocale: '0409:00000409',
           SystemLocale: 'en-US',
           UILanguage: 'en-US',
+          UILanguageFallback: 'en-US',
           UserLocale: 'en-US'
+        },
+        {
+          $: {
+            name: 'Microsoft-Windows-Security-SPP-UX',
+            processorArchitecture: 'amd64',
+            publicKeyToken: '31bf3856ad364e35',
+            language: 'neutral',
+            versionScope: 'nonSxS'
+          },
+          SkipAutoActivation: true
+        },
+        {
+          $: {
+            name: 'Microsoft-Windows-SQMApi',
+            processorArchitecture: 'amd64',
+            publicKeyToken: '31bf3856ad364e35',
+            language: 'neutral',
+            versionScope: 'nonSxS'
+          },
+          CEIPEnabled: 0
         },
         {
           $: {
@@ -302,6 +341,43 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
             publicKeyToken: '31bf3856ad364e35',
             language: 'neutral',
             versionScope: 'nonSxS'
+          },
+          ComputerName: 'ComputerName',
+          ProductKey: 'W269N-WFGWX-YVC9B-4J6C9-T83GX'
+        }
+      ]
+    };
+
+    let oobeSystem = {
+      $: {
+        pass: 'oobeSystem'
+      },
+      component: [
+        {
+          $: {
+            name: 'Microsoft-Windows-Shell-Setup',
+            processorArchitecture: 'amd64',
+            publicKeyToken: '31bf3856ad364e35',
+            language: 'neutral',
+            versionScope: 'nonSxS'
+          },
+          AutoLogon: {
+            Password: {
+              Value: this.password,
+              PlainText: true
+            },
+            Enabled: true,
+            Username: this.username
+          },
+          OOBE: {
+            HideEULAPage: true,
+            HideOEMRegistrationScreen: true,
+            HideOnlineAccountScreens: true,
+            HideWirelessSetupInOOBE: true,
+            NetworkLocation: 'Home',
+            SkipUserOOBE: true,
+            SkipMachineOOBE: true,
+            ProtectYourPC: 1
           },
           UserAccounts: {
             LocalAccounts: {
@@ -314,32 +390,58 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
                 Password: {
                   Value: this.password,
                   PlainText: true
-                }
+                },
+                Description: 'User Description',
+                DisplayName: this.username
               }
             }
           },
-          OOBE: {
-            ProtectYourPC: 3, // Turn off sharing data and things like that
-            HideEULAPage: true,
-            HideWirelessSetupInOOBE: true
-          }
+          RegisteredOrganization: 'OrgName',
+          RegisteredOwner: this.username,
+          DisableAutoDaylightTimeSet: false,
+          FirstLogonCommands: {
+            SynchronousCommand: [
+              {
+                $: {
+                  'wcm:action': 'add'
+                },
+                Description: 'Control Panel View',
+                Order: 1,
+                CommandLine: 'reg add "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\ControlPanel" /v StartupPage /t REG_DWORD /d 1 /f',
+                RequiresUserInput: true
+              },
+              {
+                $: {
+                  'wcm:action': 'add'
+                },
+                Order: 2,
+                Description: 'Control Panel Icon Size',
+                RequiresUserInput: false,
+                CommandLine: 'reg add "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\ControlPanel" /v AllItemsIconView /t REG_DWORD /d 0 /f'
+              },
+              {
+                $: {
+                  'wcm:action': 'add'
+                },
+                Order: 3,
+                RequiresUserInput: false,
+                CommandLine: 'cmd /C wmic useraccount where name="Username" set PasswordExpires=false',
+                Description: 'Password Never Expires'
+              }
+            ]
+          },
+          TimeZone: 'Eastern Standard Time'
         }
       ]
-    }
+    };
 
-    if (this.productKey) {
-      oobeSystem['component'][1]["ProductKey"] = this.productKey
-    }
+    root['unattend']['settings'].push(windowsPE);
+    root['unattend']['settings'].push(offlineServicing);
+    root['unattend']['settings'].push(generalize);
+    root['unattend']['settings'].push(specialize);
+    root['unattend']['settings'].push(oobeSystem);
 
-    // lets add everything to root component
-    root['unattend']['settings'].push(windowsPE)
-    root['unattend']['settings'].push(generalize)
-    root['unattend']['settings'].push(specialize)
-    root['unattend']['settings'].push(auditSystem)
-    root['unattend']['settings'].push(auditUser)
-    root['unattend']['settings'].push(oobeSystem)
-
-    let response = builder.buildObject(root)
+    let response = builder.buildObject(root);
     console.log(response);
     return response;
   }

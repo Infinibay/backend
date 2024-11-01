@@ -33,6 +33,7 @@ type DepartmentType {
   internetSpeed: Int
   ipSubnet: String
   name: String!
+  totalMachines: Float
 }
 
 type DyummyType {
