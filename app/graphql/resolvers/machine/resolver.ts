@@ -322,7 +322,13 @@ export class MachineMutations {
                 const filesToDelete = [
                     xmlGenerator.getUefiVarFile(),
                     ...xmlGenerator.getDisks()
-                ].filter(file => file && existsSync(file));
+                ].filter(file => {
+                    // return false if the file is virtio.iso
+                    if (file && file.includes('virtio.iso')) {
+                        return false;
+                    }
+                    return file && existsSync(file);
+                });
                 console.log("Removing files", filesToDelete);
 
                 // Delete associated files

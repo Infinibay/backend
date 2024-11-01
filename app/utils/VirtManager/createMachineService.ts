@@ -285,6 +285,9 @@ export class CreateMachineService {
             xmlGenerator.addVirtIODrivers();
         }
 
+        // Enable high-resolution graphics for the VM
+        xmlGenerator.enableHighResolutionGraphics();
+
         // Get a new port for the machine
         this.debug.log('Getting new port for machine', machine.name);
 

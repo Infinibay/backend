@@ -391,5 +391,34 @@ export class XMLGenerator {
   getDisks(): string[] {
     return this.xml?.domain?.devices?.[0]?.disk?.map((disk: any) => disk.source[0].$.file) || []
   }
+
+  enableHighResolutionGraphics(): void {
+    // Ensure the devices array exists
+    this.xml.domain.devices[0].video = this.xml.domain.devices[0].video || [];
+    // Configure the video device with virtio model and acceleration
+    const videoDevice = {
+      model: [
+        {
+          $: {
+            type: 'virtio',
+            heads: '1',
+            ram: '65536',
+            vram: '65536',
+            vgamem: '16384',
+          },
+        },
+      ],
+      acceleration: [
+        {
+          $: {
+            accel3d: 'yes',
+            accel2d: 'yes',
+          },
+        },
+      ],
+    };
+    // Add the video device to the devices list
+    this.xml.domain.devices[0].video.push(videoDevice);
+  }
 }
 

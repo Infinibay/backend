@@ -427,6 +427,51 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
                 RequiresUserInput: false,
                 CommandLine: 'cmd /C wmic useraccount where name="Username" set PasswordExpires=false',
                 Description: 'Password Never Expires'
+              },
+              {
+                $: {
+                  'wcm:action': 'add'
+                },
+                Order: 4,
+                Description: 'Install Virtio Drivers',
+                RequiresUserInput: false,
+                CommandLine: 'msiexec /i D:\\virtio-win-gt-x64.msi /quiet /norestart'
+              },
+              {
+                $: {
+                  'wcm:action': 'add'
+                },
+                Order: 5,
+                Description: 'Install Virtio Guest Tools',
+                RequiresUserInput: false,
+                CommandLine: 'D:\\virtio-win-guest-tools.exe /quiet /norestart'
+              },
+              {
+                $: {
+                  'wcm:action': 'add'
+                },
+                Order: 6,
+                Description: 'Unmount Disk D',
+                RequiresUserInput: false,
+                CommandLine: 'powershell -Command "Dismount-DiskImage -ImagePath D:"'
+              },
+              {
+                $: {
+                  'wcm:action': 'add'
+                },
+                Order: 7,
+                Description: 'Unmount Disk E',
+                RequiresUserInput: false,
+                CommandLine: 'powershell -Command "Dismount-DiskImage -ImagePath E:"'
+              },
+              {
+                $: {
+                  'wcm:action': 'add'
+                },
+                Order: 8,
+                Description: 'Restart System',
+                RequiresUserInput: false,
+                CommandLine: 'shutdown /r /t 0'
               }
             ]
           },
