@@ -392,23 +392,23 @@ export class XMLGenerator {
     return this.xml?.domain?.devices?.[0]?.disk?.map((disk: any) => disk.source[0].$.file) || []
   }
 
+  // Enable high resolution graphics for the VM
   enableHighResolutionGraphics(): void {
-    // Ensure the devices array exists
+    // Ensure the video array exists
     this.xml.domain.devices[0].video = this.xml.domain.devices[0].video || [];
-    // Configure the video device with virtio model and acceleration
+    // Configure the video device with qxl model and appropriate attributes
     const videoDevice = {
       model: [
         {
           $: {
-            type: 'virtio',
-            heads: '1',
+            type: 'qxl',
             ram: '65536',
             vram: '65536',
             vgamem: '16384',
           },
         },
       ],
-      acceleration: [
+      accel: [
         {
           $: {
             accel3d: 'yes',
@@ -420,5 +420,19 @@ export class XMLGenerator {
     // Add the video device to the devices list
     this.xml.domain.devices[0].video.push(videoDevice);
   }
-}
 
+  // Enable USB tablet input device
+  // Improves mouse input in the guest OS, especially the synchronization between the host and guest cursor.
+  enableInputTablet(): void {
+    // Ensure the input array exists
+    this.xml.domain.devices[0].input = this.xml.domain.devices[0].input || [];
+    // Add USB tablet input device
+    const inputDevice = {
+      $: {
+        type: 'tablet',
+        bus: 'usb',
+      },
+    };
+    this.xml.domain.devices[0].input.push(inputDevice);
+  }
+}

@@ -435,7 +435,7 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
                 Order: 4,
                 Description: 'Install Virtio Drivers',
                 RequiresUserInput: false,
-                CommandLine: 'msiexec /i D:\\virtio-win-gt-x64.msi /quiet /norestart'
+                CommandLine: 'msiexec /i E:\\virtio-win-gt-x64.msi /quiet /norestart'
               },
               {
                 $: {
@@ -444,7 +444,7 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
                 Order: 5,
                 Description: 'Install Virtio Guest Tools',
                 RequiresUserInput: false,
-                CommandLine: 'D:\\virtio-win-guest-tools.exe /quiet /norestart'
+                CommandLine: 'E:\\virtio-win-guest-tools.exe /quiet /norestart'
               },
               {
                 $: {

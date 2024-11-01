@@ -288,6 +288,9 @@ export class CreateMachineService {
         // Enable high-resolution graphics for the VM
         xmlGenerator.enableHighResolutionGraphics();
 
+        // Add USB tablet input device for better mouse synchronization
+        xmlGenerator.enableInputTablet();
+
         // Get a new port for the machine
         this.debug.log('Getting new port for machine', machine.name);
 

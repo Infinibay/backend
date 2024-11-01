@@ -28,7 +28,12 @@ async function transformMachine(prismaMachine: any, prisma: any): Promise<Machin
     const template = prismaMachine.templateId ? await prisma.machineTemplate.findUnique({ where: { id: prismaMachine.templateId } }) : null;
     const department = prismaMachine.departmentId ? await prisma.department.findUnique({ where: { id: prismaMachine.departmentId } }) : null;
     const vncHost = prismaMachine.configuration.vncHost || process.env.VNC_HOST || 'localhost';
-    const vncPort = await new VncPortService().getVncPort(prismaMachine.internalName);
+    let vncPort;
+    try {
+        vncPort = await new VncPortService().getVncPort(prismaMachine.internalName)
+    } catch (e) {
+        console.log(e);
+    }
 
     return {
         ...prismaMachine,
