@@ -435,4 +435,32 @@ export class XMLGenerator {
     };
     this.xml.domain.devices[0].input.push(inputDevice);
   }
+
+  addGuestAgentChannel(): void {
+    // Ensure the channel array exists
+    this.xml.domain.devices[0].channel = this.xml.domain.devices[0].channel || [];
+    // Add QEMU Guest Agent virtio channel
+    const channelDevice = {
+      $: {
+        type: 'unix',
+      },
+      source: [
+        {
+          $: {
+            mode: 'bind',
+            path: `/var/lib/libvirt/qemu/channel/target/${this.xml.domain.name[0]}.org.qemu.guest_agent.${this.id}`,
+          },
+        },
+      ],
+      target: [
+        {
+          $: {
+            type: 'virtio',
+            name: `org.qemu.guest_agent.${this.id}`,
+          },
+        },
+      ],
+    };
+    this.xml.domain.devices[0].channel.push(channelDevice);
+  }
 }

@@ -453,7 +453,7 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
                 Order: 6,
                 Description: 'Unmount Disk D',
                 RequiresUserInput: false,
-                CommandLine: 'powershell -Command "Dismount-DiskImage -ImagePath D:"'
+                CommandLine: 'powershell -Command "(New-Object -ComObject Shell.Application).NameSpace(17).ParseName(\'D:\').InvokeVerb(\'Eject\')"'
               },
               {
                 $: {
@@ -462,7 +462,7 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
                 Order: 7,
                 Description: 'Unmount Disk E',
                 RequiresUserInput: false,
-                CommandLine: 'powershell -Command "Dismount-DiskImage -ImagePath E:"'
+                CommandLine: 'powershell -Command "(New-Object -ComObject Shell.Application).NameSpace(17).ParseName(\'E:\').InvokeVerb(\'Eject\')"'
               },
               {
                 $: {
@@ -476,8 +476,8 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
             ]
           },
           TimeZone: 'Eastern Standard Time'
-        }
-      ]
+        },
+      ],
     };
 
     root['unattend']['settings'].push(windowsPE);

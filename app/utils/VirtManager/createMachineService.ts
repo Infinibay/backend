@@ -291,6 +291,9 @@ export class CreateMachineService {
         // Add USB tablet input device for better mouse synchronization
         xmlGenerator.enableInputTablet();
 
+        // Add QEMU Guest Agent channel to the VM configuration
+        xmlGenerator.addGuestAgentChannel();
+
         // Get a new port for the machine
         this.debug.log('Getting new port for machine', machine.name);
 
