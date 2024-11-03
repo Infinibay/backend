@@ -56,6 +56,7 @@ model Machine {
   configuration      MachineConfiguration?
   departmentId       String?
   department         Department?     @relation(fields: [departmentId], references: [id])
+  pendingCommands    PendingCommand[]
 }
 
 model MachineConfiguration {
@@ -103,6 +104,7 @@ model Application {
   icon            String?
   os              String[]
   installCommand  String[]
+  parameters      Json
   createdAt       DateTime  @default(now())
   machines        MachineApplication[]
 }
@@ -112,8 +114,20 @@ model MachineApplication {
   applicationId String
   machine       Machine     @relation(fields: [machineId], references: [id])
   application   Application @relation(fields: [applicationId], references: [id])
+  parameters    Json
 
   @@id([machineId, applicationId])
+}
+
+model PendingCommand {
+  id         String   @id @default(uuid())
+  machineId  String
+  command    String
+  parameters Json
+  createdAt  DateTime @default(now())
+  machine    Machine  @relation(fields: [machineId], references: [id])
+
+  @@index([machineId])
 }
 
 model Notification {

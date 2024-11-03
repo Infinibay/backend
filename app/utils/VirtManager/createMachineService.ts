@@ -75,7 +75,7 @@ export class CreateMachineService {
         return configuration;
     }
 
-    private async fetchMachineApplications(machine: Machine): Promise<Application[]> {
+    private async fetchMachineApplications(machine: Machine): Promise<any[]> {
         const applications = await this.prisma!.machineApplication.findMany({
             where: { machineId: machine.id },
             include: { application: true },
@@ -84,7 +84,7 @@ export class CreateMachineService {
         return applications.map((ma) => ma.application);
     }
 
-    private createUnattendedManager(machine: Machine, username: string, password: string, productKey: string | undefined, applications: Application[]): UnattendedManagerBase {
+    private createUnattendedManager(machine: Machine, username: string, password: string, productKey: string | undefined, applications: any[]): UnattendedManagerBase {
         const osManagers = {
             'windows10': () => new UnattendedWindowsManager(10, username, password, productKey, applications),
             'windows11': () => new UnattendedWindowsManager(11, username, password, productKey, applications),

@@ -61,6 +61,7 @@ type Machine {
 input MachineApplicationInputType {
   applicationId: String! = ""
   machineId: String! = ""
+  parameters: JSONObject
 }
 
 input MachineOrderBy {

@@ -194,11 +194,13 @@ export class MachineMutations {
             }
 
             // Create application associations
+            // TODO: Missing parameters validation!!!!
             for (const application of input.applications) {
                 await tx.machineApplication.create({
                     data: {
                         machineId: createdMachine.id,
-                        applicationId: application.applicationId
+                        applicationId: application.applicationId,
+                        parameters: application.parameters
                     }
                 });
             }

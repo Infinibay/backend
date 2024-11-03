@@ -1,4 +1,4 @@
-import { Application } from '@prisma/client';
+import { MachineApplication, Application } from '@prisma/client';
 import { Builder } from 'xml2js';
 import { spawn } from 'child_process';
 import * as fs from 'fs';
@@ -47,14 +47,14 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
   private username: string = '';
   private password: string = '';
   private productKey: string | undefined = undefined;
-  private applications: Application[] = [];
+  private applications: MachineApplication[] = [];
 
   constructor(
     version: number,
     username: string,
     password: string,
     productKey: string | undefined,
-    applications: Application[]
+    applications: MachineApplication[]
   ) {
     super();
     this.configFileName = 'autounattend.xml';
@@ -64,6 +64,67 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
     this.productKey = productKey;
     this.applications = applications;
     this.isoPath = path.join(path.join(process.env.INFINIBAY_BASE_DIR ?? '/opt/infinibay', 'iso'), 'windows' + this.version.toString() + '.iso');
+  }
+
+  private getFirstLogonCommands(): any[] {
+    return [
+      {
+        $: { 'wcm:action': 'add' },
+        Description: 'Control Panel View',
+        Order: 1,
+        CommandLine: 'reg add "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\ControlPanel" /v StartupPage /t REG_DWORD /d 1 /f',
+        RequiresUserInput: true
+      },
+      {
+        $: { 'wcm:action': 'add' },
+        Order: 2,
+        Description: 'Control Panel Icon Size',
+        RequiresUserInput: false,
+        CommandLine: 'reg add "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\ControlPanel" /v AllItemsIconView /t REG_DWORD /d 0 /f'
+      },
+      {
+        $: { 'wcm:action': 'add' },
+        Order: 3,
+        RequiresUserInput: false,
+        CommandLine: 'cmd /C wmic useraccount where name="Username" set PasswordExpires=false',
+        Description: 'Password Never Expires'
+      },
+      {
+        $: { 'wcm:action': 'add' },
+        Order: 4,
+        Description: 'Install Virtio Drivers',
+        RequiresUserInput: false,
+        CommandLine: 'msiexec /i E:\\virtio-win-gt-x64.msi /quiet /norestart'
+      },
+      {
+        $: { 'wcm:action': 'add' },
+        Order: 5,
+        Description: 'Install Virtio Guest Tools',
+        RequiresUserInput: false,
+        CommandLine: 'E:\\virtio-win-guest-tools.exe /quiet /norestart'
+      },
+      {
+        $: { 'wcm:action': 'add' },
+        Order: 6,
+        Description: 'Unmount Disk D',
+        RequiresUserInput: false,
+        CommandLine: 'powershell -Command "(New-Object -ComObject Shell.Application).NameSpace(17).ParseName(\'D:\').InvokeVerb(\'Eject\')"'
+      },
+      {
+        $: { 'wcm:action': 'add' },
+        Order: 7,
+        Description: 'Unmount Disk E',
+        RequiresUserInput: false,
+        CommandLine: 'powershell -Command "(New-Object -ComObject Shell.Application).NameSpace(17).ParseName(\'E:\').InvokeVerb(\'Eject\')"'
+      },
+      {
+        $: { 'wcm:action': 'add' },
+        Order: 8,
+        Description: 'Restart System',
+        RequiresUserInput: false,
+        CommandLine: 'shutdown /r /t 0'
+      }
+    ];
   }
 
   /**
@@ -79,27 +140,11 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
    * https://docs.microsoft.com/en-us/windows-hardware/customize/desktop/unattend/microsoft-windows-shell-setup-firstlogoncommands
    */
   private addApplicationsToSettings(settings: any[]): void {
+    // Implementation to add applications to settings
   }
 
-  /**
-   * Generates a configuration string using XML format for a specific software.
-   *
-   * @returns {Promise<string>} The generated configuration string.
-   */
-  async generateConfig(): Promise<string> {
-    const builder = new Builder();
-    const settings: any[] = [];
-    let root: any = {
-      unattend: {
-        $: {
-          xmlns: 'urn:schemas-microsoft-com:unattend',
-          'xmlns:wcm': 'http://schemas.microsoft.com/WMIConfig/2002/State'
-        },
-        settings: []
-      }
-    };
-
-    let windowsPE = {
+  private getWindowsPEConfig(): any {
+    return {
       $: {
         pass: 'windowsPE'
       },
@@ -258,8 +303,10 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
         }
       ]
     };
+  }
 
-    let offlineServicing = {
+  private getOfflineServicingConfig(): any {
+    return {
       $: {
         pass: 'offlineServicing'
       },
@@ -276,8 +323,10 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
         }
       ]
     };
+  }
 
-    let generalize = {
+  private getGeneralizeConfig(): any {
+    return {
       $: {
         pass: 'generalize'
       },
@@ -294,8 +343,10 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
         }
       ]
     };
+  }
 
-    let specialize = {
+  private getSpecializeConfig(): any {
+    return {
       $: {
         pass: 'specialize'
       },
@@ -347,8 +398,10 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
         }
       ]
     };
+  }
 
-    let oobeSystem = {
+  private getOobeSystemConfig(): any {
+    return {
       $: {
         pass: 'oobeSystem'
       },
@@ -400,93 +453,42 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
           RegisteredOwner: this.username,
           DisableAutoDaylightTimeSet: false,
           FirstLogonCommands: {
-            SynchronousCommand: [
-              {
-                $: {
-                  'wcm:action': 'add'
-                },
-                Description: 'Control Panel View',
-                Order: 1,
-                CommandLine: 'reg add "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\ControlPanel" /v StartupPage /t REG_DWORD /d 1 /f',
-                RequiresUserInput: true
-              },
-              {
-                $: {
-                  'wcm:action': 'add'
-                },
-                Order: 2,
-                Description: 'Control Panel Icon Size',
-                RequiresUserInput: false,
-                CommandLine: 'reg add "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\ControlPanel" /v AllItemsIconView /t REG_DWORD /d 0 /f'
-              },
-              {
-                $: {
-                  'wcm:action': 'add'
-                },
-                Order: 3,
-                RequiresUserInput: false,
-                CommandLine: 'cmd /C wmic useraccount where name="Username" set PasswordExpires=false',
-                Description: 'Password Never Expires'
-              },
-              {
-                $: {
-                  'wcm:action': 'add'
-                },
-                Order: 4,
-                Description: 'Install Virtio Drivers',
-                RequiresUserInput: false,
-                CommandLine: 'msiexec /i E:\\virtio-win-gt-x64.msi /quiet /norestart'
-              },
-              {
-                $: {
-                  'wcm:action': 'add'
-                },
-                Order: 5,
-                Description: 'Install Virtio Guest Tools',
-                RequiresUserInput: false,
-                CommandLine: 'E:\\virtio-win-guest-tools.exe /quiet /norestart'
-              },
-              {
-                $: {
-                  'wcm:action': 'add'
-                },
-                Order: 6,
-                Description: 'Unmount Disk D',
-                RequiresUserInput: false,
-                CommandLine: 'powershell -Command "(New-Object -ComObject Shell.Application).NameSpace(17).ParseName(\'D:\').InvokeVerb(\'Eject\')"'
-              },
-              {
-                $: {
-                  'wcm:action': 'add'
-                },
-                Order: 7,
-                Description: 'Unmount Disk E',
-                RequiresUserInput: false,
-                CommandLine: 'powershell -Command "(New-Object -ComObject Shell.Application).NameSpace(17).ParseName(\'E:\').InvokeVerb(\'Eject\')"'
-              },
-              {
-                $: {
-                  'wcm:action': 'add'
-                },
-                Order: 8,
-                Description: 'Restart System',
-                RequiresUserInput: false,
-                CommandLine: 'shutdown /r /t 0'
-              }
-            ]
+            SynchronousCommand: this.getFirstLogonCommands()
           },
           TimeZone: 'Eastern Standard Time'
         },
       ],
     };
+  }
 
-    root['unattend']['settings'].push(windowsPE);
-    root['unattend']['settings'].push(offlineServicing);
-    root['unattend']['settings'].push(generalize);
-    root['unattend']['settings'].push(specialize);
-    root['unattend']['settings'].push(oobeSystem);
+  /**
+   * Generates a configuration string using XML format for a specific software.
+   *
+   * @returns {Promise<string>} The generated configuration string.
+   */
+  async generateConfig(): Promise<string> {
+    const builder = new Builder();
+    const settings: any[] = [];
 
-    let response = builder.buildObject(root);
+    settings.push(this.getWindowsPEConfig());
+    settings.push(this.getOfflineServicingConfig());
+    settings.push(this.getGeneralizeConfig());
+    settings.push(this.getSpecializeConfig());
+    settings.push(this.getOobeSystemConfig());
+
+    this.addApplicationsToSettings(settings);
+
+    const root: any = {
+      unattend: {
+        $: {
+          xmlns: 'urn:schemas-microsoft-com:unattend',
+          'xmlns:wcm': 'http://schemas.microsoft.com/WMIConfig/2002/State'
+        },
+        settings: settings
+      }
+    };
+
+    const response = builder.buildObject(root);
     console.log(response);
     return response;
   }
