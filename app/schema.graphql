@@ -3,6 +3,24 @@
 # !!!   DO NOT MODIFY THIS FILE BY YOURSELF   !!!
 # -----------------------------------------------
 
+type ApplicationType {
+  createdAt: DateTimeISO!
+  description: String
+  id: ID!
+  installCommand: JSONObject!
+  name: String!
+  os: [String!]!
+  parameters: JSONObject
+}
+
+input CreateApplicationInputType {
+  description: String
+  installCommand: JSONObject!
+  name: String! = ""
+  os: [String!]! = []
+  parameters: JSONObject = null
+}
+
 input CreateMachineInputType {
   applications: [MachineApplicationInputType!]! = []
   name: String! = ""
@@ -61,7 +79,7 @@ type Machine {
 input MachineApplicationInputType {
   applicationId: String! = ""
   machineId: String! = ""
-  parameters: JSONObject
+  parameters: JSONObject = null
 }
 
 input MachineOrderBy {
@@ -146,17 +164,20 @@ type MachineTemplateType {
 }
 
 type Mutation {
+  createApplication(input: CreateApplicationInputType!): ApplicationType!
   createDepartment(name: String!): DepartmentType!
   createMachine(input: CreateMachineInputType!): Machine!
   createMachineTemplate(input: MachineTemplateInputType!): MachineTemplateType!
   createMachineTemplateCategory(input: MachineTemplateCategoryInputType!): MachineTemplateCategoryType!
   createUser(input: CreateUserInputType!): UserType!
+  deleteApplication(id: String!): Boolean!
   destroyDepartment(id: String!): DepartmentType!
   destroyMachine(id: String!): SuccessType!
   powerOff(id: String!): SuccessType!
   powerOn(id: String!): SuccessType!
   setupNode: DyummyType!
   suspend(id: String!): SuccessType!
+  updateApplication(id: String!, input: CreateApplicationInputType!): ApplicationType!
   updateMachineTemplate(id: String!, input: MachineTemplateInputType!): MachineTemplateType!
   updateMachineTemplateCategory(id: String!, input: MachineTemplateCategoryInputType!): MachineTemplateCategoryType!
   updateUser(id: String!, input: UpdateUserInputType!): UserType!
@@ -173,6 +194,8 @@ input PaginationInputType {
 }
 
 type Query {
+  application(id: String!): ApplicationType
+  applications: [ApplicationType!]!
   checkSetupStatus: DyummyType!
   currentUser: UserType!
   department(id: String!): DepartmentType

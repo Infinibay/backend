@@ -46,8 +46,10 @@ export class CreateMachineService {
                 await this.updateMachineStatus(tx, machine.id, 'running');
             });
             return true;
-        } catch (error) {
+        } catch (error: any) {
             console.error(`Error creating machine: ${error}`);
+            // print the stack trace
+            console.error(error.stack);
             await this.rollback(machine, newIsoPath);
             throw new Error('Error creating machine');
         }
@@ -137,7 +139,15 @@ export class CreateMachineService {
         if (!vol) {
             throw new Error('Failed to create storage volume');
         }
-        return vol;
+
+        // Ensure the volume is created and log its details
+        const createdVol = StorageVol.lookupByName(storagePool, `${machine.internalName}-main.qcow2`);
+        if (!createdVol) {
+            throw new Error('Storage volume not found after creation');
+        }
+        this.debug.log(`Storage volume created successfully: ${createdVol.getName()}`);
+
+        return createdVol;
     }
 
     private async defineAndStartVM(xmlGenerator: XMLGenerator, machine: Machine): Promise<VirtualMachine> {

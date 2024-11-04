@@ -133,7 +133,7 @@ export class MachineApplicationInputType {
     applicationId: string = ''
 
     @Field(() => GraphQLJSONObject, { nullable: true })
-    parameters?: any | undefined
+    parameters?: any = null;
 }
 
 @InputType()

@@ -150,14 +150,14 @@ spice-vdagent
       app.os.includes('redhat')
     );
 
-    redHatApps.forEach(app => {
-      // Find the Red Hat install command
-      const redHatInstallIndex = app.os.findIndex(os => os === 'redhat');
-      if (redHatInstallIndex !== -1 && app.installCommand[redHatInstallIndex]) {
-        // Add the command to the post-installation script
-        postInstallScript += `${app.installCommand[redHatInstallIndex]}\n`;
-      }
-    });
+    // redHatApps.forEach(app => {
+    //   // Find the Red Hat install command
+    //   const redHatInstallIndex = app.os.findIndex(os => os === 'redhat');
+    //   if (redHatInstallIndex !== -1 && app.installCommand[redHatInstallIndex]) {
+    //     // Add the command to the post-installation script
+    //     postInstallScript += `${app.installCommand[redHatInstallIndex]}\n`;
+    //   }
+    // });
 
     postInstallScript += `\n`;
 

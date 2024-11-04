@@ -2,6 +2,8 @@ import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcrypt";
 import dotenv from "dotenv";
 
+import createApplications from './seeds/applications';
+
 dotenv.config();
 
 const prisma = new PrismaClient();
@@ -91,7 +93,7 @@ async function createDefaultMachineTemplate(defaultCategoryId: string) {
 
 async function main() {
   try {
-    await prisma.$transaction(async (prisma) => {
+    await prisma.$transaction(async (transactionPrisma) => {
       await createAdminUser();
       await createDefaultDepartment();
       const defaultCategory = await createDefaultMachineTemplateCategory();
@@ -99,6 +101,7 @@ async function main() {
         await updateMachineTemplates(defaultCategory.id);
         await createDefaultMachineTemplate(defaultCategory.id);
       }
+      await createApplications(transactionPrisma);
     });
     console.log("Seeding completed successfully");
   } catch (error) {

@@ -320,10 +320,6 @@ export class MachineMutations {
                 //@ts-ignore
                 await domain.destroy();
 
-                // Undefine the domain from libvirt
-                console.log("Undefining domain");
-                domain.undefine();
-
 
                 // Prepare list of files to delete (UEFI var file and disk files)
                 const filesToDelete = [
@@ -342,6 +338,15 @@ export class MachineMutations {
                 await Promise.all(filesToDelete.map(file =>
                     fs.unlink(file).catch(e => this.debug.log(`Error deleting ${file}: ${e}`))
                 ));
+
+                // Undefine the domain from libvirt
+                console.log("Undefining domain");
+                domain.undefine();
+
+                // Remove all machineApplications
+                await tx.machineApplication.deleteMany({
+                    where: { machineId: machine.id }
+                });
 
                 // Remove database records
                 await tx.machineConfiguration.delete({ where: { machineId: machine.id } });

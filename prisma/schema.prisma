@@ -103,7 +103,7 @@ model Application {
   url             String?
   icon            String?
   os              String[]
-  installCommand  String[]
+  installCommand  Json
   parameters      Json
   createdAt       DateTime  @default(now())
   machines        MachineApplication[]

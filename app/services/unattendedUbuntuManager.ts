@@ -109,11 +109,12 @@ export class UnattendedUbuntuManager extends UnattendedManagerBase {
   }
 
   private getUbuntuInstallCommand(app: Application): string | undefined {
-    for (let i = 0; i < app.os.length; i++) {
-      if (app.os[i] === 'ubuntu') {
-        return app.installCommand[i];
-      }
+    if (!app.installCommand || typeof app.installCommand !== 'object') {
+      return undefined;
     }
+
+    const installCommands = app.installCommand as Record<string, string>;
+    return installCommands['ubuntu'];
   }
 
   async addAutoinstallConfigFile(content: string, extractDir: string, filename: string) {
@@ -136,7 +137,7 @@ export class UnattendedUbuntuManager extends UnattendedManagerBase {
         initrd  /casper/initrd
     }
      */
-    const content:string = `
+    const content: string = `
 menuentry "Autoinstall Ubuntu Server" {
     set gfxpayload=keep
     linux   /casper/vmlinuz quiet autoinstall quiet ds='nocloud;s=/cdrom/' --- ---

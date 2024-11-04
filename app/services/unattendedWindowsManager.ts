@@ -1,4 +1,4 @@
-import { MachineApplication, Application } from '@prisma/client';
+import { MachineApplication, Application, PrismaClient } from '@prisma/client';
 import { Builder } from 'xml2js';
 import { spawn } from 'child_process';
 import * as fs from 'fs';
@@ -47,14 +47,14 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
   private username: string = '';
   private password: string = '';
   private productKey: string | undefined = undefined;
-  private applications: MachineApplication[] = [];
+  private applications: any[] = [];
 
   constructor(
     version: number,
     username: string,
     password: string,
     productKey: string | undefined,
-    applications: MachineApplication[]
+    applications: any[]
   ) {
     super();
     this.configFileName = 'autounattend.xml';
@@ -67,7 +67,7 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
   }
 
   private getFirstLogonCommands(): any[] {
-    return [
+    let commands = [
       {
         $: { 'wcm:action': 'add' },
         Description: 'Control Panel View',
@@ -86,7 +86,7 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
         $: { 'wcm:action': 'add' },
         Order: 3,
         RequiresUserInput: false,
-        CommandLine: 'cmd /C wmic useraccount where name="Username" set PasswordExpires=false',
+        CommandLine: 'cmd /C wmic useraccount where name="' + this.username + '" set PasswordExpires=false',
         Description: 'Password Never Expires'
       },
       {
@@ -120,11 +120,40 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
       {
         $: { 'wcm:action': 'add' },
         Order: 8,
-        Description: 'Restart System',
+        Description: 'Create log directory',
         RequiresUserInput: false,
-        CommandLine: 'shutdown /r /t 0'
-      }
+        CommandLine: 'mkdir C:\\Windows\\Temp\\InstallLogs'
+      },
+      {
+        $: { 'wcm:action': 'add' },
+        Order: 9,
+        Description: 'Wait for network connectivity',
+        RequiresUserInput: false,
+        CommandLine: 'powershell -Command "& { $log = \'C:\\Windows\\Temp\\network.log\'; Write-Output \'Waiting for network...\' | Tee-Object -FilePath $log -Append; while (!(Test-Connection -ComputerName google.com -Count 1 -Quiet)) { Start-Sleep -Seconds 5 }; Write-Output \'Network is now available\' | Tee-Object -FilePath $log -Append }"'
+      },
+      {
+        $: { 'wcm:action': 'add' },
+        Order: 10,
+        Description: 'Wait and update winget',
+        RequiresUserInput: false,
+        CommandLine: 'powershell -Command "& { $log = \'C:\\Windows\\Temp\\winget.log\'; Write-Output \'Waiting for winget...\' | Tee-Object -FilePath $log -Append; while (-not (Get-Command winget -ErrorAction SilentlyContinue)) { Start-Sleep -Seconds 5 }; Write-Output \'Winget found, updating sources...\' | Tee-Object -FilePath $log -Append; winget source update | Tee-Object -FilePath $log -Append; Write-Output \'Winget ready\' | Tee-Object -FilePath $log -Append }"'
+      },
     ];
+
+    let apps = this.generateAppsToInstallScripts(12);
+    console.log("APPS: ", apps);
+
+    commands = commands.concat(apps);
+
+    // commands.push({
+    //   $: { 'wcm:action': 'add' },
+    //   Order: 11 + apps.length,
+    //   Description: 'Restart System',
+    //   RequiresUserInput: false,
+    //   CommandLine: 'shutdown /r /t 0'
+    // });
+    console.log(commands);
+    return commands;
   }
 
   /**
@@ -139,8 +168,46 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
    * For more information on the 'FirstLogonCommands' component, refer to:
    * https://docs.microsoft.com/en-us/windows-hardware/customize/desktop/unattend/microsoft-windows-shell-setup-firstlogoncommands
    */
-  private addApplicationsToSettings(settings: any[]): void {
-    // Implementation to add applications to settings
+  private generateAppsToInstallScripts(idx: number): any[] {
+    let prisma = new PrismaClient();
+    return this.applications
+      .map((app, localIndex) => {
+        const installCommand = app.installCommand['windows'];
+        console.log(app);
+        const application = prisma.application.findUnique({
+          where: {
+            id: app.applicationId,
+          },
+        });
+        if (!installCommand) {
+          return null;
+        }
+        const parsedCommand = this.parseInstallCommand(installCommand, app.parameters);
+        console.log(parsedCommand);
+        const wrappedCommand = `powershell -Command "& { $log = 'C:\\Windows\\Temp\\${app.name.replace(/\s+/g, '_')}.log'; Write-Output 'Starting installation of ${app.name}...' | Tee-Object -FilePath $log -Append; $result = $null; try { $result = (${parsedCommand}) 2>&1 | Tee-Object -FilePath $log -Append; if ($LASTEXITCODE -eq 0) { Write-Output '${app.name} installed successfully' | Tee-Object -FilePath $log -Append } else { Write-Output '${app.name} installation failed with code $LASTEXITCODE' | Tee-Object -FilePath $log -Append } } catch { Write-Output $_.Exception.Message | Tee-Object -FilePath $log -Append } }"`;
+        return {
+          $: { 'wcm:action': 'add' },
+          Description: "Install " + app.name,
+          Order: idx + localIndex,
+          CommandLine: wrappedCommand,
+          RequiresUserInput: false,
+        };
+      })
+      .filter(app => app !== null);
+  }
+
+  private parseInstallCommand(command: string, parameters: any = null): string {
+    // Replace placeholders in the command with actual parameters
+    let parsedCommand = command;
+    if (parameters) {
+      for (const [key, value] of Object.entries(parameters)) {
+        const placeholder = `{{${key}}}`;
+        parsedCommand = parsedCommand.replace(new RegExp(placeholder, 'g'), value as string);
+      }
+    }
+    // TODO: Add some script to tell the host that the vm was installed properly if no error was thrown
+    // or to tell the host that the vm was not installed properly if an error was thrown
+    return parsedCommand;
   }
 
   private getWindowsPEConfig(): any {
@@ -475,8 +542,6 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
     settings.push(this.getGeneralizeConfig());
     settings.push(this.getSpecializeConfig());
     settings.push(this.getOobeSystemConfig());
-
-    this.addApplicationsToSettings(settings);
 
     const root: any = {
       unattend: {
