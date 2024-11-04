@@ -140,18 +140,18 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
       },
     ];
 
-    let apps = this.generateAppsToInstallScripts(12);
+    let apps = this.generateAppsToInstallScripts(11);
     console.log("APPS: ", apps);
 
     commands = commands.concat(apps);
 
-    // commands.push({
-    //   $: { 'wcm:action': 'add' },
-    //   Order: 11 + apps.length,
-    //   Description: 'Restart System',
-    //   RequiresUserInput: false,
-    //   CommandLine: 'shutdown /r /t 0'
-    // });
+    commands.push({
+      $: { 'wcm:action': 'add' },
+      Order: 11 + apps.length,
+      Description: 'Restart System',
+      RequiresUserInput: false,
+      CommandLine: 'shutdown /r /t 0'
+    });
     console.log(commands);
     return commands;
   }

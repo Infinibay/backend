@@ -225,6 +225,8 @@ const createApplications = async (prisma: Prisma.TransactionClient | PrismaClien
     )
   });
   // Docker
+  // TODO: update windows subsystem for linux
+  // Auto acept agreements
   await prisma.application.create({
     data: generateAppEntry(
       "Docker",
@@ -294,6 +296,64 @@ const createApplications = async (prisma: Prisma.TransactionClient | PrismaClien
       "wingetId": "JetBrains.PhpStorm"
     },
   ];
+  for (const app of jetbrainsApps) {
+    await prisma.application.create({
+      data: generateAppEntry(
+        app.name,
+        app.description,
+        ["windows"],
+        {
+          "windows": `winget install -e --silent --accept-source-agreements --accept-package-agreements --id=${app.wingetId}`,
+        }
+      )
+    });
+  }
+  // Adobe apps
+  const adobeApps = [
+    {
+      "name": "Adobe Acrobat Reader DC",
+      "description": "Adobe Acrobat Reader DC software is the free global standard for reliably viewing, printing, and commenting on PDF documents.",
+      "wingetId": "Adobe.AdobeAcrobatReaderDC"
+    },
+    {
+      "name": "Adobe Creative Cloud",
+      "description": "Adobe Creative Cloud is a collection of 20+ desktop and mobile apps and services for photography, design, video, web, UX, and more.",
+      "wingetId": "Adobe.CreativeCloud"
+    },
+    {
+      "name": "Adobe Illustrator",
+      "description": "Adobe Illustrator is a vector graphics editor and design program developed and marketed by Adobe Inc.",
+      "wingetId": "Adobe.Illustrator"
+    },
+    {
+      "name": "Adobe Photoshop",
+      "description": "Adobe Photoshop is a raster graphics editor developed and published by Adobe Inc.",
+      "wingetId": "Adobe.Photoshop"
+    },
+    {
+      "name": "Adobe Premiere Pro",
+      "description": "Adobe Premiere Pro is a timeline-based video editing software application developed by Adobe Inc.",
+      "wingetId": "Adobe.PremierePro"
+    },
+    {
+      "name": "Adobe XD",
+      "description": "Adobe XD is a vector-based user experience design tool for web apps and mobile apps, developed and published by Adobe Inc.",
+      "wingetId": "Adobe.XD"
+    },
+  ];
+  for (const app of adobeApps) {
+    await prisma.application.create({
+      data: generateAppEntry(
+        app.name,
+        app.description,
+        ["windows"],
+        {
+          "windows": `winget install -e --silent --accept-source-agreements --accept-package-agreements --id=${app.wingetId}`,
+        }
+      )
+    });
+  }
+
 };
 
 export default createApplications;
