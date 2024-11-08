@@ -254,7 +254,7 @@ export class MachineMutations {
         @Arg('id') id: string,
         @Ctx() { prisma, user }: InfinibayContext
     ): Promise<SuccessType> {
-        return this.changeMachineState(id, prisma, user, 'destroy', 'off');
+        return this.changeMachineState(id, prisma, user, 'shutdown', 'off');
     }
 
     @Mutation(() => SuccessType)
@@ -415,6 +415,9 @@ export class MachineMutations {
                         result = 0;
                         // result = await domain.destroy(libvirt.VIR_DOMAIN_DESTROY_GRACEFUL);
                     }
+                    break;
+                case 'shutdown':
+                    result = await domain.shutdown() || 0;
                     break;
                 case 'suspend':
                     result = await domain.suspend() || 0;
