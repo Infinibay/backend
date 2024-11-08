@@ -374,7 +374,7 @@ export class MachineMutations {
         id: string,
         prisma: any,
         user: any,
-        action: 'powerOn' | 'destroy' | 'suspend',
+        action: 'powerOn' | 'destroy' | 'shutdown' | 'suspend',
         newStatus: 'running' | 'off' | 'suspended'
     ): Promise<SuccessType> {
         let libvirtConnection: Connection | null = null;
