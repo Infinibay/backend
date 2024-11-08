@@ -444,11 +444,13 @@ export class XMLGenerator {
       $: {
         type: 'unix',
       },
-      source: [
+      address: [
         {
           $: {
-            mode: 'bind',
-            path: `/var/lib/libvirt/qemu/channel/target/${this.xml.domain.name[0]}.org.qemu.guest_agent.${this.id}`,
+            mode: 'virtio-serial',
+            controller: '0',
+            bus: '0',
+            port: '1',
           },
         },
       ],
@@ -456,7 +458,7 @@ export class XMLGenerator {
         {
           $: {
             type: 'virtio',
-            name: `org.qemu.guest_agent.${this.id}`,
+            name: `org.qemu.guest_agent.0`,
           },
         },
       ],
