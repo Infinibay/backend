@@ -155,6 +155,7 @@ export class CreateMachineService {
             throw new Error('Libvirt connection not established');
         }
         const xml = xmlGenerator.generate();
+        console.log(`Generated XML for machine ${machine.name}:\n${xml}`);
         const vm = VirtualMachine.defineXml(this.libvirt, xml);
         if (!vm) {
             let error = LibvirtError.lastError();
@@ -284,12 +285,14 @@ export class CreateMachineService {
 
         // Set the machine's properties
         xmlGenerator.setMemory(template.ram);
-        xmlGenerator.setVCPUs(template.cores);
         xmlGenerator.enableTPM('2.0');
         xmlGenerator.setStorage(template.storage);
         xmlGenerator.setUEFI();
         xmlGenerator.addNetworkInterface('default', 'virtio');
         xmlGenerator.setBootDevice(['hd', 'cdrom']);
+        xmlGenerator.addAudioDevice();
+        xmlGenerator.setVCPUs(template.cores);
+        xmlGenerator.setCpuPinningOptimization(template.cores);
         if (newIsoPath) {
             xmlGenerator.addCDROM(newIsoPath, 'sata');
             xmlGenerator.addVirtIODrivers();

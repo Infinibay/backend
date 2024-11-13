@@ -2,6 +2,8 @@ import xml2js from 'xml2js';
 import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
 import fs from 'fs';
+import os from 'os';
+
 export enum NetworkModel {
   VIRTIO = 'virtio',
   E1000 = 'e1000',
@@ -61,18 +63,24 @@ export class XMLGenerator {
     const sizeInKiB = size * 1024 * 1024;
     this.xml.domain.memory = [{ _: sizeInKiB, $: { unit: 'KiB' } }];
     this.xml.domain.currentMemory = [{ _: sizeInKiB, $: { unit: 'KiB' } }];
+    this.xml.domain.devices[0].memballoon = [{ $: { model: 'virtio' } }];
   }
 
   setVCPUs(count: number): void {
-    // this.xml.domain.vcpu = [{ _: count, $: { placement: 'static', current: count } }];
-    // this.xml.domain.cpu = [{ model: [{ _: 'host-model', $: { mode: 'custom', match: 'exact' } }], topology: [{ $: { sockets: '1', cores: count.toString(), threads: '1' } }] }];
     this.xml.domain.vcpu = [{ _: count, $: { placement: 'static', current: count } }]; //current may not be needed
     this.xml.domain.cpu = {
       $: {
-        mode: "host-passthrough",
-        check: "none",
-        migratable: "on"
-      }
+        mode: 'host-passthrough',
+        check: 'none',
+        migratable: 'on',
+      },
+    };
+    // https://libvirt.org/formatdomain.html#hypervisor-features
+    this.xml.domain.features[0].hyperv = {
+      $: { mode: 'custom' },
+      relaxed: { $: { state: 'on' } },
+      vapic: { $: { state: 'on' } },
+      spinlocks: { $: { state: 'on', retries: '8191' } },
     };
     this.xml.domain.clock = {
       $: {
@@ -86,80 +94,10 @@ export class XMLGenerator {
       ]
     }
 
-    // <pm>
-    // <suspend-to-mem enabled='no'/>
-    // <suspend-to-disk enabled='no'/>
-    // </pm>
     this.xml.domain.pm = {
       "suspend-to-mem": { $: { enabled: "no" } },
       "suspend-to-disk": { $: { enabled: "no" } }
     }
-
-    // this.xml.domain.cpu = [{
-    //   mode: 'host-model',
-    //   model: { $: { fallback: 'allow' } },
-    //   model: [{ _: 'kvm64', $: { mode: 'custom', match: 'exact' } }],
-    // topology: [{ $: { sockets: '1', cores: count.toString(), threads: '1' } }],
-    // feature: [
-    //   // fpu: Floating Point Unit, fundamental for any modern processor. Introduced in 1985.
-    //   { $: { name: 'fpu', policy: 'require' } },
-    //   // vme: Virtual 8086 Mode Enhancements, commonly supported. Introduced in 1985.
-    //   { $: { name: 'vme', policy: 'require' } },
-    //   // de: Debugging Extensions. Introduced in 1990.
-    //   { $: { name: 'de', policy: 'require' } },
-    //   // pse: Page Size Extensions, for larger pages in memory management. Introduced in 1995.
-    //   { $: { name: 'pse', policy: 'require' } },
-    //   // tsc: Time Stamp Counter, for timing and performance monitoring. Introduced in 1995.
-    //   { $: { name: 'tsc', policy: 'require' } },
-    //   // msr: Model-Specific Registers, used for various control and configuration settings. Introduced in 1995.
-    //   { $: { name: 'msr', policy: 'require' } },
-    //   // pae: Physical Address Extension, for accessing more than 4 GB of RAM. Introduced in 1995.
-    //   { $: { name: 'pae', policy: 'require' } },
-    //   // mce: Machine Check Exception, for error detection and handling. Introduced in 1995.
-    //   { $: { name: 'mce', policy: 'require' } },
-    //   // cx8: CMPXCHG8 instruction, for atomic operations on 64-bit data. Introduced in 1995.
-    //   { $: { name: 'cx8', policy: 'require' } },
-    //   // apic: Advanced Programmable Interrupt Controller, for handling interrupts. Introduced in 1995.
-    //   { $: { name: 'apic', policy: 'require' } },
-    //   // sep: SYSENTER and SYSEXIT instructions, for efficient transitions between user and kernel modes. Introduced in 1997.
-    //   { $: { name: 'sep', policy: 'require' } },
-    //   // mtrr: Memory Type Range Registers, for memory type and caching control. Introduced in 1997.
-    //   { $: { name: 'mtrr', policy: 'require' } },
-    //   // pge: Page Global Enable, for global page mapping in TLB. Introduced in 1997.
-    //   { $: { name: 'pge', policy: 'require' } },
-    //   // cmov: Conditional Move Instructions, for efficient conditional operations. Introduced in 1997.
-    //   { $: { name: 'cmov', policy: 'require' } },
-    //   // pat: Page Attribute Table, for fine-grained control of memory caching. Introduced in 1997.
-    //   { $: { name: 'pat', policy: 'require' } },
-    //   // clflush: Cache Line Flush instruction, used for cache control. Introduced in 1999.
-    //   { $: { name: 'clflush', policy: 'require' } },
-    //   // mmx: MultiMedia Extensions, for SIMD operations. Introduced in 1997.
-    //   { $: { name: 'mmx', policy: 'require' } },
-    //   // fxsr: FXSAVE and FXRSTOR instructions, for saving and restoring FPU context. Introduced in 1999.
-    //   { $: { name: 'fxsr', policy: 'require' } },
-    //   // sse: Streaming SIMD Extensions, for SIMD operations. Introduced in 1999.
-    //   { $: { name: 'sse', policy: 'require' } },
-    //   // sse2: Streaming SIMD Extensions 2, further SIMD enhancements. Introduced in 2001.
-    //   { $: { name: 'sse2', policy: 'require' } },
-    //   // sse3: Streaming SIMD Extensions 3. Introduced in 2004.
-    //   { $: { name: 'sse3', policy: 'require' } },
-    //   // ssse3: Supplemental Streaming SIMD Extensions 3, for enhanced SIMD capabilities. Introduced in 2006.
-    //   { $: { name: 'ssse3', policy: 'require' } },
-    //   // sse4.1: Streaming SIMD Extensions 4.1. Introduced in 2007.
-    //   { $: { name: 'sse4.1', policy: 'require' } },
-    //   // sse4.2: Streaming SIMD Extensions 4.2. Introduced in 2008.
-    //   { $: { name: 'sse4.2', policy: 'require' } },
-    //   // popcnt: POPCNT instruction, supported by most modern CPUs. Introduced in 2008.
-    //   { $: { name: 'popcnt', policy: 'require' } },
-    //   // aes: Advanced Encryption Standard New Instructions, common in CPUs post-2010. Introduced in 2010.
-    //   { $: { name: 'aes', policy: 'require' } }, // commented because cause issues in fedora 39
-    //   // avx: Advanced Vector Extensions, common in CPUs post-2011. Introduced in 2011.
-    //   { $: { name: 'avx', policy: 'require' } },
-    //   // hypervisor: Indicates that the code is running on a hypervisor. Introduced in 2005.
-    //   { $: { name: 'hypervisor', policy: 'require' } },
-    //   // Add more features as needed
-    // ],
-    // }];
   }
 
   setBootDevice(devices: ('fd' | 'hd' | 'cdrom' | 'network')[]): void {
@@ -185,7 +123,6 @@ export class XMLGenerator {
       $: { model: 'tpm-tis' },
       backend: [{
         $: { type: 'emulator', version: version },
-        // encryption: [{ $: { secret: secretUUID } }]
       }]
     }];
   }
@@ -196,13 +133,7 @@ export class XMLGenerator {
     }
     this.xml.domain.features[0].acpi = [{}]; // Advanced Configuration and Power Interface, for power management.
     this.xml.domain.features[0].apic = [{}]; // Advanced Programmable Interrupt Controller, for better handling of system interrupts.
-    // this.xml.domain.features[0].pae = [{}];  // Physical Address Extension, allows 32-bit CPUs to use more than 4 GB of memory.
-    // this.xml.domain.features[0].hap = [{}];  // Hardware Assisted Paging, also known as Extended Page Tables (EPT) or Nested Page Tables (NPT), improves performance of address translations.
-    // this.xml.domain.features[0].viridian = [{}]; // Viridian enlightenments, improves performance and compatibility on Hyper-V.
-    // this.xml.domain.features[0].privnet = [{}]; // Private network, improves network performance by avoiding MAC address conflicts.
-    // this.xml.domain.features[0].kvm = [{ "hint-dedicated": { $: { state: 'on' } } }]; // KVM features for performance improvement.
     this.xml.domain.features[0].kvm = [{ "hidden": { $: { state: 'on' } } }]; // KVM features for performance improvement.
-    // this.xml.domain.features[0].pvspinlock = [{ $: { state: 'on' } }]; // Paravirtualized spinlock, for improved performance in certain scenarios.
     this.xml.domain.features[0].hyperv = {
       $: { mode: "custom" },
       relaxed: { $: { state: "on" } },
@@ -246,9 +177,12 @@ export class XMLGenerator {
     }
     dev = this.getNextBus(dev);
 
+    // Enable io Threads for better performance
+    // https://libvirt.org/formatdomain.html#iothreads-allocation
+    this.xml.domain.iothreads = [{ _: '4' }];
     const disk = {
       $: { type: 'file', device: 'disk' },
-      driver: [{ $: { name: 'qemu', type: 'qcow2', discard: "unmap" } }],
+      driver: [{ $: { name: 'qemu', type: 'qcow2', cache: 'writeback', discard: 'unmap' } }],
       source: [{ $: { file: path } }],
       target: [{ $: { dev: dev, bus: bus } }],
       capacity: [{ _: String(size), $: { unit: 'G' } }],
@@ -267,7 +201,8 @@ export class XMLGenerator {
     const networkInterface = {
       $: { type: 'network' },
       source: [{ $: { network: network } }],
-      model: [{ $: { type: model } }],
+      model: [{ $: { type: 'virtio' } }],
+      driver: [{ $: { name: 'vhost', queues: '4' } }],
     };
 
     this.xml.domain.devices[0].interface = this.xml.domain.devices[0].interface || [];
@@ -447,6 +382,7 @@ export class XMLGenerator {
       address: [
         {
           $: {
+            type: 'virtio-serial',
             mode: 'virtio-serial',
             controller: '0',
             bus: '0',
@@ -465,4 +401,284 @@ export class XMLGenerator {
     };
     this.xml.domain.devices[0].channel.push(channelDevice);
   }
+
+  // UNUSED UNTESTED
+  addGpu(pciAddress: string): void {
+    this.xml.domain.devices[0].hostdev = this.xml.domain.devices[0].hostdev || [];
+    const gpu = {
+      $: { mode: 'subsystem', type: 'pci', managed: 'yes' },
+      source: [{ address: [{ $: { domain: '0x0000', bus: pciAddress.split(':')[0], slot: pciAddress.split(':')[1], function: pciAddress.split('.')[1] } }] }],
+    };
+    this.xml.domain.devices[0].hostdev.push(gpu);
+  }
+
+  addAudioDevice(): void {
+    this.xml.domain.devices[0].sound = this.xml.domain.devices[0].sound || [];
+    const audioDevice = {
+      $: { model: 'ich9' },
+    };
+    this.xml.domain.devices[0].sound.push(audioDevice);
+  }
+
+  disablePowerManagement(): void {
+    this.xml.domain.pm = {
+      "suspend-to-mem": { $: { enabled: "no" } },
+      "suspend-to-disk": { $: { enabled: "no" } },
+    };
+  }
+
+  getCpuInfo() {
+    const cpus = os.cpus();
+    const physicalCores = new Set();
+    cpus.forEach(cpu => {
+      const coreId = cpu.model + cpu.times.user; // Model + user time (to differentiate cores)
+      physicalCores.add(coreId);
+    });
+
+    const numCores = physicalCores.size;
+    const numThreads = cpus.length;
+
+    return { numCores, numThreads };
+  }
+
+  /**
+ * Detect and apply the best CPU pinning strategy.
+ * Attempts NUMA optimization first, falls back to round-robin if NUMA isn't possible.
+ * 
+ * Why it matters:
+ * - NUMA-aware CPU pinning ensures vCPUs are pinned to physical CPUs
+ *   within the same NUMA node, reducing latency and improving memory
+ *   locality for workloads. 
+ * - Round-robin pinning ensures that even when NUMA optimization isn't
+ *   possible, vCPUs are evenly distributed across all available CPUs.
+ */
+  setCpuPinningOptimization(vcpuCount: number): void {
+    const numaTopology = this.getNumaTopology();
+
+    if (this.canOptimizeNumaPinning(vcpuCount, numaTopology)) {
+      this.optimizeNumaPinning(vcpuCount, numaTopology);
+    } else {
+      this.optimizeRoundRobinPinning(vcpuCount, numaTopology);
+    }
+  }
+
+  /**
+   * Check if NUMA optimization is possible for the given vCPU count.
+   * 
+   * Why it matters:
+   * - This ensures that NUMA optimization is only attempted when there are
+   *   enough CPUs across NUMA nodes to accommodate the VM's requested vCPUs.
+   * - Prevents unnecessary fallback to round-robin by checking resources upfront.
+   */
+  private canOptimizeNumaPinning(vcpuCount: number, numaTopology: { [key: string]: string[] }): boolean {
+    const availableCpus = Object.values(numaTopology).flat();
+    return vcpuCount <= availableCpus.length;
+  }
+
+  /**
+   * Optimize CPU pinning using NUMA topology.
+   * 
+   * Why it matters:
+   * - Assigns vCPUs to CPUs within the same NUMA node to minimize latency and
+   *   improve memory locality, which is critical for performance-sensitive workloads.
+   * - Adds NUMA configuration to the XML for memory alignment and topology awareness.
+   */
+  private optimizeNumaPinning(vcpuCount: number, numaTopology: { [key: string]: string[] }): void {
+    const vcpuPins: { vcpu: number; cpuset: string }[] = [];
+    let vcpuIndex = 0;
+
+    for (const node of Object.keys(numaTopology)) {
+      const cpus = numaTopology[node];
+      for (const cpu of cpus) {
+        if (vcpuIndex < vcpuCount) {
+          vcpuPins.push({ vcpu: vcpuIndex, cpuset: cpu });
+          vcpuIndex++;
+        }
+      }
+    }
+
+    this.addCpuPinningToXml(vcpuPins);
+    this.addNumaConfigurationToXml(numaTopology, vcpuCount); // Pass vCPU count here
+  }
+
+  /**
+   * Fallback to round-robin CPU pinning if NUMA optimization isn't possible.
+   * 
+   * Why it matters:
+   * - Ensures the VM can still operate with reasonable CPU pinning
+   *   even when NUMA optimization isn't feasible.
+   * - Distributes vCPUs evenly across all available physical CPUs
+   *   to balance the load and avoid hotspots.
+   */
+  private optimizeRoundRobinPinning(vcpuCount: number, numaTopology: { [key: string]: string[] }): void {
+    const allCpus = Object.values(numaTopology).flat();
+    const totalCpus = allCpus.length;
+
+    const vcpuPins = Array.from({ length: vcpuCount }, (_, vcpuIndex) => ({
+      vcpu: vcpuIndex,
+      cpuset: allCpus[vcpuIndex % totalCpus], // Round-robin across all available CPUs
+    }));
+
+    this.addCpuPinningToXml(vcpuPins);
+  }
+
+  /**
+   * Add CPU pinning configuration to the XML.
+   * 
+   * Why it matters:
+   * - Ensures that vCPUs are pinned to specific physical CPUs as per the selected
+   *   optimization strategy, which improves performance and reduces contention.
+   */
+  private addCpuPinningToXml(vcpuPins: { vcpu: number; cpuset: string }[]): void {
+    this.xml.domain.cputune = {
+      vcpupin: vcpuPins.map(pin => ({ $: { vcpu: String(pin.vcpu), cpuset: pin.cpuset } })),
+    };
+  }
+
+  /**
+   * Add NUMA configuration to the XML.
+   * 
+   * Why it matters:
+   * - Aligns VM memory with NUMA nodes to ensure memory locality, reducing latency.
+   * - Proportionally allocates memory across NUMA nodes to match the host's topology.
+   * - Optimizes performance for NUMA-aware workloads such as databases and HPC applications.
+   */
+  private addNumaConfigurationToXml(numaTopology: { [key: string]: string[] }, vcpuCount: number): void {
+    const hostNumaMemory = this.getHostNumaMemory();
+    const totalHostMemory = Object.values(hostNumaMemory).reduce((acc, mem) => acc + mem, 0);
+    const vmMemory = this.getVmMemory();
+
+    if (vmMemory > totalHostMemory) {
+      throw new Error(`Requested VM memory (${vmMemory} MiB) exceeds host total memory (${totalHostMemory} MiB).`);
+    }
+
+    let remainingVCPUs = vcpuCount; // Track remaining vCPUs to assign
+    let remainingMemory = vmMemory; // Track remaining memory to distribute
+    let currentVcpuIndex = 0; // Track the current vCPU index
+
+    const activeNumaNodes = Object.keys(numaTopology).map((node, index) => {
+      const nodeCpus = numaTopology[node];
+      const assignedVCPUs = nodeCpus.slice(0, Math.min(nodeCpus.length, remainingVCPUs)); // Limit vCPUs to remaining
+      remainingVCPUs -= assignedVCPUs.length;
+
+      if (assignedVCPUs.length === 0) {
+        return null; // Skip this NUMA node if no vCPUs assigned
+      }
+
+      // Map vCPU indices to the assigned CPUs
+      const vcpuMapping = assignedVCPUs.map(() => currentVcpuIndex++);
+
+      // Allocate memory proportional to the assigned vCPUs
+      const nodeMemory = Math.floor((vcpuMapping.length / vcpuCount) * vmMemory);
+      remainingMemory -= nodeMemory;
+
+      return {
+        id: index,
+        cpus: vcpuMapping.join(','),
+        memory: nodeMemory,
+      };
+    }).filter(Boolean); // Remove null entries
+
+    // Assign any remaining memory to the last NUMA node
+    if (activeNumaNodes.length > 0) {
+      const lastNode = activeNumaNodes[activeNumaNodes.length - 1];
+      if (lastNode) {
+        lastNode.memory += remainingMemory; // Ensure no memory is left unallocated
+      }
+    }
+
+    // Build the NUMA cells for the XML
+    const numaCells = activeNumaNodes.map(node => ({
+      $: {
+        id: String(node?.id),
+        cpus: node?.cpus,
+        memory: String(node?.memory),
+        unit: 'MiB',
+      },
+    }));
+
+    this.xml.domain.cpu = this.xml.domain.cpu || {};
+    this.xml.domain.cpu.numa = { cell: numaCells };
+  }
+
+  /**
+   * Detects memory available for each NUMA node on the host.
+   * 
+   * Why it matters:
+   * - Provides data needed to proportionally allocate VM memory across NUMA nodes.
+   * - Ensures that the VM's memory allocation matches the host's memory topology.
+   */
+  private getHostNumaMemory(): { [key: string]: number } {
+    const nodesDir = '/sys/devices/system/node/';
+    const nodeDirs = fs.readdirSync(nodesDir).filter(dir => dir.startsWith('node'));
+    const numaMemory: { [key: string]: number } = {};
+
+    nodeDirs.forEach(nodeDir => {
+      const meminfoPath = path.join(nodesDir, nodeDir, 'meminfo');
+      if (fs.existsSync(meminfoPath)) {
+        const meminfo = fs.readFileSync(meminfoPath, 'utf8');
+        const matched = meminfo.match(/MemTotal:\s+(\d+)\s+kB/);
+        if (matched) {
+          const memoryInMiB = Math.floor(Number(matched[1]) / 1024); // Convert from kB to MiB
+          numaMemory[nodeDir] = memoryInMiB;
+        }
+      }
+    });
+
+    return numaMemory;
+  }
+
+  /**
+   * Returns the total memory assigned to the VM in MiB.
+   * 
+   * Why it matters:
+   * - Ensures the memory requested for the VM fits within the host's available resources.
+   * - Provides the basis for proportionally allocating memory across NUMA nodes.
+   */
+  private getVmMemory(): number {
+    const memoryNode = this.xml.domain.memory;
+    if (memoryNode && memoryNode[0]._ && memoryNode[0].$.unit === 'KiB') {
+      return Math.floor(Number(memoryNode[0]._) / 1024); // Convert KiB to MiB
+    }
+    throw new Error('VM memory is not set or improperly configured.');
+  }
+
+  /**
+   * Get the NUMA topology of the host.
+   * 
+   * Why it matters:
+   * - Provides information about CPUs in each NUMA node for optimized pinning.
+   * - Forms the foundation for NUMA-aware resource allocation.
+   */
+  private getNumaTopology(): { [key: string]: string[] } {
+    const nodesDir = '/sys/devices/system/node/';
+    const nodeDirs = fs.readdirSync(nodesDir).filter(dir => dir.startsWith('node'));
+    const numaTopology: { [key: string]: string[] } = {};
+
+    nodeDirs.forEach(nodeDir => {
+      const cpuListPath = path.join(nodesDir, nodeDir, 'cpulist');
+      if (fs.existsSync(cpuListPath)) {
+        const cpuList = fs.readFileSync(cpuListPath, 'utf8').trim();
+        numaTopology[nodeDir] = this.expandCpuList(cpuList);
+      }
+    });
+
+    return numaTopology;
+  }
+
+  /**
+   * Expand CPU ranges (e.g., "0-3,8" → ["0", "1", "2", "3", "8"]).
+   * 
+   * Why it matters:
+   * - Simplifies the NUMA topology representation for easier processing.
+   */
+  private expandCpuList(cpuList: string): string[] {
+    return cpuList.split(',').flatMap(range => {
+      const [start, end] = range.split('-').map(Number);
+      return end !== undefined
+        ? Array.from({ length: end - start + 1 }, (_, i) => String(start + i))
+        : [String(start)];
+    });
+  }
+
 }
