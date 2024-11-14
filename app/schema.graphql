@@ -58,6 +58,12 @@ type DyummyType {
   value: String!
 }
 
+type GraphicConfigurationType {
+  link: String!
+  password: String!
+  protocol: String!
+}
+
 """
 The `JSONObject` scalar type represents JSON objects as specified by [ECMA-404](http://www.ecma-international.org/publications/files/ECMA-ST/ECMA-404.pdf).
 """
@@ -201,6 +207,7 @@ type Query {
   department(id: String!): DepartmentType
   departments: [DepartmentType!]!
   findDepartmentByName(name: String!): DepartmentType
+  graphicConnection(id: String!): GraphicConfigurationType
   login(email: String!, password: String!): UserToken!
   machine(id: String!): Machine
   machineTemplate(id: String!): MachineTemplateType
@@ -210,7 +217,6 @@ type Query {
   machines(orderBy: MachineOrderBy, pagination: PaginationInputType): [Machine!]!
   user(id: String!): UserType!
   users(orderBy: UserOrderByInputType, pagination: PaginationInputType): [UserType!]!
-  vncConnection(id: String!): VncConfigurationType
 }
 
 type SuccessType {
@@ -261,9 +267,4 @@ type UserType {
   id: ID!
   lastName: String!
   role: String!
-}
-
-type VncConfigurationType {
-  link: String!
-  password: String!
 }

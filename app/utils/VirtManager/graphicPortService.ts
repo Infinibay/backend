@@ -3,9 +3,9 @@ import {
     Machine as VirtualMachine,
     Error as LibvirtError
 } from 'libvirt-node';
-import {DOMParser, XMLSerializer} from 'xmldom';
+import { DOMParser, XMLSerializer } from 'xmldom';
 
-import {Debugger} from '@utils/debug';
+import { Debugger } from '@utils/debug';
 
 /**
  * VncPortService
@@ -52,7 +52,7 @@ import {Debugger} from '@utils/debug';
  *
  * Note: Ensure that the libvirt connection is properly initialized before using this service.
  */
-export class VncPortService {
+export class GraphicPortService {
     debug: Debugger = new Debugger('virt-manager');
     connection: Connection | null = null;
 
@@ -74,16 +74,16 @@ export class VncPortService {
      * @returns {Promise<number>} - A promise that resolves to the VNC port number.
      * @throws {Error} If the VNC port could not be retrieved.
      */
-    async getVncPort(domainName: string): Promise<number> {
+    async getGraphicPort(domainName: string, type: string): Promise<number> {
 
-        this.debug.log(`Getting VNC port for domain: ${domainName}`);
+        this.debug.log(`Getting graphic port for domain: ${domainName}`);
 
         this.validateConnection();
 
         try {
             const domain = await this.getDomain(domainName);
             const xml = await this.getDomainXml(domain);
-            return this.extractVncPortFromXml(xml);
+            return this.extractGraphicPortFromXml(xml, type);
         } catch (error) {
             this.handleError('Failed to get VNC port', error);
         }
@@ -120,7 +120,7 @@ export class VncPortService {
         return xml;
     }
 
-    private extractVncPortFromXml(xml: string): number {
+    private extractGraphicPortFromXml(xml: string, type: string): number {
         const parser = new DOMParser();
         const xmlDoc = parser.parseFromString(xml, 'text/xml');
         const graphicsElements = xmlDoc.getElementsByTagName('graphics');
@@ -128,15 +128,15 @@ export class VncPortService {
         if (graphicsElements && graphicsElements.length > 0) {
             for (let i = 0; i < graphicsElements.length; i++) {
                 const graphicsElement = graphicsElements[i];
-                if (graphicsElement.getAttribute('type') === 'vnc') {
+                if (graphicsElement.getAttribute('type') === type) {
                     const port = parseInt(graphicsElement.getAttribute('port') || '-1', 10);
-                    this.debug.log(`Found VNC port: ${port}`);
+                    this.debug.log(`Found ${type} port: ${port}`);
                     return port;
                 }
             }
         }
 
-        this.debug.log('No VNC port found');
+        this.debug.log(`No ${type} port found`);
         return -1;
     }
 

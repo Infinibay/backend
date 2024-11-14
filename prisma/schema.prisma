@@ -62,12 +62,10 @@ model Machine {
 model MachineConfiguration {
   id          String  @id @default(uuid())
   xml         Json?
-  vncHost     String?
-  vncPort     Int?
-  vncPassword String?
-  vncListen   String?
-  vncAutoport Boolean?
-  vncType     String?
+  graphicProtocol String?
+  graphicPort     Int?
+  graphicPassword String?
+  graphicHost     String?
   machineId   String  @unique
   machine     Machine @relation(fields: [machineId], references: [id])
 }

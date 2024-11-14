@@ -6,7 +6,7 @@ import {
     Machine,
     MachineOrderBy,
     CreateMachineInputType,
-    VncConfigurationType,
+    GraphicConfigurationType,
     SuccessType,
     MachineStatus,
     MachineConfigurationType,
@@ -16,7 +16,7 @@ import { MachineTemplateType } from '../machine_template/type';
 import { PaginationInputType } from '@utils/pagination';
 import { InfinibayContext } from '@main/utils/context';
 import { VirtManager } from '@utils/VirtManager';
-import { VncPortService } from '@utils/VirtManager/vncPortService';
+import { GraphicPortService } from '@utils/VirtManager/graphicPortService';
 import { Connection, Machine as VirtualMachine } from 'libvirt-node';
 import { Debugger } from '@utils/debug';
 import { XMLGenerator } from '@utils/VirtManager/xmlGenerator';
@@ -27,16 +27,17 @@ async function transformMachine(prismaMachine: any, prisma: any): Promise<Machin
     const user = prismaMachine.userId ? await prisma.user.findUnique({ where: { id: prismaMachine.userId } }) : null;
     const template = prismaMachine.templateId ? await prisma.machineTemplate.findUnique({ where: { id: prismaMachine.templateId } }) : null;
     const department = prismaMachine.departmentId ? await prisma.department.findUnique({ where: { id: prismaMachine.departmentId } }) : null;
-    const vncHost = prismaMachine.configuration.vncHost || process.env.VNC_HOST || 'localhost';
-    let vncPort;
+    const graphicHost = prismaMachine.configuration.graphicHost || process.env.GRAPHIC_HOST || 'localhost';
+    let graphicPort;
     try {
-        vncPort = await new VncPortService().getVncPort(prismaMachine.internalName)
+        graphicPort = await new GraphicPortService().getGraphicPort(prismaMachine.internalName, prismaMachine.configuration.graphicProtocol);
     } catch (e) {
         console.log(e);
     }
 
     return {
         ...prismaMachine,
+        userId: prismaMachine.userId || -1, // Add this line to include userId
         user: user ? {
             id: user.id,
             firstName: user.firstName,
@@ -61,9 +62,7 @@ async function transformMachine(prismaMachine: any, prisma: any): Promise<Machin
             createdAt: department.createdAt
         } : undefined,
         config: prismaMachine.configuration ? {
-            vnc: "vnc://" + prismaMachine.configuration.vncPassword + "@" + vncHost + ":" + vncPort,
-            vncListen: prismaMachine.configuration.vncListen || '0.0.0.0',
-            vncAutoport: prismaMachine.configuration.vncAutoport || false,
+            graphic: prismaMachine.configuration.graphicProtocol + "://" + prismaMachine.configuration.graphicPassword + "@" + graphicHost + ":" + graphicPort,
         } : null,
         status: prismaMachine.status as MachineStatus,
     };
@@ -109,12 +108,12 @@ export class MachineQueries {
         return Promise.all(prismaMachines.map(m => transformMachine(m, prisma)));
     }
 
-    @Query(() => VncConfigurationType, { nullable: true })
+    @Query(() => GraphicConfigurationType, { nullable: true })
     @Authorized('USER')
-    async vncConnection(
+    async graphicConnection(
         @Arg('id') id: string,
         @Ctx() { prisma, user }: InfinibayContext
-    ): Promise<VncConfigurationType | null> {
+    ): Promise<GraphicConfigurationType | null> {
         const isAdmin = user?.role === 'ADMIN';
         const whereClause = isAdmin ? { id } : { id, userId: user?.id };
         const machine = await prisma.machine.findFirst({
@@ -124,10 +123,11 @@ export class MachineQueries {
 
         if (!machine || !machine.configuration) return null;
 
-        const port = await new VncPortService().getVncPort(machine.internalName);
+        const port = await new GraphicPortService().getGraphicPort(machine.internalName, machine.configuration.graphicProtocol || 'vnc');
         return {
-            link: `vnc://${machine.configuration.vncHost || process.env.VNC_HOST || 'localhost'}:${port}`,
-            password: machine.configuration.vncPassword || ''
+            link: `${machine.configuration.graphicProtocol}://${machine.configuration.graphicHost || process.env.GRAPHIC_HOST || 'localhost'}:${port}`,
+            password: machine.configuration.graphicPassword || '',
+            protocol: machine.configuration.graphicProtocol || 'vnc'
         };
     }
 }
@@ -173,11 +173,10 @@ export class MachineMutations {
                     departmentId: defaultDepartment.id,
                     configuration: {
                         create: {
-                            vncPort: 0,
-                            vncListen: '0.0.0.0',
-                            vncHost: process.env.VNC_HOST || 'localhost',
-                            vncPassword: null,
-                            vncAutoport: false,
+                            graphicPort: 0,
+                            graphicProtocol: 'spice',
+                            graphicHost: process.env.GRAPHIC_HOST || 'localhost',
+                            graphicPassword: null,
                         }
                     }
                 },

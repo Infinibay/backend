@@ -78,8 +78,8 @@ async function createDefaultMachineTemplate(defaultCategoryId: string) {
         data: {
           name: "Basic",
           description: "A basic machine template.",
-          cores: 4,
-          ram: 8,
+          cores: 6,
+          ram: 24,
           storage: 70,
           categoryId: defaultCategoryId,
         }

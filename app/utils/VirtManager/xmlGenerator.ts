@@ -328,32 +328,34 @@ export class XMLGenerator {
   }
 
   // Enable high resolution graphics for the VM
-  enableHighResolutionGraphics(): void {
+  enableHighResolutionGraphics(vramSize: number = 512): void {
     // Ensure the video array exists
     this.xml.domain.devices[0].video = this.xml.domain.devices[0].video || [];
-    // Configure the video device with qxl model and appropriate attributes
+
+    // Configure the video device with QXL model and increased VRAM
     const videoDevice = {
       model: [
         {
           $: {
             type: 'qxl',
-            ram: '65536',
-            vram: '65536',
-            vgamem: '16384',
+            ram: String(vramSize * 2 * 1024),  // RAM: Twice the VRAM for caching
+            vram: String(vramSize * 1024),    // Video RAM
+            vgamem: String((vramSize * 1024) / 2), // VGA memory (optional)
           },
         },
       ],
       accel: [
         {
           $: {
-            accel3d: 'yes',
-            accel2d: 'yes',
+            accel3d: 'yes', // Enable 3D acceleration
+            accel2d: 'yes', // Enable 2D acceleration
           },
         },
       ],
     };
-    // Add the video device to the devices list
-    this.xml.domain.devices[0].video.push(videoDevice);
+
+    // Add or update the video device configuration
+    this.xml.domain.devices[0].video = [videoDevice];
   }
 
   // Enable USB tablet input device
@@ -679,6 +681,77 @@ export class XMLGenerator {
         ? Array.from({ length: end - start + 1 }, (_, i) => String(start + i))
         : [String(start)];
     });
+  }
+
+  addSPICE(enableAudio: boolean = true, enableOpenGL: boolean = true): string {
+    // Generate a random password for SPICE
+    const password = Math.random().toString(36).slice(-8); // 8-character random password
+
+    // Ensure the devices array exists
+    this.xml.domain.devices[0].graphics = [];
+
+    // Build SPICE configuration
+    const spiceConfig: any = {
+      $: {
+        type: 'spice',
+        autoport: 'yes',
+        listen: '0.0.0.0', // Listen on all interfaces
+        passwd: password, // Set the random password
+      },
+      listen: [
+        { $: { type: 'address', address: '0.0.0.0' } },
+      ],
+      image: [
+        { $: { compression: 'auto_glz' } }, // Auto image compression for low bandwidth
+      ],
+      jpeg: [
+        { $: { compression: 'auto' } }, // Enable JPEG compression
+      ],
+      zlib: [
+        { $: { compression: 'auto' } }, // Enable Zlib compression
+      ],
+      video: [
+        { $: { streaming: 'all' } }, // Optimize video streaming
+      ],
+      clipboard: [
+        { $: { copypaste: 'yes' } }, // Enable clipboard sharing
+      ],
+      filetransfer: [
+        { $: { enable: 'yes' } }, // Enable file transfer
+      ],
+      mouse: [
+        { $: { mode: 'client' } }, // Mouse handling
+      ],
+      streaming: [
+        { $: { mode: 'filter' } }, // Adaptive streaming
+      ],
+    };
+
+    // Enable OpenGL acceleration if required
+    if (enableOpenGL) {
+      spiceConfig.gl = [
+        { $: { enable: 'yes', rendernode: '/dev/dri/renderD128' } },
+      ];
+    }
+
+    // Add SPICE graphics configuration
+    this.xml.domain.devices[0].graphics.push(spiceConfig);
+
+    // Add audio redirection via SPICE channel
+    if (enableAudio) {
+      this.xml.domain.devices[0].channel = this.xml.domain.devices[0].channel || [];
+      this.xml.domain.devices[0].channel.push({
+        $: {
+          type: 'spicevmc', // Required for SPICE audio redirection
+        },
+        target: [
+          { $: { type: 'virtio', name: 'com.redhat.spice.0' } },
+        ],
+      });
+    }
+
+    // Return the generated password for the caller
+    return password;
   }
 
 }

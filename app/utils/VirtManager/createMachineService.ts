@@ -311,14 +311,17 @@ export class CreateMachineService {
         this.debug.log('Getting new port for machine', machine.name);
 
         // Add a VNC server to the machine
-        const vncPassword = xmlGenerator.addVNC(-1, true, '0.0.0.0');
+        // const vncPassword = xmlGenerator.addVNC(-1, true, '0.0.0.0');
+
+        // add SPICE
+        let spicePassword = xmlGenerator.addSPICE(true, false);
 
         // Update the machine configuration with the new port
-        configuration.vncPort = -1;
-        configuration.vncListen = '0.0.0.0';
-        configuration.vncPassword = vncPassword;
-        configuration.vncAutoport = true;
-        configuration.vncHost = process.env.APP_HOST || '0.0.0.0';
+        // configuration.vncPort = -1;
+        // configuration.vncListen = '0.0.0.0';
+        // configuration.vncPassword = vncPassword;
+        // configuration.vncAutoport = true;
+        // configuration.vncHost = process.env.APP_HOST || '0.0.0.0';
 
         // Save the machine configuration
         this.debug.log('Updating machine configuration in database');
@@ -326,11 +329,10 @@ export class CreateMachineService {
             where: { id: configuration.id },
             data: {
                 xml: xmlGenerator.getXmlObject(),
-                vncPort: configuration.vncPort,
-                vncListen: configuration.vncListen,
-                vncPassword: configuration.vncPassword,
-                vncAutoport: configuration.vncAutoport,
-                vncType: configuration.vncType,
+                graphicProtocol: 'spice',
+                graphicPassword: spicePassword,
+                graphicHost: process.env.APP_HOST || '0.0.0.0',
+                graphicPort: -1,
             },
         });
 

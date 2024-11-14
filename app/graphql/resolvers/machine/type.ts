@@ -60,12 +60,15 @@ export class MachineConfigurationType {
 
 
 @ObjectType()
-export class VncConfigurationType {
+export class GraphicConfigurationType {
     @Field(() => String)
     link: string = ''
 
     @Field(() => String)
     password: string = ''
+
+    @Field(() => String)
+    protocol: string = ''
 }
 
 @ObjectType()
