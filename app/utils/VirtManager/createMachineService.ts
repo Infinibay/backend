@@ -292,7 +292,7 @@ export class CreateMachineService {
         xmlGenerator.setBootDevice(['hd', 'cdrom']);
         xmlGenerator.addAudioDevice();
         xmlGenerator.setVCPUs(template.cores);
-        xmlGenerator.setCpuPinningOptimization(template.cores);
+        xmlGenerator.setCpuPinningOptimization();
         if (newIsoPath) {
             xmlGenerator.addCDROM(newIsoPath, 'sata');
             xmlGenerator.addVirtIODrivers();

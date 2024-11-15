@@ -3,6 +3,9 @@ import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
+import { BaseCpuPinningStrategy } from './CpuPinning/BasePinningStrategy';
+import { BasicStrategy } from './CpuPinning/BasicStrategy';
+import { HybridRandomStrategy } from './CpuPinning/HybridRandom';
 
 export enum NetworkModel {
   VIRTIO = 'virtio',
@@ -67,7 +70,7 @@ export class XMLGenerator {
   }
 
   setVCPUs(count: number): void {
-    this.xml.domain.vcpu = [{ _: count, $: { placement: 'static', current: count } }]; //current may not be needed
+    this.xml.domain.vcpu = [{ _: count, $: { placement: 'static', current: count } }];
     this.xml.domain.cpu = {
       $: {
         mode: 'host-passthrough',
@@ -75,7 +78,9 @@ export class XMLGenerator {
         migratable: 'on',
       },
     };
-    // https://libvirt.org/formatdomain.html#hypervisor-features
+
+    // Add hypervisor features and clock settings
+    this.xml.domain.features = this.xml.domain.features || [{}];
     this.xml.domain.features[0].hyperv = {
       $: { mode: 'custom' },
       relaxed: { $: { state: 'on' } },
@@ -92,15 +97,37 @@ export class XMLGenerator {
         { $: { name: "hpet", present: "no" } },
         { $: { name: "hypervclock", present: "yes" } }
       ]
-    }
+    };
 
     this.xml.domain.pm = {
       "suspend-to-mem": { $: { enabled: "no" } },
       "suspend-to-disk": { $: { enabled: "no" } }
+    };
+  }
+
+  setCpuPinningOptimization(strategy?: BaseCpuPinningStrategy): void {
+    const vcpuCount = Number(this.xml.domain.vcpu[0]._);
+
+    if (!strategy) {
+      strategy = new HybridRandomStrategy(this.xml);
+    }
+
+    const pinningConfig = strategy.setCpuPinning(vcpuCount);
+
+    // Apply the configuration to the XML
+    if (pinningConfig.cputune) {
+      this.xml.domain.cputune = pinningConfig.cputune;
+    }
+    if (pinningConfig.cpu) {
+      this.xml.domain.cpu = {
+        ...this.xml.domain.cpu,
+        ...pinningConfig.cpu
+      };
     }
   }
 
-  setBootDevice(devices: ('fd' | 'hd' | 'cdrom' | 'network')[]): void {
+  // Renamed method: setBootDevice -> setBootOrder
+  setBootOrder(devices: ('fd' | 'hd' | 'cdrom' | 'network')[]): void {
     this.xml.domain.os[0].boot = devices.map(device => ({ $: { dev: device } }));
   }
 
@@ -268,7 +295,7 @@ export class XMLGenerator {
     return password;
   }
 
-  setBootOrder(devices: string[]): void {
+  setBootDevice(devices: string[]): void {
     this.xml.domain.os[0].boot = devices.map(device => ({ $: { dev: device } }));
   }
 
@@ -328,7 +355,7 @@ export class XMLGenerator {
   }
 
   // Enable high resolution graphics for the VM
-  enableHighResolutionGraphics(vramSize: number = 512, driver: string = 'virtio'): void {
+  enableHighResolutionGraphics(vramSize: number = 512, driver: string = 'qxl'): void {
     // Ensure the video array exists
     this.xml.domain.devices[0].video = this.xml.domain.devices[0].video || [];
 
@@ -352,7 +379,9 @@ export class XMLGenerator {
           },
         },
       ],
-    } : { // virtio virgl3d
+    } : {
+      // virtio virgl3d
+      // Works, but performance is not the best
       model: [
         {
           $: {
@@ -441,260 +470,6 @@ export class XMLGenerator {
       "suspend-to-mem": { $: { enabled: "no" } },
       "suspend-to-disk": { $: { enabled: "no" } },
     };
-  }
-
-  getCpuInfo() {
-    const cpus = os.cpus();
-    const physicalCores = new Set();
-    cpus.forEach(cpu => {
-      const coreId = cpu.model + cpu.times.user; // Model + user time (to differentiate cores)
-      physicalCores.add(coreId);
-    });
-
-    const numCores = physicalCores.size;
-    const numThreads = cpus.length;
-
-    return { numCores, numThreads };
-  }
-
-  /**
-  * Detect and apply the best CPU pinning strategy.
-  * Attempts NUMA optimization first, falls back to round-robin if NUMA isn't possible.
-  * 
-  * Why it matters:
-  * - NUMA-aware CPU pinning ensures vCPUs are pinned to physical CPUs
-  *   within the same NUMA node, reducing latency and improving memory
-  *   locality for workloads. 
-  * - Round-robin pinning ensures that even when NUMA optimization isn't
-  *   possible, vCPUs are evenly distributed across all available CPUs.
-  */
-  setCpuPinningOptimization(vcpuCount: number): void {
-    const numaTopology = this.getNumaTopology();
-
-    if (this.canOptimizeNumaPinning(vcpuCount, numaTopology)) {
-      this.optimizeNumaPinning(vcpuCount, numaTopology);
-    } else {
-      this.optimizeRoundRobinPinning(vcpuCount, numaTopology);
-    }
-  }
-
-  /**
-   * Check if NUMA optimization is possible for the given vCPU count.
-   * 
-   * Why it matters:
-   * - This ensures that NUMA optimization is only attempted when there are
-   *   enough CPUs across NUMA nodes to accommodate the VM's requested vCPUs.
-   * - Prevents unnecessary fallback to round-robin by checking resources upfront.
-   */
-  private canOptimizeNumaPinning(vcpuCount: number, numaTopology: { [key: string]: string[] }): boolean {
-    const availableCpus = Object.values(numaTopology).flat();
-    return vcpuCount <= availableCpus.length;
-  }
-
-  /**
-   * Optimize CPU pinning using NUMA topology.
-   * 
-   * Why it matters:
-   * - Assigns vCPUs to CPUs within the same NUMA node to minimize latency and
-   *   improve memory locality, which is critical for performance-sensitive workloads.
-   * - Adds NUMA configuration to the XML for memory alignment and topology awareness.
-   */
-  private optimizeNumaPinning(vcpuCount: number, numaTopology: { [key: string]: string[] }): void {
-    const vcpuPins: { vcpu: number; cpuset: string }[] = [];
-    let vcpuIndex = 0;
-
-    for (const node of Object.keys(numaTopology)) {
-      const cpus = numaTopology[node];
-      for (const cpu of cpus) {
-        if (vcpuIndex < vcpuCount) {
-          vcpuPins.push({ vcpu: vcpuIndex, cpuset: cpu });
-          vcpuIndex++;
-        }
-      }
-    }
-
-    this.addCpuPinningToXml(vcpuPins);
-    this.addNumaConfigurationToXml(numaTopology, vcpuCount); // Pass vCPU count here
-  }
-
-  /**
-   * Fallback to round-robin CPU pinning if NUMA optimization isn't possible.
-   * 
-   * Why it matters:
-   * - Ensures the VM can still operate with reasonable CPU pinning
-   *   even when NUMA optimization isn't feasible.
-   * - Distributes vCPUs evenly across all available physical CPUs
-   *   to balance the load and avoid hotspots.
-   */
-  private optimizeRoundRobinPinning(vcpuCount: number, numaTopology: { [key: string]: string[] }): void {
-    const allCpus = Object.values(numaTopology).flat();
-    const totalCpus = allCpus.length;
-
-    const vcpuPins = Array.from({ length: vcpuCount }, (_, vcpuIndex) => ({
-      vcpu: vcpuIndex,
-      cpuset: allCpus[vcpuIndex % totalCpus], // Round-robin across all available CPUs
-    }));
-
-    this.addCpuPinningToXml(vcpuPins);
-  }
-
-  /**
-   * Add CPU pinning configuration to the XML.
-   * 
-   * Why it matters:
-   * - Ensures that vCPUs are pinned to specific physical CPUs as per the selected
-   *   optimization strategy, which improves performance and reduces contention.
-   */
-  private addCpuPinningToXml(vcpuPins: { vcpu: number; cpuset: string }[]): void {
-    this.xml.domain.cputune = {
-      vcpupin: vcpuPins.map(pin => ({ $: { vcpu: String(pin.vcpu), cpuset: pin.cpuset } })),
-    };
-  }
-
-  /**
-   * Add NUMA configuration to the XML.
-   * 
-   * Why it matters:
-   * - Aligns VM memory with NUMA nodes to ensure memory locality, reducing latency.
-   * - Proportionally allocates memory across NUMA nodes to match the host's topology.
-   * - Optimizes performance for NUMA-aware workloads such as databases and HPC applications.
-   */
-  private addNumaConfigurationToXml(numaTopology: { [key: string]: string[] }, vcpuCount: number): void {
-    const hostNumaMemory = this.getHostNumaMemory();
-    const totalHostMemory = Object.values(hostNumaMemory).reduce((acc, mem) => acc + mem, 0);
-    const vmMemory = this.getVmMemory();
-
-    if (vmMemory > totalHostMemory) {
-      throw new Error(`Requested VM memory (${vmMemory} MiB) exceeds host total memory (${totalHostMemory} MiB).`);
-    }
-
-    let remainingVCPUs = vcpuCount; // Track remaining vCPUs to assign
-    let remainingMemory = vmMemory; // Track remaining memory to distribute
-    let currentVcpuIndex = 0; // Track the current vCPU index
-
-    const activeNumaNodes = Object.keys(numaTopology).map((node, index) => {
-      const nodeCpus = numaTopology[node];
-      const assignedVCPUs = nodeCpus.slice(0, Math.min(nodeCpus.length, remainingVCPUs)); // Limit vCPUs to remaining
-      remainingVCPUs -= assignedVCPUs.length;
-
-      if (assignedVCPUs.length === 0) {
-        return null; // Skip this NUMA node if no vCPUs assigned
-      }
-
-      // Map vCPU indices to the assigned CPUs
-      const vcpuMapping = assignedVCPUs.map(() => currentVcpuIndex++);
-
-      // Allocate memory proportional to the assigned vCPUs
-      const nodeMemory = Math.floor((vcpuMapping.length / vcpuCount) * vmMemory);
-      remainingMemory -= nodeMemory;
-
-      return {
-        id: index,
-        cpus: vcpuMapping.join(','),
-        memory: nodeMemory,
-      };
-    }).filter(Boolean); // Remove null entries
-
-    // Assign any remaining memory to the last NUMA node
-    if (activeNumaNodes.length > 0) {
-      const lastNode = activeNumaNodes[activeNumaNodes.length - 1];
-      if (lastNode) {
-        lastNode.memory += remainingMemory; // Ensure no memory is left unallocated
-      }
-    }
-
-    // Build the NUMA cells for the XML
-    const numaCells = activeNumaNodes.map(node => ({
-      $: {
-        id: String(node?.id),
-        cpus: node?.cpus,
-        memory: String(node?.memory),
-        unit: 'MiB',
-      },
-    }));
-
-    this.xml.domain.cpu = this.xml.domain.cpu || {};
-    this.xml.domain.cpu.numa = { cell: numaCells };
-  }
-
-  /**
-   * Detects memory available for each NUMA node on the host.
-   * 
-   * Why it matters:
-   * - Provides data needed to proportionally allocate VM memory across NUMA nodes.
-   * - Ensures that the VM's memory allocation matches the host's memory topology.
-   */
-  private getHostNumaMemory(): { [key: string]: number } {
-    const nodesDir = '/sys/devices/system/node/';
-    const nodeDirs = fs.readdirSync(nodesDir).filter(dir => dir.startsWith('node'));
-    const numaMemory: { [key: string]: number } = {};
-
-    nodeDirs.forEach(nodeDir => {
-      const meminfoPath = path.join(nodesDir, nodeDir, 'meminfo');
-      if (fs.existsSync(meminfoPath)) {
-        const meminfo = fs.readFileSync(meminfoPath, 'utf8');
-        const matched = meminfo.match(/MemTotal:\s+(\d+)\s+kB/);
-        if (matched) {
-          const memoryInMiB = Math.floor(Number(matched[1]) / 1024); // Convert from kB to MiB
-          numaMemory[nodeDir] = memoryInMiB;
-        }
-      }
-    });
-
-    return numaMemory;
-  }
-
-  /**
-   * Returns the total memory assigned to the VM in MiB.
-   * 
-   * Why it matters:
-   * - Ensures the memory requested for the VM fits within the host's available resources.
-   * - Provides the basis for proportionally allocating memory across NUMA nodes.
-   */
-  private getVmMemory(): number {
-    const memoryNode = this.xml.domain.memory;
-    if (memoryNode && memoryNode[0]._ && memoryNode[0].$.unit === 'KiB') {
-      return Math.floor(Number(memoryNode[0]._) / 1024); // Convert KiB to MiB
-    }
-    throw new Error('VM memory is not set or improperly configured.');
-  }
-
-  /**
-   * Get the NUMA topology of the host.
-   * 
-   * Why it matters:
-   * - Provides information about CPUs in each NUMA node for optimized pinning.
-   * - Forms the foundation for NUMA-aware resource allocation.
-   */
-  private getNumaTopology(): { [key: string]: string[] } {
-    const nodesDir = '/sys/devices/system/node/';
-    const nodeDirs = fs.readdirSync(nodesDir).filter(dir => dir.startsWith('node'));
-    const numaTopology: { [key: string]: string[] } = {};
-
-    nodeDirs.forEach(nodeDir => {
-      const cpuListPath = path.join(nodesDir, nodeDir, 'cpulist');
-      if (fs.existsSync(cpuListPath)) {
-        const cpuList = fs.readFileSync(cpuListPath, 'utf8').trim();
-        numaTopology[nodeDir] = this.expandCpuList(cpuList);
-      }
-    });
-
-    return numaTopology;
-  }
-
-  /**
-   * Expand CPU ranges (e.g., "0-3,8" → ["0", "1", "2", "3", "8"]).
-   * 
-   * Why it matters:
-   * - Simplifies the NUMA topology representation for easier processing.
-   */
-  private expandCpuList(cpuList: string): string[] {
-    return cpuList.split(',').flatMap(range => {
-      const [start, end] = range.split('-').map(Number);
-      return end !== undefined
-        ? Array.from({ length: end - start + 1 }, (_, i) => String(start + i))
-        : [String(start)];
-    });
   }
 
   addSPICE(enableAudio: boolean = true, enableOpenGL: boolean = true): string {
