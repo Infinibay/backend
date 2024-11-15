@@ -328,12 +328,12 @@ export class XMLGenerator {
   }
 
   // Enable high resolution graphics for the VM
-  enableHighResolutionGraphics(vramSize: number = 512): void {
+  enableHighResolutionGraphics(vramSize: number = 512, driver: string = 'virtio'): void {
     // Ensure the video array exists
     this.xml.domain.devices[0].video = this.xml.domain.devices[0].video || [];
 
     // Configure the video device with QXL model and increased VRAM
-    const videoDevice = {
+    const videoDevice = driver === 'qxl' ? {
       model: [
         {
           $: {
@@ -350,6 +350,20 @@ export class XMLGenerator {
             accel3d: 'yes', // Enable 3D acceleration
             accel2d: 'yes', // Enable 2D acceleration
           },
+        },
+      ],
+    } : { // virtio virgl3d
+      model: [
+        {
+          $: {
+            type: 'virtio',
+            accel3d: 'yes',
+          },
+          gl: {
+            $: {
+              rendernode: '/dev/dri/renderD128', // TODO detect the rendernode, right now is hardcoded
+            },
+          }
         },
       ],
     };
@@ -444,16 +458,16 @@ export class XMLGenerator {
   }
 
   /**
- * Detect and apply the best CPU pinning strategy.
- * Attempts NUMA optimization first, falls back to round-robin if NUMA isn't possible.
- * 
- * Why it matters:
- * - NUMA-aware CPU pinning ensures vCPUs are pinned to physical CPUs
- *   within the same NUMA node, reducing latency and improving memory
- *   locality for workloads. 
- * - Round-robin pinning ensures that even when NUMA optimization isn't
- *   possible, vCPUs are evenly distributed across all available CPUs.
- */
+  * Detect and apply the best CPU pinning strategy.
+  * Attempts NUMA optimization first, falls back to round-robin if NUMA isn't possible.
+  * 
+  * Why it matters:
+  * - NUMA-aware CPU pinning ensures vCPUs are pinned to physical CPUs
+  *   within the same NUMA node, reducing latency and improving memory
+  *   locality for workloads. 
+  * - Round-robin pinning ensures that even when NUMA optimization isn't
+  *   possible, vCPUs are evenly distributed across all available CPUs.
+  */
   setCpuPinningOptimization(vcpuCount: number): void {
     const numaTopology = this.getNumaTopology();
 
