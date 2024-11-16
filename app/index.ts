@@ -19,6 +19,9 @@ import { authChecker } from './utils/authChecker';
 import { InfinibayContext } from './utils/context';
 import resolvers from './graphql/resolvers';
 
+// Crons
+import { startCrons } from './crons/all';
+
 const prisma = new PrismaClient(); // Create a new instance of PrismaClient
 
 // Check: https://github.com/MichalLytek/type-graphql/blob/c5a03745dc951785b73a0afa4e85cd041adfa279/examples/redis-subscriptions/index.ts
@@ -46,9 +49,9 @@ async function bootstrap(): Promise<void> {
     formatError: (error: any): GraphQLError => {
       console.error(error);
 
-        // Check if it's an unauthorized exception
+      // Check if it's an unauthorized exception
       if (error?.extensions?.code == 'UNAUTHORIZED' ||
-          error?.message.toLowerCase().includes('unauthorized')) {
+        error?.message.toLowerCase().includes('unauthorized')) {
         return new GraphQLError('Unauthorized: You do not have permission to perform this action');
       }
 
@@ -64,11 +67,14 @@ async function bootstrap(): Promise<void> {
     cors<cors.CorsRequest>(),
     bodyParser.json(),
     expressMiddleware(server, {
-    context: async ({ req, res }): Promise<InfinibayContext> => {
-      return { req, res, prisma, user: null } as InfinibayContext; // Add prisma to the context
-    },
+      context: async ({ req, res }): Promise<InfinibayContext> => {
+        return { req, res, prisma, user: null } as InfinibayContext; // Add prisma to the context
+      },
     })
   );
+
+  // Create a thread and start all crons
+  startCrons();
 
   // Now that the HTTP server is fully set up, we can listen to it
   httpServer.listen(4000, '0.0.0.0', () => {

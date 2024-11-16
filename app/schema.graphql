@@ -13,6 +13,12 @@ type ApplicationType {
   parameters: JSONObject
 }
 
+type CommandExecutionResponseType {
+  message: String!
+  response: String
+  success: Boolean!
+}
+
 input CreateApplicationInputType {
   description: String
   installCommand: JSONObject!
@@ -179,6 +185,7 @@ type Mutation {
   deleteApplication(id: String!): Boolean!
   destroyDepartment(id: String!): DepartmentType!
   destroyMachine(id: String!): SuccessType!
+  executeCommand(command: String!, id: String!): CommandExecutionResponseType!
   powerOff(id: String!): SuccessType!
   powerOn(id: String!): SuccessType!
   setupNode: DyummyType!

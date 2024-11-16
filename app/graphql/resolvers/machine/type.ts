@@ -80,6 +80,18 @@ export class SuccessType {
     message: string = ''
 }
 
+@ObjectType()
+export class CommandExecutionResponseType {
+    @Field(() => Boolean)
+    success: boolean = false;
+
+    @Field(() => String)
+    message: string = '';
+
+    @Field(() => String, { nullable: true })
+    response?: string;
+}
+
 @InputType()
 export class MachineOrderBy {
     @Field(() => MachineOrderByEnum, { nullable: true })

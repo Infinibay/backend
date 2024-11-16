@@ -10,6 +10,7 @@ import {
     SuccessType,
     MachineStatus,
     MachineConfigurationType,
+    CommandExecutionResponseType,
 } from './type';
 import { UserType } from '../user/type';
 import { MachineTemplateType } from '../machine_template/type';
@@ -17,10 +18,11 @@ import { PaginationInputType } from '@utils/pagination';
 import { InfinibayContext } from '@main/utils/context';
 import { VirtManager } from '@utils/VirtManager';
 import { GraphicPortService } from '@utils/VirtManager/graphicPortService';
-import { Connection, Machine as VirtualMachine } from 'libvirt-node';
+import { Connection, Machine as VirtualMachine, Error } from 'libvirt-node';
 import { Debugger } from '@utils/debug';
 import { XMLGenerator } from '@utils/VirtManager/xmlGenerator';
 import { existsSync } from 'fs';
+import { execute } from "graphql";
 
 async function transformMachine(prismaMachine: any, prisma: any): Promise<Machine> {
     // TODO: fix n+1 problem
@@ -360,6 +362,64 @@ export class MachineMutations {
     }
 
     /**
+     * Executes a command inside a virtual machine.
+     * 
+     * @param id - The ID of the machine to execute the command.
+     * @param command - The command to execute inside the VM.
+     * @param prisma - The Prisma client for database operations.
+     * @param user - The current user context.
+     * @returns A CommandExecutionResponseType indicating the result of the operation along with the command response.
+     */
+    @Mutation(() => CommandExecutionResponseType)
+    @Authorized('ADMIN')
+    async executeCommand(
+        @Arg('id') id: string,
+        @Arg('command') command: string,
+        @Ctx() { prisma, user }: InfinibayContext
+    ): Promise<CommandExecutionResponseType> {
+        let libvirtConnection: Connection | null = null;
+        try {
+            // Retrieve the machine from the database
+            const machine = await prisma.machine.findFirst({ where: { id } });
+            if (!machine) {
+                return { success: false, message: "Machine not found" };
+            }
+
+            // Establish connection to libvirt
+            libvirtConnection = Connection.open('qemu:///system');
+            if (!libvirtConnection) {
+                throw new UserInputError("Libvirt not connected");
+            }
+
+            // Look up the virtual machine (domain) in libvirt
+            const domain = VirtualMachine.lookupByName(libvirtConnection, machine.internalName);
+            if (!domain) {
+                throw new UserInputError(`Machine ${machine.internalName} not found in libvirt`);
+            }
+            const jsonCommand = {
+                execute: command
+            }
+
+            // Execute the command inside the VM
+            const result = await domain.qemuAgentCommand(JSON.stringify(jsonCommand), 0, 0);
+            if (!result) {
+                throw new UserInputError(`Error executing command: ${command}`);
+            }
+
+            return { success: true, message: `Command executed successfully`, response: result };
+        } catch (error) {
+            // Log the error and return a failure response
+            this.debug.log(`Error executing command: ${error}`);
+            return { success: false, message: (error as Error).message || `Error executing command` };
+        } finally {
+            // Ensure the libvirt connection is closed, even if an error occurred
+            if (libvirtConnection) {
+                libvirtConnection.close();
+            }
+        }
+    }
+
+    /**
      * Changes the state of a virtual machine.
      * 
      * @param id - The ID of the machine to change state.
@@ -391,13 +451,13 @@ export class MachineMutations {
             // Establish connection to libvirt
             libvirtConnection = Connection.open('qemu:///system');
             if (!libvirtConnection) {
-                throw new Error("Libvirt not connected");
+                throw new UserInputError("Libvirt not connected");
             }
 
             // Look up the virtual machine (domain) in libvirt
             const domain = VirtualMachine.lookupByName(libvirtConnection, machine.internalName);
             if (!domain) {
-                throw new Error(`Machine ${machine.internalName} not found in libvirt`);
+                throw new UserInputError(`Machine ${machine.internalName} not found in libvirt`);
             }
 
             // Perform the requested action on the domain
