@@ -11,7 +11,7 @@ function prepareFolders() {
   const baseDir = process.env.INFINIBAY_BASE_DIR || '/opt/infinibay';
   const isoDir = path.join(baseDir, 'iso');
 
-  [baseDir, isoDir, path.join(isoDir, 'ubuntu'), path.join(isoDir, 'fedora'), path.join(baseDir, 'disks'), path.join(baseDir, 'isos')].forEach(dir => {
+  [baseDir, isoDir, path.join(isoDir, 'ubuntu'), path.join(isoDir, 'fedora'), path.join(baseDir, 'disks'), path.join(baseDir, 'isos'), path.join(baseDir, 'uefi')].forEach(dir => {
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
     }
