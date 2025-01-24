@@ -126,8 +126,8 @@ async function downloadFedora() {
 async function install() {
   console.log('Installing...')
   prepareFolders()
-  downloadUbuntu()
-  downloadFedora()
+//  downloadUbuntu()
+//  downloadFedora()
   // BASIC APPS
   // cpu-checker for kvm-ok
   // qemu-kvm libvirt-daemon-system bridge-utils
