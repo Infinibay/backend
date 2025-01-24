@@ -18,7 +18,7 @@
   "dependencies": {
     "@apollo/server": "^4.3.0",
     "@graphql-tools/jest-transform": "^1.2.2",
-    "@prisma/client": "^5.19.0",
+    "@prisma/client": "5.19.0",
     "@types/axios": "^0.14.0",
     "apollo-link-context": "^1.0.20",
     "apollo-server": "^3.12.0",
@@ -97,7 +97,7 @@
     "fs": "^0.0.1-security",
     "jest": "^29.0.0",
     "jsdom": "^23.0.1",
-    "prisma": "^5.19.0",
+    "prisma": "5.19.0",
     "stream": "^0.0.2",
     "ts-jest": "^29.2.5",
     "ts-node": "^10.9.2",
