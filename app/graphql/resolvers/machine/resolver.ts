@@ -328,7 +328,7 @@ export class MachineMutations {
                     ...xmlGenerator.getDisks()
                 ].filter(file => {
                     // return false if the file is virtio.iso
-                    if (file && file.includes('virtio.iso')) {
+                    if (file && file.includes('virtio')) {
                         return false;
                     }
                     return file && existsSync(file);

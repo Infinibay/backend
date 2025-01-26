@@ -25,7 +25,7 @@ export class Machine {
     name: string = ''
 
     @Field(() => GraphQLJSONObject, { nullable: true })
-    config: any | null = null
+    configuration: any | null = null
 
     @Field(() => String)
     status: MachineStatus = MachineStatus.STOPPED
