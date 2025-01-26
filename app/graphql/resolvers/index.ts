@@ -6,6 +6,7 @@ import { SetupResolver } from '@resolvers/setup/resolver';
 import { DepartmentResolver } from '@resolvers/department/resolver';
 import { MachineTemplateCategoryResolver } from './machine_template_category/resolver';
 import { ApplicationQueries, ApplicationMutations } from './application/resolver';
+import { SystemResolver } from './system/resolver';
 
 const resolvers: NonEmptyArray<Function> = [
   UserResolver,
@@ -16,7 +17,8 @@ const resolvers: NonEmptyArray<Function> = [
   DepartmentResolver,
   MachineTemplateCategoryResolver,
   ApplicationQueries,
-  ApplicationMutations
+  ApplicationMutations,
+  SystemResolver
 ];
 
 export default resolvers as NonEmptyArray<Function>;
