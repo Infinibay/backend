@@ -56,10 +56,10 @@ export class VirtManager {
    * @param productKey - The product key for the new machine.
    * @returns A promise that resolves when the machine is created.
    */
-  async createMachine(machine: Machine, username: string, password: string, productKey: string | undefined): Promise<void> {
+  async createMachine(machine: Machine, username: string, password: string, productKey: string | undefined, pciBus: string | null): Promise<void> {
     this.debug.log('Creating machine', machine.name);
     let service: CreateMachineService =new CreateMachineService(this.uri, this.prisma);
-    await service.create(machine, username, password, productKey);
+    await service.create(machine, username, password, productKey, pciBus);
   }
 
   /**

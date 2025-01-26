@@ -9,7 +9,7 @@ export class SystemResolver {
     try {
       const data = (await si.graphics()).controllers;
       return data.map(controller => ({
-        pciBus: controller.pciBus || `00000000:${controller.busAddress}}` || '',
+        pciBus: controller.pciBus || `00000000:${controller.busAddress}` || '',
         vendor: controller.vendor,
         model: controller.name || controller.model,
         memory: (controller.vram || 0) / 1024  // Convert MB to GB

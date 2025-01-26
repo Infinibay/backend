@@ -171,6 +171,9 @@ export class CreateMachineInputType {
     @Field(() => String, { nullable: true })
     productKey?: string | undefined
 
+    @Field(() => String, { nullable: true })
+    pciBus: string | null = null
+
     @Field(() => [MachineApplicationInputType])
     applications: MachineApplicationInputType[] = []
 }

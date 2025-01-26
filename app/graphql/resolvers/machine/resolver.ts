@@ -210,13 +210,14 @@ export class MachineMutations {
         });
 
         setImmediate(() => {
-            this.backgroundCode(machine.id, prisma, user, input.username, input.password, input.productKey);
+            console.log(input)
+            this.backgroundCode(machine.id, prisma, user, input.username, input.password, input.productKey, input.pciBus);
         });
 
         return machine;
     }
 
-    private backgroundCode = async (id: string, prisma: any, user: any, username: string, password: string, productKey: string | undefined) => {
+    private backgroundCode = async (id: string, prisma: any, user: any, username: string, password: string, productKey: string | undefined, pciBus: string | null) => {
         try {
             const machine = await prisma.machine.findUnique({
                 where: {
@@ -225,7 +226,7 @@ export class MachineMutations {
             });
             const virtManager = new VirtManager();
             virtManager.setPrisma(prisma);
-            await virtManager.createMachine(machine as any, username, password, productKey);
+            await virtManager.createMachine(machine as any, username, password, productKey, pciBus);
             await virtManager.powerOn(machine?.internalName as string);
             await prisma.machine.update({
                 where: {

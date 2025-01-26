@@ -447,14 +447,41 @@ export class XMLGenerator {
     this.xml.domain.devices[0].channel.push(channelDevice);
   }
 
-  // UNUSED UNTESTED
-  addGpu(pciAddress: string): void {
+
+  /*
+  * Add GPU passthrough
+  * @param pciBus - The PCI bus address of the GPU in the format `0000:B4:00.0`
+  * @returns {void}
+  */
+  addGPUPassthrough(
+    pciBus: string
+  ): void {
     this.xml.domain.devices[0].hostdev = this.xml.domain.devices[0].hostdev || [];
-    const gpu = {
+  
+    // Parse PCI address from `pciBus` (e.g., 00000000:B4:00.0)
+    const [domain, bus, slotFunction] = pciBus.split(':');
+    const [slot, func] = slotFunction.split('.');
+  
+    // Construct passthrough configuration
+    const gpuPassthrough = {
       $: { mode: 'subsystem', type: 'pci', managed: 'yes' },
-      source: [{ address: [{ $: { domain: '0x0000', bus: pciAddress.split(':')[0], slot: pciAddress.split(':')[1], function: pciAddress.split('.')[1] } }] }],
+      source: [
+        {
+          address: [
+            {
+              $: {
+                domain: `0x${domain}`,
+                bus: `0x${bus}`,
+                slot: `0x${slot}`,
+                function: func,
+              },
+            },
+          ],
+        },
+      ],
     };
-    this.xml.domain.devices[0].hostdev.push(gpu);
+  
+    this.xml.domain.devices[0].hostdev.push(gpuPassthrough);
   }
 
   addAudioDevice(): void {

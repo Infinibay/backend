@@ -1,4 +1,5 @@
 import fs from 'fs';
+import si from 'systeminformation';
 
 import { MachineConfiguration, PrismaClient } from '@prisma/client';
 import { Connection, Machine as VirtualMachine, StoragePool, StorageVol, Error as LibvirtError, ErrorNumber } from 'libvirt-node';
@@ -11,11 +12,18 @@ import { UnattendedUbuntuManager } from '@services/unattendedUbuntuManager';
 import { UnattendedRedHatManager } from '@services/unattendedRedHatManager';
 import { Debugger } from '@utils/debug';
 
+const ALLOWED_GPU_VENDORS = [
+    'NVIDIA Corporationß',
+    'Advanced Micro Devices, Inc. [AMD/ATI]'
+]
+
 export class CreateMachineService {
 
     private prisma: PrismaClient | null = null;
     private libvirt: Connection | null = null
     private debug: Debugger = new Debugger('virt-manager');
+
+    
 
     constructor(uri: string = 'qemu:///system', prisma: PrismaClient | null = null) {
         this.debug.log('Creating VirtManager instance with URI', uri);
@@ -23,7 +31,7 @@ export class CreateMachineService {
         this.prisma = prisma;
     }
 
-    async create(machine: Machine, username: string, password: string, productKey: string | undefined): Promise<boolean> {
+    async create(machine: Machine, username: string, password: string, productKey: string | undefined, pciBus: string | null): Promise<boolean> {
         this.debug.log('Creating machine', machine.name);
         let newIsoPath: string | null = null;
 
@@ -36,7 +44,7 @@ export class CreateMachineService {
             const unattendedManager = this.createUnattendedManager(machine, username, password, productKey, applications);
             newIsoPath = await unattendedManager.generateNewImage();
 
-            const xmlGenerator = await this.generateXML(machine, template, configuration, newIsoPath);
+            const xmlGenerator = await this.generateXML(machine, template, configuration, newIsoPath, pciBus);
 
             await this.executeTransaction(async (tx: any) => {
                 await this.updateMachineStatus(tx, machine.id, 'building');
@@ -264,7 +272,8 @@ export class CreateMachineService {
         machine: Machine,
         template: MachineTemplate,
         configuration: MachineConfiguration,
-        newIsoPath: string | null
+        newIsoPath: string | null,
+        pciBus: string | null
     ): Promise<XMLGenerator> {
         // Log the start of the XML generation
         this.debug.log('Starting to generate XML for machine', machine.name);
@@ -316,6 +325,11 @@ export class CreateMachineService {
         // add SPICE
         let spicePassword = xmlGenerator.addSPICE(true, false);
 
+        // Add a gpu
+        if (pciBus != null) {
+            xmlGenerator.addGPUPassthrough(pciBus);
+        }
+
         // Update the machine configuration with the new port
         // configuration.vncPort = -1;
         // configuration.vncListen = '0.0.0.0';
@@ -341,5 +355,15 @@ export class CreateMachineService {
 
         // Return the generated XML
         return xmlGenerator;
+    }
+
+    async getGraphicsInfo(): Promise<Array<any>> {
+        try {
+            const data = (await si.graphics()).controllers;
+            return data.filter((controller: any) => ALLOWED_GPU_VENDORS.includes(controller.vendor));
+            // TODO: discard already used gpus
+        } catch (error) {
+            return []
+        }
     }
 }

@@ -32,6 +32,7 @@ input CreateMachineInputType {
   name: String! = ""
   os: MachineOs! = WINDOWS10
   password: String! = ""
+  pciBus: String = null
   productKey: String
   templateId: String! = ""
   username: String! = ""
