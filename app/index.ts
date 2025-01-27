@@ -6,6 +6,7 @@ import cors from 'cors';
 import bodyParser from 'body-parser';
 import 'dotenv/config';
 import 'reflect-metadata';
+import timeout from 'connect-timeout';
 
 // Apollo Server Related Imports
 import { ApolloServer } from '@apollo/server';
@@ -18,6 +19,9 @@ import { buildSchema } from 'type-graphql';
 import { authChecker } from './utils/authChecker';
 import { InfinibayContext } from './utils/context';
 import resolvers from './graphql/resolvers';
+
+// Routes
+import isoUploadRouter from './routes/isoUpload';
 
 // Crons
 import { startCrons } from './crons/all';
@@ -36,10 +40,64 @@ async function bootstrap(): Promise<void> {
   const app = express();
   const httpServer = http.createServer(app);
 
+  // Add connection debugging
+  httpServer.on('connection', (socket) => {
+    socket.setTimeout(60 * 60 * 1000); // 1hr timeout
+    console.log(`[${new Date().toISOString()}] New connection established - Remote Address: ${socket.remoteAddress}`);
+    
+    socket.on('error', (error) => {
+      console.error(`[${new Date().toISOString()}] Socket error from ${socket.remoteAddress}:`, error);
+    });
+
+    socket.on('close', (hadError) => {
+      console.log(`[${new Date().toISOString()}] Connection closed from ${socket.remoteAddress} ${hadError ? 'due to error' : 'normally'}`);
+    });
+
+    socket.on('timeout', () => {
+      console.log(`[${new Date().toISOString()}] Connection timeout from ${socket.remoteAddress}`);
+      socket.end();
+    });
+  });
+
+  httpServer.on('error', (error) => {
+    console.error(`[${new Date().toISOString()}] Server error:`, error);
+  });
+
+  httpServer.on('clientError', (error, socket) => {
+    console.error(`[${new Date().toISOString()}] Client error:`, error);
+    socket.end('HTTP/1.1 400 Bad Request\r\n\r\n');
+  });
+
+
+  // Configure express for large file uploads
+  app.use(bodyParser.json({ limit: '100gb' }));
+  app.use(bodyParser.urlencoded({ limit: '100gb', extended: true }));
+  
+  // Add global timeout middleware
+  app.use(timeout(60 * 60 * 1000)); // 1hr. Is in miliseconds
+  
+  // Add global error handler for timeouts
+  app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (err.name === 'TimeoutError') {
+      res.status(408).json({ error: 'Request timeout' });
+    } else {
+      next(err);
+    }
+  });
+
+  // Configure CORS with proper timeout
+  app.use(cors<cors.CorsRequest>({
+    maxAge: 3600, // 1 hour
+    exposedHeaders: ['Content-Length', 'Content-Range'],
+  }));
+
   // Add health check endpoint
   app.get('/health', (req, res) => {
     res.status(200).send('OK');
   });
+
+  // Mount the ISO upload router
+  app.use('/isoUpload', isoUploadRouter);
 
   const server = new ApolloServer<InfinibayContext>({
     schema,

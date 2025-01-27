@@ -21,6 +21,7 @@
     "@graphql-tools/jest-transform": "^1.2.2",
     "@prisma/client": "5.19.0",
     "@types/axios": "^0.14.0",
+    "@types/multer": "^1.4.12",
     "apollo-link-context": "^1.0.20",
     "apollo-server": "^3.12.0",
     "apollo-server-errors": "^3.3.1",
@@ -31,6 +32,7 @@
     "bcrypt": "^5.1.0",
     "body-parser": "^1.20.1",
     "cheerio": "^1.0.0-rc.12",
+    "connect-timeout": "^1.9.0",
     "cron": "^3.2.1",
     "crypto": "^1.0.1",
     "debug": "^4.3.4",
@@ -76,6 +78,7 @@
   },
   "devDependencies": {
     "@types/bcrypt": "^5.0.2",
+    "@types/connect-timeout": "^0.0.39",
     "@types/cron": "^2.4.3",
     "@types/debug": "^4.1.12",
     "@types/ejs": "^3.1.5",
@@ -100,13 +103,13 @@
     "jsdom": "^23.0.1",
     "prisma": "5.19.0",
     "stream": "^0.0.2",
+    "systeminformation": "5.25.11",
     "ts-jest": "^29.2.5",
     "ts-node": "^10.9.2",
     "tsconfig-paths": "^4.2.0",
     "tslib": "^2.6.2",
     "typescript": "^5.3.3",
-    "util": "^0.12.5",
-    "systeminformation": "5.25.11"
+    "util": "^0.12.5"
   },
   "prisma": {
     "seed": "ts-node prisma/seed.ts"
