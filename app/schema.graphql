@@ -200,6 +200,7 @@ type Mutation {
   destroyMachineTemplate(id: String!): Boolean!
   destroyMachineTemplateCategory(id: String!): Boolean!
   executeCommand(command: String!, id: String!): CommandExecutionResponseType!
+  moveMachine(departmentId: String!, id: String!): Machine!
   powerOff(id: String!): SuccessType!
   powerOn(id: String!): SuccessType!
   setupNode: DyummyType!

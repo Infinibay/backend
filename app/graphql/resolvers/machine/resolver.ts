@@ -516,4 +516,41 @@ export class MachineMutations {
             }
         }
     }
+
+    @Mutation(() => Machine)
+    @Authorized('ADMIN')
+    async moveMachine(
+        @Arg('id') id: string,
+        @Arg('departmentId') departmentId: string,
+        @Ctx() { prisma, user }: InfinibayContext
+    ): Promise<Machine> {
+
+        // Check if machine exists
+        const machine = await prisma.machine.findUnique({
+            where: { id }
+        });
+
+        if (!machine) {
+            throw new UserInputError('Machine not found');
+        }
+
+        // Check if department exists
+        const department = await prisma.department.findUnique({
+            where: { id: departmentId }
+        });
+
+        if (!department) {
+            throw new UserInputError('Department not found');
+        }
+
+        // Update machine's department
+        const updatedMachine = await prisma.machine.update({
+            where: { id },
+            data: {
+                departmentId
+            }
+        });
+
+        return transformMachine(updatedMachine, prisma);
+    }
 }
