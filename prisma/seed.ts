@@ -13,8 +13,18 @@ const DEFAULT_ADMIN_PASSWORD = process.env.DEFAULT_ADMIN_PASSWORD || "password";
 async function createAdminUser() {
   const password = await bcrypt.hash(DEFAULT_ADMIN_PASSWORD, 10);
   try {
-    await prisma.user.create({
-      data: {
+    await prisma.user.upsert({
+      where: {
+        email: DEFAULT_ADMIN_EMAIL
+      },
+      update: {
+        password,
+        firstName: "Admin",
+        lastName: "User",
+        role: "ADMIN",
+        deleted: false,
+      },
+      create: {
         email: DEFAULT_ADMIN_EMAIL,
         password,
         firstName: "Admin",
@@ -23,7 +33,7 @@ async function createAdminUser() {
         deleted: false,
       },
     });
-    console.log("Admin user created successfully");
+    console.log("Admin user created/updated successfully");
   } catch (error) {
     console.error("Error creating admin user:", error);
   }

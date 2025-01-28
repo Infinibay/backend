@@ -10,6 +10,9 @@
     "lint:fix": "eslint --fix ./*.ts",
     "build": "tsc",
     "tsc": "tsc",
+    "db:reset": "npx prisma migrate reset",
+    "db:migrate": "npx prisma migrate dev",
+    "db:seed": "ts-node prisma/seed.ts",
     "seed": "ts-node prisma/seed.ts",
     "setup": "ts-node scripts/install.ts"
   },
