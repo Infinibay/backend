@@ -155,13 +155,20 @@ export class MachineMutations {
 
         const internalName = uuidv4();
         const machine = await prisma.$transaction(async (tx: any) => {
+;
             // Find the Default department
-            const defaultDepartment = await tx.department.findFirst({
-                where: { name: "Default" }
-            });
+            let department = null;
+            if (input.departmentId) {
+                department = await tx.department.findUnique({
+                    where: { id: input.departmentId }
+                });
+            } else {
+                // get the first department
+                department = await tx.department.first()
+            }
 
-            if (!defaultDepartment) {
-                throw new UserInputError("Default department not found");
+            if (!department) {
+                throw new UserInputError("Department not found");
             }
 
             const createdMachine = await tx.machine.create({
@@ -172,7 +179,7 @@ export class MachineMutations {
                     os: input.os,
                     templateId: input.templateId,
                     internalName,
-                    departmentId: defaultDepartment.id,
+                    departmentId: department.id,
                     configuration: {
                         create: {
                             graphicPort: 0,

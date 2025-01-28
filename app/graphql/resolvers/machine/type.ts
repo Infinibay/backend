@@ -156,6 +156,9 @@ export class CreateMachineInputType {
     @Field(() => String)
     templateId: string = ''
 
+    @Field(() => ID, { nullable: true }) // Temporarly is nullable, but it should not
+    departmentId: string = ''
+
     @Field()
     name: string = ''
 

@@ -29,6 +29,7 @@ input CreateApplicationInputType {
 
 input CreateMachineInputType {
   applications: [MachineApplicationInputType!]! = []
+  departmentId: ID = ""
   name: String! = ""
   os: MachineOs! = WINDOWS10
   password: String! = ""
