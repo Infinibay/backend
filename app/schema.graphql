@@ -135,6 +135,8 @@ type MachineTemplateCategoryType {
   description: String
   id: ID!
   name: String!
+  totalMachines: Int
+  totalTemplates: Int
 }
 
 input MachineTemplateInputType {
@@ -181,6 +183,7 @@ type MachineTemplateType {
   name: String
   ram: Int!
   storage: Int!
+  totalMachines: Int
 }
 
 type Mutation {
@@ -193,6 +196,8 @@ type Mutation {
   deleteApplication(id: String!): Boolean!
   destroyDepartment(id: String!): DepartmentType!
   destroyMachine(id: String!): SuccessType!
+  destroyMachineTemplate(id: String!): Boolean!
+  destroyMachineTemplateCategory(id: String!): Boolean!
   executeCommand(command: String!, id: String!): CommandExecutionResponseType!
   powerOff(id: String!): SuccessType!
   powerOn(id: String!): SuccessType!

@@ -32,8 +32,34 @@ export class MachineTemplateCategoryResolver implements MachineTemplateCategoryR
     @Ctx() ctx: InfinibayContext
   ): Promise<MachineTemplateCategoryType[]> {
     const { prisma } = ctx
-    let list = await prisma.machineTemplateCategory.findMany();
-    return list as MachineTemplateCategoryType[]
+    const categories = await prisma.machineTemplateCategory.findMany();
+
+    // Get counts for each category
+    const categoriesWithCounts = await Promise.all(
+      categories.map(async (category) => {
+        // Count templates in this category
+        const templates = await prisma.machineTemplate.findMany({
+          where: { categoryId: category.id }
+        });
+
+        // Count total machines using templates in this category
+        const totalMachines = await prisma.machine.count({
+          where: {
+            templateId: {
+              in: templates.map(t => t.id)
+            }
+          }
+        });
+
+        return {
+          ...category,
+          totalTemplates: templates.length,
+          totalMachines
+        };
+      })
+    );
+
+    return categoriesWithCounts;
   }
 
   /**
@@ -50,10 +76,31 @@ export class MachineTemplateCategoryResolver implements MachineTemplateCategoryR
     @Ctx() ctx: InfinibayContext
   ): Promise<MachineTemplateCategoryType | null> {
     const { prisma } = ctx
-    let result = await prisma.machineTemplateCategory.findUnique({
+    const category = await prisma.machineTemplateCategory.findUnique({
       where: { id }
-    }) as MachineTemplateCategoryType
-    return result
+    });
+
+    if (!category) return null;
+
+    // Count templates in this category
+    const templates = await prisma.machineTemplate.findMany({
+      where: { categoryId: id }
+    });
+
+    // Count total machines using templates in this category
+    const totalMachines = await prisma.machine.count({
+      where: {
+        templateId: {
+          in: templates.map(t => t.id)
+        }
+      }
+    });
+
+    return {
+      ...category,
+      totalTemplates: templates.length,
+      totalMachines
+    };
   }
 
   /**

@@ -26,6 +26,9 @@ export class MachineTemplateType {
 
     @Field(() => ID, { nullable: true })
     categoryId: string | null = null
+
+    @Field(() => Int, { nullable: true })
+    totalMachines?: number
 }
 
 @InputType()

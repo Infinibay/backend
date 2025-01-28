@@ -16,6 +16,8 @@ export interface MachineTemplateResolverInterface {
   machineTemplates(pagination: PaginationInputType, orderBy: MachineTemplateOrderBy, ctx: InfinibayContext): Promise<MachineTemplateType[]>
   createMachineTemplate(input: MachineTemplateInputType, ctx: InfinibayContext): Promise<MachineTemplateType>
   updateMachineTemplate(id: string, input: MachineTemplateInputType, ctx: InfinibayContext): Promise<MachineTemplateType>
+  destroyMachineTemplate(id: string, ctx: InfinibayContext): Promise<boolean>
+  destroyMachineTemplateCategory(id: string, ctx: InfinibayContext): Promise<boolean>
 }
 
 const MAX_CORES = 64;
@@ -45,7 +47,17 @@ export class MachineTemplateResolver implements MachineTemplateResolverInterface
       where: { id },
       include: { category: true }
     })
-    return machineTemplate;
+    // we need to count the number of machines using this template
+    const totalMachines = await ctx.prisma.machine.count({
+      where: { templateId: id }
+    })
+    console.log(totalMachines)
+    if (!machineTemplate) return null;
+    let response : MachineTemplateType = {
+      ...machineTemplate,
+      totalMachines
+    }
+    return response;
   }
 
   /**
@@ -75,7 +87,20 @@ export class MachineTemplateResolver implements MachineTemplateResolverInterface
       include: { category: true }
     });
 
-    return machineTemplates;
+    // Get the count of machines for each template
+    const templatesWithCount = await Promise.all(
+      machineTemplates.map(async (template) => {
+        const totalMachines = await prisma.machine.count({
+          where: { templateId: template.id }
+        });
+        return {
+          ...template,
+          totalMachines
+        };
+      })
+    );
+
+    return templatesWithCount;
   }
 
   private resolveOrder(orderBy: MachineTemplateOrderBy) {
@@ -92,7 +117,7 @@ export class MachineTemplateResolver implements MachineTemplateResolverInterface
   }
 
   private resolveTake(pagination: PaginationInputType) {
-    return pagination && pagination.take ? pagination.take : 20;
+    return pagination && pagination.take ? pagination.take : 10;
   }
 
   /**
@@ -201,5 +226,87 @@ export class MachineTemplateResolver implements MachineTemplateResolverInterface
       },
       include: { category: true }
     })
+  }
+
+  /**
+   * Deletes a machine template if it's not being used by any machines
+   * 
+   * @param {string} id - The ID of the machine template to delete
+   * @param {InfinibayContext} ctx - The Infinibay context
+   * @returns {Promise<boolean>} - True if deletion was successful, throws error otherwise
+   */
+  @Mutation(() => Boolean)
+  @Authorized('ADMIN')
+  async destroyMachineTemplate(
+    @Arg('id', { nullable: false }) id: string,
+    @Ctx() ctx: InfinibayContext
+  ): Promise<boolean> {
+    const { prisma } = ctx;
+
+    // Check if template exists
+    const template = await prisma.machineTemplate.findUnique({
+      where: { id }
+    });
+
+    if (!template) {
+      throw new UserInputError('Machine template not found');
+    }
+
+    // Check if template is in use
+    const machineCount = await prisma.machine.count({
+      where: { templateId: id }
+    });
+
+    if (machineCount > 0) {
+      throw new UserInputError('Cannot delete template while it is being used by machines');
+    }
+
+    // Delete the template
+    await prisma.machineTemplate.delete({
+      where: { id }
+    });
+
+    return true;
+  }
+
+  /**
+   * Deletes a machine template category if it's not being used by any templates
+   * 
+   * @param {string} id - The ID of the category to delete
+   * @param {InfinibayContext} ctx - The Infinibay context
+   * @returns {Promise<boolean>} - True if deletion was successful, throws error otherwise
+   */
+  @Mutation(() => Boolean)
+  @Authorized('ADMIN')
+  async destroyMachineTemplateCategory(
+    @Arg('id', { nullable: false }) id: string,
+    @Ctx() ctx: InfinibayContext
+  ): Promise<boolean> {
+    const { prisma } = ctx;
+
+    // Check if category exists
+    const category = await prisma.machineTemplateCategory.findUnique({
+      where: { id }
+    });
+
+    if (!category) {
+      throw new UserInputError('Machine template category not found');
+    }
+
+    // Check if category is in use
+    const templateCount = await prisma.machineTemplate.count({
+      where: { categoryId: id }
+    });
+
+    if (templateCount > 0) {
+      throw new UserInputError('Cannot delete category while it is being used by templates');
+    }
+
+    // Delete the category
+    await prisma.machineTemplateCategory.delete({
+      where: { id }
+    });
+
+    return true;
   }
 }
