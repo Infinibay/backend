@@ -536,7 +536,7 @@ export class XMLGenerator {
         { $: { enable: 'yes' } }, // Enable file transfer
       ],
       mouse: [
-        { $: { mode: 'client' } }, // Mouse handling
+        { $: { mode: 'server' } }, // client cause problems with gpu drivers
       ],
       streaming: [
         { $: { mode: 'filter' } }, // Adaptive streaming
