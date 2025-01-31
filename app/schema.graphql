@@ -13,6 +13,11 @@ type ApplicationType {
   parameters: JSONObject
 }
 
+input BridgeNameInput {
+  bridgeName: String! = ""
+  networkName: String! = ""
+}
+
 type CommandExecutionResponseType {
   message: String!
   response: String
@@ -39,6 +44,15 @@ input CreateMachineInputType {
   username: String! = ""
 }
 
+input CreateNetworkInput {
+  bridgeName: String! = ""
+  description: String! = ""
+  enableIntraNetworkCommunication: Boolean
+  enabledServices: [String!]
+  ipConfig: NetworkIpConfigInput
+  name: String! = ""
+}
+
 input CreateUserInputType {
   email: String! = ""
   firstName: String! = ""
@@ -52,6 +66,10 @@ input CreateUserInputType {
 A date-time string at UTC, such as 2007-12-03T10:15:30Z, compliant with the `date-time` format outlined in section 5.6 of the RFC 3339 profile of the ISO 8601 standard for representation of dates and times using the Gregorian calendar.This scalar is serialized to a string in ISO 8601 format and parsed from a string in ISO 8601 format.
 """
 scalar DateTimeISO
+
+input DeleteNetworkInput {
+  name: String!
+}
 
 type DepartmentType {
   createdAt: DateTimeISO!
@@ -77,6 +95,12 @@ type GraphicConfigurationType {
   link: String!
   password: String!
   protocol: String!
+}
+
+input IpRangeInput {
+  end: String! = ""
+  networkName: String! = ""
+  start: String! = ""
 }
 
 """
@@ -193,8 +217,10 @@ type Mutation {
   createMachine(input: CreateMachineInputType!): Machine!
   createMachineTemplate(input: MachineTemplateInputType!): MachineTemplateType!
   createMachineTemplateCategory(input: MachineTemplateCategoryInputType!): MachineTemplateCategoryType!
+  createNetwork(input: CreateNetworkInput!): Boolean!
   createUser(input: CreateUserInputType!): UserType!
   deleteApplication(id: String!): Boolean!
+  deleteNetwork(input: DeleteNetworkInput!): Boolean!
   destroyDepartment(id: String!): DepartmentType!
   destroyMachine(id: String!): SuccessType!
   destroyMachineTemplate(id: String!): Boolean!
@@ -203,12 +229,61 @@ type Mutation {
   moveMachine(departmentId: String!, id: String!): Machine!
   powerOff(id: String!): SuccessType!
   powerOn(id: String!): SuccessType!
+  setNetworkBridgeName(input: BridgeNameInput!): Boolean!
+  setNetworkIp(input: NetworkIpInput!): Boolean!
+  setNetworkIpRange(input: IpRangeInput!): Boolean!
   setupNode: DyummyType!
   suspend(id: String!): SuccessType!
   updateApplication(id: String!, input: CreateApplicationInputType!): ApplicationType!
   updateMachineTemplate(id: String!, input: MachineTemplateInputType!): MachineTemplateType!
   updateMachineTemplateCategory(id: String!, input: MachineTemplateCategoryInputType!): MachineTemplateCategoryType!
   updateUser(id: String!, input: UpdateUserInputType!): UserType!
+}
+
+type Network {
+  bridge: NetworkBridge!
+  description: String
+  ip: NetworkIp!
+  name: String!
+  uuid: String!
+}
+
+type NetworkBridge {
+  delay: String!
+  name: String!
+  stp: String!
+}
+
+type NetworkDhcp {
+  range: NetworkDhcpRange!
+}
+
+type NetworkDhcpRange {
+  end: String!
+  start: String!
+}
+
+input NetworkDhcpRangeInput {
+  end: String! = ""
+  start: String! = ""
+}
+
+type NetworkIp {
+  address: String!
+  dhcp: NetworkDhcp
+  netmask: String!
+}
+
+input NetworkIpConfigInput {
+  address: String! = ""
+  dhcp: NetworkDhcpRangeInput
+  netmask: String! = ""
+}
+
+input NetworkIpInput {
+  address: String! = ""
+  netmask: String! = ""
+  networkName: String! = ""
 }
 
 enum OrderByDirection {
@@ -238,6 +313,8 @@ type Query {
   machineTemplateCategory(id: String!): MachineTemplateCategoryType
   machineTemplates(orderBy: MachineTemplateOrderBy, pagination: PaginationInputType): [MachineTemplateType!]!
   machines(orderBy: MachineOrderBy, pagination: PaginationInputType): [Machine!]!
+  network(name: String!): Network!
+  networks: [Network!]!
   user(id: String!): UserType!
   users(orderBy: UserOrderByInputType, pagination: PaginationInputType): [UserType!]!
 }
