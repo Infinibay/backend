@@ -57,6 +57,7 @@ model Machine {
   departmentId       String?
   department         Department?     @relation(fields: [departmentId], references: [id])
   pendingCommands    PendingCommand[]
+  ports              VmPort[]
 }
 
 model MachineConfiguration {
@@ -140,4 +141,21 @@ model Department {
   internetSpeed Int?     // in Mbps
   ipSubnet      String?
   machines      Machine[]
+}
+
+model VmPort {
+  id          String    @id @default(uuid())
+  portStart   Int       // Start of port range
+  portEnd     Int       // End of port range (same as portStart for single port)
+  protocol    String    // tcp or udp
+  running     Boolean   // if the port is currently in use
+  enabled     Boolean   // if firewall allows inbound connections
+  toEnable    Boolean   // if it will be enabled in next firewall update
+  vmId        String
+  vm          Machine   @relation(fields: [vmId], references: [id])
+  lastSeen    DateTime  @default(now())
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([vmId, portStart, protocol])
 }

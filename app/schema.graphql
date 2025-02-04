@@ -296,6 +296,16 @@ input PaginationInputType {
   take: Int = 20
 }
 
+type PortInfo {
+  enabled: Boolean!
+  lastSeen: DateTimeISO!
+  portEnd: Int!
+  portStart: Int!
+  protocol: String!
+  running: Boolean!
+  toEnable: Boolean!
+}
+
 type Query {
   application(id: String!): ApplicationType
   applications: [ApplicationType!]!
@@ -306,6 +316,7 @@ type Query {
   findDepartmentByName(name: String!): DepartmentType
   getGraphics: [GPU!]!
   graphicConnection(id: String!): GraphicConfigurationType
+  listVmPorts(departmentId: String): [VmPortInfo!]!
   login(email: String!, password: String!): UserToken!
   machine(id: String!): Machine
   machineTemplate(id: String!): MachineTemplateType
@@ -367,4 +378,10 @@ type UserType {
   id: ID!
   lastName: String!
   role: String!
+}
+
+type VmPortInfo {
+  name: String!
+  ports: [PortInfo!]!
+  vmId: ID!
 }
