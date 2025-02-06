@@ -1,4 +1,4 @@
-import { ObjectType, Field, ID, Int } from "type-graphql";
+import { ObjectType, Field, ID, Int, InputType } from "type-graphql";
 
 @ObjectType()
 export class VmPortInfo {
@@ -88,4 +88,79 @@ export class FirewallRule {
 
   @Field()
   action: 'accept' | 'reject' | 'drop' = 'accept';
+}
+
+@ObjectType()
+export class DepartmentPortInfo {
+  @Field(() => ID)
+  id: string = '';
+
+  @Field(() => ID)
+  departmentId: string = '';
+
+  @Field(() => Int)
+  portStart: number = 0;
+
+  @Field(() => Int)
+  portEnd: number = 0;
+
+  @Field()
+  protocol: string = '';
+
+  @Field()
+  enabled: boolean = false;
+
+  @Field()
+  toEnable: boolean = false;
+
+  @Field(() => Date)
+  lastSeen: Date = new Date();
+}
+
+@ObjectType()
+export class DepartmentConfigurationInfo {
+  @Field(() => ID)
+  id: string = '';
+
+  @Field(() => ID)
+  departmentId: string = '';
+
+  @Field()
+  cleanTraffic: boolean = false;
+}
+
+@InputType()
+export class UpdatePortStatusInput {
+  @Field(() => ID)
+  id: string = '';
+
+  @Field()
+  toEnable: boolean = false;
+}
+
+@InputType()
+export class CreateDepartmentPortInput {
+  @Field(() => ID)
+  departmentId: string = '';
+
+  @Field(() => Int)
+  portStart: number = 0;
+
+  @Field(() => Int)
+  portEnd: number = 0;
+
+  @Field()
+  protocol: string = '';
+
+  @Field()
+  toEnable: boolean = false;
+}
+
+@InputType()
+export class UpdateDepartmentConfigInput {
+  @Field(() => ID)
+  departmentId: string = '';
+
+  @Field()
+  cleanTraffic: boolean = false;
 }

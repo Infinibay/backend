@@ -55,7 +55,6 @@ export class FirewallService {
     console.log(machines[1].ports);
     // fina ll vmPorts (no conditino or where, just all)
     let allPorts = await this.prisma.vmPort.findMany({})
-    console.log(allPorts);
 
     return machines.map((machine) => ({
       vmId: machine.id,

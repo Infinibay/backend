@@ -32,6 +32,14 @@ input CreateApplicationInputType {
   parameters: JSONObject = null
 }
 
+input CreateDepartmentPortInput {
+  departmentId: ID! = ""
+  portEnd: Int! = 0
+  portStart: Int! = 0
+  protocol: String! = ""
+  toEnable: Boolean! = false
+}
+
 input CreateMachineInputType {
   applications: [MachineApplicationInputType!]! = []
   departmentId: ID = ""
@@ -69,6 +77,23 @@ scalar DateTimeISO
 
 input DeleteNetworkInput {
   name: String!
+}
+
+type DepartmentConfigurationInfo {
+  cleanTraffic: Boolean!
+  departmentId: ID!
+  id: ID!
+}
+
+type DepartmentPortInfo {
+  departmentId: ID!
+  enabled: Boolean!
+  id: ID!
+  lastSeen: DateTimeISO!
+  portEnd: Int!
+  portStart: Int!
+  protocol: String!
+  toEnable: Boolean!
 }
 
 type DepartmentType {
@@ -214,12 +239,14 @@ type MachineTemplateType {
 type Mutation {
   createApplication(input: CreateApplicationInputType!): ApplicationType!
   createDepartment(name: String!): DepartmentType!
+  createDepartmentPort(input: CreateDepartmentPortInput!): DepartmentPortInfo!
   createMachine(input: CreateMachineInputType!): Machine!
   createMachineTemplate(input: MachineTemplateInputType!): MachineTemplateType!
   createMachineTemplateCategory(input: MachineTemplateCategoryInputType!): MachineTemplateCategoryType!
   createNetwork(input: CreateNetworkInput!): Boolean!
   createUser(input: CreateUserInputType!): UserType!
   deleteApplication(id: String!): Boolean!
+  deleteDepartmentPort(id: String!): Boolean!
   deleteNetwork(input: DeleteNetworkInput!): Boolean!
   destroyDepartment(id: String!): DepartmentType!
   destroyMachine(id: String!): SuccessType!
@@ -235,9 +262,12 @@ type Mutation {
   setupNode: DyummyType!
   suspend(id: String!): SuccessType!
   updateApplication(id: String!, input: CreateApplicationInputType!): ApplicationType!
+  updateDepartmentConfiguration(input: UpdateDepartmentConfigInput!): DepartmentConfigurationInfo!
+  updateDepartmentPortStatus(input: UpdatePortStatusInput!): DepartmentPortInfo!
   updateMachineTemplate(id: String!, input: MachineTemplateInputType!): MachineTemplateType!
   updateMachineTemplateCategory(id: String!, input: MachineTemplateCategoryInputType!): MachineTemplateCategoryType!
   updateUser(id: String!, input: UpdateUserInputType!): UserType!
+  updateVmPortStatus(input: UpdatePortStatusInput!): VmPortInfo!
 }
 
 type Network {
@@ -314,8 +344,10 @@ type Query {
   department(id: String!): DepartmentType
   departments: [DepartmentType!]!
   findDepartmentByName(name: String!): DepartmentType
+  getDepartmentConfiguration(departmentId: String!): DepartmentConfigurationInfo
   getGraphics: [GPU!]!
   graphicConnection(id: String!): GraphicConfigurationType
+  listDepartmentPorts(departmentId: String!): [DepartmentPortInfo!]!
   listVmPorts(departmentId: String): [VmPortInfo!]!
   login(email: String!, password: String!): UserToken!
   machine(id: String!): Machine
@@ -333,6 +365,16 @@ type Query {
 type SuccessType {
   message: String!
   success: Boolean!
+}
+
+input UpdateDepartmentConfigInput {
+  cleanTraffic: Boolean! = false
+  departmentId: ID! = ""
+}
+
+input UpdatePortStatusInput {
+  id: ID! = ""
+  toEnable: Boolean! = false
 }
 
 input UpdateUserInputType {
