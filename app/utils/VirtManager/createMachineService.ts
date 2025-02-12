@@ -297,7 +297,7 @@ export class CreateMachineService {
         xmlGenerator.enableTPM('2.0');
         xmlGenerator.setStorage(template.storage);
         xmlGenerator.setUEFI();
-        xmlGenerator.addNetworkInterface('default', 'virtio');
+        xmlGenerator.addNetworkInterface(process.env.BRIDGE_NAME ?? 'default', 'virtio');
         xmlGenerator.setBootDevice(['hd', 'cdrom']);
         xmlGenerator.addAudioDevice();
         xmlGenerator.setVCPUs(template.cores);

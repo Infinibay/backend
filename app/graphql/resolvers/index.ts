@@ -8,7 +8,7 @@ import { MachineTemplateCategoryResolver } from './machine_template_category/res
 import { ApplicationQueries, ApplicationMutations } from './application/resolver';
 import { SystemResolver } from './system/resolver';
 import { NetworkResolver } from './networks/resolver';
-import { FirewallResolver } from './firewall/resolver';
+import { NetworkFilterResolver } from './firewall/resolver';
 
 const resolvers: NonEmptyArray<Function> = [
   UserResolver,
@@ -22,7 +22,7 @@ const resolvers: NonEmptyArray<Function> = [
   ApplicationMutations,
   SystemResolver,
   NetworkResolver,
-  FirewallResolver
+  NetworkFilterResolver
 ];
 
 export default resolvers as NonEmptyArray<Function>;

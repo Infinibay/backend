@@ -58,6 +58,7 @@ model Machine {
   department         Department?     @relation(fields: [departmentId], references: [id])
   pendingCommands    PendingCommand[]
   ports              VmPort[]
+  nwFilters          VMNWFilter[]
 }
 
 model MachineConfiguration {
@@ -141,6 +142,100 @@ model Department {
   internetSpeed Int?     // in Mbps
   ipSubnet      String?
   machines      Machine[]
+  nwFilters     DepartmentNWFilter[]
+  configuration DepartmentConfiguration?
+}
+
+model NWFilter {
+  id            String   @id @default(uuid())
+  name          String   @unique
+  internalName  String   @unique
+  uuid          String   @unique
+  description   String?
+  chain         String?  // ipv4, arp, etc.
+  type          String   @default("generic") // generic, department, vm
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  rules         FWRule[]
+  departments   DepartmentNWFilter[]
+  vms          VMNWFilter[]
+  
+  // Self-referential many-to-many relationship for filter references
+  referencedBy    FilterReference[] @relation("ReferencingFilters")
+  references      FilterReference[] @relation("ReferencedFilters")
+}
+
+// Join table for filter references
+model FilterReference {
+  id              String   @id @default(uuid())
+  sourceFilter    NWFilter @relation("ReferencingFilters", fields: [sourceFilterId], references: [id], onDelete: Cascade)
+  sourceFilterId  String
+  targetFilter    NWFilter @relation("ReferencedFilters", fields: [targetFilterId], references: [id], onDelete: Cascade)
+  targetFilterId  String
+  createdAt      DateTime @default(now())
+
+  @@unique([sourceFilterId, targetFilterId])
+}
+
+model DepartmentNWFilter {
+  id           String     @id @default(uuid())
+  department   Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  departmentId String
+  nwFilter     NWFilter   @relation(fields: [nwFilterId], references: [id], onDelete: Cascade)
+  nwFilterId   String
+  priority     Int
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  @@unique([departmentId, nwFilterId])
+}
+
+model FWRule {
+  id          String    @id @default(uuid())
+  nwFilter    NWFilter  @relation(fields: [nwFilterId], references: [id], onDelete: Cascade)
+  nwFilterId  String
+  action      String    @default("accept") // accept, reject, drop, return, continue
+  direction   String    @default("inout")  // in, out, inout
+  priority    Int
+  protocol    String    @default("all")    // tcp, udp, icmp, arp, ipv4, ipv6, all
+  ipVersion   String?   // ipv4, ipv6
+  srcMacAddr  String?   // MAC address format
+  srcIpAddr   String?   // IP address format
+  srcIpMask   String?   // IP mask format
+  dstIpAddr   String?   // IP address format
+  dstIpMask   String?   // IP mask format
+  srcPortStart Int?     @db.SmallInt // 0-65535
+  srcPortEnd   Int?     @db.SmallInt // 0-65535
+  dstPortStart Int?     @db.SmallInt // 0-65535
+  dstPortEnd   Int?     @db.SmallInt // 0-65535
+  state       Json?     // NEW, ESTABLISHED, RELATED, etc.
+  comment     String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([nwFilterId, priority])
+}
+
+model DepartmentConfiguration {
+  id          String    @id @default(uuid())
+  department  Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  departmentId String   @unique
+  cleanTraffic Boolean  @default(false)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+model VMNWFilter {
+  id           String     @id @default(uuid())
+  vm           Machine    @relation(fields: [vmId], references: [id], onDelete: Cascade)
+  vmId         String
+  nwFilter     NWFilter   @relation(fields: [nwFilterId], references: [id], onDelete: Cascade)
+  nwFilterId   String
+  priority     Int
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  @@unique([vmId, nwFilterId])
 }
 
 model VmPort {
@@ -156,6 +251,5 @@ model VmPort {
   lastSeen    DateTime  @default(now())
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
-
   @@unique([vmId, portStart, protocol])
 }
