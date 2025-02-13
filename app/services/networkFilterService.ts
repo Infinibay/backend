@@ -192,6 +192,10 @@ export class NetworkFilterService {
 
       // Define the filter in libvirt
       const result = await NwFilter.defineXml(conn, xml);
+      this.prisma.nWFilter.update({
+        where: { id: filter.id },
+        data: { flushedAt: new Date() }
+      })
       return result !== null;
 
     } catch (error) {

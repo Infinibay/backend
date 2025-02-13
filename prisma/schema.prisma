@@ -156,6 +156,7 @@ model NWFilter {
   type          String   @default("generic") // generic, department, vm
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+  flushedAt     DateTime?
   rules         FWRule[]
   departments   DepartmentNWFilter[]
   vms          VMNWFilter[]
