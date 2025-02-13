@@ -184,7 +184,6 @@ model DepartmentNWFilter {
   departmentId String
   nwFilter     NWFilter   @relation(fields: [nwFilterId], references: [id], onDelete: Cascade)
   nwFilterId   String
-  priority     Int
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 
@@ -232,7 +231,6 @@ model VMNWFilter {
   vmId         String
   nwFilter     NWFilter   @relation(fields: [nwFilterId], references: [id], onDelete: Cascade)
   nwFilterId   String
-  priority     Int
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 
