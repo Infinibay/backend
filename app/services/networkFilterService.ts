@@ -50,6 +50,21 @@ export class NetworkFilterService {
     return nwFilter;
   }
 
+  async updateFilter(
+    id: string,
+    data: {
+      name?: string;
+      description?: string;
+      chain?: string;
+      type?: 'generic' | 'department' | 'vm';
+    }
+  ): Promise<NWFilter> {
+    return await this.prisma.nWFilter.update({
+      where: { id },
+      data,
+    });
+  }
+
   async deleteFilter(id: string): Promise<NWFilter> {
     return await this.prisma.nWFilter.delete({
       where: { id },
