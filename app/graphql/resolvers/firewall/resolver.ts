@@ -21,10 +21,9 @@ export class FirewallResolver {
   @Query(() => [GenericFilter])
   @Authorized('ADMIN')
   async listFilters(
-    @Arg('type') type: FilterType,
-    @Arg('departmentId', () => ID, { nullable: true }) departmentId: string | null,
-    @Arg('vmId', () => ID, { nullable: true }) vmId: string | null,
-    @Ctx() { prisma }: InfinibayContext
+    @Ctx() { prisma }: InfinibayContext,
+    @Arg('departmentId', () => ID, { nullable: true }) departmentId?: string | null,
+    @Arg('vmId', () => ID, { nullable: true }) vmId?: string | null,
   ): Promise<GenericFilter[]> {
     if (departmentId && vmId) {
       // Error
@@ -47,8 +46,7 @@ export class FirewallResolver {
           }
         }
       });
-    }
-    if (vmId) {
+    } else if (vmId) {
       filters = await prisma.nWFilter.findMany({
         include: {
           vms: true,
@@ -63,8 +61,22 @@ export class FirewallResolver {
           }
         }
       });
+    } else {
+      filters = await prisma.nWFilter.findMany({
+        include: {
+          vms: true,
+          departments: true,
+          rules: true,
+          references: true
+        },
+        where: {
+          type: 'generic'
+        }
+      });
     }
+
     return filters.map( (filter:any) => {
+      console.log(filter);
       return {
         id: filter.id,
         name: filter.name,

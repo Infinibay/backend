@@ -1,6 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 import { v4 as uuidv4 } from 'uuid';
 import { randomBytes } from 'crypto';
+import { Connection, NwFilter } from 'libvirt-node';
 
 const prisma = new PrismaClient();
 
@@ -12,7 +13,9 @@ async function createFilter(
   name: string,
   description: string,
   chain: string | null,
-  type: 'generic' | 'department' | 'vm' = 'generic'
+  type: 'generic' | 'department' | 'vm' = 'generic',
+  priority: number = 500,
+  stateMatch: boolean = true
 ): Promise<string> {
   const filter = await prisma.nWFilter.create({
     data: {
@@ -22,6 +25,8 @@ async function createFilter(
       description,
       chain,
       type,
+      priority,
+      stateMatch,
     },
   });
   return filter.id;
@@ -33,10 +38,11 @@ async function createRule(
   direction: string,
   priority: number,
   protocol: string = 'all',
-  port?: number,
   options: {
+    srcPort?: number;
     srcPortStart?: number;
     srcPortEnd?: number;
+    dstPort?: number;
     dstPortStart?: number;
     dstPortEnd?: number;
     comment?: string;
@@ -44,6 +50,9 @@ async function createRule(
     srcIpAddr?: string;
     dstIpAddr?: string;
     state?: any;
+    icmpType?: number;
+    icmpCode?: number;
+    macAddr?: string;
   } = {}
 ) {
   await prisma.fWRule.create({
@@ -53,10 +62,10 @@ async function createRule(
       direction,
       priority,
       protocol,
-      dstPortStart: port,
-      dstPortEnd: port,
-      srcPortStart: options.srcPortStart,
-      srcPortEnd: options.srcPortEnd,
+      dstPortStart: (options.dstPort || options.dstPortStart),
+      dstPortEnd: (options.dstPort || options.dstPortEnd),
+      srcPortStart: (options.srcPort || options.srcPortStart),
+      srcPortEnd: (options.srcPort || options.srcPortEnd),
       comment: options.comment,
       ipVersion: options.ipVersion,
       srcIpAddr: options.srcIpAddr,
@@ -75,13 +84,61 @@ async function createFilterReference(sourceId: string, targetId: string) {
   });
 }
 
+async function cleanExistingIbayFilters() {
+  console.log('  Cleaning existing ibay filters...');
+  let conn: Connection | null = null;
+  try {
+    // Connect to libvirt
+    conn = await Connection.open('qemu:///system');
+    if (!conn) {
+      throw new Error('Failed to connect to libvirt');
+    }
+
+    // Get all network filters
+    const filters = await conn.listNwFilters();
+    if (!filters) {
+      console.log('No network filters found');
+      return;
+    }
+
+    // Find and remove ibay filters
+    for (const filterName of filters) {
+      if (filterName.startsWith('ibay-')) {
+        try {
+          const filter = await NwFilter.lookupByName(conn, filterName);
+          if (filter) {
+            await filter.undefine();
+            console.log(`Removed network filter: ${filterName}`);
+          }
+        } catch (error) {
+          console.error(`Failed to remove filter ${filterName}:`, error);
+        }
+      }
+    }
+  } catch (error) {
+    console.error('Error cleaning existing ibay filters:', error);
+    throw error;
+  } finally {
+    if (conn) {
+      await conn.close();
+    }
+  }
+}
+
 export async function installNetworkFilters() {
   try {
+    // Clean existing filters before installing new ones
+    await cleanExistingIbayFilters();
+
+    console.log('  Installing network filters...');
+
     // Basic security filters
     const cleanTrafficId = await createFilter(
       'Clean Traffic',
       'Basic security measures including MAC/IP/ARP spoofing prevention',
-      'root'
+      'root',
+      'generic',
+      100  // Higher priority for security filters
     );
 
     const noMacSpoofingId = await createFilter(
@@ -89,10 +146,10 @@ export async function installNetworkFilters() {
       'Prevents MAC address spoofing',
       'mac'
     );
-    await createRule(noMacSpoofingId, 'return', 'out', 500, 'all', undefined, {
+    await createRule(noMacSpoofingId, 'return', 'out', 500, 'all', {
       comment: 'Allow packets from VM MAC',
     });
-    await createRule(noMacSpoofingId, 'drop', 'out', 500, 'all', undefined, {
+    await createRule(noMacSpoofingId, 'drop', 'out', 500, 'all', {
       comment: 'Drop all other MAC addresses',
     });
 
@@ -101,14 +158,14 @@ export async function installNetworkFilters() {
       'Prevents IP address spoofing',
       'ipv4-ip'
     );
-    await createRule(noIpSpoofingId, 'return', 'out', 100, 'udp', undefined, {
+    await createRule(noIpSpoofingId, 'return', 'out', 100, 'udp', {
       srcIpAddr: '0.0.0.0',
       comment: 'Allow DHCP requests',
     });
-    await createRule(noIpSpoofingId, 'return', 'out', 500, 'all', undefined, {
+    await createRule(noIpSpoofingId, 'return', 'out', 500, 'all', {
       comment: 'Allow packets from VM IP',
     });
-    await createRule(noIpSpoofingId, 'drop', 'out', 1000, 'all', undefined, {
+    await createRule(noIpSpoofingId, 'drop', 'out', 1000, 'all', {
       comment: 'Drop all other IPs',
     });
 
@@ -122,7 +179,7 @@ export async function installNetworkFilters() {
       'Allows DHCP client operations',
       'ipv4'
     );
-    await createRule(dhcpId, 'accept', 'out', 100, 'udp', undefined, {
+    await createRule(dhcpId, 'accept', 'out', 100, 'udp', {
       srcIpAddr: '0.0.0.0',
       dstIpAddr: '255.255.255.255',
       srcPortStart: 68,
@@ -131,7 +188,7 @@ export async function installNetworkFilters() {
       dstPortEnd: 67,
       comment: 'Allow DHCP requests',
     });
-    await createRule(dhcpId, 'accept', 'in', 100, 'udp', undefined, {
+    await createRule(dhcpId, 'accept', 'in', 100, 'udp', {
       srcPortStart: 67,
       srcPortEnd: 67,
       dstPortStart: 68,
@@ -140,65 +197,65 @@ export async function installNetworkFilters() {
     });
 
     // Service definitions with proper protocols and ports
-    const services = [
+    const services: any[] = [
       {
         name: 'SSH',
-        rules: [{ protocol: 'tcp', dstPortStart: 22, dstPortEnd: 22 }],
+        rules: [{ protocol: 'tcp', port: 22 }],
       },
       {
         name: 'RDP',
-        rules: [{ protocol: 'tcp', dstPortStart: 3389, dstPortEnd: 3389 }],
+        rules: [{ protocol: 'tcp', port: 3389 }],
       },
       {
         name: 'HTTP',
-        rules: [{ protocol: 'tcp', dstPortStart: 80, dstPortEnd: 80 }],
+        rules: [{ protocol: 'tcp', port: 80 }],
       },
       {
         name: 'HTTPS',
-        rules: [{ protocol: 'tcp', dstPortStart: 443, dstPortEnd: 443 }],
+        rules: [{ protocol: 'tcp', port: 443 }],
       },
       {
         name: 'DNS',
         rules: [
-          { protocol: 'tcp', dstPortStart: 53, dstPortEnd: 53 },
-          { protocol: 'udp', dstPortStart: 53, dstPortEnd: 53 },
+          { protocol: 'tcp', port: 53 },
+          { protocol: 'udp', port: 53 },
         ],
       },
       {
         name: 'SMTP',
         rules: [
-          { protocol: 'tcp', dstPortStart: 25, dstPortEnd: 25 },
-          { protocol: 'tcp', dstPortStart: 587, dstPortEnd: 587 }, // SMTP Submission
+          { protocol: 'tcp', port: 25 },
+          { protocol: 'tcp', port: 587 }, // SMTP Submission
         ],
       },
       {
         name: 'SMTPS',
-        rules: [{ protocol: 'tcp', dstPortStart: 465, dstPortEnd: 465 }],
+        rules: [{ protocol: 'tcp', port: 465 }],
       },
       {
         name: 'POP3',
-        rules: [{ protocol: 'tcp', dstPortStart: 110, dstPortEnd: 110 }],
+        rules: [{ protocol: 'tcp', port: 110 }],
       },
       {
         name: 'POP3S',
-        rules: [{ protocol: 'tcp', dstPortStart: 995, dstPortEnd: 995 }],
+        rules: [{ protocol: 'tcp', port: 995 }],
       },
       {
         name: 'IMAP',
-        rules: [{ protocol: 'tcp', dstPortStart: 143, dstPortEnd: 143 }],
+        rules: [{ protocol: 'tcp', port: 143 }],
       },
       {
         name: 'IMAPS',
-        rules: [{ protocol: 'tcp', dstPortStart: 993, dstPortEnd: 993 }],
+        rules: [{ protocol: 'tcp', port: 993 }],
       },
       {
         name: 'FTP',
         rules: [
-          { protocol: 'tcp', dstPortStart: 21, dstPortEnd: 21 },
+          { protocol: 'tcp', port: 21 },
           {
             protocol: 'tcp',
-            dstPortStart: 1024,
-            dstPortEnd: 65535,
+            portStart: 1024,
+            portEnd: 65535,
             state: { new: true, established: true, related: true },
           }, // Passive mode
         ],
@@ -209,138 +266,175 @@ export async function installNetworkFilters() {
           { protocol: 'tcp', dstPortStart: 990, dstPortEnd: 990 },
           {
             protocol: 'tcp',
-            dstPortStart: 1024,
-            dstPortEnd: 65535,
+            portStart: 1024,
+            portEnd: 65535,
             state: { new: true, established: true, related: true },
           }, // Passive mode
         ],
       },
       {
         name: 'MySQL',
-        rules: [{ protocol: 'tcp', dstPortStart: 3306, dstPortEnd: 3306 }],
+        rules: [{ protocol: 'tcp', port: 3306 }],
       },
       {
         name: 'PostgreSQL',
-        rules: [{ protocol: 'tcp', dstPortStart: 5432, dstPortEnd: 5432 }],
+        rules: [{ protocol: 'tcp', port: 5432 }],
       },
       {
         name: 'MongoDB',
-        rules: [{ protocol: 'tcp', dstPortStart: 27017, dstPortEnd: 27017 }],
+        rules: [{ protocol: 'tcp', port: 27017 }],
       },
       {
         name: 'Redis',
-        rules: [{ protocol: 'tcp', dstPortStart: 6379, dstPortEnd: 6379 }],
+        rules: [{ protocol: 'tcp', port: 6379 }],
       },
       {
         name: 'OpenVPN',
         rules: [
-          { protocol: 'udp', dstPortStart: 1194, dstPortEnd: 1194 },
-          { protocol: 'tcp', dstPortStart: 1194, dstPortEnd: 1194 },
+          { protocol: 'udp', port: 1194 },
+          { protocol: 'tcp', port: 1194 },
         ],
       },
       {
         name: 'Steam',
         rules: [
-          { protocol: 'tcp', dstPortStart: 27015, dstPortEnd: 27015 }, // Game traffic
-          { protocol: 'udp', dstPortStart: 27015, dstPortEnd: 27015 }, // Game traffic
-          { protocol: 'tcp', dstPortStart: 27036, dstPortEnd: 27036 }, // Steam client
-          { protocol: 'udp', dstPortStart: 27036, dstPortEnd: 27036 }, // Steam client
-          { protocol: 'tcp', dstPortStart: 27037, dstPortEnd: 27037 }, // Steam downloads
-          { protocol: 'tcp', dstPortStart: 27031, dstPortEnd: 27036 }, // Remote play
+          { protocol: 'tcp', port: 27015 }, // Game traffic
+          { protocol: 'udp', port: 27015 }, // Game traffic
+          { protocol: 'tcp', port: 27036 }, // Steam client
+          { protocol: 'udp', port: 27036 }, // Steam client
+          { protocol: 'tcp', port: 27037 }, // Steam downloads
+          { protocol: 'tcp', port: 27031 }, // Remote play
         ],
       },
       {
         name: 'cPanel',
         rules: [
-          { protocol: 'tcp', dstPortStart: 2082, dstPortEnd: 2082 }, // HTTP
-          { protocol: 'tcp', dstPortStart: 2083, dstPortEnd: 2083 }, // HTTPS
+          { protocol: 'tcp', port: 2082 }, // HTTP
+          { protocol: 'tcp', port: 2083 }, // HTTPS
         ],
       },
       {
         name: 'BitTorrent',
         rules: [
-          { protocol: 'tcp', dstPortStart: 6881, dstPortEnd: 6999 },
-          { protocol: 'udp', dstPortStart: 6881, dstPortEnd: 6999 },
+          { protocol: 'tcp', port: 6881 },
+          { protocol: 'udp', port: 6881 },
         ],
       },
       {
         name: 'BackupExec',
-        rules: [{ protocol: 'tcp', dstPortStart: 10000, dstPortEnd: 10000 }],
+        rules: [{ protocol: 'tcp', port: 10000 }],
       },
       {
         name: 'XDMCP',
-        rules: [{ protocol: 'udp', dstPortStart: 177, dstPortEnd: 177 }],
+        rules: [{ protocol: 'udp', port: 177 }],
       },
       {
         name: 'Kerberos',
         rules: [
-          { protocol: 'tcp', dstPortStart: 88, dstPortEnd: 88 },
-          { protocol: 'udp', dstPortStart: 88, dstPortEnd: 88 },
-          { protocol: 'tcp', dstPortStart: 464, dstPortEnd: 464 },
-          { protocol: 'udp', dstPortStart: 464, dstPortEnd: 464 },
-          { protocol: 'tcp', dstPortStart: 749, dstPortEnd: 749 },
+          { protocol: 'tcp', port: 88 },
+          { protocol: 'udp', port: 88 },
+          { protocol: 'tcp', port: 464 },
+          { protocol: 'udp', port: 464 },
+          { protocol: 'tcp', port: 749 },
         ],
       },
       {
         name: 'DCOM',
-        rules: [{ protocol: 'tcp', dstPortStart: 135, dstPortEnd: 135 }],
+        rules: [{ protocol: 'tcp', port: 135 }],
       },
       {
         name: 'MSExchange',
         rules: [
-          { protocol: 'tcp', dstPortStart: 135, dstPortEnd: 135 },
-          { protocol: 'udp', dstPortStart: 135, dstPortEnd: 135 },
-          { protocol: 'tcp', dstPortStart: 25, dstPortEnd: 25 },
-          { protocol: 'tcp', dstPortStart: 587, dstPortEnd: 587 },
-          { protocol: 'tcp', dstPortStart: 1024, dstPortEnd: 65535 }, // Dynamic RPC ports
+          { protocol: 'tcp', port: 135 },
+          { protocol: 'udp', port: 135 },
+          { protocol: 'tcp', port: 25 },
+          { protocol: 'tcp', port: 587 },
+          { protocol: 'tcp', port: 1024 }, // Dynamic RPC ports
         ],
       },
       {
         name: 'NFS',
         rules: [
-          { protocol: 'tcp', dstPortStart: 2049, dstPortEnd: 2049 },
-          { protocol: 'udp', dstPortStart: 2049, dstPortEnd: 2049 },
-          { protocol: 'tcp', dstPortStart: 111, dstPortEnd: 111 }, // Portmapper
-          { protocol: 'udp', dstPortStart: 111, dstPortEnd: 111 },
+          { protocol: 'tcp', port: 2049 },
+          { protocol: 'udp', port: 2049 },
+          { protocol: 'tcp', port: 111 }, // Portmapper
+          { protocol: 'udp', port: 111 },
         ],
       },
       {
         name: 'SMB',
         rules: [
-          { protocol: 'tcp', dstPortStart: 139, dstPortEnd: 139 },
-          { protocol: 'tcp', dstPortStart: 445, dstPortEnd: 445 },
+          { protocol: 'tcp', port: 139 },
+          { protocol: 'tcp', port: 445 },
         ],
       },
     ];
 
     for (const service of services) {
+      // Create Use service filter
       const serviceFilterId = await createFilter(
-        service.name,
-        `Allow ${service.name} traffic`, // Description
+        `Use ${service.name} service`,
+        `Allow usage of ${service.name} service`, // Description
         null, // Chain
         'generic' // Type
       );
 
       for (const rule of service.rules) {
-        await createRule(
-          serviceFilterId,
-          'accept',
-          'in',
-          200,
-          rule.protocol,
-          undefined,
-          rule
-        );
+        if (rule.port != null) {
+          await createRule(
+            serviceFilterId,
+            'accept',
+            'out',
+            200,
+            rule.protocol,
+            {
+              dstPort: rule.port,
+              comment: rule.comment,
+              ipVersion: rule.ipVersion,
+              state: rule.state,
+              srcIpAddr: rule.srcIpAddr,
+              dstIpAddr: rule.dstIpAddr,
+            }
+          );
+        }
+      }
+
+      // Create Provide service filter
+      const provideFilterId = await createFilter(
+        `Provides ${service.name} service`,
+        `Allow VMs to provide ${service.name} service`, // Description
+        null, // Chain
+        'generic' // Type
+      );
+
+      for (const rule of service.rules) {
+        if (rule.port != null) {
+          await createRule(
+            provideFilterId,
+            'accept',
+            'in',
+            200,
+            rule.protocol,
+            {
+              dstPort: rule.port,
+              comment: rule.comment,
+              ipVersion: rule.ipVersion,
+              state: rule.state,
+              srcIpAddr: rule.srcIpAddr,
+              dstIpAddr: rule.dstIpAddr,
+            }
+          );
+        }
       }
     }
 
     // ICMP filters
     const allowPingId = await createFilter(
-      'Allow Ping',
+      'Respond to Ping requests',
       'Allows incoming ICMP echo requests (ping)',
       'ipv4'
     );
-    await createRule(allowPingId, 'accept', 'in', 500, 'icmp', undefined, {
+    await createRule(allowPingId, 'accept', 'in', 500, 'icmp', {
       comment: 'Allow incoming ping requests',
     });
 
@@ -349,7 +443,7 @@ export async function installNetworkFilters() {
       'Allows outgoing ICMP echo requests (ping)',
       'ipv4'
     );
-    await createRule(usePingId, 'accept', 'out', 500, 'icmp', undefined, {
+    await createRule(usePingId, 'accept', 'out', 500, 'icmp', {
       comment: 'Allow outgoing ping requests',
     });
 
@@ -359,7 +453,7 @@ export async function installNetworkFilters() {
       'Rejects all incoming connections',
       'ipv4'
     );
-    await createRule(rejectIncomingId, 'reject', 'in', 1000, 'all', undefined, {
+    await createRule(rejectIncomingId, 'reject', 'in', 1000, 'all', {
       comment: 'Reject all incoming connections',
     });
 
@@ -368,8 +462,20 @@ export async function installNetworkFilters() {
       'Rejects all outgoing connections',
       'ipv4'
     );
-    await createRule(rejectOutgoingId, 'reject', 'out', 1000, 'all', undefined, {
+    await createRule(rejectOutgoingId, 'reject', 'out', 1000, 'all', {
       comment: 'Reject all outgoing connections',
+    });
+
+    const dropAllId = await createFilter(
+      'Drop All',
+      'Rejects all incoming and outgoing connections',
+      'ipv4'
+    );
+    await createRule(dropAllId, 'drop', 'in', 1000, 'all', {
+      comment: 'Reject all incoming and outgoing connections',
+    });
+    await createRule(dropAllId, 'drop', 'out', 1000, 'all', {
+      comment: 'Reject all incoming and outgoing connections',
     });
 
     // Common combinations
@@ -380,6 +486,14 @@ export async function installNetworkFilters() {
     );
     await createFilterReference(basicSecurityId, cleanTrafficId);
     await createFilterReference(basicSecurityId, dhcpId);
+    let useHttpFilterId = await prisma.nWFilter.findFirst({
+      where: { name: 'Use HTTP service' },
+    });
+    let useHttpsFilterId = await prisma.nWFilter.findFirst({
+      where: { name: 'Use HTTPS service' },
+    });
+    if (useHttpFilterId) await createFilterReference(basicSecurityId, useHttpFilterId.id);
+    if (useHttpsFilterId) await createFilterReference(basicSecurityId, useHttpsFilterId.id);
 
     const webServerSecurityId = await createFilter(
       'Web Server Security',
@@ -403,6 +517,3 @@ export async function installNetworkFilters() {
     await prisma.$disconnect();
   }
 }
-
-// Run the installation
-installNetworkFilters().catch(console.error);

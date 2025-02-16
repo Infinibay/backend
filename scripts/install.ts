@@ -6,6 +6,8 @@ import { Connection, Network } from 'libvirt-node';
 import { v4 as uuidv4 } from 'uuid';
 import { DOMParser } from 'xmldom';
 
+import { installNetworkFilters } from './installation/networkFilters'
+
 function prepareFolders() {
   // Load environment variables
   dotenv.config();
@@ -222,7 +224,8 @@ async function installBridge() {
 async function install() {
   console.log('Installing...')
   prepareFolders()
-  await installBridge()
+  installNetworkFilters()
+  // await installBridge()
   // await downloadUbuntu()
   // await downloadFedora()
   // BASIC APPS

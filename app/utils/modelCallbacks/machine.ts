@@ -3,12 +3,13 @@ import { PrismaClient } from '@prisma/client';
 import { v4 as uuidv4 } from 'uuid';
 import { randomBytes } from 'crypto';
 
-export async function beforeCreateMachine(prisma: PrismaClient, params:any) {
-    
+export async function beforeCreateMachine(prisma: PrismaClient, params: any) {
+
 }
 
 
 async function createMachineFilter(prisma: PrismaClient, machine: any) {
+    console.log("")
     const departmentId = machine.departmentId;
     const department = await prisma.department.findUnique({ where: { id: departmentId } });
     if (!department) {
@@ -34,8 +35,9 @@ async function createMachineFilter(prisma: PrismaClient, machine: any) {
     return null;
 }
 
-export async function afterCreateMachine(prisma: PrismaClient, params:any, result:any) {
+export async function afterCreateMachine(prisma: PrismaClient, params: any, result: any) {
     console.log('afterCreateMachine');
     console.log(params);
     console.log(result);
+    createMachineFilter(prisma, result);
 }

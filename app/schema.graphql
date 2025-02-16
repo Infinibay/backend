@@ -32,12 +32,26 @@ input CreateApplicationInputType {
   parameters: JSONObject = null
 }
 
-input CreateDepartmentPortInput {
-  departmentId: ID! = ""
-  portEnd: Int! = 0
-  portStart: Int! = 0
-  protocol: String! = ""
-  toEnable: Boolean! = false
+input CreateFilterInput {
+  chain: String = "root"
+  description: String! = ""
+  name: String! = ""
+  type: FilterType = GENERIC
+}
+
+input CreateFilterRuleInput {
+  action: String! = ""
+  comment: String
+  direction: String! = ""
+  dstPortEnd: Int
+  dstPortStart: Int
+  filterId: String! = ""
+  ipVersion: String
+  priority: Int! = 0
+  protocol: String
+  srcPortEnd: Int
+  srcPortStart: Int
+  state: String
 }
 
 input CreateMachineInputType {
@@ -79,23 +93,6 @@ input DeleteNetworkInput {
   name: String!
 }
 
-type DepartmentConfigurationInfo {
-  cleanTraffic: Boolean!
-  departmentId: ID!
-  id: ID!
-}
-
-type DepartmentPortInfo {
-  departmentId: ID!
-  enabled: Boolean!
-  id: ID!
-  lastSeen: DateTimeISO!
-  portEnd: Int!
-  portStart: Int!
-  protocol: String!
-  toEnable: Boolean!
-}
-
 type DepartmentType {
   createdAt: DateTimeISO!
   id: ID!
@@ -109,11 +106,41 @@ type DyummyType {
   value: String!
 }
 
+type FWRule {
+  action: String!
+  createdAt: DateTimeISO
+  direction: String!
+  id: ID!
+  ipRange: String
+  portRange: String
+  priority: Float!
+  protocol: String!
+  updatedAt: DateTimeISO
+}
+
+"""Type of network filter"""
+enum FilterType {
+  DEPARTMENT
+  GENERIC
+  VM
+}
+
 type GPU {
   memory: Float!
   model: String!
   pciBus: String!
   vendor: String!
+}
+
+type GenericFilter {
+  createdAt: DateTimeISO!
+  description: String
+  id: ID!
+  name: String!
+  references: [String!]!
+  rules: [FWRule!]
+  type: FilterType!
+  updatedAt: DateTimeISO!
 }
 
 type GraphicConfigurationType {
@@ -239,20 +266,25 @@ type MachineTemplateType {
 type Mutation {
   createApplication(input: CreateApplicationInputType!): ApplicationType!
   createDepartment(name: String!): DepartmentType!
-  createDepartmentPort(input: CreateDepartmentPortInput!): DepartmentPortInfo!
+  createFilter(input: CreateFilterInput!): GenericFilter!
+  createFilterRule(filterId: ID!, input: CreateFilterRuleInput!): FWRule!
   createMachine(input: CreateMachineInputType!): Machine!
   createMachineTemplate(input: MachineTemplateInputType!): MachineTemplateType!
   createMachineTemplateCategory(input: MachineTemplateCategoryInputType!): MachineTemplateCategoryType!
   createNetwork(input: CreateNetworkInput!): Boolean!
   createUser(input: CreateUserInputType!): UserType!
   deleteApplication(id: String!): Boolean!
-  deleteDepartmentPort(id: String!): Boolean!
+  deleteFilter(id: ID!): Boolean!
+  deleteFilterRule(id: ID!): Boolean!
   deleteNetwork(input: DeleteNetworkInput!): Boolean!
   destroyDepartment(id: String!): DepartmentType!
   destroyMachine(id: String!): SuccessType!
   destroyMachineTemplate(id: String!): Boolean!
   destroyMachineTemplateCategory(id: String!): Boolean!
   executeCommand(command: String!, id: String!): CommandExecutionResponseType!
+
+  """Apply a network filter inmediatly"""
+  flushFilter(filterId: ID!): Boolean!
   moveMachine(departmentId: String!, id: String!): Machine!
   powerOff(id: String!): SuccessType!
   powerOn(id: String!): SuccessType!
@@ -262,12 +294,11 @@ type Mutation {
   setupNode: DyummyType!
   suspend(id: String!): SuccessType!
   updateApplication(id: String!, input: CreateApplicationInputType!): ApplicationType!
-  updateDepartmentConfiguration(input: UpdateDepartmentConfigInput!): DepartmentConfigurationInfo!
-  updateDepartmentPortStatus(input: UpdatePortStatusInput!): DepartmentPortInfo!
+  updateFilter(id: ID!, input: UpdateFilterInput!): GenericFilter!
+  updateFilterRule(id: ID!, input: UpdateFilterRuleInput!): FWRule!
   updateMachineTemplate(id: String!, input: MachineTemplateInputType!): MachineTemplateType!
   updateMachineTemplateCategory(id: String!, input: MachineTemplateCategoryInputType!): MachineTemplateCategoryType!
   updateUser(id: String!, input: UpdateUserInputType!): UserType!
-  updateVmPortStatus(input: UpdatePortStatusInput!): VmPortInfo!
 }
 
 type Network {
@@ -326,16 +357,6 @@ input PaginationInputType {
   take: Int = 20
 }
 
-type PortInfo {
-  enabled: Boolean!
-  lastSeen: DateTimeISO!
-  portEnd: Int!
-  portStart: Int!
-  protocol: String!
-  running: Boolean!
-  toEnable: Boolean!
-}
-
 type Query {
   application(id: String!): ApplicationType
   applications: [ApplicationType!]!
@@ -344,11 +365,11 @@ type Query {
   department(id: String!): DepartmentType
   departments: [DepartmentType!]!
   findDepartmentByName(name: String!): DepartmentType
-  getDepartmentConfiguration(departmentId: String!): DepartmentConfigurationInfo
+  getFilter(id: ID!): GenericFilter
   getGraphics: [GPU!]!
   graphicConnection(id: String!): GraphicConfigurationType
-  listDepartmentPorts(departmentId: String!): [DepartmentPortInfo!]!
-  listVmPorts(departmentId: String): [VmPortInfo!]!
+  listFilterRules(filterId: ID): [FWRule!]!
+  listFilters(departmentId: ID, vmId: ID): [GenericFilter!]!
   login(email: String!, password: String!): UserToken!
   machine(id: String!): Machine
   machineTemplate(id: String!): MachineTemplateType
@@ -367,14 +388,25 @@ type SuccessType {
   success: Boolean!
 }
 
-input UpdateDepartmentConfigInput {
-  cleanTraffic: Boolean! = false
-  departmentId: ID! = ""
+input UpdateFilterInput {
+  chain: String
+  description: String
+  name: String
+  type: String
 }
 
-input UpdatePortStatusInput {
-  id: ID! = ""
-  toEnable: Boolean! = false
+input UpdateFilterRuleInput {
+  action: String! = ""
+  comment: String
+  direction: String! = ""
+  dstPortEnd: Int
+  dstPortStart: Int
+  ipVersion: String
+  priority: Int! = 0
+  protocol: String
+  srcPortEnd: Int
+  srcPortStart: Int
+  state: String
 }
 
 input UpdateUserInputType {
@@ -420,10 +452,4 @@ type UserType {
   id: ID!
   lastName: String!
   role: String!
-}
-
-type VmPortInfo {
-  name: String!
-  ports: [PortInfo!]!
-  vmId: ID!
 }

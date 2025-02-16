@@ -18,7 +18,7 @@ import { PaginationInputType } from '@utils/pagination';
 import { InfinibayContext } from '@main/utils/context';
 import { VirtManager } from '@utils/VirtManager';
 import { GraphicPortService } from '@utils/VirtManager/graphicPortService';
-import { Connection, Machine as VirtualMachine, Error } from 'libvirt-node';
+import { Connection, Machine as VirtualMachine, Error, NwFilter } from 'libvirt-node';
 import { Debugger } from '@utils/debug';
 import { XMLGenerator } from '@utils/VirtManager/xmlGenerator';
 import { existsSync } from 'fs';
@@ -155,7 +155,7 @@ export class MachineMutations {
 
         const internalName = uuidv4();
         const machine = await prisma.$transaction(async (tx: any) => {
-;
+            ;
             // Find the Default department
             let department = null;
             if (input.departmentId) {
@@ -291,6 +291,7 @@ export class MachineMutations {
     ): Promise<SuccessType> {
         // Check if the user has permission to destroy this machine
         const isAdmin = user?.role === 'ADMIN';
+        console.log(`Current use is ${user?.email} and role is ${user?.role}`);
         const whereClause = isAdmin ? { id } : { id, userId: user?.id };
         const machine = await prisma.machine.findFirst({ where: whereClause });
 
@@ -306,7 +307,7 @@ export class MachineMutations {
 
         // Look up the domain (VM) by name
         const domain = VirtualMachine.lookupByName(libvirtConnection, machine.internalName);
-        if (domain === null) {
+        if (!domain) {
             return { success: false, message: "Error destroying machine. Machine not found" };
         }
 
@@ -319,26 +320,25 @@ export class MachineMutations {
                 });
                 if (!configuration) throw new UserInputError("MachineConfiguration not found");
 
+                // Get VM filters before deletion
+                const vmFilters = await tx.vMNWFilter.findMany({
+                    where: { vmId: machine.id },
+                    include: { nwFilter: true }
+                });
+
                 // Load XML configuration
                 const xmlGenerator = new XMLGenerator('', '', '');
                 xmlGenerator.load(configuration.xml);
 
                 // Attempt to forcefully stop the VM (ignore errors if already stopped)
-                // We ignore the error because domain object can not be null at this point.
-                // The mutation has an early return if the domain is not found.
-                //@ts-ignore
                 await domain.destroy();
 
-
-                // Prepare list of files to delete (UEFI var file and disk files)
+                // Prepare list of files to delete
                 const filesToDelete = [
                     xmlGenerator.getUefiVarFile(),
                     ...xmlGenerator.getDisks()
                 ].filter(file => {
-                    // return false if the file is virtio.iso
-                    if (file && file.includes('virtio')) {
-                        return false;
-                    }
+                    if (file && file.includes('virtio')) return false;
                     return file && existsSync(file);
                 });
                 console.log("Removing files", filesToDelete);
@@ -350,21 +350,33 @@ export class MachineMutations {
 
                 // Undefine the domain from libvirt
                 console.log("Undefining domain");
-                domain.undefine();
+                await domain.undefine();
+
+                // Undefine network filters from libvirt
+                for (const vmFilter of vmFilters) {
+                    try {
+                        const filter = await NwFilter.lookupByName(libvirtConnection, vmFilter.nwFilter.internalName);
+                        if (filter) {
+                            await filter.undefine();
+                        }
+                    } catch (error) {
+                        this.debug.log(`Error undefining filter ${vmFilter.nwFilter.internalName}: ${error}`);
+                    }
+                }
+                await libvirtConnection.close();
 
                 // Remove all machineApplications
                 await tx.machineApplication.deleteMany({
                     where: { machineId: machine.id }
                 });
 
-                // Remove database records
-                await tx.machineConfiguration.delete({ where: { machineId: machine.id } });
+                // Delete the machine - this will cascade delete configuration and VMNWFilters
                 await tx.machine.delete({ where: { id: machine.id } });
 
                 return { success: true, message: "Machine destroyed" };
             } catch (error) {
                 this.debug.log(`Error destroying machine: ${error}`);
-                throw error; // Propagate error to rollback transaction
+                throw error;
             }
         });
     }

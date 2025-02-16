@@ -53,12 +53,12 @@ model Machine {
   template           MachineTemplate @relation(fields: [templateId], references: [id])
   user               User?           @relation(fields: [userId], references: [id])
   applications       MachineApplication[]
-  configuration      MachineConfiguration?
+  configuration      MachineConfiguration? @relation(onDelete: Cascade)
   departmentId       String?
   department         Department?     @relation(fields: [departmentId], references: [id])
   pendingCommands    PendingCommand[]
   ports              VmPort[]
-  nwFilters          VMNWFilter[]
+  nwFilters          VMNWFilter[] @relation(onDelete: Cascade)
 }
 
 model MachineConfiguration {
@@ -154,6 +154,8 @@ model NWFilter {
   description   String?
   chain         String?  // ipv4, arp, etc.
   type          String   @default("generic") // generic, department, vm
+  priority      Int      @default(500)       // Added: filter priority
+  stateMatch    Boolean  @default(true)      // Added: state matching
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
   flushedAt     DateTime?
@@ -166,7 +168,6 @@ model NWFilter {
   references      FilterReference[] @relation("ReferencedFilters")
 }
 
-// Join table for filter references
 model FilterReference {
   id              String   @id @default(uuid())
   sourceFilter    NWFilter @relation("ReferencingFilters", fields: [sourceFilterId], references: [id], onDelete: Cascade)
@@ -212,8 +213,6 @@ model FWRule {
   comment     String?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
-
-  @@unique([nwFilterId, priority])
 }
 
 model DepartmentConfiguration {

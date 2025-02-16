@@ -38,10 +38,10 @@ export class FWRule {
   @Field({ nullable: true })
   portRange?: string;
 
-  @Field(() => Date)
-  createdAt: Date = new Date();
+  @Field(() => Date, {nullable: true})
+  createdAt?: Date = new Date();
 
-  @Field(() => Date)
+  @Field(() => Date, {nullable: true})
   updatedAt: Date = new Date();
 }
 

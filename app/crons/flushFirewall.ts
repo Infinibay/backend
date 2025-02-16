@@ -1,19 +1,26 @@
 import { CronJob } from 'cron';
-import { PrismaClient, Machine as PrismaMachine } from '@prisma/client';
-import { Connection, Machine as LibvirtMachine, VirDomainXMLFlags } from 'libvirt-node';
-import { DOMParser } from 'xmldom';
-import { networkInterfaces } from 'systeminformation';
-
+import { PrismaClient, NWFilter } from '@prisma/client';
 import { NetworkFilterService } from '../services/networkFilterService';
 
+const prisma = new PrismaClient();
+const service = new NetworkFilterService(prisma);
+
 const FlushFirewallJob = new CronJob('*/1 * * * *', async () => {
-    const prisma = new PrismaClient();
-    // all filters where updatedAt > flushedAt
-    const filters:any[] = await prisma.$queryRaw`
-        SELECT * FROM public.nWFilter WHERE updatedAt > flushedAt or flushedAt is null
-    `;
-    let service = new NetworkFilterService(prisma);
-    for (const filter of filters) {
-        service.flushNWFilter(filter.id, true);
+    try {
+        // all filters where updatedAt > flushedAt or flushedAt is null
+        const filters = await prisma.$queryRaw<NWFilter[]>`
+            SELECT * FROM "NWFilter" 
+            WHERE "flushedAt" IS NULL 
+            OR "updatedAt" > "flushedAt"
+        `;
+
+        await Promise.all(filters.map(filter =>
+            service.flushNWFilter(filter.id, true)
+                .catch(error => console.error(`Failed to flush filter ${filter.id}:`, error))
+        ));
+    } catch (error) {
+        console.error('Error in FlushFirewallJob:', error);
     }
 });
+
+export default FlushFirewallJob;

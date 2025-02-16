@@ -3,7 +3,8 @@ import { PrismaClient } from '@prisma/client';
 import { v4 as uuidv4 } from 'uuid';
 import { randomBytes } from 'crypto';
 
-export async function afterCreateDepartment(prisma: PrismaClient, params:any, result:any) {
+export async function afterCreateDepartment(prisma: PrismaClient, params: any, result: any) {
+    console.log('afterCreateDepartment');
     let basicSecurity = await prisma.nWFilter.findFirst({
         where: {
             name: 'Basic Security'
@@ -15,9 +16,10 @@ export async function afterCreateDepartment(prisma: PrismaClient, params:any, re
         }
     });
     if (!basicSecurity || !dropAll) {
-        console.error('Basic Security or Drop All not found');
+        console.error('Basic Security is missing a basic security filter');
         return;
     }
+    console.log("Creating things");
     // create a nwFilter
     let nwFilter = await prisma.nWFilter.create({
         data: {

@@ -14,6 +14,16 @@ export class NetworkFilterService {
     this.xmlParser = new Parser();
   }
 
+  private generateIbayName(): string {
+    return `ibay-${randomBytes(8).toString('hex')}`;
+  }
+
+  private cleanUndefined(obj: any): any {
+    return Object.fromEntries(
+      Object.entries(obj).filter(([_, v]) => v != null)
+    );
+  }
+
   async connect(): Promise<Connection> {
     if (!this.connection) {
       this.connection = await Connection.open('qemu:///system');
@@ -118,7 +128,6 @@ export class NetworkFilterService {
 
   async flushNWFilter(id: string, redefine: boolean = false): Promise<boolean> {
     try {
-      // Get the filter and its rules from the database
       const filter = await this.prisma.nWFilter.findUnique({
         where: { id },
         include: {
@@ -131,79 +140,107 @@ export class NetworkFilterService {
         }
       });
 
-      if (!filter) {
-        return false;
-      }
+      if (!filter) return false;
 
-      // Ensure connection
       const conn = await this.connect();
-
-      // Check if filter exists in libvirt
       const existingFilter = await NwFilter.lookupByName(conn, filter.internalName);
       if (existingFilter) {
-        if (!redefine) {
-          return true;
-        }
-        // Undefine existing filter if redefine is true
+        if (!redefine) return true;
         await existingFilter.undefine();
       }
 
-      // Build XML structure for the filter
       const xmlObj: any = {
         filter: {
           $: {
             name: filter.internalName,
-            chain: filter.chain || 'root'
+            chain: filter.chain || 'root',
+            priority: filter.priority.toString(),
+            statematch: filter.stateMatch ? '1' : '0'
           },
           uuid: filter.uuid,
-          rule: filter.rules.map(rule => ({
-            $: {
-              action: rule.action,
-              direction: rule.direction,
-              priority: rule.priority,
-              statematch: rule.state || undefined
-            },
-            [rule.protocol]: {
+          rule: filter.rules.map(rule => {
+            const ruleObj: any = {
               $: {
-                srcipaddr: rule.srcIpAddr || undefined,
-                dstipaddr: rule.dstIpAddr || undefined,
-                srcportstart: rule.srcPortStart || undefined,
-                srcportend: rule.srcPortEnd || undefined,
-                dstportstart: rule.dstPortStart || undefined,
-                dstportend: rule.dstPortEnd || undefined,
-                comment: rule.comment || undefined
+                action: rule.action,
+                direction: rule.direction,
+                priority: rule.priority.toString(),
+                statematch: rule.state ? '1' : '0'
               }
+            };
+
+            // Protocol-specific configuration
+            const protocolConfig: any = {
+              $: this.cleanUndefined({
+                srcipaddr: rule.srcIpAddr,
+                dstipaddr: rule.dstIpAddr,
+                srcportstart: rule.srcPortStart?.toString(),
+                srcportend: rule.srcPortEnd?.toString(),
+                dstportstart: rule.dstPortStart?.toString(),
+                dstportend: rule.dstPortEnd?.toString(),
+                comment: rule.comment
+              })
+            };
+
+            // Add protocol-specific elements
+            switch (rule.protocol) {
+              case 'tcp':
+              case 'udp':
+                ruleObj[rule.protocol] = protocolConfig;
+                break;
+              case 'icmp':
+                ruleObj.icmp = {
+                  $: {
+                    ...protocolConfig.$,
+                    // Using srcIpAddr and dstIpAddr instead of removed icmpType/Code
+                    srcipaddr: rule.srcIpAddr,
+                    dstipaddr: rule.dstIpAddr
+                  }
+                };
+                break;
+              case 'mac':
+                ruleObj.mac = {
+                  $: {
+                    ...protocolConfig.$,
+                    srcmacaddr: rule.srcMacAddr // Using the correct field from schema
+                  }
+                };
+                break;
+              case 'all':
+                ruleObj.all = protocolConfig;
+                break;
+              default:
+                ruleObj[rule.protocol] = protocolConfig;
             }
-          }))
+
+            return ruleObj;
+          })
         }
       };
 
-      // Add filter references if any
       if (filter.references.length > 0) {
         xmlObj.filter.filterref = filter.references.map(ref => ({
           $: {
-            filter: ref.targetFilter.internalName
+            filter: ref.targetFilter.internalName,
+            priority: (ref.targetFilter.priority || 500).toString()
           }
         }));
       }
 
-      // Convert to XML string
       const xml = this.xmlBuilder.buildObject(xmlObj);
 
-      // Define the filter in libvirt
+      // For debugging
+      console.log('Generated XML:', xml);
+
       const result = await NwFilter.defineXml(conn, xml);
-      this.prisma.nWFilter.update({
+      await this.prisma.nWFilter.update({
         where: { id: filter.id },
         data: { flushedAt: new Date() }
-      })
-      return result !== null;
+      });
 
+      return result !== null;
     } catch (error) {
+      console.error('Error in flushNWFilter:', error);
       return false;
     }
-  }
-
-  private generateIbayName() {
-    return `ibay-${randomBytes(8).toString('hex')}`;
   }
 }
