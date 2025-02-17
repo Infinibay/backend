@@ -1,6 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 import { beforeCreateMachine, afterCreateMachine } from './modelCallbacks/machine';
 import { afterCreateDepartment } from './modelCallbacks/department';
+import { afterCreateNWfilter } from './modelCallbacks/nwfilter';
 
 class ModelsCallbackManager {
     private callbacks: any = {
@@ -46,6 +47,7 @@ export default async function installCallbacks(prisma: PrismaClient) {
     mcbm.registerCallback('before', 'create', 'Machine', beforeCreateMachine);
     mcbm.registerCallback('after', 'create', 'Machine', afterCreateMachine);
     mcbm.registerCallback('after', 'create', 'Department', afterCreateDepartment);
+    mcbm.registerCallback('after', 'create', 'NWFilter', afterCreateNWfilter);
 
 
     // Middleware 1

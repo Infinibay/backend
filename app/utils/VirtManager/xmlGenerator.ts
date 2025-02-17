@@ -144,6 +144,18 @@ export class XMLGenerator {
     // TODO: Add ip address
   }
 
+  addNWFilter(filterName: string) {
+    // find the network interface and add the filterref
+    if (!this.xml.domain.devices[0].interface) {
+      throw new Error('No network interface found');
+    }
+    this.xml.domain.devices[0].interface.forEach((iface: any) => {
+      if (iface.$.type === 'network') {
+        iface.filterref = [{ $: { filter: filterName } }];
+      }
+    });
+  }
+
   enableTPM(version: '1.2' | '2.0' = '2.0'): void {
     const secretUUID = uuidv4();
     this.xml.domain.devices[0].tpm = [{
@@ -457,11 +469,11 @@ export class XMLGenerator {
     pciBus: string
   ): void {
     this.xml.domain.devices[0].hostdev = this.xml.domain.devices[0].hostdev || [];
-  
+
     // Parse PCI address from `pciBus` (e.g., 00000000:B4:00.0)
     const [domain, bus, slotFunction] = pciBus.split(':');
     const [slot, func] = slotFunction.split('.');
-  
+
     // Construct passthrough configuration
     const gpuPassthrough = {
       $: { mode: 'subsystem', type: 'pci', managed: 'yes' },
@@ -480,7 +492,7 @@ export class XMLGenerator {
         },
       ],
     };
-  
+
     this.xml.domain.devices[0].hostdev.push(gpuPassthrough);
   }
 

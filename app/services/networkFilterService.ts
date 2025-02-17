@@ -132,7 +132,7 @@ export class NetworkFilterService {
         where: { id },
         include: {
           rules: true,
-          references: {
+          referencedBy: {
             include: {
               targetFilter: true
             }
@@ -217,8 +217,8 @@ export class NetworkFilterService {
         }
       };
 
-      if (filter.references.length > 0) {
-        xmlObj.filter.filterref = filter.references.map(ref => ({
+      if (filter.referencedBy.length > 0) {
+        xmlObj.filter.filterref = filter.referencedBy.map(ref => ({
           $: {
             filter: ref.targetFilter.internalName,
             priority: (ref.targetFilter.priority || 500).toString()
@@ -227,9 +227,6 @@ export class NetworkFilterService {
       }
 
       const xml = this.xmlBuilder.buildObject(xmlObj);
-
-      // For debugging
-      console.log('Generated XML:', xml);
 
       const result = await NwFilter.defineXml(conn, xml);
       await this.prisma.nWFilter.update({

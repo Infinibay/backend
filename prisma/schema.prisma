@@ -53,23 +53,23 @@ model Machine {
   template           MachineTemplate @relation(fields: [templateId], references: [id])
   user               User?           @relation(fields: [userId], references: [id])
   applications       MachineApplication[]
-  configuration      MachineConfiguration? @relation(onDelete: Cascade)
+  configuration      MachineConfiguration?
   departmentId       String?
   department         Department?     @relation(fields: [departmentId], references: [id])
   pendingCommands    PendingCommand[]
   ports              VmPort[]
-  nwFilters          VMNWFilter[] @relation(onDelete: Cascade)
+  nwFilters          VMNWFilter[]
 }
 
 model MachineConfiguration {
-  id          String  @id @default(uuid())
-  xml         Json?
+  id              String   @id @default(uuid())
+  xml             Json?
   graphicProtocol String?
   graphicPort     Int?
   graphicPassword String?
   graphicHost     String?
-  machineId   String  @unique
-  machine     Machine @relation(fields: [machineId], references: [id])
+  machineId       String   @unique
+  machine         Machine  @relation(fields: [machineId], references: [id], onDelete: Cascade)
 }
 
 model MachineTemplate {

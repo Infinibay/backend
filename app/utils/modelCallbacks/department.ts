@@ -3,6 +3,8 @@ import { PrismaClient } from '@prisma/client';
 import { v4 as uuidv4 } from 'uuid';
 import { randomBytes } from 'crypto';
 
+import { NetworkFilterService } from '../../services/networkFilterService';
+
 export async function afterCreateDepartment(prisma: PrismaClient, params: any, result: any) {
     console.log('afterCreateDepartment');
     let basicSecurity = await prisma.nWFilter.findFirst({
@@ -35,12 +37,6 @@ export async function afterCreateDepartment(prisma: PrismaClient, params: any, r
         data: {
             departmentId: result.id,
             nwFilterId: nwFilter.id
-        }
-    });
-    await prisma.filterReference.create({
-        data: {
-            sourceFilterId: dropAll.id,
-            targetFilterId: nwFilter.id
         }
     });
     // Add the basic security filter

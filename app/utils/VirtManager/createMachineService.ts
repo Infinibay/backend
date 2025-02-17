@@ -23,7 +23,7 @@ export class CreateMachineService {
     private libvirt: Connection | null = null
     private debug: Debugger = new Debugger('virt-manager');
 
-    
+
 
     constructor(uri: string = 'qemu:///system', prisma: PrismaClient | null = null) {
         this.debug.log('Creating VirtManager instance with URI', uri);
@@ -298,6 +298,15 @@ export class CreateMachineService {
         xmlGenerator.setStorage(template.storage);
         xmlGenerator.setUEFI();
         xmlGenerator.addNetworkInterface(process.env.BRIDGE_NAME ?? 'default', 'virtio');
+        const vmFilter = await this.prisma.vMNWFilter.findFirst({ where: { vmId: machine.id } });
+        if (vmFilter) {
+            const filter = await this.prisma.nWFilter.findFirst({ where: { id: vmFilter.nwFilterId } });
+            if (!filter) {
+                console.error('Filter not found');
+            } else {
+                xmlGenerator.addNWFilter(filter.internalName);
+            }
+        }
         xmlGenerator.setBootDevice(['hd', 'cdrom']);
         xmlGenerator.addAudioDevice();
         xmlGenerator.setVCPUs(template.cores);
