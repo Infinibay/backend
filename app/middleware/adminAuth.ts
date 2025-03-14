@@ -11,7 +11,6 @@ interface DecodedToken {
 
 export const adminAuthMiddleware = async (req: Request, res: Response, next: NextFunction) => {
     const token = req.headers.authorization;
-    console.log('adminAuthMiddleware', token);
 
     if (!token) {
         debug.log('No token found.');

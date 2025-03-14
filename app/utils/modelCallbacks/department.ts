@@ -6,7 +6,6 @@ import { randomBytes } from 'crypto';
 import { NetworkFilterService } from '../../services/networkFilterService';
 
 export async function afterCreateDepartment(prisma: PrismaClient, params: any, result: any) {
-    console.log('afterCreateDepartment');
     let basicSecurity = await prisma.nWFilter.findFirst({
         where: {
             name: 'Basic Security'
@@ -21,7 +20,6 @@ export async function afterCreateDepartment(prisma: PrismaClient, params: any, r
         console.error('Basic Security is missing a basic security filter');
         return;
     }
-    console.log("Creating things");
     // create a nwFilter
     let nwFilter = await prisma.nWFilter.create({
         data: {

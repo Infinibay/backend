@@ -1,5 +1,4 @@
 import { ObjectType, Field, ID, InputType, registerEnumType, Int } from 'type-graphql';
-import { DepartmentNWFilter } from '@prisma/client';
 import { GraphQLJSONObject } from "graphql-type-json";
 
 export enum FilterType {
@@ -18,25 +17,53 @@ export class FWRule {
   @Field(() => ID)
   id: string = '';
 
-  @Field()
+  @Field(() => String)
   protocol: string = '';
 
-  @Field()
+  @Field(() => String)
   direction: string = '';
 
-  @Field()
+  @Field(() => String)
   action: string = '';
 
-  @Field()
+  @Field(() => Int)
   priority: number = 0;
 
-  //WRONG
-  @Field({ nullable: true })
-  ipRange?: string;
+  @Field(() => String, { nullable: true })
+  ipVersion?: string | null;
 
-  //WRONG
-  @Field({ nullable: true })
-  portRange?: string;
+  @Field(() => String, { nullable: true })
+  srcMacAddr?: string | null;
+
+  @Field(() => String, { nullable: true })
+  srcIpAddr?: string | null;
+
+  @Field(() => String, { nullable: true })
+  srcIpMask?: string | null;
+
+  @Field(() => String, { nullable: true })
+  dstIpAddr?: string | null;
+
+  @Field(() => String, { nullable: true })
+  dstIpMask?: string | null;
+
+  @Field(() => Int, { nullable: true })
+  srcPortStart?: number | null;
+
+  @Field(() => Int, { nullable: true })
+  srcPortEnd?: number | null;
+
+  @Field(() => Int, { nullable: true })
+  dstPortStart?: number | null;
+
+  @Field(() => Int, { nullable: true })
+  dstPortEnd?: number | null;
+
+  @Field(() => GraphQLJSONObject, { nullable: true })
+  state?: any;
+
+  @Field(() => String, { nullable: true })
+  comment?: string | null;
 
   @Field(() => Date, {nullable: true})
   createdAt?: Date = new Date();

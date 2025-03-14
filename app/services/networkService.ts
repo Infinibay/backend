@@ -123,7 +123,6 @@ export class NetworkService {
     const xml = await generator.generateXML();
 
     // Create and start the network
-    console.log("Defining network...", xml);
     const network = await Network.defineXml(conn, xml);
     if (!network) {
       throw new Error("Failed to define network");
@@ -337,10 +336,7 @@ export class NetworkService {
       
       // Check interfaces for network or bridge usage
       const interfaces = domainInfo?.domain?.devices?.[0]?.interface || [];
-      console.log("Interfaces:", interfaces);
       for (const iface of interfaces) {
-        console.log("Iface:", iface?.$?.type === 'network' && iface?.source?.[0]?.$?.network);
-        console.log(iface?.$?.type === 'bridge' && iface?.source?.[0]?.$?.bridge);
         if (
           (iface?.$?.type === 'network' && iface?.source?.[0]?.$?.network === networkName) ||
           (iface?.$?.type === 'bridge' && iface?.source?.[0]?.$?.bridge === bridgeName)

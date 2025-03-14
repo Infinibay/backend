@@ -163,7 +163,6 @@ export class CreateMachineService {
             throw new Error('Libvirt connection not established');
         }
         const xml = xmlGenerator.generate();
-        console.log(`Generated XML for machine ${machine.name}:\n${xml}`);
         const vm = VirtualMachine.defineXml(this.libvirt, xml);
         if (!vm) {
             let error = LibvirtError.lastError();
@@ -239,11 +238,8 @@ export class CreateMachineService {
     }
 
     private async rollback(machine: Machine, newIsoPath: string | null) {
-        console.log('Rolling back')
-
         // Delete the ISO
         if (newIsoPath) {
-            console.log('Deleting ISO')
             fs.unlinkSync(newIsoPath);
         }
 

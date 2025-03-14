@@ -109,7 +109,6 @@ async function getListeningPorts(libvirtMachine: LibvirtMachine, os: string): Pr
     }
 
     try {
-        console.log("Executing command: ", command.command);
         const result = await libvirtMachine.qemuAgentCommand(JSON.stringify({
             execute: 'guest-exec',
             arguments: {
@@ -141,8 +140,6 @@ async function getListeningPorts(libvirtMachine: LibvirtMachine, os: string): Pr
                 execute: 'guest-exec-status',
                 arguments: { pid: resultObj.pid }
             }), 30, 0);
-
-            console.log(`Attempt ${attempts + 1} status:`, status);
             
             if (!status) {
                 throw new Error('Failed to get command output from guest');

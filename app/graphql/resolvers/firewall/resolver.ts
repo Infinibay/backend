@@ -76,7 +76,6 @@ export class FirewallResolver {
     }
 
     return filters.map( (filter:any) => {
-      console.log(filter);
       return {
         id: filter.id,
         name: filter.name,
@@ -89,8 +88,20 @@ export class FirewallResolver {
             direction: rule.direction,
             action: rule.action,
             priority: rule.priority,
-            ipRange: rule.ipRange,
-            portRange: rule.portRange,
+            ipVersion: rule.ipVersion,
+            srcMacAddr: rule.srcMacAddr,
+            srcIpAddr: rule.srcIpAddr,
+            srcIpMask: rule.srcIpMask,
+            dstIpAddr: rule.dstIpAddr,
+            dstIpMask: rule.dstIpMask,
+            srcPortStart: rule.srcPortStart,
+            srcPortEnd: rule.srcPortEnd,
+            dstPortStart: rule.dstPortStart,
+            dstPortEnd: rule.dstPortEnd,
+            state: rule.state,
+            comment: rule.comment,
+            createdAt: rule.createdAt,
+            updatedAt: rule.updatedAt
           } as FWRule
         }),
         references: filter.references.map((ref:any) => ref.targetFilterId),
@@ -129,8 +140,20 @@ export class FirewallResolver {
           direction: rule.direction,
           action: rule.action,
           priority: rule.priority,
-          ipRange: rule.ipRange,
-          portRange: rule.portRange,
+          ipVersion: rule.ipVersion,
+          srcMacAddr: rule.srcMacAddr,
+          srcIpAddr: rule.srcIpAddr,
+          srcIpMask: rule.srcIpMask,
+          dstIpAddr: rule.dstIpAddr,
+          dstIpMask: rule.dstIpMask,
+          srcPortStart: rule.srcPortStart,
+          srcPortEnd: rule.srcPortEnd,
+          dstPortStart: rule.dstPortStart,
+          dstPortEnd: rule.dstPortEnd,
+          state: rule.state,
+          comment: rule.comment,
+          createdAt: rule.createdAt,
+          updatedAt: rule.updatedAt
         } as FWRule
       }),
       references: result.references.map((ref:any) => ref.targetFilterId),
@@ -146,11 +169,18 @@ export class FirewallResolver {
     @Ctx() { prisma }: InfinibayContext
   ): Promise<FWRule[]> {
     if (!filterId) {
-      return prisma.fWRule.findMany();
+      // Cast the result to FWRule[] to handle null vs undefined differences
+      return (await prisma.fWRule.findMany()).map(rule => ({
+        ...rule,
+        // Ensure all fields match the FWRule type definition
+      } as unknown as FWRule));
     }
-    return prisma.fWRule.findMany({
+    return (await prisma.fWRule.findMany({
       where: { nwFilterId: filterId }
-    })
+    })).map(rule => ({
+      ...rule,
+      // Ensure all fields match the FWRule type definition
+    } as unknown as FWRule));
   }
 
   @Mutation(() => GenericFilter)
@@ -191,8 +221,20 @@ export class FirewallResolver {
         direction: rule.direction,
         action: rule.action,
         priority: rule.priority,
-        ipRange: rule.ipRange,
-        portRange: rule.portRange,
+        ipVersion: rule.ipVersion,
+        srcMacAddr: rule.srcMacAddr,
+        srcIpAddr: rule.srcIpAddr,
+        srcIpMask: rule.srcIpMask,
+        dstIpAddr: rule.dstIpAddr,
+        dstIpMask: rule.dstIpMask,
+        srcPortStart: rule.srcPortStart,
+        srcPortEnd: rule.srcPortEnd,
+        dstPortStart: rule.dstPortStart,
+        dstPortEnd: rule.dstPortEnd,
+        state: rule.state,
+        comment: rule.comment,
+        createdAt: rule.createdAt,
+        updatedAt: rule.updatedAt
       } as FWRule
     });
     result.references = (await prisma.filterReference.findMany({
@@ -219,13 +261,13 @@ export class FirewallResolver {
     @Arg('input') input: CreateFilterRuleInput,
     @Ctx() { prisma }: InfinibayContext
   ): Promise<FWRule> {
-    return this.networkFilterService.createRule(
+    const rule = await this.networkFilterService.createRule(
       filterId,
       input.action,
       input.direction,
       input.priority,
-      input.protocol,
-      undefined,
+      input.protocol || 'all',
+      undefined, // port parameter
       {
         srcPortStart: input.srcPortStart,
         srcPortEnd: input.srcPortEnd,
@@ -233,11 +275,12 @@ export class FirewallResolver {
         dstPortEnd: input.dstPortEnd,
         comment: input.comment,
         ipVersion: input.ipVersion,
-        srcIpAddr: undefined,
-        dstIpAddr: undefined,
         state: input.state
       }
     );
+    
+    // Cast to FWRule to handle null vs undefined differences
+    return rule as unknown as FWRule;
   }
 
   @Mutation(() => FWRule)
@@ -261,16 +304,19 @@ export class FirewallResolver {
         action: input.action,
         direction: input.direction,
         priority: input.priority,
-        protocol: input.protocol,
-        srcPortStart: input.srcPortStart,
-        srcPortEnd: input.srcPortEnd,
-        dstPortStart: input.dstPortStart,
-        dstPortEnd: input.dstPortEnd,
-        comment: input.comment,
-        ipVersion: input.ipVersion,
-        state: input.state,
+        protocol: input.protocol || undefined,
+        srcPortStart: input.srcPortStart || undefined,
+        srcPortEnd: input.srcPortEnd || undefined,
+        dstPortStart: input.dstPortStart || undefined,
+        dstPortEnd: input.dstPortEnd || undefined,
+        comment: input.comment || undefined,
+        ipVersion: input.ipVersion || undefined,
+        state: input.state ? JSON.parse(input.state) : undefined
       }
     });
+    
+    // Cast to FWRule to handle null vs undefined differences
+    return rule as unknown as FWRule;
   }
 
   @Mutation(() => Boolean)

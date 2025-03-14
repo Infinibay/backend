@@ -141,7 +141,6 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
     ];
 
     let apps = this.generateAppsToInstallScripts(11);
-    console.log("APPS: ", apps);
 
     commands = commands.concat(apps);
 
@@ -152,7 +151,6 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
       RequiresUserInput: false,
       CommandLine: 'shutdown /r /t 0'
     });
-    console.log(commands);
     return commands;
   }
 
@@ -173,7 +171,6 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
     return this.applications
       .map((app, localIndex) => {
         const installCommand = app.installCommand['windows'];
-        console.log(app);
         const application = prisma.application.findUnique({
           where: {
             id: app.applicationId,
@@ -183,7 +180,6 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
           return null;
         }
         const parsedCommand = this.parseInstallCommand(installCommand, app.parameters);
-        console.log(parsedCommand);
         const wrappedCommand = `powershell -Command "& { $log = 'C:\\Windows\\Temp\\${app.name.replace(/\s+/g, '_')}.log'; Write-Output 'Starting installation of ${app.name}...' | Tee-Object -FilePath $log -Append; $result = $null; try { $result = (${parsedCommand}) 2>&1 | Tee-Object -FilePath $log -Append; if ($LASTEXITCODE -eq 0) { Write-Output '${app.name} installed successfully' | Tee-Object -FilePath $log -Append } else { Write-Output '${app.name} installation failed with code $LASTEXITCODE' | Tee-Object -FilePath $log -Append } } catch { Write-Output $_.Exception.Message | Tee-Object -FilePath $log -Append } }"`;
         return {
           $: { 'wcm:action': 'add' },
@@ -554,7 +550,6 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
     };
 
     const response = builder.buildObject(root);
-    console.log(response);
     return response;
   }
 

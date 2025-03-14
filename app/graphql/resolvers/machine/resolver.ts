@@ -217,7 +217,6 @@ export class MachineMutations {
         });
 
         setImmediate(() => {
-            console.log(input)
             this.backgroundCode(machine.id, prisma, user, input.username, input.password, input.productKey, input.pciBus);
         });
 
@@ -291,7 +290,6 @@ export class MachineMutations {
     ): Promise<SuccessType> {
         // Check if the user has permission to destroy this machine
         const isAdmin = user?.role === 'ADMIN';
-        console.log(`Current user is ${user?.email} and role is ${user?.role}`);
         const whereClause = isAdmin ? { id } : { id, userId: user?.id };
         const machine = await prisma.machine.findFirst({
             where: whereClause,
@@ -344,7 +342,6 @@ export class MachineMutations {
                 if (file && file.includes('virtio')) return false;
                 return file && existsSync(file);
             });
-            console.log("Files to remove:", filesToDelete);
 
             // Undefine network filters first
             for (const vmFilter of machine.nwFilters) {
@@ -359,7 +356,6 @@ export class MachineMutations {
             }
 
             // Undefine the domain
-            console.log("Undefining domain");
             await domain.undefine();
 
             // Close libvirt connection before database operations
@@ -392,7 +388,6 @@ export class MachineMutations {
             for (const file of filesToDelete) {
                 try {
                     await unlink(file);
-                    console.log(`Deleted file: ${file}`);
                 } catch (error) {
                     console.log(`Error deleting file ${file}:`, error);
                 }

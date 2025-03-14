@@ -108,13 +108,23 @@ type DyummyType {
 
 type FWRule {
   action: String!
+  comment: String
   createdAt: DateTimeISO
   direction: String!
+  dstIpAddr: String
+  dstIpMask: String
+  dstPortEnd: Int
+  dstPortStart: Int
   id: ID!
-  ipRange: String
-  portRange: String
-  priority: Float!
+  ipVersion: String
+  priority: Int!
   protocol: String!
+  srcIpAddr: String
+  srcIpMask: String
+  srcMacAddr: String
+  srcPortEnd: Int
+  srcPortStart: Int
+  state: JSONObject
   updatedAt: DateTimeISO
 }
 

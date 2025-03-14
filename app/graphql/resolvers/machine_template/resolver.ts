@@ -51,7 +51,6 @@ export class MachineTemplateResolver implements MachineTemplateResolverInterface
     const totalMachines = await ctx.prisma.machine.count({
       where: { templateId: id }
     })
-    console.log(totalMachines)
     if (!machineTemplate) return null;
     let response : MachineTemplateType = {
       ...machineTemplate,

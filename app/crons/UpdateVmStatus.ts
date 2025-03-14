@@ -35,12 +35,9 @@ async function getRunningDomainNames(): Promise<string[]> {
 }
 
 const UpdateVmStatusJob = new CronJob('*/1 * * * *', async () => {
-    console.log('Running UpdateVmStatusJob');
-    
     try {
         // Get list of running VMs from libvirt
         const runningVms = await getRunningDomainNames();
-        console.log('Running VMs:', runningVms);
 
         // Get all VMs from database
         const allVms = await prisma.machine.findMany({
@@ -69,7 +66,6 @@ const UpdateVmStatusJob = new CronJob('*/1 * * * *', async () => {
 
         // Update running VMs
         if (runningVmIds.length > 0) {
-            console.log(`Updating ${runningVmIds.length} VMs to running:`, runningVmIds);
             await prisma.machine.updateMany({
                 where: { id: { in: runningVmIds } },
                 data: { status: 'running' },
@@ -78,7 +74,6 @@ const UpdateVmStatusJob = new CronJob('*/1 * * * *', async () => {
 
         // Update stopped VMs
         if (stoppedVmIds.length > 0) {
-            console.log(`Updating ${stoppedVmIds.length} VMs to stopped:`, stoppedVmIds);
             await prisma.machine.updateMany({
                 where: { id: { in: stoppedVmIds } },
                 data: { status: 'stopped' },
