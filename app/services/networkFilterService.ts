@@ -100,6 +100,31 @@ export class NetworkFilterService {
       state?: any;
     } = {}
   ): Promise<FWRule> {
+    // Check if an identical rule already exists
+    const existingRule = await this.prisma.fWRule.findFirst({
+      where: {
+        nwFilterId: filterId,
+        action,
+        direction,
+        protocol,
+        dstPortStart: port !== undefined ? port : options.dstPortStart,
+        dstPortEnd: port !== undefined ? port : options.dstPortEnd,
+        srcPortStart: options.srcPortStart,
+        srcPortEnd: options.srcPortEnd,
+        comment: options.comment,
+        ipVersion: options.ipVersion,
+        srcIpAddr: options.srcIpAddr,
+        dstIpAddr: options.dstIpAddr
+        // Note: We don't check 'state' because it's a JSON object and more complex to compare
+      }
+    });
+
+    // If an identical rule exists, return it
+    if (existingRule) {
+      return existingRule;
+    }
+
+    // Otherwise create a new rule
     return await this.prisma.fWRule.create({
       data: {
         nwFilterId: filterId,
@@ -107,8 +132,8 @@ export class NetworkFilterService {
         direction,
         priority,
         protocol,
-        dstPortStart: port,
-        dstPortEnd: port,
+        dstPortStart: port !== undefined ? port : options.dstPortStart,
+        dstPortEnd: port !== undefined ? port : options.dstPortEnd,
         srcPortStart: options.srcPortStart,
         srcPortEnd: options.srcPortEnd,
         state: options.state,
@@ -239,5 +264,75 @@ export class NetworkFilterService {
       console.error('Error in flushNWFilter:', error);
       return false;
     }
+  }
+
+  /**
+   * Removes duplicate rules from a filter
+   * This is useful for cleaning up legacy data where identical rules might have been created
+   * @param filterId The ID of the filter to deduplicate
+   * @returns The number of duplicate rules removed
+   */
+  async deduplicateRules(filterId: string): Promise<number> {
+    // Get all rules for this filter
+    const rules = await this.prisma.fWRule.findMany({
+      where: { nwFilterId: filterId },
+      orderBy: { createdAt: 'asc' } // Order by creation date, keeping the oldest ones
+    });
+
+    // Group rules by their key attributes to find duplicates
+    const ruleGroups = new Map<string, FWRule[]>();
+    
+    for (const rule of rules) {
+      // Create a unique key based on rule properties
+      const key = JSON.stringify({
+        action: rule.action,
+        direction: rule.direction,
+        protocol: rule.protocol,
+        dstPortStart: rule.dstPortStart,
+        dstPortEnd: rule.dstPortEnd,
+        srcPortStart: rule.srcPortStart,
+        srcPortEnd: rule.srcPortEnd,
+        comment: rule.comment,
+        ipVersion: rule.ipVersion,
+        srcIpAddr: rule.srcIpAddr,
+        dstIpAddr: rule.dstIpAddr
+        // Note: We don't compare 'state' because it's a JSON object
+      });
+      
+      if (!ruleGroups.has(key)) {
+        ruleGroups.set(key, []);
+      }
+      
+      ruleGroups.get(key)!.push(rule);
+    }
+    
+    // Delete duplicate rules (keeping the most recent one in each group)
+    let deletedCount = 0;
+    for (const group of ruleGroups.values()) {
+      if (group.length > 1) {
+        // Keep the most recently created rule
+        const sortedGroup = [...group].sort(
+          (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        );
+        
+        // Delete all but the most recent rule
+        for (let i = 1; i < sortedGroup.length; i++) {
+          await this.prisma.fWRule.delete({
+            where: { id: sortedGroup[i].id }
+          });
+          deletedCount++;
+        }
+      }
+    }
+    
+    // Update the filter's updatedAt timestamp to ensure it gets flushed
+    if (deletedCount > 0) {
+      await this.prisma.nWFilter.update({
+        where: { id: filterId },
+        data: { updatedAt: new Date() }
+      });
+    }
+    
+    return deletedCount;
   }
 }

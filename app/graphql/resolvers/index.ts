@@ -9,6 +9,7 @@ import { ApplicationQueries, ApplicationMutations } from './application/resolver
 import { SystemResolver } from './system/resolver';
 import { NetworkResolver } from './networks/resolver';
 import { FirewallResolver } from './firewall/resolver';
+import { SecurityResolver } from './security/resolver';
 
 const resolvers: NonEmptyArray<Function> = [
   UserResolver,
@@ -22,7 +23,8 @@ const resolvers: NonEmptyArray<Function> = [
   ApplicationMutations,
   SystemResolver,
   NetworkResolver,
-  FirewallResolver
+  FirewallResolver,
+  SecurityResolver
 ];
 
 export default resolvers as NonEmptyArray<Function>;

@@ -3,6 +3,7 @@ import bcrypt from "bcrypt";
 import dotenv from "dotenv";
 import { installNetworkFilters } from '../scripts/installation/networkFilters';
 import createApplications from './seeds/applications';
+import seedGlobalServiceConfigs from './seeds/globalServiceConfigs';
 
 import installCallbacks from '../app/utils/modelsCallbacks';
 
@@ -119,6 +120,9 @@ async function main() {
         await createDefaultMachineTemplate(defaultCategory.id);
       }
       await createApplications(transactionPrisma);
+      
+      // Seed global service configurations
+      await seedGlobalServiceConfigs(transactionPrisma);
     });
     console.log("Seeding completed successfully");
   } catch (error) {

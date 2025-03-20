@@ -59,6 +59,7 @@ model Machine {
   pendingCommands    PendingCommand[]
   ports              VmPort[]
   nwFilters          VMNWFilter[]
+  serviceConfigs     VMServiceConfig[]
 }
 
 model MachineConfiguration {
@@ -144,6 +145,7 @@ model Department {
   machines      Machine[]
   nwFilters     DepartmentNWFilter[]
   configuration DepartmentConfiguration?
+  serviceConfigs DepartmentServiceConfig[]
 }
 
 model NWFilter {
@@ -205,10 +207,10 @@ model FWRule {
   srcIpMask   String?   // IP mask format
   dstIpAddr   String?   // IP address format
   dstIpMask   String?   // IP mask format
-  srcPortStart Int?     @db.SmallInt // 0-65535
-  srcPortEnd   Int?     @db.SmallInt // 0-65535
-  dstPortStart Int?     @db.SmallInt // 0-65535
-  dstPortEnd   Int?     @db.SmallInt // 0-65535
+  srcPortStart Int?     // 0-65535
+  srcPortEnd   Int?     // 0-65535
+  dstPortStart Int?     // 0-65535
+  dstPortEnd   Int?     // 0-65535
   state       Json?     // NEW, ESTABLISHED, RELATED, etc.
   comment     String?
   createdAt   DateTime  @default(now())
@@ -250,4 +252,39 @@ model VmPort {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   @@unique([vmId, portStart, protocol])
+}
+
+model DepartmentServiceConfig {
+  id             String     @id @default(uuid())
+  department     Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  departmentId   String
+  serviceId      String     // Reference to a known service
+  useEnabled     Boolean    @default(false)  // Can VMs in department use this service
+  provideEnabled Boolean    @default(false)  // Can VMs in department provide this service
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+  
+  @@unique([departmentId, serviceId])
+}
+
+model VMServiceConfig {
+  id             String     @id @default(uuid())
+  vm             Machine    @relation(fields: [vmId], references: [id], onDelete: Cascade)
+  vmId           String
+  serviceId      String     // Reference to a known service
+  useEnabled     Boolean    @default(false)  // Can this VM use this service
+  provideEnabled Boolean    @default(false)  // Can this VM provide this service
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+  
+  @@unique([vmId, serviceId])
+}
+
+model GlobalServiceConfig {
+  id             String     @id @default(uuid())
+  serviceId      String     @unique // Reference to a known service
+  useEnabled     Boolean    @default(true)   // Global default for using this service
+  provideEnabled Boolean    @default(false)  // Global default for providing this service
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
 }
