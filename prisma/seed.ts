@@ -1,8 +1,11 @@
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcrypt";
 import dotenv from "dotenv";
-
+import { installNetworkFilters } from '../scripts/installation/networkFilters';
 import createApplications from './seeds/applications';
+import seedGlobalServiceConfigs from './seeds/globalServiceConfigs';
+
+import installCallbacks from '../app/utils/modelsCallbacks';
 
 dotenv.config();
 
@@ -103,7 +106,12 @@ async function createDefaultMachineTemplate(defaultCategoryId: string) {
 
 async function main() {
   try {
+    installCallbacks(prisma);
     await prisma.$transaction(async (transactionPrisma) => {
+      // First install network filters
+      await installNetworkFilters();
+
+      // Then create admin user and departments
       await createAdminUser();
       await createDefaultDepartment();
       const defaultCategory = await createDefaultMachineTemplateCategory();
@@ -112,6 +120,9 @@ async function main() {
         await createDefaultMachineTemplate(defaultCategory.id);
       }
       await createApplications(transactionPrisma);
+      
+      // Seed global service configurations
+      await seedGlobalServiceConfigs(transactionPrisma);
     });
     console.log("Seeding completed successfully");
   } catch (error) {

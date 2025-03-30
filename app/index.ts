@@ -15,6 +15,8 @@ import { configureRoutes } from './config/routes';
 import { expressMiddleware } from '@apollo/server/express4';
 import { InfinibayContext } from './utils/context';
 
+import installCallbacks from './utils/modelsCallbacks';
+
 // Crons
 import { startCrons } from './crons/all';
 
@@ -54,13 +56,15 @@ async function bootstrap(): Promise<void> {
       })
     );
 
+    installCallbacks(prisma);
+
     // Start cron jobs
     await startCrons();
 
     // Start server
     const port = parseInt(process.env.PORT || '4000', 10);
     const host = '0.0.0.0';
-    
+
     await new Promise<void>((resolve) => {
       httpServer.listen({ port, host }, () => {
         console.log(`🚀 Server ready at http://${host}:${port}`);

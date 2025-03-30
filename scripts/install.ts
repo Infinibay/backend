@@ -1,8 +1,12 @@
 import axios from 'axios';
 import fs from 'fs';
-import cheerio from 'cheerio';
 import dotenv from 'dotenv';
 import path from 'path';
+import { Connection, Network } from 'libvirt-node';
+import { v4 as uuidv4 } from 'uuid';
+import { DOMParser } from 'xmldom';
+
+import { installNetworkFilters } from './installation/networkFilters'
 
 function prepareFolders() {
   // Load environment variables
@@ -48,86 +52,182 @@ async function downloadUbuntu() {
   }
 
   // Parse the HTML to find the exact version number
-  const $ = cheerio.load(response.data);
-  const link = $('a').filter((i, el) => {
-    // The exact version is in a link that ends with 'desktop-amd64.iso'
-    return ($(el)?.attr('href') || '').endsWith('desktop-amd64.iso');
-  }).first();
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(response.data, 'text/html');
+  const links = doc.getElementsByTagName('a');
+  let isoLink = '';
 
-  const href = link?.attr('href');
-  const exactVersion = link.length && href ? href.split('/')[0] : undefined;
-
-  if (!exactVersion) {
-    throw new Error('No link found that ends with "desktop-amd64.iso"');
+  for (let i = 0; i < links.length; i++) {
+    const href = links[i].getAttribute('href');
+    if (href && href.endsWith('desktop-amd64.iso')) {
+      isoLink = href;
+      break;
+    }
   }
 
-  // Now, download the ISO file
-  const url = `https://releases.ubuntu.com/${version}/${exactVersion}`;
-  console.log("Final link is", url)
+  if (!isoLink) {
+    throw new Error('Could not find Ubuntu ISO download link');
+  }
 
-  const writer = fs.createWriteStream(`/opt/infinibay/iso/ubuntu/ubuntu.iso`);
+  const downloadUrl = `https://releases.ubuntu.com/${version}/${isoLink}`;
+  console.log(`Found Ubuntu ISO: ${downloadUrl}`);
 
-  const download = await axios.get(url, { responseType: 'stream' });
-  download.data.pipe(writer);
+  // Download the ISO
+  const isoDir = path.join(process.env.INFINIBAY_BASE_DIR || '/opt/infinibay', 'iso', 'ubuntu');
+  const isoPath = path.join(isoDir, isoLink);
+
+  if (fs.existsSync(isoPath)) {
+    console.log('Ubuntu ISO already exists');
+    return;
+  }
+
+  console.log('Downloading Ubuntu ISO...');
+  const writer = fs.createWriteStream(isoPath);
+  const isoResponse = await axios({
+    url: downloadUrl,
+    method: 'GET',
+    responseType: 'stream'
+  });
+
+  isoResponse.data.pipe(writer);
 
   return new Promise((resolve, reject) => {
-    writer.on('finish', resolve);
+    writer.on('finish', () => {
+      console.log('Ubuntu ISO downloaded successfully');
+      resolve(true);
+    });
     writer.on('error', reject);
   });
 }
 
 async function downloadFedora() {
-  console.log('Downloading Red Hat...');
-  const url = 'https://fedoraproject.org/workstation/download';
-  let response;
-  try {
-    response = await axios.get(url);
-  } catch (error) {
-    console.error('Failed to fetch Red Hat download page:', error);
+  console.log('Downloading Fedora...');
+  const response = await axios.get('https://download.fedoraproject.org/pub/fedora/linux/releases/');
+
+  // Parse the HTML to find the download link
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(response.data, 'text/html');
+  const links = doc.getElementsByTagName('a');
+  let isoLink = '';
+
+  for (let i = 0; i < links.length; i++) {
+    const href = links[i].getAttribute('href');
+    if (href && href.endsWith('.iso') && href.includes('netinst')) {
+      isoLink = href;
+      break;
+    }
+  }
+
+  if (!isoLink) {
+    throw new Error('Could not find Fedora ISO download link');
+  }
+
+  const downloadUrl = `https://download.fedoraproject.org/pub/fedora/linux/releases/${isoLink}`;
+  console.log(`Found Fedora ISO: ${downloadUrl}`);
+
+  // Download the ISO
+  const isoDir = path.join(process.env.INFINIBAY_BASE_DIR || '/opt/infinibay', 'iso', 'fedora');
+  const isoPath = path.join(isoDir, path.basename(isoLink));
+
+  if (fs.existsSync(isoPath)) {
+    console.log('Fedora ISO already exists');
     return;
   }
 
-  // Parse the HTML to find the download link
-  const $ = cheerio.load(response.data);
-  const link = $('a').filter((i, el) => {
-    // The download link is in a link that ends with '.iso' and contains 'netinst' in the filename
-    const href = $(el).attr('href') || '';
-    return href.endsWith('.iso') && href.includes('netinst');
-  }).first();
+  console.log('Downloading Fedora ISO...');
+  const writer = fs.createWriteStream(isoPath);
+  const isoResponse = await axios({
+    url: downloadUrl,
+    method: 'GET',
+    responseType: 'stream'
+  });
 
-  const href = link?.attr('href');
-  if (!href) {
-    throw new Error('No netinst download link found');
-  }
-
-  // Extract the version from the link
-  const versionMatch = href.match(/x86_64-(\d+)/);
-  if (!versionMatch) {
-    throw new Error('No version found in netinst download link');
-  }
-  const version = versionMatch[1]
-
-  console.log(`Version: ${version}`);
-  console.log(`Download link: ${href}`);
-  return
-
-  // Now, download the ISO file
-  const writer = fs.createWriteStream(`/opt/infinibay/iso/fedora/fedora.iso`);
-
-  const download = await axios.get(href ?? '', { responseType: 'stream' });
-  download.data.pipe(writer);
+  isoResponse.data.pipe(writer);
 
   return new Promise((resolve, reject) => {
-    writer.on('finish', resolve);
+    writer.on('finish', () => {
+      console.log('Fedora ISO downloaded successfully');
+      resolve(true);
+    });
     writer.on('error', reject);
   });
+}
+
+async function installBridge() {
+  // Load environment variables
+  dotenv.config();
+
+  const bridgeName = process.env.BRIDGE_NAME;
+  if (!bridgeName) {
+    throw new Error('BRIDGE_NAME environment variable is not set');
+  }
+
+  // Connect to libvirt
+  const conn = await Connection.open('qemu:///system');
+  if (!conn) {
+    throw new Error('Failed to connect to libvirt');
+  }
+
+  try {
+    // Check if network already exists
+    const networks = await conn.listNetworks();
+    if (!networks) {
+      throw new Error('Failed to list networks');
+    }
+
+    if (networks.includes(bridgeName)) {
+      console.log(`Bridge network ${bridgeName} already exists`);
+      return;
+    }
+
+    // Generate a random UUID
+    const uuid = uuidv4();
+
+    // Define network XML
+    const networkXml = `
+<network>
+  <name>${bridgeName}</name>
+  <uuid>${uuid}</uuid>
+  <forward mode='bridge'/>
+  <bridge name='${bridgeName}' />
+</network>`;
+
+    // Define the network
+    const network = await Network.defineXml(conn, networkXml);
+    if (!network) {
+      throw new Error('Failed to define network');
+    }
+    console.log(`Bridge network ${bridgeName} defined`);
+
+    // Set network to autostart
+    const result = await network.setAutostart(true);
+    if (result === null) {
+      throw new Error('Failed to set network autostart');
+    }
+    console.log(`Bridge network ${bridgeName} set to autostart`);
+
+    // Start the network
+    const createResult = await network.create();
+    if (createResult === null) {
+      throw new Error('Failed to start network');
+    }
+    console.log(`Bridge network ${bridgeName} started`);
+
+  } catch (error) {
+    console.error('Error installing bridge:', error);
+    throw error;
+  } finally {
+    conn.close();
+  }
 }
 
 async function install() {
   console.log('Installing...')
   prepareFolders()
-//  downloadUbuntu()
-//  downloadFedora()
+  installNetworkFilters()
+  // await installBridge()
+  // await downloadUbuntu()
+  // await downloadFedora()
   // BASIC APPS
   // cpu-checker for kvm-ok
   // qemu-kvm libvirt-daemon-system bridge-utils

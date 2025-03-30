@@ -1,6 +1,6 @@
 generator client {
   provider        = "prisma-client-js"
-  previewFeatures = ["fullTextIndex"]
+  previewFeatures = ["relationJoins"]
 }
 
 datasource db {
@@ -57,17 +57,20 @@ model Machine {
   departmentId       String?
   department         Department?     @relation(fields: [departmentId], references: [id])
   pendingCommands    PendingCommand[]
+  ports              VmPort[]
+  nwFilters          VMNWFilter[]
+  serviceConfigs     VMServiceConfig[]
 }
 
 model MachineConfiguration {
-  id          String  @id @default(uuid())
-  xml         Json?
+  id              String   @id @default(uuid())
+  xml             Json?
   graphicProtocol String?
   graphicPort     Int?
   graphicPassword String?
   graphicHost     String?
-  machineId   String  @unique
-  machine     Machine @relation(fields: [machineId], references: [id])
+  machineId       String   @unique
+  machine         Machine  @relation(fields: [machineId], references: [id], onDelete: Cascade)
 }
 
 model MachineTemplate {
@@ -140,4 +143,148 @@ model Department {
   internetSpeed Int?     // in Mbps
   ipSubnet      String?
   machines      Machine[]
+  nwFilters     DepartmentNWFilter[]
+  configuration DepartmentConfiguration?
+  serviceConfigs DepartmentServiceConfig[]
+}
+
+model NWFilter {
+  id            String   @id @default(uuid())
+  name          String   @unique
+  internalName  String   @unique
+  uuid          String   @unique
+  description   String?
+  chain         String?  // ipv4, arp, etc.
+  type          String   @default("generic") // generic, department, vm
+  priority      Int      @default(500)       // Added: filter priority
+  stateMatch    Boolean  @default(true)      // Added: state matching
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  flushedAt     DateTime?
+  rules         FWRule[]
+  departments   DepartmentNWFilter[]
+  vms          VMNWFilter[]
+  
+  // Self-referential many-to-many relationship for filter references
+  referencedBy    FilterReference[] @relation("ReferencingFilters")
+  references      FilterReference[] @relation("ReferencedFilters")
+}
+
+model FilterReference {
+  id              String   @id @default(uuid())
+  sourceFilter    NWFilter @relation("ReferencingFilters", fields: [sourceFilterId], references: [id], onDelete: Cascade)
+  sourceFilterId  String
+  targetFilter    NWFilter @relation("ReferencedFilters", fields: [targetFilterId], references: [id], onDelete: Cascade)
+  targetFilterId  String
+  createdAt      DateTime @default(now())
+
+  @@unique([sourceFilterId, targetFilterId])
+}
+
+model DepartmentNWFilter {
+  id           String     @id @default(uuid())
+  department   Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  departmentId String
+  nwFilter     NWFilter   @relation(fields: [nwFilterId], references: [id], onDelete: Cascade)
+  nwFilterId   String
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  @@unique([departmentId, nwFilterId])
+}
+
+model FWRule {
+  id          String    @id @default(uuid())
+  nwFilter    NWFilter  @relation(fields: [nwFilterId], references: [id], onDelete: Cascade)
+  nwFilterId  String
+  action      String    @default("accept") // accept, reject, drop, return, continue
+  direction   String    @default("inout")  // in, out, inout
+  priority    Int
+  protocol    String    @default("all")    // tcp, udp, icmp, arp, ipv4, ipv6, all
+  ipVersion   String?   // ipv4, ipv6
+  srcMacAddr  String?   // MAC address format
+  srcIpAddr   String?   // IP address format
+  srcIpMask   String?   // IP mask format
+  dstIpAddr   String?   // IP address format
+  dstIpMask   String?   // IP mask format
+  srcPortStart Int?     // 0-65535
+  srcPortEnd   Int?     // 0-65535
+  dstPortStart Int?     // 0-65535
+  dstPortEnd   Int?     // 0-65535
+  state       Json?     // NEW, ESTABLISHED, RELATED, etc.
+  comment     String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+model DepartmentConfiguration {
+  id          String    @id @default(uuid())
+  department  Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  departmentId String   @unique
+  cleanTraffic Boolean  @default(false)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+model VMNWFilter {
+  id           String     @id @default(uuid())
+  vm           Machine    @relation(fields: [vmId], references: [id], onDelete: Cascade)
+  vmId         String
+  nwFilter     NWFilter   @relation(fields: [nwFilterId], references: [id], onDelete: Cascade)
+  nwFilterId   String
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  @@unique([vmId, nwFilterId])
+}
+
+model VmPort {
+  id          String    @id @default(uuid())
+  portStart   Int       // Start of port range
+  portEnd     Int       // End of port range (same as portStart for single port)
+  protocol    String    // tcp or udp
+  running     Boolean   // if the port is currently in use
+  enabled     Boolean   // if firewall allows inbound connections
+  toEnable    Boolean   // if it will be enabled in next firewall update
+  vmId        String
+  vm          Machine   @relation(fields: [vmId], references: [id])
+  lastSeen    DateTime  @default(now())
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  @@unique([vmId, portStart, protocol])
+}
+
+model DepartmentServiceConfig {
+  id             String     @id @default(uuid())
+  department     Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  departmentId   String
+  serviceId      String     // Reference to a known service
+  useEnabled     Boolean    @default(false)  // Can VMs in department use this service
+  provideEnabled Boolean    @default(false)  // Can VMs in department provide this service
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+  
+  @@unique([departmentId, serviceId])
+}
+
+model VMServiceConfig {
+  id             String     @id @default(uuid())
+  vm             Machine    @relation(fields: [vmId], references: [id], onDelete: Cascade)
+  vmId           String
+  serviceId      String     // Reference to a known service
+  useEnabled     Boolean    @default(false)  // Can this VM use this service
+  provideEnabled Boolean    @default(false)  // Can this VM provide this service
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+  
+  @@unique([vmId, serviceId])
+}
+
+model GlobalServiceConfig {
+  id             String     @id @default(uuid())
+  serviceId      String     @unique // Reference to a known service
+  useEnabled     Boolean    @default(true)   // Global default for using this service
+  provideEnabled Boolean    @default(false)  // Global default for providing this service
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
 }

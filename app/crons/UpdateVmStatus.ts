@@ -8,48 +8,81 @@ import { PrismaClient } from '@prisma/client';
 // libvirt-node
 import { Connection, Machine } from 'libvirt-node';
 
-const UpdateVmStatusJob = new CronJob('* * * * *', async () => {
-  console.log('Running UpdateVmStatusJob');
-  const prisma = new PrismaClient();
-  const conn = Connection.open('qemu:///system');
-  if (!conn) {
-    console.error('Failed to open connection to libvirt');
-    return;
-  }
-  const domains = conn?.listAllDomains(0);
-  if (!domains) {
-    console.error('Failed to list domains');
-    return;
-  }
-  const runningVms = domains.map((domain) => domain.getName());
-  const allVms = await prisma.machine.findMany();
+const prisma = new PrismaClient();
 
-  const runningVmIds = allVms
-    .filter((vm) => runningVms.includes(vm.internalName) && vm.status !== 'running')
-    .map((vm) => vm.id);
+async function getRunningDomainNames(): Promise<string[]> {
+    try {
+        const conn = Connection.open('qemu:///system');
+        if (!conn) {
+            throw new Error('Failed to open connection to libvirt');
+        }
 
-  const stoppedVmIds = allVms
-    .filter((vm) => !runningVms.includes(vm.internalName) && vm.status !== 'stopped')
-    .map((vm) => vm.id);
+        try {
+            // Get all domains
+            const domains = await conn.listAllDomains(16); // 16 == running
+            if (!domains || domains.length === 0) {
+                return [];
+            }
 
-  if (runningVmIds.length > 0) {
-    console.log(`Updating ${runningVmIds.length} VMs to running`);
-    await prisma.machine.updateMany({
-      where: { id: { in: runningVmIds } },
-      data: { status: 'running' },
-    });
-  }
+            return domains.map((domain) => domain.getName() || '');
+        } finally {
+            conn.close();
+        }
+    } catch (error) {
+        console.error('Error in getRunningDomainNames:', error);
+        return [];
+    }
+}
 
-  if (stoppedVmIds.length > 0) {
-    console.log(`Updating ${stoppedVmIds.length} VMs to stopped`);
-    await prisma.machine.updateMany({
-      where: { id: { in: stoppedVmIds } },
-      data: { status: 'stopped' },
-    });
-  }
+const UpdateVmStatusJob = new CronJob('*/1 * * * *', async () => {
+    try {
+        // Get list of running VMs from libvirt
+        const runningVms = await getRunningDomainNames();
 
-  conn.close();
-  prisma.$disconnect();
+        // Get all VMs from database
+        const allVms = await prisma.machine.findMany({
+            select: {
+                id: true,
+                internalName: true,
+                status: true
+            }
+        });
+
+        // Find VMs that need status updates
+        const runningVmIds = allVms
+            .filter((vm) => 
+                runningVms.includes(vm.internalName) && 
+                vm.status !== 'running'
+            )
+            .map((vm) => vm.id);
+
+        const stoppedVmIds = allVms
+            .filter((vm) => 
+                !runningVms.includes(vm.internalName) && 
+                vm.status !== 'stopped' &&
+                vm.status !== 'failed' // Don't update failed VMs
+            )
+            .map((vm) => vm.id);
+
+        // Update running VMs
+        if (runningVmIds.length > 0) {
+            await prisma.machine.updateMany({
+                where: { id: { in: runningVmIds } },
+                data: { status: 'running' },
+            });
+        }
+
+        // Update stopped VMs
+        if (stoppedVmIds.length > 0) {
+            await prisma.machine.updateMany({
+                where: { id: { in: stoppedVmIds } },
+                data: { status: 'stopped' },
+            });
+        }
+
+    } catch (error) {
+        console.error('Error in UpdateVmStatusJob:', error);
+    }
 });
 
 export default UpdateVmStatusJob;

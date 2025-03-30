@@ -23,7 +23,7 @@ export class CreateMachineService {
     private libvirt: Connection | null = null
     private debug: Debugger = new Debugger('virt-manager');
 
-    
+
 
     constructor(uri: string = 'qemu:///system', prisma: PrismaClient | null = null) {
         this.debug.log('Creating VirtManager instance with URI', uri);
@@ -163,7 +163,6 @@ export class CreateMachineService {
             throw new Error('Libvirt connection not established');
         }
         const xml = xmlGenerator.generate();
-        console.log(`Generated XML for machine ${machine.name}:\n${xml}`);
         const vm = VirtualMachine.defineXml(this.libvirt, xml);
         if (!vm) {
             let error = LibvirtError.lastError();
@@ -239,11 +238,8 @@ export class CreateMachineService {
     }
 
     private async rollback(machine: Machine, newIsoPath: string | null) {
-        console.log('Rolling back')
-
         // Delete the ISO
         if (newIsoPath) {
-            console.log('Deleting ISO')
             fs.unlinkSync(newIsoPath);
         }
 
@@ -297,7 +293,16 @@ export class CreateMachineService {
         xmlGenerator.enableTPM('2.0');
         xmlGenerator.setStorage(template.storage);
         xmlGenerator.setUEFI();
-        xmlGenerator.addNetworkInterface('default', 'virtio');
+        xmlGenerator.addNetworkInterface(process.env.BRIDGE_NAME ?? 'default', 'virtio');
+        const vmFilter = await this.prisma.vMNWFilter.findFirst({ where: { vmId: machine.id } });
+        if (vmFilter) {
+            const filter = await this.prisma.nWFilter.findFirst({ where: { id: vmFilter.nwFilterId } });
+            if (!filter) {
+                console.error('Filter not found');
+            } else {
+                xmlGenerator.addNWFilter(filter.internalName);
+            }
+        }
         xmlGenerator.setBootDevice(['hd', 'cdrom']);
         xmlGenerator.addAudioDevice();
         xmlGenerator.setVCPUs(template.cores);

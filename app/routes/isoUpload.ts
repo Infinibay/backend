@@ -95,19 +95,16 @@ router.post('/',
   upload.single('file'),
   async (req, res) => {
     try {
-      console.log("isoUpload started");
       if (!req.file) {
         throw new Error('No file uploaded');
       }
 
-      console.log("file uploaded");
       // Validate metadata
       const uploadMetadata = await validateMetadata(
         req.file.originalname,
         req.body.os,
         req.file.size
       );
-      console.log("metadata validated");
 
       // Ensure ISO directory exists
       const baseDir = process.env.INFINIBAY_BASE_DIR;
@@ -117,11 +114,9 @@ router.post('/',
       const isoDir = path.join(baseDir, 'iso');
       await ensureDirectoryExists(isoDir);
 
-      console.log("ISO directory created");
       // Move file to target location
       const targetPath = path.join(isoDir, `${uploadMetadata.os}.iso`);
       await fs.rename(req.file.path, targetPath);
-      console.log("file moved");
 
       res.status(200).json({
         message: 'File uploaded successfully',
@@ -130,7 +125,6 @@ router.post('/',
         os: uploadMetadata.os
       });
     } catch (error) {
-      console.error('Error handling file upload:', error);
 
       if (error instanceof Error) {
         if (error.message.includes('limit')) {

@@ -1,6 +1,6 @@
 import { Arg, Authorized, Ctx, Mutation, Query, Resolver } from "type-graphql";
 import { UserInputError } from "apollo-server-core";
-import fs from 'fs/promises';
+import { unlink } from 'fs/promises';
 import { v4 as uuidv4 } from 'uuid';
 import {
     Machine,
@@ -18,7 +18,7 @@ import { PaginationInputType } from '@utils/pagination';
 import { InfinibayContext } from '@main/utils/context';
 import { VirtManager } from '@utils/VirtManager';
 import { GraphicPortService } from '@utils/VirtManager/graphicPortService';
-import { Connection, Machine as VirtualMachine, Error } from 'libvirt-node';
+import { Connection, Machine as VirtualMachine, Error, NwFilter } from 'libvirt-node';
 import { Debugger } from '@utils/debug';
 import { XMLGenerator } from '@utils/VirtManager/xmlGenerator';
 import { existsSync } from 'fs';
@@ -155,7 +155,7 @@ export class MachineMutations {
 
         const internalName = uuidv4();
         const machine = await prisma.$transaction(async (tx: any) => {
-;
+            ;
             // Find the Default department
             let department = null;
             if (input.departmentId) {
@@ -217,7 +217,6 @@ export class MachineMutations {
         });
 
         setImmediate(() => {
-            console.log(input)
             this.backgroundCode(machine.id, prisma, user, input.username, input.password, input.productKey, input.pciBus);
         });
 
@@ -292,81 +291,122 @@ export class MachineMutations {
         // Check if the user has permission to destroy this machine
         const isAdmin = user?.role === 'ADMIN';
         const whereClause = isAdmin ? { id } : { id, userId: user?.id };
-        const machine = await prisma.machine.findFirst({ where: whereClause });
+        const machine = await prisma.machine.findFirst({
+            where: whereClause,
+            include: {
+                configuration: true,
+                nwFilters: {
+                    include: {
+                        nwFilter: true
+                    }
+                }
+            }
+        });
 
         if (!machine) {
             return { success: false, message: "Machine not found" };
         }
 
-        // Connect to libvirt
-        const libvirtConnection = Connection.open('qemu:///system');
-        if (!libvirtConnection) {
-            return { success: false, message: "Libvirt not connected" };
-        }
+        let libvirtConnection: Connection | null = null;
+        try {
+            // Connect to libvirt
+            libvirtConnection = Connection.open('qemu:///system');
+            if (!libvirtConnection) {
+                return { success: false, message: "Libvirt not connected" };
+            }
 
-        // Look up the domain (VM) by name
-        const domain = VirtualMachine.lookupByName(libvirtConnection, machine.internalName);
-        if (domain === null) {
-            return { success: false, message: "Error destroying machine. Machine not found" };
-        }
+            // Look up the domain (VM) by name
+            const domain = VirtualMachine.lookupByName(libvirtConnection, machine.internalName);
+            if (!domain) {
+                return { success: false, message: "Error destroying machine. Machine not found in libvirt" };
+            }
 
-        // Perform destruction process within a transaction
-        return prisma.$transaction(async (tx) => {
+            // Attempt to forcefully stop the VM first
             try {
-                // Retrieve machine configuration
-                const configuration = await tx.machineConfiguration.findUnique({
-                    where: { machineId: machine.id }
-                });
-                if (!configuration) throw new UserInputError("MachineConfiguration not found");
-
-                // Load XML configuration
-                const xmlGenerator = new XMLGenerator('', '', '');
-                xmlGenerator.load(configuration.xml);
-
-                // Attempt to forcefully stop the VM (ignore errors if already stopped)
-                // We ignore the error because domain object can not be null at this point.
-                // The mutation has an early return if the domain is not found.
-                //@ts-ignore
                 await domain.destroy();
+            } catch (error) {
+                console.log("VM was already stopped or error stopping VM:", error);
+            }
 
+            // Load XML configuration
+            const xmlGenerator = new XMLGenerator('', '', '');
+            if (machine.configuration?.xml) {
+                xmlGenerator.load(machine.configuration.xml);
+            }
 
-                // Prepare list of files to delete (UEFI var file and disk files)
-                const filesToDelete = [
-                    xmlGenerator.getUefiVarFile(),
-                    ...xmlGenerator.getDisks()
-                ].filter(file => {
-                    // return false if the file is virtio.iso
-                    if (file && file.includes('virtio')) {
-                        return false;
+            // Prepare list of files to delete
+            const filesToDelete = [
+                xmlGenerator.getUefiVarFile(),
+                ...xmlGenerator.getDisks()
+            ].filter(file => {
+                if (file && file.includes('virtio')) return false;
+                return file && existsSync(file);
+            });
+
+            // Undefine network filters first
+            for (const vmFilter of machine.nwFilters) {
+                try {
+                    const filter = await NwFilter.lookupByName(libvirtConnection, vmFilter.nwFilter.internalName);
+                    if (filter) {
+                        await filter.undefine();
                     }
-                    return file && existsSync(file);
-                });
-                console.log("Removing files", filesToDelete);
+                } catch (error) {
+                    console.log(`Error undefining filter ${vmFilter.nwFilter.internalName}:`, error);
+                }
+            }
 
-                // Delete associated files
-                await Promise.all(filesToDelete.map(file =>
-                    fs.unlink(file).catch(e => this.debug.log(`Error deleting ${file}: ${e}`))
-                ));
+            // Undefine the domain
+            await domain.undefine();
 
-                // Undefine the domain from libvirt
-                console.log("Undefining domain");
-                domain.undefine();
+            // Close libvirt connection before database operations
+            await libvirtConnection.close();
+            libvirtConnection = null;
 
-                // Remove all machineApplications
+            // Perform database operations in a transaction
+            await prisma.$transaction(async (tx) => {
+                // Delete in correct order
+                if (machine.configuration) {
+                    await tx.machineConfiguration.delete({
+                        where: { machineId: machine.id }
+                    });
+                }
+
                 await tx.machineApplication.deleteMany({
                     where: { machineId: machine.id }
                 });
 
-                // Remove database records
-                await tx.machineConfiguration.delete({ where: { machineId: machine.id } });
-                await tx.machine.delete({ where: { id: machine.id } });
+                await tx.vMNWFilter.deleteMany({
+                    where: { vmId: machine.id }
+                });
 
-                return { success: true, message: "Machine destroyed" };
-            } catch (error) {
-                this.debug.log(`Error destroying machine: ${error}`);
-                throw error; // Propagate error to rollback transaction
+                await tx.machine.delete({
+                    where: { id: machine.id }
+                });
+            });
+
+            // Delete files after successful database operations
+            for (const file of filesToDelete) {
+                try {
+                    await unlink(file);
+                } catch (error) {
+                    console.log(`Error deleting file ${file}:`, error);
+                }
             }
-        });
+
+            return { success: true, message: "Machine destroyed" };
+        } catch (error) {
+            console.error("Error in destroyMachine:", error);
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+            return { success: false, message: `Error destroying machine: ${errorMessage}` };
+        } finally {
+            if (libvirtConnection) {
+                try {
+                    await libvirtConnection.close();
+                } catch (error) {
+                    console.error("Error closing libvirt connection:", error);
+                }
+            }
+        }
     }
 
     /**

@@ -13,6 +13,11 @@ type ApplicationType {
   parameters: JSONObject
 }
 
+input BridgeNameInput {
+  bridgeName: String! = ""
+  networkName: String! = ""
+}
+
 type CommandExecutionResponseType {
   message: String!
   response: String
@@ -27,6 +32,28 @@ input CreateApplicationInputType {
   parameters: JSONObject = null
 }
 
+input CreateFilterInput {
+  chain: String = "root"
+  description: String! = ""
+  name: String! = ""
+  type: FilterType = GENERIC
+}
+
+input CreateFilterRuleInput {
+  action: String! = ""
+  comment: String
+  direction: String! = ""
+  dstPortEnd: Int
+  dstPortStart: Int
+  filterId: String! = ""
+  ipVersion: String
+  priority: Int! = 0
+  protocol: String
+  srcPortEnd: Int
+  srcPortStart: Int
+  state: String
+}
+
 input CreateMachineInputType {
   applications: [MachineApplicationInputType!]! = []
   departmentId: ID = ""
@@ -37,6 +64,15 @@ input CreateMachineInputType {
   productKey: String
   templateId: String! = ""
   username: String! = ""
+}
+
+input CreateNetworkInput {
+  bridgeName: String! = ""
+  description: String! = ""
+  enableIntraNetworkCommunication: Boolean
+  enabledServices: [String!]
+  ipConfig: NetworkIpConfigInput
+  name: String! = ""
 }
 
 input CreateUserInputType {
@@ -53,6 +89,36 @@ A date-time string at UTC, such as 2007-12-03T10:15:30Z, compliant with the `dat
 """
 scalar DateTimeISO
 
+input DeleteNetworkInput {
+  name: String!
+}
+
+type DepartmentServiceStatus {
+  """Unique identifier for the department"""
+  departmentId: ID!
+
+  """Name of the department"""
+  departmentName: String!
+
+  """Number of VMs in the department with this service enabled"""
+  enabledVmCount: Float!
+
+  """Whether the service is enabled for inbound traffic"""
+  provideEnabled: Boolean!
+
+  """Unique identifier for the service"""
+  serviceId: ID!
+
+  """Name of the service"""
+  serviceName: String!
+
+  """Whether the service is enabled for outbound traffic"""
+  useEnabled: Boolean!
+
+  """Total number of VMs in the department"""
+  vmCount: Float!
+}
+
 type DepartmentType {
   createdAt: DateTimeISO!
   id: ID!
@@ -66,6 +132,35 @@ type DyummyType {
   value: String!
 }
 
+type FWRule {
+  action: String!
+  comment: String
+  createdAt: DateTimeISO
+  direction: String!
+  dstIpAddr: String
+  dstIpMask: String
+  dstPortEnd: Int
+  dstPortStart: Int
+  id: ID!
+  ipVersion: String
+  priority: Int!
+  protocol: String!
+  srcIpAddr: String
+  srcIpMask: String
+  srcMacAddr: String
+  srcPortEnd: Int
+  srcPortStart: Int
+  state: JSONObject
+  updatedAt: DateTimeISO
+}
+
+"""Type of network filter"""
+enum FilterType {
+  DEPARTMENT
+  GENERIC
+  VM
+}
+
 type GPU {
   memory: Float!
   model: String!
@@ -73,10 +168,41 @@ type GPU {
   vendor: String!
 }
 
+type GenericFilter {
+  createdAt: DateTimeISO!
+  description: String
+  id: ID!
+  name: String!
+  references: [String!]!
+  rules: [FWRule!]
+  type: FilterType!
+  updatedAt: DateTimeISO!
+}
+
+type GlobalServiceStatus {
+  """Whether the service is enabled for inbound traffic"""
+  provideEnabled: Boolean!
+
+  """Unique identifier for the service"""
+  serviceId: ID!
+
+  """Name of the service"""
+  serviceName: String!
+
+  """Whether the service is enabled for outbound traffic"""
+  useEnabled: Boolean!
+}
+
 type GraphicConfigurationType {
   link: String!
   password: String!
   protocol: String!
+}
+
+input IpRangeInput {
+  end: String! = ""
+  networkName: String! = ""
+  start: String! = ""
 }
 
 """
@@ -190,25 +316,88 @@ type MachineTemplateType {
 type Mutation {
   createApplication(input: CreateApplicationInputType!): ApplicationType!
   createDepartment(name: String!): DepartmentType!
+  createFilter(input: CreateFilterInput!): GenericFilter!
+  createFilterRule(filterId: ID!, input: CreateFilterRuleInput!): FWRule!
   createMachine(input: CreateMachineInputType!): Machine!
   createMachineTemplate(input: MachineTemplateInputType!): MachineTemplateType!
   createMachineTemplateCategory(input: MachineTemplateCategoryInputType!): MachineTemplateCategoryType!
+  createNetwork(input: CreateNetworkInput!): Boolean!
   createUser(input: CreateUserInputType!): UserType!
   deleteApplication(id: String!): Boolean!
+  deleteFilter(id: ID!): Boolean!
+  deleteFilterRule(id: ID!): Boolean!
+  deleteNetwork(input: DeleteNetworkInput!): Boolean!
   destroyDepartment(id: String!): DepartmentType!
   destroyMachine(id: String!): SuccessType!
   destroyMachineTemplate(id: String!): Boolean!
   destroyMachineTemplateCategory(id: String!): Boolean!
   executeCommand(command: String!, id: String!): CommandExecutionResponseType!
+
+  """Apply a network filter inmediatly"""
+  flushFilter(filterId: ID!): Boolean!
   moveMachine(departmentId: String!, id: String!): Machine!
   powerOff(id: String!): SuccessType!
   powerOn(id: String!): SuccessType!
+  setNetworkBridgeName(input: BridgeNameInput!): Boolean!
+  setNetworkIp(input: NetworkIpInput!): Boolean!
+  setNetworkIpRange(input: IpRangeInput!): Boolean!
   setupNode: DyummyType!
   suspend(id: String!): SuccessType!
+  toggleDepartmentService(input: ToggleDepartmentServiceInput!): DepartmentServiceStatus!
+  toggleGlobalService(input: ToggleServiceInput!): GlobalServiceStatus!
+  toggleVmService(input: ToggleVmServiceInput!): VmServiceStatus!
   updateApplication(id: String!, input: CreateApplicationInputType!): ApplicationType!
+  updateFilter(id: ID!, input: UpdateFilterInput!): GenericFilter!
+  updateFilterRule(id: ID!, input: UpdateFilterRuleInput!): FWRule!
   updateMachineTemplate(id: String!, input: MachineTemplateInputType!): MachineTemplateType!
   updateMachineTemplateCategory(id: String!, input: MachineTemplateCategoryInputType!): MachineTemplateCategoryType!
   updateUser(id: String!, input: UpdateUserInputType!): UserType!
+}
+
+type Network {
+  bridge: NetworkBridge!
+  description: String
+  ip: NetworkIp!
+  name: String!
+  uuid: String!
+}
+
+type NetworkBridge {
+  delay: String!
+  name: String!
+  stp: String!
+}
+
+type NetworkDhcp {
+  range: NetworkDhcpRange!
+}
+
+type NetworkDhcpRange {
+  end: String!
+  start: String!
+}
+
+input NetworkDhcpRangeInput {
+  end: String! = ""
+  start: String! = ""
+}
+
+type NetworkIp {
+  address: String!
+  dhcp: NetworkDhcp
+  netmask: String!
+}
+
+input NetworkIpConfigInput {
+  address: String! = ""
+  dhcp: NetworkDhcpRangeInput
+  netmask: String! = ""
+}
+
+input NetworkIpInput {
+  address: String! = ""
+  netmask: String! = ""
+  networkName: String! = ""
 }
 
 enum OrderByDirection {
@@ -229,8 +418,16 @@ type Query {
   department(id: String!): DepartmentType
   departments: [DepartmentType!]!
   findDepartmentByName(name: String!): DepartmentType
+  getDepartmentServiceStatus(departmentId: ID!, serviceId: ID): [DepartmentServiceStatus!]!
+  getFilter(id: ID!): GenericFilter
+  getGlobalServiceStatus(serviceId: ID): [GlobalServiceStatus!]!
   getGraphics: [GPU!]!
+  getServiceStatusSummary: [ServiceStatusSummary!]!
+  getVmServiceStatus(serviceId: ID, vmId: ID!): [VmServiceStatus!]!
   graphicConnection(id: String!): GraphicConfigurationType
+  listFilterRules(filterId: ID): [FWRule!]!
+  listFilters(departmentId: ID, vmId: ID): [GenericFilter!]!
+  listServices: [ServiceDefinition!]!
   login(email: String!, password: String!): UserToken!
   machine(id: String!): Machine
   machineTemplate(id: String!): MachineTemplateType
@@ -238,13 +435,139 @@ type Query {
   machineTemplateCategory(id: String!): MachineTemplateCategoryType
   machineTemplates(orderBy: MachineTemplateOrderBy, pagination: PaginationInputType): [MachineTemplateType!]!
   machines(orderBy: MachineOrderBy, pagination: PaginationInputType): [Machine!]!
+  network(name: String!): Network!
+  networks: [Network!]!
   user(id: String!): UserType!
   users(orderBy: UserOrderByInputType, pagination: PaginationInputType): [UserType!]!
+}
+
+"""Service action type (USE for outbound, PROVIDE for inbound)"""
+enum ServiceAction {
+  PROVIDE
+  USE
+}
+
+type ServiceDefinition {
+  """Description of the service"""
+  description: String!
+
+  """Human-readable name of the service"""
+  displayName: String!
+
+  """Unique identifier for the service"""
+  id: ID!
+
+  """Internal name of the service"""
+  name: String!
+
+  """Port configurations for the service"""
+  ports: [ServicePort!]!
+
+  """Description of the risk"""
+  riskDescription: String!
+
+  """Risk level of the service"""
+  riskLevel: ServiceRiskLevel!
+}
+
+type ServicePort {
+  """Ending port number"""
+  portEnd: Float!
+
+  """Starting port number"""
+  portStart: Float!
+
+  """Protocol (TCP or UDP)"""
+  protocol: String!
+}
+
+"""Risk level of a service"""
+enum ServiceRiskLevel {
+  HIGH
+  LOW
+  MEDIUM
+}
+
+type ServiceStatusSummary {
+  """Number of VMs with this service enabled"""
+  enabledVms: Float!
+
+  """Number of VMs with this service running"""
+  runningVms: Float!
+
+  """Unique identifier for the service"""
+  serviceId: ID!
+
+  """Name of the service"""
+  serviceName: String!
+
+  """Total number of VMs"""
+  totalVms: Float!
 }
 
 type SuccessType {
   message: String!
   success: Boolean!
+}
+
+input ToggleDepartmentServiceInput {
+  """Service action (USE for outbound, PROVIDE for inbound)"""
+  action: ServiceAction!
+
+  """Unique identifier of the department"""
+  departmentId: ID!
+
+  """Whether to enable or disable the service"""
+  enabled: Boolean!
+
+  """Unique identifier of the service to toggle"""
+  serviceId: ID!
+}
+
+input ToggleServiceInput {
+  """Service action (USE for outbound, PROVIDE for inbound)"""
+  action: ServiceAction!
+
+  """Whether to enable or disable the service"""
+  enabled: Boolean!
+
+  """Unique identifier of the service to toggle"""
+  serviceId: ID!
+}
+
+input ToggleVmServiceInput {
+  """Service action (USE for outbound, PROVIDE for inbound)"""
+  action: ServiceAction!
+
+  """Whether to enable or disable the service"""
+  enabled: Boolean!
+
+  """Unique identifier of the service to toggle"""
+  serviceId: ID!
+
+  """Unique identifier of the VM"""
+  vmId: ID!
+}
+
+input UpdateFilterInput {
+  chain: String
+  description: String
+  name: String
+  type: String
+}
+
+input UpdateFilterRuleInput {
+  action: String! = ""
+  comment: String
+  direction: String! = ""
+  dstPortEnd: Int
+  dstPortStart: Int
+  ipVersion: String
+  priority: Int! = 0
+  protocol: String
+  srcPortEnd: Int
+  srcPortStart: Int
+  state: String
 }
 
 input UpdateUserInputType {
@@ -290,4 +613,30 @@ type UserType {
   id: ID!
   lastName: String!
   role: String!
+}
+
+type VmServiceStatus {
+  """When the service was last seen running"""
+  lastSeen: DateTimeISO
+
+  """Whether the service is enabled for inbound traffic"""
+  provideEnabled: Boolean!
+
+  """Whether the service is currently running"""
+  running: Boolean!
+
+  """Unique identifier for the service"""
+  serviceId: ID!
+
+  """Name of the service"""
+  serviceName: String!
+
+  """Whether the service is enabled for outbound traffic"""
+  useEnabled: Boolean!
+
+  """Unique identifier for the VM"""
+  vmId: ID!
+
+  """Name of the VM"""
+  vmName: String!
 }
