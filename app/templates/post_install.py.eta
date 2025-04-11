@@ -81,7 +81,7 @@ def check_network():
                 text=True
             )
             return result.stdout.strip() == "204"
-        except Exception:
+        except (subprocess.SubprocessError, FileNotFoundError):
             return False
     
     for attempt in range(max_retries):
