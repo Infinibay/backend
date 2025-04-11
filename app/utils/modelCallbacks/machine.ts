@@ -65,9 +65,15 @@ export async function createMachineFilter(prisma: PrismaClient, machine: any) {
         }
 
         // Apply the filter to libvirt
-        await networkFilterService.connect();
-        await networkFilterService.flushNWFilter(filter.id, true);
-        await networkFilterService.close();
+        try {
+          await networkFilterService.connect();
+          await networkFilterService.flushNWFilter(filter.id, true);
+        } catch (error) {
+          debug.log('error', `Error applying network filter: ${error}`);
+          throw error;
+        } finally {
+          await networkFilterService.close();
+        }
 
         debug.log(`Successfully created filter for VM ${machine.name} (${machine.id})`);
         return vmFilter;
