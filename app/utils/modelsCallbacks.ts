@@ -20,23 +20,23 @@ class ModelsCallbackManager {
         this.callbacks[type][action][model] = callback;
     }
 
-    runsBeforeCallback(action: any, model: any, params: any) {
+    async runsBeforeCallback(action: any, model: any, params: any) {
         const type = 'before';
         if (!this.callbacks[type][action]) {
             this.callbacks[type][action] = {};
         }
         if (this.callbacks[type][action][model]) {
-            this.callbacks[type][action][model](this.prisma, params);
+            await this.callbacks[type][action][model](this.prisma, params);
         }
     }
 
-    runsAfterCallback(action: any, model: any, params: any, result: any) {
+    async runsAfterCallback(action: any, model: any, params: any, result: any) {
         const type = 'after';
         if (!this.callbacks[type][action]) {
             this.callbacks[type][action] = {};
         }
         if (this.callbacks[type][action][model]) {
-            this.callbacks[type][action][model](this.prisma, params, result);
+            await this.callbacks[type][action][model](this.prisma, params, result);
         }
     }
 }
@@ -53,9 +53,9 @@ export default async function installCallbacks(prisma: PrismaClient) {
     // Middleware 1
     prisma.$use(async (params, next) => {
 
-        mcbm.runsBeforeCallback(params.action, params.model, params);
+        await mcbm.runsBeforeCallback(params.action, params.model, params);
         const result = await next(params)
-        mcbm.runsAfterCallback(params.action, params.model, params, result);
+        await mcbm.runsAfterCallback(params.action, params.model, params, result);
 
         return result;
     });
