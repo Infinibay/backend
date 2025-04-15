@@ -1,6 +1,7 @@
 import { Application } from '@prisma/client';
 import * as fs from 'fs';
 import * as path from 'path';
+import { Eta } from 'eta';
 
 import { UnattendedManagerBase } from './unattendedManagerBase';
 
@@ -40,168 +41,294 @@ export class UnattendedRedHatManager extends UnattendedManagerBase {
   }
 
   async generateConfig(): Promise<string> {
-    this.debug.log('Root password generated and encrypted');
-    const applicationsPostCommands = this.generateApplicationsConfig(); // Returns commands without %post and %end tags
+    this.debug.log('Generating RedHat kickstart configuration');
+    const applicationsPostCommands = await this.generateApplicationsConfig();
     this.debug.log('Applications post commands generated');
-    this.debug.log('User post commands generated');
 
-    // Combine all post-installation commands into one %post section
-    //     const postInstallSection = `
-    // %post
-    // # Explicitly set graphical.target as default as this is how initial-setup detects which version to run
-    // systemctl set-default graphical.target
-    // %end
-    //   `;
+    // Initialize Eta template engine
+    const eta = new Eta({
+      views: path.join(process.env.INFINIBAY_BASE_DIR ?? path.join(__dirname, '..'), 'templates'),
+      cache: true
+    });
 
-    return `
-#version=RHEL8
+    try {
+      const templatePath = path.join(__dirname, '../templates/redhat_kickstart.cfg.eta');
+      const templateContent = fs.readFileSync(templatePath, 'utf8');
 
-# Use graphical install
-graphical
+      // Render the template with our data
+      const renderedConfig = eta.renderString(templateContent, {
+        username: this.username,
+        password: this.password,
+        applicationsPostCommands
+      });
 
-#repo --name=default --mirrorlist=https://mirrors.fedoraproject.org/mirrorlist?repo=fedora-$releasever&arch=$basearch
-#repo --name=updates --mirrorlist=https://mirrors.fedoraproject.org/mirrorlist?repo=updates-released-f$releasever&arch=$basearch
-##repo --name=updates-testing --mirrorlist=https://mirrors.fedoraproject.org/mirrorlist?repo=updates-testing-f$releasever&arch=$basearch
-#url --mirrorlist=https://mirrors.fedoraproject.org/mirrorlist?repo=fedora-$releasever&arch=$basearch
-
-#repo --name=default --mirrorlist=https://mirrors.fedoraproject.org/mirrorlist?repo=fedora-39&arch=x86_64
-#repo --name=updates --mirrorlist=https://mirrors.fedoraproject.org/mirrorlist?repo=updates-released-f$39&arch=x86_64
-##repo --name=updates-testing --mirrorlist=https://mirrors.fedoraproject.org/mirrorlist?repo=updates-testing-f$releasever&arch=$basearch
-#url --mirrorlist=https://mirrors.fedoraproject.org/mirrorlist?repo=fedora-39&arch=x86_64
-
-# Enable selinux
-selinux --enforcing
-
-# System language
-lang en_US.UTF-8
-
-# Keyboard layouts
-keyboard us
-
-# Network information
-network --bootproto=dhcp --onboot=on --activate
-
-# Root password
-rootpw --lock --iscrypted locked
-
-# System timezone
-timezone America/New_York
-
-# System bootloader configuration
-bootloader --timeout=1
-
-# Clear the Master Boot Record
-zerombr
-
-# Partition clearing information
-# clearpart --all --initlabel --drives=vda
-clearpart --all --initlabel --disklabel=msdos
-
-# Disk partitioning information
-# autopart --type=lvm
-autopart --type=btrfs --noswap
-
-# System services
-services --enabled=sshd,NetworkManager,chronyd
-
-# System authorization information
-#auth  --useshadow  --passalgo=sha512
-
-# Create a user
-user "--name=${this.username}" "--password=${this.password}" --plaintext --gecos="${this.username}"
-
-# Reboot After Installation
-reboot --eject
-
-# Firewall configuration
-firewall --enabled --ssh
-
-# Package Selection
-%packages
-# Install full fedora workstation (https://github.com/kororaproject/kp-config/blob/master/kickstart.d/fedora-workstation-common.ks)
-# Exclude unwanted groups that fedora-live-base.ks pulls in
-
-# VM performance
-qemu-guest-agent
-spice-vdagent
-
-# Make sure to sync any additions / removals done here with
-# workstation-product-environment in comps
-@base-x
-@core
-@Fedora Workstation
-
-# Exclude unwanted packages from @anaconda-tools group
--gfs2-utils
--reiserfs-utils
-%end
-
-%addon com_redhat_kdump --enable --reserve-mb='auto'
-%end
-  `;
+      this.debug.log('RedHat kickstart configuration generated successfully');
+      return renderedConfig;
+    } catch (error) {
+      this.debug.log('error', `Failed to render RedHat kickstart template: ${error}`);
+      throw error;
+    }
   }
 
-  private generateApplicationsConfig(): string {
-    // Post-installation script section
-    let postInstallScript = `\n`;
+  public async generateApplicationsConfig(): Promise<string> {
+    if (!this.applications || this.applications.length === 0) {
+      return '';
+    }
 
-    // Filter applications for those compatible with Red Hat
+    // Filter applications compatible with RedHat/Fedora
     const redHatApps = this.applications.filter(app =>
-      app.os.includes('redhat')
+      app.os.includes('redhat') || app.os.includes('fedora')
     );
 
-    // redHatApps.forEach(app => {
-    //   // Find the Red Hat install command
-    //   const redHatInstallIndex = app.os.findIndex(os => os === 'redhat');
-    //   if (redHatInstallIndex !== -1 && app.installCommand[redHatInstallIndex]) {
-    //     // Add the command to the post-installation script
-    //     postInstallScript += `${app.installCommand[redHatInstallIndex]}\n`;
-    //   }
-    // });
+    if (redHatApps.length === 0) {
+      return '';
+    }
 
-    postInstallScript += `\n`;
+    let postInstallScript = '%post --log=/root/ks-post.log\n';
+    postInstallScript += 'echo "Starting application installation..."\n';
+
+    const installCommands: string[] = [];
+
+    redHatApps.forEach(app => {
+      // Find the Red Hat/Fedora OS index
+      const osIndex = app.os.findIndex(os => os === 'redhat' || os === 'fedora');
+      // Ensure installCommand is an array and the command exists for the found OS index
+      if (osIndex !== -1 && Array.isArray(app.installCommand) && app.installCommand.length > osIndex && app.installCommand[osIndex]) {
+        // Assuming installCommand contains the package name for dnf
+        installCommands.push(app.installCommand[osIndex] as string);
+      }
+    });
+
+    if (installCommands.length > 0) {
+      postInstallScript += `dnf install -y ${installCommands.join(' ')}\n`;
+      postInstallScript += 'echo "Application installation finished."\n';
+    } else {
+        postInstallScript += 'echo "No compatible applications found or install commands missing."\n';
+    }
+
+    postInstallScript += '%end\n';
 
     return postInstallScript;
   }
 
-  protected async modifyGrubConfig(grubCfgPath: string): Promise<void> {
-    // Read the existing GRUB configuration file
-    const grubConfig = fs.readFileSync(grubCfgPath, 'utf8');
+  /**
+   * Modifies the GRUB configuration file to add Kickstart parameters.
+   * @param grubCfgPath - Path to the grub.cfg file.
+   */
+  private async modifyGrubConfigForKickstart(grubCfgPath: string): Promise<void> {
+    this.debug.log(`Attempting to modify GRUB config for Kickstart: ${grubCfgPath}`);
+    try {
+      let content = await fs.promises.readFile(grubCfgPath, 'utf-8');
 
-    // Define the kickstart parameter
-    const kickstartParam = `inst.ks=cdrom:/ks.cfg`;
+      // Add inst.ks parameter to linux/linuxefi lines
+      // Regex to find linux/linuxefi lines, capturing indentation and the rest of the line
+      const linuxLineRegex = /^(\s*)(linux|linuxefi)(\s+.*)$/gm;
+      let modified = false;
 
-    // Modify the GRUB configuration to include the kickstart file parameter
-    let modifiedGrubConfig = grubConfig.replace(/(^\s*linux\s+.*)/gm, `$1 inst.ks=cdrom:/ks.cfg`);
-    // Update inst.stage2=.* to be inst.stage2=live:CDLABEL=Infinibay
-    modifiedGrubConfig = modifiedGrubConfig.replace(/(^\s*linux\s+.*\s+inst.stage2=)(.*?)(\s+.*)/gm, `$1live:CDLABEL=Infinibay $3`);
-    // Write the modified GRUB configuration back to the file
-    fs.writeFileSync(grubCfgPath, modifiedGrubConfig, 'utf8');
+      content = content.replace(linuxLineRegex, (match, indent, command, args) => {
+        // Avoid adding if already present (simple check)
+        if (args.includes('inst.ks=')) {
+          this.debug.log(`Kickstart parameter already found in line: ${match.trim()}`);
+          return match; // Return original match
+        }
+        // Append the kickstart parameter
+        let modifiedLine = `${indent}${command}${args.trimEnd()} inst.ks=cdrom:/ks.cfg`;
+        modifiedLine = modifiedLine.replace(/(\s*rd.live.check\s*)/gm, ' ');
+        modifiedLine = modifiedLine.replace(/(\s*rd.live.image\s*)/gm, ' ');
+        this.debug.log(`Modifying GRUB line: ${match.trim()} -> ${modifiedLine.trim()}`);
+        modified = true;
+        return modifiedLine;
+      });
+
+      // AAAAAAAAAAAAA
+      // Set GRUB timeout to 3 seconds
+      const timeoutRegex = /^\s*set\s+timeout\s*=\s*\d+\s*$/gm;
+      if (timeoutRegex.test(content)) {
+        // Replace existing timeout setting
+        content = content.replace(timeoutRegex, (match) => {
+          const indent = match.match(/^\s*/)?.[0] || '';
+          this.debug.log(`Changing GRUB timeout: ${match.trim()} -> ${indent}set timeout=3`);
+          modified = true;
+          return `${indent}set timeout=3`;
+        });
+      } else {
+        // Add timeout setting if not found
+        // Look for a good place to insert it - typically after the first few lines
+        const lines = content.split('\n');
+        let insertIndex = 0;
+        
+        // Find a good insertion point - after initial comments and set commands
+        for (let i = 0; i < Math.min(10, lines.length); i++) {
+          if (lines[i].trim().startsWith('set ')) {
+            insertIndex = i + 1;
+          }
+        }
+        
+        lines.splice(insertIndex, 0, 'set timeout=3');
+        content = lines.join('\n');
+        this.debug.log(`Added GRUB timeout setting at line ${insertIndex + 1}: set timeout=3`);
+        modified = true;
+      }
+      // AAAAAAAAAAAAAAAA
+
+      if (modified) {
+        await fs.promises.writeFile(grubCfgPath, content, 'utf-8');
+        this.debug.log(`Successfully modified GRUB config: ${grubCfgPath}`);
+      } else {
+        this.debug.log('warning', `No suitable linux/linuxefi lines found or modified in ${grubCfgPath}`);
+      }
+    } catch (error) {
+      this.debug.log('error', `Failed to modify GRUB config ${grubCfgPath}: ${error}`);
+      // Decide if this should be a fatal error or just a warning
+      // For now, log as error but don't throw, ISO creation might still work if user manually specifies ks
+    }
   }
 
-  protected async createISO(newIsoPath: string, extractDir: string): Promise<void> {
+  /**
+   * Creates a new ISO image with the Kickstart configuration.
+   *
+   * @param {string} newIsoPath - The path to the new ISO image file
+   * @param {string} extractDir - The directory containing the extracted ISO
+   * @returns {Promise<void>}
+   */
+  async createISO(newIsoPath: string, extractDir: string): Promise<void> {
     // Ensure the extractDir exists and has content
     if (!fs.existsSync(extractDir)) {
-      throw new Error('Extraction directory does not exist.');
+      throw new Error(`Extraction directory does not exist: ${extractDir}`);
     }
 
-    //move boot/grub2 into boot/grub
-    await this.executeCommand(['mv', path.join(extractDir, 'boot/grub2'), path.join(extractDir, 'boot/grub')]);
+    this.debug.log('Creating Kickstart configuration file...');
 
-    await this.modifyGrubConfig(path.join(extractDir, 'boot/grub/grub.cfg'));
+    // Generate the configuration
+    const config = await this.generateConfig();
 
-    // Define the command and arguments for creating a new ISO image
-    const isoCreationCommandParts = [
-      'grub-mkrescue',
-      '-o', newIsoPath, // output file
-      '-V', 'Infinibay', // Volume ID
-      extractDir // the path to the files to be included in the ISO
+    // Write ks.cfg to the root of the extracted directory
+    const kickstartPath = path.join(extractDir, 'ks.cfg');
+    await fs.promises.writeFile(kickstartPath, config);
+    this.debug.log(`Kickstart configuration written to ${kickstartPath}`);
+
+    // Find and modify GRUB configurations
+    // Common paths for GRUB config in Fedora/RHEL ISOs
+    const potentialGrubPaths = [
+      path.join(extractDir, 'boot/grub2/grub.cfg'), // Non-EFI boot
+      path.join(extractDir, 'EFI/BOOT/grub.cfg')    // EFI boot
     ];
 
-    // Use the execCommand method from the parent class
-    await this.executeCommand(isoCreationCommandParts);
-    // Remove the extracted directory
-    await this.executeCommand(['rm', '-rf', extractDir]);
+    let grubModified = false;
+    for (const grubPath of potentialGrubPaths) {
+      if (fs.existsSync(grubPath)) {
+        await this.modifyGrubConfigForKickstart(grubPath);
+        grubModified = true; // Assume modification attempt means success for this flag
+      }
+    }
+
+    if (!grubModified) {
+      this.debug.log('warning', 'Could not find any GRUB configuration files at expected paths to modify for Kickstart.');
+      // Consider if this is a fatal error
+    }
+
+    // Extract the original Volume ID from the source ISO
+    let volumeId = 'INFINIBAY-FEDORA'; // Default fallback
+    try {
+      this.debug.log(`Extracting Volume ID using isoinfo from: ${this.isoPath}`);
+      console.log(`Extracting Volume ID using isoinfo from: ${this.isoPath}`);
+      const volIdOutput = await this.executeCommand(['isoinfo', '-d', '-i', this.isoPath as string]) as string;
+
+      // Match 'Volume id: VALUE' from isoinfo output
+      const match = volIdOutput.match(/^Volume id:\s*(.*)$/m);
+      console.log(`Volume ID output: ${volIdOutput}`);
+      console.log(`Volume ID match: ${match}`);
+      if (match && match[1]) {
+        volumeId = match[1];
+        this.debug.log(`Extracted original volume ID: ${volumeId}`);
+      } else {
+        console.log('warning', `Could not parse volume ID from isoinfo output string: ${volIdOutput}. Using default: ${volumeId}`)
+        this.debug.log(`warning', 'Could not parse volume ID from isoinfo output string: ${volIdOutput}. Using default: ${volumeId}`);
+      }
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      console.log('error', `Failed to extract volume ID from ${this.isoPath}: ${errorMsg}. Using default: ${volumeId}`);
+      this.debug.log(`error', 'Failed to extract volume ID from ${this.isoPath}: ${errorMsg}. Using default: ${volumeId}`);
+    }
+
+    this.debug.log('Checking necessary files for ISO recreation...');
+    // Paths derived from xorriso report for Fedora
+    const biosBootImg = path.join(extractDir, 'images/eltorito.img');
+    const efiBootPath = path.join(extractDir, 'EFI/BOOT'); // Directory for EFI boot files
+
+    if (!fs.existsSync(biosBootImg)) {
+      this.debug.log('warning', `BIOS boot image not found at expected path: ${biosBootImg}. ISO creation might fail.`);
+    }
+    if (!fs.existsSync(efiBootPath)) {
+      this.debug.log('warning', `EFI boot directory not found at expected path: ${efiBootPath}. ISO creation might fail.`);
+    }
+
+    this.debug.log('Constructing xorriso command...');
+
+    // Arguments inspired by the xorriso report for Fedora
+    // Paths like `/images/eltorito.img` are relative to extractDir when running mkisofs
+    // Intervals referencing this.isoPath need to be correct
+    const isoCreationCommandParts = [
+      'xorriso',
+      '-as', 'mkisofs',
+      '-V', volumeId,
+      // MBR and GPT specifics from report
+      '--grub2-mbr', `--interval:local_fs:0s-15s:zero_mbrpt,zero_gpt:${this.isoPath}`,
+      '--protective-msdos-label',
+      '-partition_cyl_align', 'off',
+      '-partition_offset', '16',
+      '-partition_hd_cyl', '64',
+      '-partition_sec_hd', '32',
+      // Appended partition for EFI - critical to get right
+      // Using the partition details directly from the report, referencing this.isoPath
+      '-append_partition', '2', '28732ac11ff8d211ba4b00a0c93ec93b', `--interval:local_fs:1819116d-1844979d::${this.isoPath}`,
+      '-appended_part_as_gpt',
+      '-iso_mbr_part_type', 'a2a0d0ebe5b9334487c068b6b72699c7',
+      // Boot options
+      '--boot-catalog-hide', // From report
+      '-b', 'images/eltorito.img', // BIOS boot image path (relative to extractDir)
+      '-no-emul-boot',
+      '-boot-load-size', '4',
+      '-boot-info-table',
+      '--grub2-boot-info',
+      // EFI boot option
+      '-eltorito-alt-boot',
+      // Reference the EFI boot image via interval - use the one from report
+      '-e', `--interval:appended_partition_2_start_454779s_size_25864d:all::`, // Updated interval from Fedora report
+      '-no-emul-boot',
+      // boot-load-size must match the size of the EFI image referenced by -e
+      // The Fedora report showed 25864 * 512 bytes for EFI image size. boot-load-size is in 512-byte sectors.
+      '-boot-load-size', '25864', // Updated size from Fedora report
+      // Output file
+      '-o', newIsoPath,
+      // Source directory
+      extractDir
+    ];
+
+    // Execute the command
+    try {
+      this.debug.log(`Creating Kickstart ISO with command: ${isoCreationCommandParts.join(' ')}`);
+      await this.executeCommand(isoCreationCommandParts);
+      this.debug.log(`Successfully created Kickstart ISO at ${newIsoPath}`);
+
+      // Clean up the extracted directory
+      this.debug.log(`Removing temporary directory: ${extractDir}`);
+      await this.executeCommand(['rm', '-rf', extractDir]);
+      this.debug.log(`Removed temporary directory ${extractDir}`);
+
+    } catch (error) {
+      this.debug.log('error', `Failed to create Kickstart ISO: ${error}`);
+      // Attempt cleanup even on failure
+      try {
+        if (fs.existsSync(extractDir)) {
+            this.debug.log(`Attempting cleanup of failed build directory: ${extractDir}`);
+            await this.executeCommand(['rm', '-rf', extractDir]);
+        }
+      } catch (cleanupError) {
+        this.debug.log('error', `Failed to cleanup temporary directory ${extractDir} after error: ${cleanupError}`);
+      }
+      throw error; // Re-throw the original error
+    }
   }
   // ... other methods ...
 }

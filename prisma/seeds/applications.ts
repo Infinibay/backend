@@ -1,6 +1,4 @@
-import { PrismaClient, Prisma } from "@prisma/client";
-
-const prisma = new PrismaClient();
+import { Prisma, PrismaClient } from "@prisma/client";
 
 function generateAppEntry(name: string, description: string, os: string[], installCommand: Prisma.JsonObject) {
   return {
@@ -12,16 +10,22 @@ function generateAppEntry(name: string, description: string, os: string[], insta
   };
 }
 
+// Helper function to generate Fedora Flatpak installation command
+function getFedoraFlatpakCommand(flatpakId: string): string {
+  return `dnf install -y flatpak && flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo && flatpak install -y flathub ${flatpakId}`;
+}
+
 const createApplications = async (prisma: Prisma.TransactionClient | PrismaClient) => {
   // Slack
   await prisma.application.create({
     data: generateAppEntry(
       "Slack",
       "Slack is a collaboration hub that can replace email, IM and phones.",
-      ["windows", "ubuntu"],
+      ["windows", "ubuntu", "fedora"],
       {
         "windows": "winget install -e --silent --accept-source-agreements --accept-package-agreements --id=SlackTechnologies.Slack",
-        "ubuntu": "snap install slack --classic"
+        "ubuntu": "snap install slack --classic",
+        "fedora": getFedoraFlatpakCommand("com.slack.Slack")
       }
     )
   });
@@ -41,10 +45,11 @@ const createApplications = async (prisma: Prisma.TransactionClient | PrismaClien
     data: generateAppEntry(
       "Microsoft Visual Studio Code",
       "Visual Studio Code is a lightweight but powerful source code editor which runs on your desktop.",
-      ["windows", "ubuntu"],
+      ["windows", "ubuntu", "fedora"],
       {
         "windows": "winget install -e --silent --accept-source-agreements --accept-package-agreements --id=Microsoft.VisualStudioCode",
-        "ubuntu": "snap install code --classic"
+        "ubuntu": "snap install code --classic",
+        "fedora": "rpm --import https://packages.microsoft.com/keys/microsoft.asc && sh -c 'echo -e \"[code]\\nname=Visual Studio Code\\nbaseurl=https://packages.microsoft.com/yumrepos/vscode\\nenabled=1\\ngpgcheck=1\\ngpgkey=https://packages.microsoft.com/keys/microsoft.asc\" > /etc/yum.repos.d/vscode.repo' && dnf install -y code"
       }
     )
   });
@@ -53,10 +58,11 @@ const createApplications = async (prisma: Prisma.TransactionClient | PrismaClien
     data: generateAppEntry(
       "Google Chrome",
       "Google Chrome is a fast, secure, and free web browser.",
-      ["windows", "ubuntu"],
+      ["windows", "ubuntu", "fedora"],
       {
         "windows": "winget install -e --silent --accept-source-agreements --accept-package-agreements --id=Google.Chrome",
-        "ubuntu": "wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - && echo 'deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main' > /etc/apt/sources.list.d/google-chrome.list && apt-get update && apt-get install -y google-chrome-stable"
+        "ubuntu": "wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - && echo 'deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main' > /etc/apt/sources.list.d/google-chrome.list && apt-get update && apt-get install -y google-chrome-stable",
+        "fedora": "dnf install -y fedora-workstation-repositories && dnf config-manager --set-enabled google-chrome && dnf install -y google-chrome-stable"
       }
     )
   });
@@ -65,10 +71,11 @@ const createApplications = async (prisma: Prisma.TransactionClient | PrismaClien
     data: generateAppEntry(
       "Skype",
       "Skype keeps the world talking. Call, message, and share whatever you want - for free.",
-      ["windows", "ubuntu"],
+      ["windows", "ubuntu", "fedora"],
       {
         "windows": "winget install -e --silent --accept-source-agreements --accept-package-agreements --id=Skype",
-        "ubuntu": "snap install skype --classic"
+        "ubuntu": "snap install skype --classic",
+        "fedora": getFedoraFlatpakCommand("com.skype.Client")
       }
     )
   });
@@ -77,10 +84,11 @@ const createApplications = async (prisma: Prisma.TransactionClient | PrismaClien
     data: generateAppEntry(
       "Zoom",
       "Zoom is the leader in modern enterprise video communications, with an easy, reliable cloud platform for video and audio conferencing, chat, and webinars.",
-      ["windows", "ubuntu"],
+      ["windows", "ubuntu", "fedora"],
       {
         "windows": "winget install -e --silent --accept-source-agreements --accept-package-agreements --id=Zoom.Zoom",
-        "ubuntu": "wget -O /tmp/zoom_amd64.deb https://zoom.us/client/latest/zoom_amd64.deb && apt-get install -y /tmp/zoom_amd64.deb && rm /tmp/zoom_amd64.deb"
+        "ubuntu": "wget -O /tmp/zoom_amd64.deb https://zoom.us/client/latest/zoom_amd64.deb && apt-get install -y /tmp/zoom_amd64.deb && rm /tmp/zoom_amd64.deb",
+        "fedora": "dnf install -y https://zoom.us/client/latest/zoom_x86_64.rpm"
       }
     )
   });
@@ -90,10 +98,11 @@ const createApplications = async (prisma: Prisma.TransactionClient | PrismaClien
     data: generateAppEntry(
       "WhatsApp",
       "WhatsApp is a free messaging app available for all mobile devices that allows you to send and receive messages in real time.",
-      ["windows", "ubuntu"],
+      ["windows", "ubuntu", "fedora"],
       {
         "windows": "winget install -e --silent --accept-source-agreements --accept-package-agreements --id=WhatsApp.WhatsApp",
-        "ubuntu": "snap install whatsapp-for-linux"
+        "ubuntu": "snap install whatsapp-for-linux",
+        "fedora": getFedoraFlatpakCommand("io.github.mimbrero.WhatsAppDesktop")
       }
     )
   });
@@ -103,10 +112,11 @@ const createApplications = async (prisma: Prisma.TransactionClient | PrismaClien
     data: generateAppEntry(
       "Telegram",
       "Telegram is a cloud-based mobile and desktop messaging app with a focus on security and speed.",
-      ["windows", "ubuntu"],
+      ["windows", "ubuntu", "fedora"],
       {
         "windows": "winget install -e --silent --accept-source-agreements --accept-package-agreements --id=Telegram.TelegramDesktop",
-        "ubuntu": "snap install telegram-desktop"
+        "ubuntu": "snap install telegram-desktop",
+        "fedora": "dnf install -y telegram-desktop"
       }
     )
   });
@@ -115,10 +125,11 @@ const createApplications = async (prisma: Prisma.TransactionClient | PrismaClien
     data: generateAppEntry(
       "Discord",
       "Discord is a free voice, video, and text chat app for gamers.",
-      ["windows", "ubuntu"],
+      ["windows", "ubuntu", "fedora"],
       {
         "windows": "winget install -e --silent --accept-source-agreements --accept-package-agreements --id=Discord.Discord",
-        "ubuntu": "snap install discord"
+        "ubuntu": "snap install discord",
+        "fedora": getFedoraFlatpakCommand("com.discordapp.Discord")
       }
     )
   });
@@ -127,10 +138,11 @@ const createApplications = async (prisma: Prisma.TransactionClient | PrismaClien
     data: generateAppEntry(
       "Signal",
       "Signal is a cross-platform encrypted messaging service developed by the Signal Foundation and Signal Messenger.",
-      ["windows", "ubuntu"],
+      ["windows", "ubuntu", "fedora"],
       {
         "windows": "winget install -e --silent --accept-source-agreements --accept-package-agreements --id=OpenWhisperSystems.Signal",
-        "ubuntu": "snap install signal-desktop"
+        "ubuntu": "snap install signal-desktop",
+        "fedora": getFedoraFlatpakCommand("org.signal.Signal")
       }
     )
   });
@@ -139,10 +151,11 @@ const createApplications = async (prisma: Prisma.TransactionClient | PrismaClien
     data: generateAppEntry(
       "Webex",
       "Webex is a video conferencing and online meeting software.",
-      ["windows", "ubuntu"],
+      ["windows", "ubuntu", "fedora"],
       {
         "windows": "winget install -e --silent --accept-source-agreements --accept-package-agreements --id=Cisco.WebexTeams",
-        "ubuntu": "wget -O /tmp/webex.deb https://binaries.webex.com/WebexDesktop-Ubuntu-Official-Package/Webex.deb && apt-get install -y /tmp/webex.deb && rm /tmp/webex.deb"
+        "ubuntu": "wget -O /tmp/webex.deb https://binaries.webex.com/WebexDesktop-Ubuntu-Official-Package/Webex.deb && apt-get install -y /tmp/webex.deb && rm /tmp/webex.deb",
+        "fedora": "wget -O /tmp/webex.rpm https://binaries.webex.com/WebexDesktop-RHEL-Official-Package/Webex.rpm && dnf install -y /tmp/webex.rpm && rm /tmp/webex.rpm"
       }
     )
   });
@@ -151,10 +164,11 @@ const createApplications = async (prisma: Prisma.TransactionClient | PrismaClien
     data: generateAppEntry(
       "Spotify",
       "Spotify is a digital music service that gives you access to millions of songs.",
-      ["windows", "ubuntu"],
+      ["windows", "ubuntu", "fedora"],
       {
         "windows": "winget install -e --silent --accept-source-agreements --accept-package-agreements --id=Spotify.Spotify",
-        "ubuntu": "snap install spotify"
+        "ubuntu": "snap install spotify",
+        "fedora": getFedoraFlatpakCommand("com.spotify.Client")
       }
     )
   });
@@ -163,10 +177,11 @@ const createApplications = async (prisma: Prisma.TransactionClient | PrismaClien
     data: generateAppEntry(
       "VLC",
       "VLC is a free and open source cross-platform multimedia player and framework that plays most multimedia files as well as DVDs, Audio CDs, VCDs, and various streaming protocols.",
-      ["windows", "ubuntu"],
+      ["windows", "ubuntu", "fedora"],
       {
         "windows": "winget install -e --silent --accept-source-agreements --accept-package-agreements --id=VideoLAN.VLC",
-        "ubuntu": "apt-get install -y vlc"
+        "ubuntu": "apt-get install -y vlc",
+        "fedora": "dnf install -y vlc"
       }
     )
   });
@@ -175,10 +190,11 @@ const createApplications = async (prisma: Prisma.TransactionClient | PrismaClien
     data: generateAppEntry(
       "7-Zip",
       "7-Zip is a file archiver with a high compression ratio.",
-      ["windows", "ubuntu"],
+      ["windows", "ubuntu", "fedora"],
       {
         "windows": "winget install -e --silent --accept-source-agreements --accept-package-agreements --id=7zip.7zip",
-        "ubuntu": "apt-get install -y p7zip-full p7zip-rar"
+        "ubuntu": "apt-get install -y p7zip-full p7zip-rar",
+        "fedora": "dnf install -y p7zip p7zip-plugins"
       }
     )
   });
@@ -187,10 +203,11 @@ const createApplications = async (prisma: Prisma.TransactionClient | PrismaClien
     data: generateAppEntry(
       "Notion",
       "Notion is an all-in-one workspace for your notes, tasks, wikis, and databases.",
-      ["windows", "ubuntu"],
+      ["windows", "ubuntu", "fedora"],
       {
         "windows": "winget install -e --silent --accept-source-agreements --accept-package-agreements --id=Notion.Notion",
-        "ubuntu": "wget -O /tmp/notion.deb https://notion-desktop.s3.amazonaws.com/Notion-2.0.18.deb && apt-get install -y /tmp/notion.deb && rm /tmp/notion.deb"
+        "ubuntu": "wget -O /tmp/notion.deb https://notion-desktop.s3.amazonaws.com/Notion-2.0.18.deb && apt-get install -y /tmp/notion.deb && rm /tmp/notion.deb",
+        "fedora": getFedoraFlatpakCommand("md.obsidian.Obsidian")
       }
     )
   });
@@ -199,10 +216,11 @@ const createApplications = async (prisma: Prisma.TransactionClient | PrismaClien
     data: generateAppEntry(
       "Evernote",
       "Evernote is a cross-platform app designed for note taking, organizing, and archiving.",
-      ["windows", "ubuntu"],
+      ["windows", "ubuntu", "fedora"],
       {
         "windows": "winget install -e --silent --accept-source-agreements --accept-package-agreements --id=Evernote.Evernote",
-        "ubuntu": "snap install evernote-web-client"
+        "ubuntu": "snap install evernote-web-client",
+        "fedora": getFedoraFlatpakCommand("com.github.nvim_doe.Evernote")
       }
     )
   });
@@ -211,10 +229,11 @@ const createApplications = async (prisma: Prisma.TransactionClient | PrismaClien
     data: generateAppEntry(
       "Steam",
       "Steam is a digital distribution platform developed by Valve Corporation for purchasing and playing video games.",
-      ["windows", "ubuntu"],
+      ["windows", "ubuntu", "fedora"],
       {
         "windows": "winget install -e --silent --accept-source-agreements --accept-package-agreements --id=Valve.Steam",
-        "ubuntu": "apt-get install -y steam-installer"
+        "ubuntu": "apt-get install -y steam-installer",
+        "fedora": "dnf install -y steam"
       }
     )
   });
@@ -223,10 +242,11 @@ const createApplications = async (prisma: Prisma.TransactionClient | PrismaClien
     data: generateAppEntry(
       "Epic Games",
       "Epic Games is an American video game and software developer and publisher.",
-      ["windows", "ubuntu"],
+      ["windows", "ubuntu", "fedora"],
       {
         "windows": "winget install -e --silent --accept-source-agreements --accept-package-agreements --id=EpicGames.EpicGamesLauncher",
-        "ubuntu": "wget -O /tmp/legendary.deb https://github.com/derrod/legendary/releases/latest/download/legendary.deb && apt-get install -y /tmp/legendary.deb && rm /tmp/legendary.deb"
+        "ubuntu": "wget -O /tmp/legendary.deb https://github.com/derrod/legendary/releases/latest/download/legendary.deb && apt-get install -y /tmp/legendary.deb && rm /tmp/legendary.deb",
+        "fedora": "dnf install -y python3-pip && pip3 install legendary-gl"
       }
     )
   });
@@ -246,10 +266,11 @@ const createApplications = async (prisma: Prisma.TransactionClient | PrismaClien
     data: generateAppEntry(
       "GitHub Desktop",
       "GitHub Desktop is an open-source Electron-based GitHub app.",
-      ["windows", "ubuntu"],
+      ["windows", "ubuntu", "fedora"],
       {
         "windows": "winget install -e --silent --accept-source-agreements --accept-package-agreements --id=GitHub.GitHubDesktop",
-        "ubuntu": "wget -qO - https://apt.packages.shiftkey.dev/gpg.key | apt-key add - && sh -c 'echo \"deb [arch=amd64] https://apt.packages.shiftkey.dev/ubuntu/ any main\" > /etc/apt/sources.list.d/githubdesktop.list' && apt-get update && apt-get install -y github-desktop"
+        "ubuntu": "wget -qO - https://apt.packages.shiftkey.dev/gpg.key | apt-key add - && sh -c 'echo \"deb [arch=amd64] https://apt.packages.shiftkey.dev/ubuntu/ any main\" > /etc/apt/sources.list.d/githubdesktop.list' && apt-get update && apt-get install -y github-desktop",
+        "fedora": "rpm --import https://rpm.packages.shiftkey.dev/gpg.key && dnf config-manager --add-repo https://rpm.packages.shiftkey.dev/rpm/shiftkey-rpm.repo && dnf install -y github-desktop"
       }
     )
   });
@@ -258,10 +279,11 @@ const createApplications = async (prisma: Prisma.TransactionClient | PrismaClien
     data: generateAppEntry(
       "Docker",
       "Docker is an open platform for developing, shipping, and running applications.",
-      ["windows", "ubuntu"],
+      ["windows", "ubuntu", "fedora"],
       {
         "windows": "winget install -e --silent --accept-source-agreements --accept-package-agreements --id=Docker.DockerDesktop",
-        "ubuntu": "apt-get install -y apt-transport-https ca-certificates curl software-properties-common && curl -fsSL https://download.docker.com/linux/ubuntu/gpg | apt-key add - && add-apt-repository \"deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable\" && apt-get update && apt-get install -y docker-ce docker-ce-cli containerd.io"
+        "ubuntu": "apt-get install -y apt-transport-https ca-certificates curl software-properties-common && curl -fsSL https://download.docker.com/linux/ubuntu/gpg | apt-key add - && add-apt-repository \"deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable\" && apt-get update && apt-get install -y docker-ce docker-ce-cli containerd.io",
+        "fedora": "dnf -y install dnf-plugins-core && dnf config-manager --add-repo https://download.docker.com/linux/fedora/docker-ce.repo && dnf install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin"
       }
     )
   });
@@ -281,10 +303,11 @@ const createApplications = async (prisma: Prisma.TransactionClient | PrismaClien
     data: generateAppEntry(
       "Git",
       "Git is a free and open source distributed version control system designed to handle everything from small to very large projects with speed and efficiency.",
-      ["windows", "ubuntu"],
+      ["windows", "ubuntu", "fedora"],
       {
         "windows": "winget install -e --silent --accept-source-agreements --accept-package-agreements --id=Git.Git",
-        "ubuntu": "apt-get install -y git"
+        "ubuntu": "apt-get install -y git",
+        "fedora": "dnf install -y git"
       }
     )
   });
@@ -293,10 +316,11 @@ const createApplications = async (prisma: Prisma.TransactionClient | PrismaClien
     data: generateAppEntry(
       "Python",
       "Python is a programming language that lets you work quickly and integrate systems more effectively.",
-      ["windows", "ubuntu"],
+      ["windows", "ubuntu", "fedora"],
       {
         "windows": "winget install -e --silent --accept-source-agreements --accept-package-agreements --id=Python.Python.3.11",
-        "ubuntu": "apt-get install -y python3 python3-pip python3-venv"
+        "ubuntu": "apt-get install -y python3 python3-pip python3-venv",
+        "fedora": "dnf install -y python3 python3-pip python3-devel"
       }
     )
   });
@@ -305,10 +329,11 @@ const createApplications = async (prisma: Prisma.TransactionClient | PrismaClien
     data: generateAppEntry(
       "Java",
       "Java is a programming language and computing platform first released by Sun Microsystems in 1995.",
-      ["windows", "ubuntu"],
+      ["windows", "ubuntu", "fedora"],
       {
         "windows": "winget install -e --silent --accept-source-agreements --accept-package-agreements --id=Oracle.JDK.17",
-        "ubuntu": "apt-get install -y default-jdk"
+        "ubuntu": "apt-get install -y default-jdk",
+        "fedora": "dnf install -y java-latest-openjdk-devel"
       }
     )
   });
@@ -317,10 +342,11 @@ const createApplications = async (prisma: Prisma.TransactionClient | PrismaClien
     data: generateAppEntry(
       "Node.js",
       "Node.js is a JavaScript runtime built on Chrome's V8 JavaScript engine.",
-      ["windows", "ubuntu"],
+      ["windows", "ubuntu", "fedora"],
       {
         "windows": "winget install -e --silent --accept-source-agreements --accept-package-agreements --id=OpenJS.NodeJS",
-        "ubuntu": "curl -fsSL https://deb.nodesource.com/setup_18.x | bash - && apt-get install -y nodejs"
+        "ubuntu": "curl -fsSL https://deb.nodesource.com/setup_18.x | bash - && apt-get install -y nodejs",
+        "fedora": "dnf module install -y nodejs:18/default"
       }
     )
   });
@@ -397,13 +423,15 @@ const createApplications = async (prisma: Prisma.TransactionClient | PrismaClien
       installCommand["ubuntu"] = app.snapClassic
         ? `snap install ${app.snapName} --classic`
         : `snap install ${app.snapName}`;
+
+      installCommand["fedora"] = getFedoraFlatpakCommand(`com.jetbrains.${app.snapName.replace('-', '.')}`);
     }
 
     await prisma.application.create({
       data: generateAppEntry(
         app.name,
         app.description,
-        app.snapName ? ["windows", "ubuntu"] : ["windows"],
+        app.snapName ? ["windows", "ubuntu", "fedora"] : ["windows"],
         installCommand
       )
     });

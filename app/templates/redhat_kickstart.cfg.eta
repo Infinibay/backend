@@ -1,0 +1,135 @@
+#version=RHEL9
+
+# Use text install
+graphical
+xconfig  --startxonboot
+# Automatically agree to the EULA
+eula --agreed
+
+# Run the Setup Agent on first boot
+firstboot --enable
+# System services
+services --disabled="chronyd"
+# Keyboard layouts
+keyboard --vckeymap=us --xlayouts='us'
+# System language
+lang en_US.UTF-8
+
+
+url --mirrorlist=https://mirrors.fedoraproject.org/mirrorlist?repo=fedora-$releasever&arch=$basearch
+
+repo --name=default --mirrorlist=https://mirrors.fedoraproject.org/mirrorlist?repo=fedora-$releasever&arch=$basearch
+repo --name=updates --mirrorlist=https://mirrors.fedoraproject.org/mirrorlist?repo=updates-released-f$releasever&arch=$basearch
+
+# RPM Fusion repositories
+repo --name=rpmfusion-free --mirrorlist=https://mirrors.rpmfusion.org/mirrorlist?repo=free-fedora-$releasever&arch=$basearch
+repo --name=rpmfusion-free-updates --mirrorlist=https://mirrors.rpmfusion.org/mirrorlist?repo=free-fedora-updates-released-$releasever&arch=$basearch
+repo --name=rpmfusion-nonfree --mirrorlist=https://mirrors.rpmfusion.org/mirrorlist?repo=nonfree-fedora-$releasever&arch=$basearch
+repo --name=rpmfusion-nonfree-updates --mirrorlist=https://mirrors.rpmfusion.org/mirrorlist?repo=nonfree-fedora-updates-released-$releasever&arch=$basearch
+
+# Additional third-party repositories
+repo --name=fedora-cisco-openh264 --baseurl=https://mirror.fedoraproject.org/metalink?repo=fedora-cisco-openh264-$releasever&arch=$basearch
+repo --name=google-chrome --baseurl=https://dl.google.com/linux/chrome/rpm/stable/$basearch
+repo --name=vscode --baseurl=https://packages.microsoft.com/yumrepos/vscode
+repo --name=docker-ce --baseurl=https://download.docker.com/linux/fedora/$releasever/$basearch/stable
+repo --name=flathub --baseurl=https://flathub.org/repo/flathub.flatpakrepo
+
+# Enable selinux
+selinux --enforcing
+
+# Network information
+network --bootproto=dhcp --onboot=on --activate
+
+# Root password
+rootpw --lock --iscrypted locked
+
+# System timezone
+# TODO: Read it from account configuration or something
+timezone America/New_York
+
+# System bootloader configuration
+bootloader --timeout=1
+
+# Clear the Master Boot Record
+zerombr
+
+# Partition clearing information
+# clearpart --all --initlabel --drives=vda
+clearpart --all --initlabel --disklabel=msdos
+ignoredisk --only-use=vda
+
+# Disk partitioning information
+autopart --type=lvm
+#autopart --type=btrfs --noswap
+
+# System services
+services --enabled=sshd,NetworkManager,chronyd
+
+# System authorization information
+#auth  --useshadow  --passalgo=sha512
+
+# Create a user
+user "--name=<%= it.username %>" "--password=<%= it.password %>" --plaintext --gecos="<%= it.username %>" --groups=wheel
+
+# Reboot After Installation
+reboot --eject
+
+# Firewall configuration
+firewall --enabled --ssh
+
+# Package Selection
+%packages
+# Install full fedora workstation (https://github.com/kororaproject/kp-config/blob/master/kickstart.d/fedora-workstation-common.ks)
+# Exclude unwanted groups that fedora-live-base.ks pulls in
+
+# VM performance
+qemu-guest-agent
+spice-vdagent
+
+# RPM Fusion package keys
+rpmfusion-free-release
+rpmfusion-nonfree-release
+
+# Additional third-party repository keys and packages
+# Note: Some of these will be installed in post-install scripts
+flatpak
+gnome-software-plugin-flatpak
+
+@workstation-product-environment
+@development-tools
+
+%end
+
+%addon com_redhat_kdump --enable --reserve-mb='auto'
+%end
+
+<% if (it.applicationsPostCommands && it.applicationsPostCommands.trim()) { %>
+<%= it.applicationsPostCommands %>
+<% } %>
+
+# Post-installation script to set up additional repositories
+%post
+# Set up Google Chrome repository
+rpm --import https://dl.google.com/linux/linux_signing_key.pub
+
+# Set up VS Code repository
+rpm --import https://packages.microsoft.com/keys/microsoft.asc
+
+# Set up Docker repository
+dnf -y install dnf-plugins-core
+dnf config-manager --add-repo https://download.docker.com/linux/fedora/docker-ce.repo
+
+# Set up Brave Browser repository
+rpm --import https://brave-browser-rpm-release.s3.brave.com/brave-core.asc
+dnf config-manager --add-repo https://brave-browser-rpm-release.s3.brave.com/x86_64/
+
+# Set up Flathub repository
+flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+
+# Enable third-party repositories in GNOME Software
+gsettings set org.gnome.software show-ratings true
+gsettings set org.gnome.software allow-updates true
+gsettings set org.gnome.software download-updates true
+gsettings set org.gnome.software enable-repos true
+
+%end
