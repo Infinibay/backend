@@ -13,7 +13,7 @@ export class MachineCleanupService {
   }
 
   async cleanupVM(machineId: string): Promise<void> {
-    console.log("Cleanining up");
+    console.log("Cleaning up");
     const machine = await this.prisma.machine.findUnique({
       where: { id: machineId },
       include: {
