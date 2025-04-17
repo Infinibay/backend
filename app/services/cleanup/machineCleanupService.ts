@@ -54,8 +54,10 @@ export class MachineCleanupService {
         }
         // Delete VM-related files
         for (const file of filesToDelete) {
-          try { unlinkSync(file); } catch (e) {
-            this.debug.log(`Error deleting file ${file}: ${String(e)}`);
+          if (existsSync(file)) {
+            try { unlinkSync(file); } catch (e) {
+              this.debug.log(`Error deleting file ${file}: ${String(e)}`);
+            }
           }
         }
         // Cleanup VM-specific filters in libvirt
