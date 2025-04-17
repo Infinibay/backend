@@ -11,6 +11,7 @@ import { UnattendedWindowsManager } from '@services/unattendedWindowsManager'
 import { UnattendedUbuntuManager } from '@services/unattendedUbuntuManager';
 import { UnattendedRedHatManager } from '@services/unattendedRedHatManager';
 import { Debugger } from '@utils/debug';
+import { MachineCleanupService } from '../../services/cleanup/machineCleanupService';
 
 const ALLOWED_GPU_VENDORS = [
     'NVIDIA Corporationß',
@@ -243,25 +244,30 @@ export class CreateMachineService {
             fs.unlinkSync(newIsoPath);
         }
 
-        // We need to delete the volume if it exists
-        let vol: StorageVol | null = null;
-        if (!this.libvirt) {
-            throw new Error('Libvirt connection not established');
-        }
-        let pool = await this.getDefaultStoragePool();
-
-        if (pool == null) {
-            throw new Error('Failed to get default storage pool');
-        }
-
-        vol = StorageVol.lookupByName(pool, `${machine.internalName}-main.qcow2`);
-        if (vol !== null) {
-            if (vol.delete(0) !== 0) {
-                let error = LibvirtError.lastError();
-                this.debug.log('error', error.message);
-                throw new Error('Failed to delete storage volume');
+        // Delete the storage volume
+        const pool = await this.getDefaultStoragePool();
+        if (!pool) {
+            this.debug.log('Storage pool not found during rollback');
+        } else {
+            const vol = StorageVol.lookupByName(pool, `${machine.internalName}-main.qcow2`);
+            if (vol) {
+                try {
+                    if (vol.delete(0) !== 0) {
+                        const err = LibvirtError.lastError();
+                        this.debug.log('Error deleting storage volume', err.message);
+                    }
+                } catch (e) {
+                    this.debug.log('Error deleting storage volume', e instanceof Error ? e.message : String(e));
+                }
             }
         }
+
+        // Delegate cleanup to MachineCleanupService
+        if (this.prisma) {
+            const cleanup = new MachineCleanupService(this.prisma);
+            await cleanup.cleanupVM(machine.id);
+        }
+        this.debug.log('Rollback completed for machine', machine.id);
     }
 
     async generateXML(

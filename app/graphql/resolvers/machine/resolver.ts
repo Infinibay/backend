@@ -23,6 +23,7 @@ import { Debugger } from '@utils/debug';
 import { XMLGenerator } from '@utils/VirtManager/xmlGenerator';
 import { existsSync } from 'fs';
 import { execute } from "graphql";
+import { MachineLifecycleService } from '../../../services/machineLifecycleService';
 
 async function transformMachine(prismaMachine: any, prisma: any): Promise<Machine> {
     // TODO: fix n+1 problem
@@ -144,107 +145,8 @@ export class MachineMutations {
         @Arg('input') input: CreateMachineInputType,
         @Ctx() { prisma, user }: InfinibayContext
     ): Promise<Machine> {
-        // First verify the template exists
-        const template = await prisma.machineTemplate.findUnique({
-            where: { id: input.templateId }
-        });
-
-        if (!template) {
-            throw new UserInputError("Machine template not found");
-        }
-
-        const internalName = uuidv4();
-        const machine = await prisma.$transaction(async (tx: any) => {
-            ;
-            // Find the Default department
-            let department = null;
-            if (input.departmentId) {
-                department = await tx.department.findUnique({
-                    where: { id: input.departmentId }
-                });
-            } else {
-                // get the first department
-                department = await tx.department.first()
-            }
-
-            if (!department) {
-                throw new UserInputError("Department not found");
-            }
-
-            const createdMachine = await tx.machine.create({
-                data: {
-                    name: input.name,
-                    userId: user?.id,
-                    status: 'building',
-                    os: input.os,
-                    templateId: input.templateId,
-                    internalName,
-                    departmentId: department.id,
-                    configuration: {
-                        create: {
-                            graphicPort: 0,
-                            graphicProtocol: 'spice',
-                            graphicHost: process.env.GRAPHIC_HOST || 'localhost',
-                            graphicPassword: null,
-                        }
-                    }
-                },
-                include: {
-                    configuration: true,
-                    department: true,
-                    template: true,
-                    user: true
-                }
-            });
-
-            if (!createdMachine) {
-                throw new UserInputError("Machine not created");
-            }
-
-            // Create application associations
-            // TODO: Missing parameters validation!!!!
-            for (const application of input.applications) {
-                await tx.machineApplication.create({
-                    data: {
-                        machineId: createdMachine.id,
-                        applicationId: application.applicationId,
-                        parameters: application.parameters
-                    }
-                });
-            }
-
-            return createdMachine;
-        });
-
-        setImmediate(() => {
-            this.backgroundCode(machine.id, prisma, user, input.username, input.password, input.productKey, input.pciBus);
-        });
-
-        return machine;
-    }
-
-    private backgroundCode = async (id: string, prisma: any, user: any, username: string, password: string, productKey: string | undefined, pciBus: string | null) => {
-        try {
-            const machine = await prisma.machine.findUnique({
-                where: {
-                    id
-                }
-            });
-            const virtManager = new VirtManager();
-            virtManager.setPrisma(prisma);
-            await virtManager.createMachine(machine as any, username, password, productKey, pciBus);
-            await virtManager.powerOn(machine?.internalName as string);
-            await prisma.machine.update({
-                where: {
-                    id
-                },
-                data: {
-                    status: 'running'
-                }
-            });
-        } catch (error) {
-            console.log(error);
-        }
+        const lifecycleService = new MachineLifecycleService(prisma, user);
+        return await lifecycleService.createMachine(input);
     }
 
     @Mutation(() => SuccessType)
@@ -288,125 +190,8 @@ export class MachineMutations {
         @Arg('id') id: string,
         @Ctx() { prisma, user }: InfinibayContext
     ): Promise<SuccessType> {
-        // Check if the user has permission to destroy this machine
-        const isAdmin = user?.role === 'ADMIN';
-        const whereClause = isAdmin ? { id } : { id, userId: user?.id };
-        const machine = await prisma.machine.findFirst({
-            where: whereClause,
-            include: {
-                configuration: true,
-                nwFilters: {
-                    include: {
-                        nwFilter: true
-                    }
-                }
-            }
-        });
-
-        if (!machine) {
-            return { success: false, message: "Machine not found" };
-        }
-
-        let libvirtConnection: Connection | null = null;
-        try {
-            // Connect to libvirt
-            libvirtConnection = Connection.open('qemu:///system');
-            if (!libvirtConnection) {
-                return { success: false, message: "Libvirt not connected" };
-            }
-
-            // Look up the domain (VM) by name
-            const domain = VirtualMachine.lookupByName(libvirtConnection, machine.internalName);
-            if (!domain) {
-                return { success: false, message: "Error destroying machine. Machine not found in libvirt" };
-            }
-
-            // Attempt to forcefully stop the VM first
-            try {
-                await domain.destroy();
-            } catch (error) {
-                console.log("VM was already stopped or error stopping VM:", error);
-            }
-
-            // Load XML configuration
-            const xmlGenerator = new XMLGenerator('', '', '');
-            if (machine.configuration?.xml) {
-                xmlGenerator.load(machine.configuration.xml);
-            }
-
-            // Prepare list of files to delete
-            const filesToDelete = [
-                xmlGenerator.getUefiVarFile(),
-                ...xmlGenerator.getDisks()
-            ].filter(file => {
-                if (file && file.includes('virtio')) return false;
-                return file && existsSync(file);
-            });
-
-            // Undefine network filters first
-            for (const vmFilter of machine.nwFilters) {
-                try {
-                    const filter = await NwFilter.lookupByName(libvirtConnection, vmFilter.nwFilter.internalName);
-                    if (filter) {
-                        await filter.undefine();
-                    }
-                } catch (error) {
-                    console.log(`Error undefining filter ${vmFilter.nwFilter.internalName}:`, error);
-                }
-            }
-
-            // Undefine the domain
-            await domain.undefine();
-
-            // Close libvirt connection before database operations
-            await libvirtConnection.close();
-            libvirtConnection = null;
-
-            // Perform database operations in a transaction
-            await prisma.$transaction(async (tx) => {
-                // Delete in correct order
-                if (machine.configuration) {
-                    await tx.machineConfiguration.delete({
-                        where: { machineId: machine.id }
-                    });
-                }
-
-                await tx.machineApplication.deleteMany({
-                    where: { machineId: machine.id }
-                });
-
-                await tx.vMNWFilter.deleteMany({
-                    where: { vmId: machine.id }
-                });
-
-                await tx.machine.delete({
-                    where: { id: machine.id }
-                });
-            });
-
-            // Delete files after successful database operations
-            for (const file of filesToDelete) {
-                try {
-                    await unlink(file);
-                } catch (error) {
-                    console.log(`Error deleting file ${file}:`, error);
-                }
-            }
-
-            return { success: true, message: "Machine destroyed" };
-        } catch (error) {
-            console.error("Error in destroyMachine:", error);
-            const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-            return { success: false, message: `Error destroying machine: ${errorMessage}` };
-        } finally {
-            if (libvirtConnection) {
-                try {
-                    await libvirtConnection.close();
-                } catch (error) {
-                    console.error("Error closing libvirt connection:", error);
-                }
-            }
-        }
+        const lifecycleService = new MachineLifecycleService(prisma, user);
+        return await lifecycleService.destroyMachine(id);
     }
 
     /**

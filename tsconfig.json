@@ -119,7 +119,6 @@
     "moduleResolution": "node"
   },
   "include": [
-    "app/index.ts",
-    "app/logger.ts"
+    "app/**/*.ts"
   ]
 }

@@ -48,5 +48,11 @@ async function createMachineFilter(prisma: PrismaClient, machine: any) {
 }
 
 export async function afterCreateMachine(prisma: PrismaClient, params: any, result: any) {
-    createMachineFilter(prisma, result);
+    process.nextTick(async () => {
+        try {
+            await createMachineFilter(prisma, result);
+        } catch (error) {
+            console.error('Error creating machine filter:', error);
+        }
+    });
 }
