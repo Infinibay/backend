@@ -13,7 +13,6 @@ export class MachineCleanupService {
   }
 
   async cleanupVM(machineId: string): Promise<void> {
-    console.log("Cleaning up");
     const machine = await this.prisma.machine.findUnique({
       where: { id: machineId },
       include: {
@@ -79,12 +78,10 @@ export class MachineCleanupService {
         }
       }
     } catch (e) {
-      console.log(e);
       this.debug.log(`Error cleaning up libvirt resources: ${String(e)}`);
     } finally {
       if (conn) {
         try { conn.close(); } catch (e) {
-          console.log(e);
           this.debug.log(`Error closing libvirt connection: ${String(e)}`);
         }
       }
@@ -92,7 +89,6 @@ export class MachineCleanupService {
 
     // Remove DB records in correct order
     await this.prisma.$transaction(async tx => {
-      console.log("Removing DB records");
       try {
         if (machine.configuration) {
           await tx.machineConfiguration.delete({ where: { machineId: machine.id } });
@@ -107,8 +103,8 @@ export class MachineCleanupService {
         }
         await tx.machine.delete({ where: { id: machine.id } });
       } catch (e) {
-        console.log(e);
         this.debug.log(`Error removing DB records: ${String(e)}`);
+        throw e;
       }
       });
   }
