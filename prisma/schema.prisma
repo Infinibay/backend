@@ -69,6 +69,7 @@ model MachineConfiguration {
   graphicPort     Int?
   graphicPassword String?
   graphicHost     String?
+  assignedGpuBus  String?  // Assigned GPU PCI bus
   machineId       String   @unique
   machine         Machine  @relation(fields: [machineId], references: [id], onDelete: Cascade)
 }
