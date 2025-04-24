@@ -47,6 +47,16 @@ export async function checkGpuAffinity(prisma: PrismaClient): Promise<void> {
                 );
                 const xml = xmlGenerator.generate();
                 try {
+                    // Undefine existing VM definition if exists
+                    const existingVm = VirtualMachine.lookupByName(vmService.libvirt!, machine.internalName);
+                    if (existingVm) {
+                        try {
+                            existingVm.undefine();
+                            console.log(`Undefining VM ${machine.internalName} before redefining.`);
+                        } catch (undefErr) {
+                            console.error(`Failed to undefine VM ${machine.internalName}:`, undefErr);
+                        }
+                    }
                     VirtualMachine.defineXml(vmService.libvirt!, xml);
                     console.log(`Redefined VM ${machine.internalName} without GPU.`);
                 } catch (err) {
