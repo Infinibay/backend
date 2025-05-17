@@ -171,7 +171,14 @@ export class NetworkFilterService {
       const existingFilter = await NwFilter.lookupByName(conn, filter.internalName);
       if (existingFilter) {
         if (!redefine) return true;
-        await existingFilter.undefine();
+        try {
+          await existingFilter.undefine();
+        } catch (undefErr: any) {
+          // ignore in-use errors, rethrow others
+          if (!undefErr.message.includes('nwfilter is in use')) {
+            throw undefErr;
+          }
+        }
       }
 
       const xmlObj: any = {
@@ -253,7 +260,18 @@ export class NetworkFilterService {
 
       const xml = this.xmlBuilder.buildObject(xmlObj);
 
-      const result = await NwFilter.defineXml(conn, xml);
+      let result: any;
+      try {
+        result = await NwFilter.defineXml(conn, xml);
+      } catch (defErr: any) {
+        // skip missing dependency errors
+        if (defErr.message.includes('referenced filter') && defErr.message.includes('is missing')) {
+          console.warn(`Skipping flush for filter ${filter.internalName}: missing referenced filter.`);
+          return false;
+        }
+        throw defErr;
+      }
+
       await this.prisma.nWFilter.update({
         where: { id: filter.id },
         data: { flushedAt: new Date() }
