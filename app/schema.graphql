@@ -349,6 +349,7 @@ type Mutation {
   updateApplication(id: String!, input: CreateApplicationInputType!): ApplicationType!
   updateFilter(id: ID!, input: UpdateFilterInput!): GenericFilter!
   updateFilterRule(id: ID!, input: UpdateFilterRuleInput!): FWRule!
+  updateMachineHardware(input: UpdateMachineHardwareInput!): Machine!
   updateMachineTemplate(id: String!, input: MachineTemplateInputType!): MachineTemplateType!
   updateMachineTemplateCategory(id: String!, input: MachineTemplateCategoryInputType!): MachineTemplateCategoryType!
   updateUser(id: String!, input: UpdateUserInputType!): UserType!
@@ -568,6 +569,18 @@ input UpdateFilterRuleInput {
   srcPortEnd: Int
   srcPortStart: Int
   state: String
+}
+
+input UpdateMachineHardwareInput {
+  """New number of CPU cores"""
+  cpuCores: Int
+
+  """New GPU PCI address (e.g., 0000:01:00.0). Set to null to remove GPU."""
+  gpuPciAddress: String
+  id: ID! = ""
+
+  """New RAM in GB"""
+  ramGB: Int
 }
 
 input UpdateUserInputType {

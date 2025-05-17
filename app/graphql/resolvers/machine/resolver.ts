@@ -1,7 +1,5 @@
 import { Arg, Authorized, Ctx, Mutation, Query, Resolver } from "type-graphql";
 import { UserInputError } from "apollo-server-core";
-import { unlink } from 'fs/promises';
-import { v4 as uuidv4 } from 'uuid';
 import {
     Machine,
     MachineOrderBy,
@@ -9,20 +7,16 @@ import {
     GraphicConfigurationType,
     SuccessType,
     MachineStatus,
-    MachineConfigurationType,
     CommandExecutionResponseType,
+    UpdateMachineHardwareInput,
 } from './type';
 import { UserType } from '../user/type';
 import { MachineTemplateType } from '../machine_template/type';
 import { PaginationInputType } from '@utils/pagination';
 import { InfinibayContext } from '@main/utils/context';
-import { VirtManager } from '@utils/VirtManager';
 import { GraphicPortService } from '@utils/VirtManager/graphicPortService';
 import { Connection, Machine as VirtualMachine, Error, NwFilter } from 'libvirt-node';
 import { Debugger } from '@utils/debug';
-import { XMLGenerator } from '@utils/VirtManager/xmlGenerator';
-import { existsSync } from 'fs';
-import { execute } from "graphql";
 import { MachineLifecycleService } from '../../../services/machineLifecycleService';
 
 async function transformMachine(prismaMachine: any, prisma: any): Promise<Machine> {
@@ -147,6 +141,17 @@ export class MachineMutations {
     ): Promise<Machine> {
         const lifecycleService = new MachineLifecycleService(prisma, user);
         return await lifecycleService.createMachine(input);
+    }
+
+    @Mutation(() => Machine) 
+    @Authorized('ADMIN') 
+    async updateMachineHardware(
+        @Arg('input') input: UpdateMachineHardwareInput,
+        @Ctx() { prisma, user }: InfinibayContext
+    ): Promise<Machine> {
+        const lifecycleService = new MachineLifecycleService(prisma, user);
+        const updatedMachine = await lifecycleService.updateMachineHardware(input);
+        return transformMachine(updatedMachine, prisma); 
     }
 
     @Mutation(() => SuccessType)

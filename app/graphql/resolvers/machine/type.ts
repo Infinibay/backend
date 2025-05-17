@@ -181,3 +181,17 @@ export class CreateMachineInputType {
     applications: MachineApplicationInputType[] = []
 }
 
+@InputType()
+export class UpdateMachineHardwareInput {
+    @Field(() => ID)
+    id: string = ''; // ID of the machine to update
+
+    @Field(() => Int, { nullable: true, description: 'New number of CPU cores' })
+    cpuCores?: number;
+
+    @Field(() => Int, { nullable: true, description: 'New RAM in GB' })
+    ramGB?: number;
+
+    @Field(() => String, { nullable: true, description: 'New GPU PCI address (e.g., 0000:01:00.0). Set to null to remove GPU.' })
+    gpuPciAddress?: string | null;
+}
