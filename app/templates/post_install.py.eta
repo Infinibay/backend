@@ -1,0 +1,159 @@
+#!/usr/bin/env python3
+import subprocess
+import time
+import sys
+import os
+import logging
+
+# Configure logging
+LOG_FILE = "/var/log/post_install.log"
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(LOG_FILE),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger('post_install')
+
+def run_command(command):
+    """Run a shell command and return its success status"""
+    logger.info(f"Running command: {command}")
+    try:
+        result = subprocess.run(command, shell=True, check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        for line in result.stdout.splitlines():
+            logger.info(f"  {line}")
+        return True
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Command failed with exit code {e.returncode}")
+        for line in e.stdout.splitlines():
+            logger.error(f"  {line}")
+        return False
+
+def check_network():
+    """Check for network connectivity with retries using multiple methods"""
+    logger.info("Checking for network connectivity...")
+    max_retries = 12  # Try for about 1 minute (12 * 5 seconds)
+    
+    # Define multiple reliable hosts to test connectivity
+    test_hosts = [
+        "1.1.1.1",           # Cloudflare DNS
+        "8.8.8.8",           # Google DNS
+        "208.67.222.222",    # OpenDNS
+        "9.9.9.9"            # Quad9 DNS
+    ]
+    
+    # Define multiple methods to test connectivity
+    def test_ping(host):
+        """Test connectivity using ping"""
+        try:
+            result = subprocess.run(
+                ["ping", "-c", "1", "-W", "2", host],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+            return result.returncode == 0
+        except Exception:
+            return False
+    
+    def test_dns_resolution():
+        """Test DNS resolution"""
+        try:
+            # Try to resolve a reliable domain
+            result = subprocess.run(
+                ["getent", "hosts", "ubuntu.com"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+            return result.returncode == 0
+        except Exception:
+            return False
+    
+    def test_http_connection():
+        """Test HTTP connectivity"""
+        try:
+            # Try to connect to a reliable HTTP endpoint
+            result = subprocess.run(
+                ["curl", "--connect-timeout", "2", "-s", "-o", "/dev/null", "-w", "%{http_code}", "http://connectivity-check.ubuntu.com/"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True
+            )
+            return result.stdout.strip() == "204"
+        except (subprocess.SubprocessError, FileNotFoundError):
+            return False
+    
+    for attempt in range(max_retries):
+        # Try multiple connectivity tests
+        ping_success = any(test_ping(host) for host in test_hosts)
+        dns_success = test_dns_resolution()
+        http_success = test_http_connection()
+        
+        # Log detailed results for debugging
+        logger.info(f"Attempt {attempt+1}/{max_retries} results: Ping: {ping_success}, DNS: {dns_success}, HTTP: {http_success}")
+        
+        # If any test succeeds, we have connectivity
+        if ping_success or dns_success or http_success:
+            logger.info("Network connectivity established")
+            return True
+        
+        logger.warning(f"Attempt {attempt+1}/{max_retries}: Network not available yet, retrying in 5 seconds...")
+        time.sleep(5)
+    
+    logger.error("Failed to establish network connectivity after multiple attempts")
+    logger.error("Application installation cannot proceed without network connectivity")
+    logger.error("Please check network settings and try again manually")
+    return False
+
+def install_applications():
+    """Install all configured applications"""
+    app_count = <%= it.appScripts.length %>
+    
+    if app_count == 0:
+        logger.info("No applications to install")
+        return True
+    
+    logger.info(f"Installing {app_count} application(s)")
+    success_count = 0
+    
+    <% if (it.appScripts.length > 0) { %>
+    <% it.appScripts.forEach(function(app, index) { %>
+    # Install <%= app.name %> (<%= index + 1 %>/<%= it.appScripts.length %>)
+    logger.info(f"Installing <%= app.name %> (<%= index + 1 %>/<%= it.appScripts.length %>)...")
+    script_path = "/var/lib/cloud/scripts/per-instance/app_install_<%= app.scriptName %>.sh"
+    if os.path.exists(script_path):
+        if run_command(f"bash {script_path}"):
+            success_count += 1
+            logger.info(f"Successfully installed <%= app.name %>")
+        else:
+            logger.warning(f"Installation of <%= app.name %> may have failed")
+    else:
+        logger.error(f"Installation script for <%= app.name %> not found at {script_path}")
+    
+    <% }) %> # End of forEach
+    <% } %> # En of If
+    logger.info(f"Completed installation of {success_count}/{app_count} applications")
+    return True
+
+def main():
+    """Main installation process"""
+    logger.info("Starting application installation process...")
+    
+    # Check for network connectivity
+    if not check_network():
+        return 1
+    
+    # Update package lists
+    logger.info("Updating package lists...")
+    if not run_command("apt-get update -y"):
+        logger.warning("Failed to update package lists, but continuing with installation")
+    
+    # Install applications
+    install_applications()
+    
+    logger.info("Application installation process completed")
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())

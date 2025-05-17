@@ -8,7 +8,7 @@ import { KNOWN_SERVICES } from '../../app/config/knownServices';
  * By default, all services are enabled for 'use' (outbound) but disabled
  * for 'provide' (inbound) for security reasons.
  */
-const seedGlobalServiceConfigs = async (prisma: PrismaClient) => {
+const seedGlobalServiceConfigs = async (prisma: any) => {
   console.log('Seeding global service configurations...');
   
   // We need to wait until Prisma client is ready with the updated models
