@@ -16,6 +16,7 @@ import { expressMiddleware } from '@apollo/server/express4';
 import { InfinibayContext } from './utils/context';
 
 import installCallbacks from './utils/modelsCallbacks';
+import { checkGpuAffinity } from './utils/checkGpuAffinity';
 
 // Crons
 import { startCrons } from './crons/all';
@@ -24,6 +25,9 @@ const prisma = new PrismaClient();
 
 async function bootstrap(): Promise<void> {
   try {
+    // Clean up stale GPU assignments before server starts
+    await checkGpuAffinity(prisma);
+
     // Initialize Express and HTTP server
     const app = express();
     const httpServer = http.createServer(app);

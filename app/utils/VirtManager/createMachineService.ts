@@ -20,7 +20,7 @@ const ALLOWED_GPU_VENDORS = [
 export class CreateMachineService {
 
     private prisma: PrismaClient | null = null;
-    private libvirt: Connection | null = null
+    public libvirt: Connection | null = null
     private debug: Debugger = new Debugger('virt-manager');
 
 
@@ -352,6 +352,7 @@ export class CreateMachineService {
                 graphicPassword: spicePassword,
                 graphicHost: process.env.APP_HOST || '0.0.0.0',
                 graphicPort: -1,
+                assignedGpuBus: pciBus,
             },
         });
 
