@@ -173,7 +173,14 @@ async function getListeningPorts(libvirtMachine: LibvirtMachine, os: string): Pr
         // Convert base64 output to string
         const outputStr = Buffer.from(statusObj['out-data'], 'base64').toString();
 
-        return command.parser(outputStr);
+        let ports: PortInfo[];
+        try {
+            ports = command.parser(outputStr);
+        } catch (parserError) {
+            console.error(`Error parsing listening ports for OS ${osType}:`, parserError, 'Raw output:', outputStr);
+            return [];
+        }
+        return ports;
 
     } catch (error) {
         console.error(`Error getting listening ports for VM:`, error);
@@ -181,17 +188,10 @@ async function getListeningPorts(libvirtMachine: LibvirtMachine, os: string): Pr
     }
 }
 
-async function checkRunningService(prismaMachine: PrismaMachine) {
-    let conn: Connection | null = null;
+async function checkRunningService(prismaMachine: PrismaMachine, conn: Connection) {
     try {
-        // Only check ports if VM is running
         if (prismaMachine.status !== 'running') {
             return;
-        }
-
-        conn = Connection.open('qemu:///system');
-        if (!conn) {
-            throw new Error('Failed to open connection to libvirt');
         }
 
         const libvirtMachine = await LibvirtMachine.lookupByName(conn, prismaMachine.internalName);
@@ -274,29 +274,35 @@ async function checkRunningService(prismaMachine: PrismaMachine) {
                 }
             },
             data: {
-                running: false
+                running: false,
+                updatedAt: new Date()
             }
         });
 
         libvirtMachine.free();
     } catch (error) {
         console.error(`Error checking running services for VM ${prismaMachine.id}:`, error);
-    } finally {
-        if (conn) {
-            conn.close();
-        }
     }
 }
 
 const CheckRunningServicesJob = new CronJob('*/1 * * * *', async () => {
+    let conn: Connection | null = null;
     try {
+        conn = Connection.open('qemu:///system');
+        if (!conn) {
+            throw new Error('Failed to open connection to libvirt');
+        }
         // Get all VMs, not just running ones
         const vms = await prisma.machine.findMany();
         for (const vm of vms) {
-            await checkRunningService(vm);
+            await checkRunningService(vm, conn);
         }
     } catch (error) {
         console.error('Error in CheckRunningServicesJob:', error);
+    } finally {
+        if (conn) {
+            conn.close();
+        }
     }
 });
 
