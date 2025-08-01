@@ -1,4 +1,4 @@
-import { FirewallRule } from '../networkFirewallRules';
+import { FirewallRule } from '../networkFirewallRules'
 
 export interface NetworkService {
   name: string;

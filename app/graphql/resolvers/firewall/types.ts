@@ -1,223 +1,223 @@
-import { ObjectType, Field, ID, InputType, registerEnumType, Int } from 'type-graphql';
-import { GraphQLJSONObject } from "graphql-type-json";
+import { ObjectType, Field, ID, InputType, registerEnumType, Int } from 'type-graphql'
+import { GraphQLJSONObject } from 'graphql-type-json'
 
 export enum FilterType {
-  GENERIC = "generic",
-  DEPARTMENT = "department",
-  VM = "vm"
+  GENERIC = 'generic',
+  DEPARTMENT = 'department',
+  VM = 'vm'
 }
 
 registerEnumType(FilterType, {
-  name: "FilterType",
-  description: "Type of network filter"
-});
+  name: 'FilterType',
+  description: 'Type of network filter'
+})
 
 @ObjectType()
 export class FWRule {
   @Field(() => ID)
-  id: string = '';
+    id: string = ''
 
   @Field(() => String)
-  protocol: string = '';
+    protocol: string = ''
 
   @Field(() => String)
-  direction: string = '';
+    direction: string = ''
 
   @Field(() => String)
-  action: string = '';
+    action: string = ''
 
   @Field(() => Int)
-  priority: number = 0;
+    priority: number = 0
 
   @Field(() => String, { nullable: true })
-  ipVersion?: string | null;
+    ipVersion?: string | null
 
   @Field(() => String, { nullable: true })
-  srcMacAddr?: string | null;
+    srcMacAddr?: string | null
 
   @Field(() => String, { nullable: true })
-  srcIpAddr?: string | null;
+    srcIpAddr?: string | null
 
   @Field(() => String, { nullable: true })
-  srcIpMask?: string | null;
+    srcIpMask?: string | null
 
   @Field(() => String, { nullable: true })
-  dstIpAddr?: string | null;
+    dstIpAddr?: string | null
 
   @Field(() => String, { nullable: true })
-  dstIpMask?: string | null;
+    dstIpMask?: string | null
 
   @Field(() => Int, { nullable: true })
-  srcPortStart?: number | null;
+    srcPortStart?: number | null
 
   @Field(() => Int, { nullable: true })
-  srcPortEnd?: number | null;
+    srcPortEnd?: number | null
 
   @Field(() => Int, { nullable: true })
-  dstPortStart?: number | null;
+    dstPortStart?: number | null
 
   @Field(() => Int, { nullable: true })
-  dstPortEnd?: number | null;
+    dstPortEnd?: number | null
 
   @Field(() => GraphQLJSONObject, { nullable: true })
-  state?: any;
+    state?: any
 
   @Field(() => String, { nullable: true })
-  comment?: string | null;
+    comment?: string | null
 
-  @Field(() => Date, {nullable: true})
-  createdAt?: Date = new Date();
+  @Field(() => Date, { nullable: true })
+    createdAt?: Date = new Date()
 
-  @Field(() => Date, {nullable: true})
-  updatedAt: Date = new Date();
+  @Field(() => Date, { nullable: true })
+    updatedAt: Date = new Date()
 }
 
 @ObjectType()
 export class GenericFilter {
   @Field(() => ID)
-  id: string = '';
+    id: string = ''
 
   @Field()
-  name: string = '';
+    name: string = ''
 
   @Field({ nullable: true })
-  description?: string;
+    description?: string
 
   @Field(() => FilterType)
-  type: FilterType = FilterType.GENERIC;
+    type: FilterType = FilterType.GENERIC
 
   @Field(() => [FWRule], { nullable: true })
-  rules: FWRule[] = [];
+    rules: FWRule[] = []
 
   @Field(() => [String])
-  references: string[] = [];
+    references: string[] = []
 
   @Field(() => Date)
-  createdAt: Date = new Date();
+    createdAt: Date = new Date()
 
   @Field(() => Date)
-  updatedAt: Date = new Date();
+    updatedAt: Date = new Date()
 }
 
 @ObjectType()
 export class DepartmentFilter extends GenericFilter {
   @Field(() => ID)
-  departmentId: string = '';
+    departmentId: string = ''
 
   @Field()
-  priority: number = 0;
+    priority: number = 0
 }
 
 @ObjectType()
 export class VMFilter extends GenericFilter {
   @Field(() => ID)
-  vmId: string = '';
+    vmId: string = ''
 
   @Field()
-  priority: number = 0;
+    priority: number = 0
 }
 
 @InputType()
 export class CreateFilterRuleInput {
   @Field(() => String)
-  filterId: string = '';
+    filterId: string = ''
 
   @Field(() => String)
-  action: string = '';
+    action: string = ''
 
   @Field(() => String)
-  direction: string = '';
+    direction: string = ''
 
   @Field(() => Int)
-  priority: number = 0;
+    priority: number = 0
 
   @Field(() => String, { nullable: true })
-  protocol?: string;
+    protocol?: string
 
   @Field(() => Int, { nullable: true })
-  srcPortStart?: number;
+    srcPortStart?: number
 
   @Field(() => Int, { nullable: true })
-  srcPortEnd?: number;
+    srcPortEnd?: number
 
   @Field(() => Int, { nullable: true })
-  dstPortStart?: number;
+    dstPortStart?: number
 
   @Field(() => Int, { nullable: true })
-  dstPortEnd?: number;
+    dstPortEnd?: number
 
   @Field(() => String, { nullable: true })
-  comment?: string;
+    comment?: string
 
   @Field(() => String, { nullable: true })
-  ipVersion?: string;
+    ipVersion?: string
 
   @Field(() => String, { nullable: true })
-  state?: string;
+    state?: string
 }
 
 @InputType()
 export class UpdateFilterRuleInput {
   @Field(() => String)
-  action: string = '';
+    action: string = ''
 
   @Field(() => String)
-  direction: string = '';
+    direction: string = ''
 
   @Field(() => Int)
-  priority: number = 0;
+    priority: number = 0
 
   @Field(() => String, { nullable: true })
-  protocol?: string;
+    protocol?: string
 
   @Field(() => Int, { nullable: true })
-  srcPortStart?: number;
+    srcPortStart?: number
 
   @Field(() => Int, { nullable: true })
-  srcPortEnd?: number;
+    srcPortEnd?: number
 
   @Field(() => Int, { nullable: true })
-  dstPortStart?: number;
+    dstPortStart?: number
 
   @Field(() => Int, { nullable: true })
-  dstPortEnd?: number;
+    dstPortEnd?: number
 
   @Field(() => String, { nullable: true })
-  comment?: string;
+    comment?: string
 
   @Field(() => String, { nullable: true })
-  ipVersion?: string;
+    ipVersion?: string
 
   @Field(() => String, { nullable: true })
-  state?: string;
+    state?: string
 }
 
 @InputType()
 export class CreateFilterInput {
   @Field(() => FilterType, { nullable: true })
-  type: FilterType = FilterType.GENERIC;
+    type: FilterType = FilterType.GENERIC
 
   @Field()
-  name: string = '';
+    name: string = ''
 
   @Field(() => String)
-  description: string = '';
+    description: string = ''
 
   @Field(() => String, { nullable: true })
-  chain: string = 'root';
+    chain: string = 'root'
 }
 
 @InputType()
 export class UpdateFilterInput {
   @Field({ nullable: true })
-  name?: string;
+    name?: string
 
   @Field({ nullable: true })
-  description?: string;
+    description?: string
 
   @Field({ nullable: true })
-  chain?: string;
+    chain?: string
 
   @Field({ nullable: true })
-  type?: FilterType;
+    type?: FilterType
 }

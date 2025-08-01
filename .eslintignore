@@ -1,0 +1,29 @@
+# Build outputs
+dist/
+node_modules/
+
+# Generated files
+prisma/generated/
+*.d.ts
+
+# Native modules
+lib/**/*.node
+
+# Test coverage
+coverage/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Temporary files
+tmp/
+*.tmp
+*.temp

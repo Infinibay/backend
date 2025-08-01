@@ -1,22 +1,22 @@
-import { Application } from '@prisma/client';
-import { Builder } from 'xml2js';
-import { spawn } from 'child_process';
-import * as fs from 'fs';
-import * as os from 'os';
-import * as path from 'path';
-import { promises as fsPromises } from 'fs';
+import { Application } from '@prisma/client'
+import { Builder } from 'xml2js'
+import { spawn } from 'child_process'
+import * as fs from 'fs'
+import * as os from 'os'
+import * as path from 'path'
+import { promises as fsPromises } from 'fs'
 
-import { Debugger } from '@utils/debug';
+import { Debugger } from '@utils/debug'
 // ... other imports ...
 
 export class UnattendedManagerBase {
-  protected debug: Debugger = new Debugger('unattended-manager-base');
+  protected debug: Debugger = new Debugger('unattended-manager-base')
 
-  configFileName: string | null = null;
-  isoPath: string | null = null;
+  configFileName: string | null = null
+  isoPath: string | null = null
 
-  public async generateConfig(): Promise<string> {
-    return '';
+  public async generateConfig (): Promise<string> {
+    return ''
   }
 
   /**
@@ -25,50 +25,50 @@ export class UnattendedManagerBase {
    * @returns A Promise that resolves to the path of the generated image.
    * @throws If there is an error generating the image.
    */
-  async generateNewImage(): Promise<string> {
-    this.debug.log('Starting to generate new image');
-    let extractDir: string | null = null;
+  async generateNewImage (): Promise<string> {
+    this.debug.log('Starting to generate new image')
+    let extractDir: string | null = null
     try {
-      this.debug.log('Validating ISO path');
+      this.debug.log('Validating ISO path')
       if (!this.isoPath) {
-        throw Error('No ISO path specified');
+        throw Error('No ISO path specified')
       }
-      this.debug.log('Generating config');
-      const configContent = await this.generateConfig();
-      this.debug.log(configContent);
-      this.debug.log('Validating output path');
-      const outputPath = this.validatePath(path.join(process.env.INFINIBAY_BASE_DIR ?? '/opt/infinibay', 'iso'), '/opt/infinibay/isos');
+      this.debug.log('Generating config')
+      const configContent = await this.generateConfig()
+      this.debug.log(configContent)
+      this.debug.log('Validating output path')
+      const outputPath = this.validatePath(path.join(process.env.INFINIBAY_BASE_DIR ?? '/opt/infinibay', 'iso'), '/opt/infinibay/isos')
 
-      this.debug.log('Generating random file name for new ISO');
-      const newIsoName = this.generateRandomFileName();
-      const newIsoPath = path.join(outputPath, newIsoName);
+      this.debug.log('Generating random file name for new ISO')
+      const newIsoName = this.generateRandomFileName()
+      const newIsoPath = path.join(outputPath, newIsoName)
 
-      this.debug.log('Extracting ISO');
-      extractDir = await this.extractISO(this.isoPath);
+      this.debug.log('Extracting ISO')
+      extractDir = await this.extractISO(this.isoPath)
       if (this.configFileName) {
-        this.debug.log('Adding autoinstall config file');
-        await this.addAutonistallConfigFile(configContent, extractDir, this.configFileName);
+        this.debug.log('Adding autoinstall config file')
+        await this.addAutonistallConfigFile(configContent, extractDir, this.configFileName)
       } else {
-        this.debug.log('Error: configFileName is not set');
-        throw new Error('configFileName is not set');
+        this.debug.log('Error: configFileName is not set')
+        throw new Error('configFileName is not set')
       }
-      this.debug.log('Creating new ISO');
-      await this.createISO(newIsoPath, extractDir);
+      this.debug.log('Creating new ISO')
+      await this.createISO(newIsoPath, extractDir)
       // TODO: We may need to delete the iso file in the future, after finishing the installation process
 
       // Optional: Clean up extracted files
-      this.debug.log('Cleaning up extracted files');
-      await this.cleanup(extractDir);
+      this.debug.log('Cleaning up extracted files')
+      await this.cleanup(extractDir)
 
-      this.debug.log('New image generated successfully');
-      return newIsoPath;
+      this.debug.log('New image generated successfully')
+      return newIsoPath
     } catch (error) {
-      this.debug.log(`Error generating new image: ${error}`);
+      this.debug.log(`Error generating new image: ${error}`)
       if (extractDir) {
-        this.debug.log('Cleaning up extracted files due to error');
-        await this.cleanup(extractDir);
+        this.debug.log('Cleaning up extracted files due to error')
+        await this.cleanup(extractDir)
       }
-      throw error;
+      throw error
     }
   }
 
@@ -78,12 +78,12 @@ export class UnattendedManagerBase {
    * @param {string} defaultPath - The default path to use if the envPath is not set or invalid.
    * @returns {string} The validated path.
    */
-  protected validatePath(envPath: string | undefined, defaultPath: string): string {
+  protected validatePath (envPath: string | undefined, defaultPath: string): string {
     if (!envPath || !fs.existsSync(envPath)) {
-      console.warn(`Path not set or invalid. Using default path: ${defaultPath}`);
-      return defaultPath;
+      console.warn(`Path not set or invalid. Using default path: ${defaultPath}`)
+      return defaultPath
     }
-    return envPath;
+    return envPath
   }
 
   /**
@@ -92,8 +92,8 @@ export class UnattendedManagerBase {
    * and then takes a substring of the result. It appends the '.iso' extension to the end of the string.
    * @returns {string} The random file name.
    */
-  protected generateRandomFileName(): string {
-    return Math.random().toString(36).substring(2, 15) + '.iso';
+  protected generateRandomFileName (): string {
+    return Math.random().toString(36).substring(2, 15) + '.iso'
   }
 
   /**
@@ -102,11 +102,11 @@ export class UnattendedManagerBase {
    * @param {string} isoPath - The path to the ISO file.
    * @returns {Promise<string>} The path to the directory where the ISO file was extracted.
    */
-  protected async extractISO(isoPath: string): Promise<string> {
-    const extractDir = path.join(os.tmpdir(), 'extracted_iso_' + Date.now());
-    await fsPromises.mkdir(extractDir, { recursive: true });
-    await this.executeCommand(['7z', 'x', isoPath, '-o' + extractDir]);
-    return extractDir;
+  protected async extractISO (isoPath: string): Promise<string> {
+    const extractDir = path.join(os.tmpdir(), 'extracted_iso_' + Date.now())
+    await fsPromises.mkdir(extractDir, { recursive: true })
+    await this.executeCommand(['7z', 'x', isoPath, '-o' + extractDir])
+    return extractDir
   }
 
   /**
@@ -116,11 +116,11 @@ export class UnattendedManagerBase {
    * @param {string} extractDir - The directory where the XML file will be copied.
    * @returns {Promise<void>}
    */
-  protected async addAutonistallConfigFile(content: string, extractDir: string, fileName: string): Promise<void> {
-    this.debug.log(`Starting to add Autonistall Config File: ${fileName}`);
-    const destPath = path.join(extractDir, fileName);
-    await fsPromises.writeFile(destPath, content);
-    this.debug.log(`Successfully added Autonistall Config File: ${fileName}`);
+  protected async addAutonistallConfigFile (content: string, extractDir: string, fileName: string): Promise<void> {
+    this.debug.log(`Starting to add Autonistall Config File: ${fileName}`)
+    const destPath = path.join(extractDir, fileName)
+    await fsPromises.writeFile(destPath, content)
+    this.debug.log(`Successfully added Autonistall Config File: ${fileName}`)
   }
 
   /**
@@ -130,8 +130,8 @@ export class UnattendedManagerBase {
    * @param {string} extractDir - The directory from which the ISO file will be created.
    * @returns {Promise<void>}
    */
-  protected async createISO(newIsoPath: string, extractDir: string): Promise<void> {
-    throw new Error('Not implemented');
+  protected async createISO (newIsoPath: string, extractDir: string): Promise<void> {
+    throw new Error('Not implemented')
   }
 
   /**
@@ -140,20 +140,20 @@ export class UnattendedManagerBase {
    * @param {string} extractDir - The directory to be cleaned up.
    * @returns {Promise<void>}
    */
-  protected async cleanup(extractDir: string): Promise<void> {
+  protected async cleanup (extractDir: string): Promise<void> {
     try {
       // Safety check: Ensure extractDir is not empty and is within the system's temp directory
       if (!extractDir || !extractDir.startsWith(os.tmpdir())) {
-        throw new Error('Invalid directory path for cleanup.');
+        throw new Error('Invalid directory path for cleanup.')
       }
 
-      this.debug.log(`Starting cleanup of directory: ${extractDir}`);
+      this.debug.log(`Starting cleanup of directory: ${extractDir}`)
 
       // await fsPromises.rm(extractDir, { recursive: true, force: true });
 
-      this.debug.log(`Successfully cleaned up directory: ${extractDir}`);
+      this.debug.log(`Successfully cleaned up directory: ${extractDir}`)
     } catch (error) {
-      this.debug.log(`Error during cleanup: ${error}`);
+      this.debug.log(`Error during cleanup: ${error}`)
       // We'll just log the error and continue, as cleanup failure shouldn't stop the process
     }
   }
@@ -165,32 +165,32 @@ export class UnattendedManagerBase {
    * @param {string[]} commandParts - The command to execute and its arguments.
    * @returns {Promise<void>}
    */
-  protected executeCommand(commandParts: string[]): Promise<string> {
+  protected executeCommand (commandParts: string[]): Promise<string> {
     return new Promise((resolve, reject) => {
-      const process = spawn(commandParts[0], commandParts.slice(1));
-      let output = '';
+      const process = spawn(commandParts[0], commandParts.slice(1))
+      let output = ''
 
       process.stdout.on('data', (data) => {
-        output += data;
-      });
+        output += data
+      })
 
       process.stderr.on('data', (data) => {
-        console.error(`stderr: ${data}`);
-      });
+        console.error(`stderr: ${data}`)
+      })
 
       process.on('close', (code) => {
         if (code === 0) {
-          resolve(output);
+          resolve(output)
         } else {
-          console.error(`Command failed with exit code ${code}: ${commandParts.join(' ')}`);
-          reject(new Error(`Command failed with exit code ${code}`));
+          console.error(`Command failed with exit code ${code}: ${commandParts.join(' ')}`)
+          reject(new Error(`Command failed with exit code ${code}`))
         }
-      });
+      })
 
       process.on('error', (error) => {
-        console.error(`Error occurred while executing command: ${commandParts.join(' ')}`);
-        reject(error);
-      });
-    });
+        console.error(`Error occurred while executing command: ${commandParts.join(' ')}`)
+        reject(error)
+      })
+    })
   }
 }

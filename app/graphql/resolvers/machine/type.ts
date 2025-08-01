@@ -19,86 +19,94 @@ model Machine {
 @ObjectType()
 export class Machine {
     @Field(() => ID)
-    id: string = ''
+      id: string = ''
 
     @Field(() => String)
-    name: string = ''
+      name: string = ''
+
+    @Field(() => Int, { nullable: true })
+      cpuCores: number | null = null
+
+    @Field(() => Int, { nullable: true })
+      ramGB: number | null = null
+
+    @Field(() => String, { nullable: true })
+      gpuPciAddress: string | null = null
 
     @Field(() => GraphQLJSONObject, { nullable: true })
-    configuration: any | null = null
+      configuration: any | null = null
 
     @Field(() => String)
-    status: MachineStatus = MachineStatus.STOPPED
+      status: MachineStatus = MachineStatus.STOPPED
 
     @Field(() => String)
-    userId: string = ''
+      userId: string = ''
 
     @Field(() => String)
-    templateId: string = ''
+      templateId: string = ''
 
     @Field(() => Date, { nullable: true })
-    createdAt: Date | null = null
+      createdAt: Date | null = null
 
     @Field(() => MachineTemplateType, { nullable: true })
-    template?: MachineTemplateType
+      template?: MachineTemplateType
 
     @Field(() => DepartmentType, { nullable: true })
-    department?: DepartmentType
+      department?: DepartmentType
 
     @Field(() => UserType, { nullable: true })
-    user?: UserType
+      user?: UserType
 }
 
 @ObjectType()
 export class MachineConfigurationType {
     @Field(() => Int)
-    port: number = 0
+      port: number = 0
 
     @Field(() => String)
-    address: string = ''
+      address: string = ''
 }
-
 
 @ObjectType()
 export class GraphicConfigurationType {
     @Field(() => String)
-    link: string = ''
+      link: string = ''
 
     @Field(() => String)
-    password: string = ''
+      password: string = ''
 
     @Field(() => String)
-    protocol: string = ''
+      protocol: string = ''
 }
 
 @ObjectType()
 export class SuccessType {
     @Field(() => Boolean)
-    success: boolean = false
+      success: boolean = false
 
     @Field(() => String)
-    message: string = ''
+      message: string = ''
 }
 
 @ObjectType()
 export class CommandExecutionResponseType {
     @Field(() => Boolean)
-    success: boolean = false;
+      success: boolean = false
 
     @Field(() => String)
-    message: string = '';
+      message: string = ''
 
     @Field(() => String, { nullable: true })
-    response?: string;
+      response?: string
 }
 
 @InputType()
 export class MachineOrderBy {
     @Field(() => MachineOrderByEnum, { nullable: true })
-    fieldName: MachineOrderByEnum | undefined
+      fieldName: MachineOrderByEnum | undefined
 
     @Field(() => OrderByDirection, { nullable: true })
-    direction: OrderByDirection | undefined
+      direction: OrderByDirection | undefined
 }
 
 // MachineOrderByField enum
@@ -125,73 +133,73 @@ export enum OsEnum {
 }
 
 registerEnumType(MachineOrderByEnum, {
-    name: 'MachineOrderByField',
-    description: 'The field to order machines by'
+  name: 'MachineOrderByField',
+  description: 'The field to order machines by'
 })
 
 registerEnumType(MachineStatus, {
-    name: 'MachineStatus',
-    description: 'The status of the machine'
+  name: 'MachineStatus',
+  description: 'The status of the machine'
 })
 
 registerEnumType(OsEnum, {
-    name: 'MachineOs',
-    description: 'The os of the machine'
+  name: 'MachineOs',
+  description: 'The os of the machine'
 })
 
 @InputType()
 export class MachineApplicationInputType {
     @Field(() => String)
-    machineId: string = ''
+      machineId: string = ''
 
     @Field(() => String)
-    applicationId: string = ''
+      applicationId: string = ''
 
     @Field(() => GraphQLJSONObject, { nullable: true })
-    parameters?: any = null;
+      parameters?: any = null
 }
 
 @InputType()
 export class CreateMachineInputType {
     @Field(() => String)
-    templateId: string = ''
+      templateId: string = ''
 
     @Field(() => ID, { nullable: true }) // Temporarly is nullable, but it should not
-    departmentId: string = ''
+      departmentId: string = ''
 
     @Field()
-    name: string = ''
+      name: string = ''
 
     @Field(() => OsEnum)
-    os: OsEnum = OsEnum.WINDOWS10
+      os: OsEnum = OsEnum.WINDOWS10
 
     @Field()
-    username: string = ''
+      username: string = ''
 
     @Field()
-    password: string = ''
+      password: string = ''
 
     @Field(() => String, { nullable: true })
-    productKey?: string | undefined
+      productKey?: string | undefined
 
     @Field(() => String, { nullable: true })
-    pciBus: string | null = null
+      pciBus: string | null = null
 
     @Field(() => [MachineApplicationInputType])
-    applications: MachineApplicationInputType[] = []
+      applications: MachineApplicationInputType[] = []
 }
 
 @InputType()
 export class UpdateMachineHardwareInput {
     @Field(() => ID)
-    id: string = ''; // ID of the machine to update
+      id: string = '' // ID of the machine to update
 
     @Field(() => Int, { nullable: true, description: 'New number of CPU cores' })
-    cpuCores?: number;
+      cpuCores?: number
 
     @Field(() => Int, { nullable: true, description: 'New RAM in GB' })
-    ramGB?: number;
+      ramGB?: number
 
     @Field(() => String, { nullable: true, description: 'New GPU PCI address (e.g., 0000:01:00.0). Set to null to remove GPU.' })
-    gpuPciAddress?: string | null;
+      gpuPciAddress?: string | null
 }

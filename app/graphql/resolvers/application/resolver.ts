@@ -1,27 +1,27 @@
-import { Arg, Authorized, Ctx, Mutation, Query, Resolver } from 'type-graphql';
-import { ApplicationType, CreateApplicationInputType } from './type';
-import { InfinibayContext } from '@main/utils/context';
-import { Application } from '@prisma/client';
+import { Arg, Authorized, Ctx, Mutation, Query, Resolver } from 'type-graphql'
+import { ApplicationType, CreateApplicationInputType } from './type'
+import { InfinibayContext } from '@main/utils/context'
+import { Application } from '@prisma/client'
 
 @Resolver()
 export class ApplicationQueries {
   @Query(() => [ApplicationType])
   @Authorized('USER')
-  async applications(
+  async applications (
     @Ctx() { prisma }: InfinibayContext
   ): Promise<Application[]> {
-    return prisma.application.findMany();
+    return prisma.application.findMany()
   }
 
   @Query(() => ApplicationType, { nullable: true })
   @Authorized('USER')
-  async application(
+  async application (
     @Arg('id') id: string,
     @Ctx() { prisma }: InfinibayContext
   ): Promise<Application | null> {
     return prisma.application.findUnique({
       where: { id }
-    });
+    })
   }
 }
 
@@ -29,7 +29,7 @@ export class ApplicationQueries {
 export class ApplicationMutations {
   @Mutation(() => ApplicationType)
   @Authorized('ADMIN')
-  async createApplication(
+  async createApplication (
     @Arg('input') input: CreateApplicationInputType,
     @Ctx() { prisma }: InfinibayContext
   ): Promise<Application> {
@@ -41,12 +41,12 @@ export class ApplicationMutations {
         installCommand: input.installCommand,
         parameters: input.parameters
       }
-    });
+    })
   }
 
   @Mutation(() => ApplicationType)
   @Authorized('ADMIN')
-  async updateApplication(
+  async updateApplication (
     @Arg('id') id: string,
     @Arg('input') input: CreateApplicationInputType,
     @Ctx() { prisma }: InfinibayContext
@@ -60,23 +60,23 @@ export class ApplicationMutations {
         installCommand: input.installCommand,
         parameters: input.parameters
       }
-    });
+    })
   }
 
   @Mutation(() => Boolean)
   @Authorized('ADMIN')
-  async deleteApplication(
+  async deleteApplication (
     @Arg('id') id: string,
     @Ctx() { prisma }: InfinibayContext
   ): Promise<boolean> {
     try {
       await prisma.application.delete({
         where: { id }
-      });
-      return true;
+      })
+      return true
     } catch (error) {
-      console.error(error);
-      return false;
+      console.error(error)
+      return false
     }
   }
 }

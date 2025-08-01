@@ -1,31 +1,31 @@
-import { ObjectType, Field, Int, ID, InputType } from 'type-graphql';
+import { ObjectType, Field, Int, ID, InputType } from 'type-graphql'
 
 @ObjectType()
 export class MachineTemplateCategoryType {
   @Field(() => ID)
-  id: string = ''
+    id: string = ''
 
   @Field(() => String)
-  name: string = ''
+    name: string = ''
 
   @Field(() => String, { nullable: true })
-  description: string | null = null
+    description: string | null = null
 
   @Field(() => Date)
-  createdAt: Date = new Date()
+    createdAt: Date = new Date()
 
   @Field(() => Int, { nullable: true })
-  totalTemplates?: number
+    totalTemplates?: number
 
   @Field(() => Int, { nullable: true })
-  totalMachines?: number
+    totalMachines?: number
 }
 
 @InputType()
 export class MachineTemplateCategoryInputType {
   @Field(() => String)
-  name: string = ''
+    name: string = ''
 
   @Field(() => String, { nullable: true })
-  description: string | null = null
+    description: string | null = null
 }

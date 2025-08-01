@@ -1,140 +1,140 @@
-import { Field, ObjectType, InputType } from "type-graphql";
+import { Field, ObjectType, InputType } from 'type-graphql'
 
 @ObjectType()
 export class NetworkBridge {
   @Field(() => String)
-  name: string = "";
+    name: string = ''
 
   @Field(() => String)
-  stp: string = "on";
+    stp: string = 'on'
 
   @Field(() => String)
-  delay: string = "0";
+    delay: string = '0'
 }
 
 @ObjectType()
 export class NetworkDhcpRange {
   @Field(() => String)
-  start: string = "";
+    start: string = ''
 
   @Field(() => String)
-  end: string = "";
+    end: string = ''
 }
 
 @ObjectType()
 export class NetworkDhcp {
   @Field(() => NetworkDhcpRange)
-  range: NetworkDhcpRange = new NetworkDhcpRange();
+    range: NetworkDhcpRange = new NetworkDhcpRange()
 }
 
 @ObjectType()
 export class NetworkIp {
   @Field(() => String)
-  address: string = "";
+    address: string = ''
 
   @Field(() => String)
-  netmask: string = "";
+    netmask: string = ''
 
   @Field(() => NetworkDhcp, { nullable: true })
-  dhcp?: NetworkDhcp;
+    dhcp?: NetworkDhcp
 }
 
 @ObjectType()
 export class Network {
   @Field(() => String)
-  name: string = "";
+    name: string = ''
 
   @Field(() => String)
-  uuid: string = "";
+    uuid: string = ''
 
   @Field(() => NetworkBridge)
-  bridge: NetworkBridge = new NetworkBridge();
+    bridge: NetworkBridge = new NetworkBridge()
 
   @Field(() => NetworkIp)
-  ip: NetworkIp = new NetworkIp();
+    ip: NetworkIp = new NetworkIp()
 
   @Field(() => String, { nullable: true })
-  description?: string;
+    description?: string
 }
 
 // Input types for mutations
 @InputType()
 export class NetworkDhcpRangeInput {
   @Field(() => String)
-  start: string = '';
+    start: string = ''
 
   @Field(() => String)
-  end: string = '';
+    end: string = ''
 }
 
 @InputType()
 export class NetworkIpConfigInput {
   @Field(() => String)
-  address: string = '';
+    address: string = ''
 
   @Field(() => String)
-  netmask: string = '';
+    netmask: string = ''
 
   @Field(() => NetworkDhcpRangeInput, { nullable: true })
-  dhcp?: NetworkDhcpRangeInput;
+    dhcp?: NetworkDhcpRangeInput
 }
 
 @InputType()
 export class CreateNetworkInput {
   @Field(() => String)
-  name: string = '';
+    name: string = ''
 
   @Field(() => String)
-  bridgeName: string = '';
+    bridgeName: string = ''
 
   @Field(() => String)
-  description: string = '';
+    description: string = ''
 
   @Field(() => NetworkIpConfigInput, { nullable: true })
-  ipConfig?: NetworkIpConfigInput;
+    ipConfig?: NetworkIpConfigInput
 
   @Field(() => Boolean, { nullable: true })
-  enableIntraNetworkCommunication?: boolean;
+    enableIntraNetworkCommunication?: boolean
 
   @Field(() => [String], { nullable: true })
-  enabledServices?: string[];
+    enabledServices?: string[]
 }
 
 @InputType()
 export class IpRangeInput {
   @Field(() => String)
-  networkName: string = "";
+    networkName: string = ''
 
   @Field(() => String)
-  start: string = "";
+    start: string = ''
 
   @Field(() => String)
-  end: string = "";
+    end: string = ''
 }
 
 @InputType()
 export class NetworkIpInput {
   @Field(() => String)
-  networkName: string = "";
+    networkName: string = ''
 
   @Field(() => String)
-  address: string = "";
+    address: string = ''
 
   @Field(() => String)
-  netmask: string = "";
+    netmask: string = ''
 }
 
 @InputType()
 export class BridgeNameInput {
   @Field(() => String)
-  networkName: string = "";
+    networkName: string = ''
 
   @Field(() => String)
-  bridgeName: string = "";
+    bridgeName: string = ''
 }
 
 @InputType()
 export class DeleteNetworkInput {
   @Field()
-  name!: string;
+    name!: string
 }

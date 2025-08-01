@@ -1,13 +1,12 @@
-import { MachineApplication, Application, PrismaClient } from '@prisma/client';
-import { Builder } from 'xml2js';
-import { spawn } from 'child_process';
-import * as fs from 'fs';
-import * as os from 'os';
-import * as path from 'path';
-import { promises as fsPromises } from 'fs';
+import { MachineApplication, Application, PrismaClient } from '@prisma/client'
+import { Builder } from 'xml2js'
+import { spawn } from 'child_process'
+import * as fs from 'fs'
+import * as os from 'os'
+import * as path from 'path'
+import { promises as fsPromises } from 'fs'
 
-import { UnattendedManagerBase } from './unattendedManagerBase';
-
+import { UnattendedManagerBase } from './unattendedManagerBase'
 
 export interface ComponentConfig {
   name: string;
@@ -40,33 +39,33 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
     publicKeyToken: '31bf3856ad364e35',
     language: 'neutral',
     versionScope: 'nonSxS',
-    xmlns: 'http://schemas.microsoft.com/WMIConfig/2002/State',
-  };
+    xmlns: 'http://schemas.microsoft.com/WMIConfig/2002/State'
+  }
 
-  private version: number = 0;
-  private username: string = '';
-  private password: string = '';
-  private productKey: string | undefined = undefined;
-  private applications: any[] = [];
+  private version: number = 0
+  private username: string = ''
+  private password: string = ''
+  private productKey: string | undefined = undefined
+  private applications: any[] = []
 
-  constructor(
+  constructor (
     version: number,
     username: string,
     password: string,
     productKey: string | undefined,
     applications: any[]
   ) {
-    super();
-    this.configFileName = 'autounattend.xml';
-    this.version = version;
-    this.username = username;
-    this.password = password;
-    this.productKey = productKey;
-    this.applications = applications;
-    this.isoPath = path.join(path.join(process.env.INFINIBAY_BASE_DIR ?? '/opt/infinibay', 'iso'), 'windows' + this.version.toString() + '.iso');
+    super()
+    this.configFileName = 'autounattend.xml'
+    this.version = version
+    this.username = username
+    this.password = password
+    this.productKey = productKey
+    this.applications = applications
+    this.isoPath = path.join(path.join(process.env.INFINIBAY_BASE_DIR ?? '/opt/infinibay', 'iso'), 'windows' + this.version.toString() + '.iso')
   }
 
-  private getFirstLogonCommands(): any[] {
+  private getFirstLogonCommands (): any[] {
     let commands = [
       {
         $: { 'wcm:action': 'add' },
@@ -137,12 +136,12 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
         Description: 'Wait and update winget',
         RequiresUserInput: false,
         CommandLine: 'powershell -Command "& { $log = \'C:\\Windows\\Temp\\winget.log\'; Write-Output \'Waiting for winget...\' | Tee-Object -FilePath $log -Append; while (-not (Get-Command winget -ErrorAction SilentlyContinue)) { Start-Sleep -Seconds 5 }; Write-Output \'Winget found, updating sources...\' | Tee-Object -FilePath $log -Append; winget source update | Tee-Object -FilePath $log -Append; Write-Output \'Winget ready\' | Tee-Object -FilePath $log -Append }"'
-      },
-    ];
+      }
+    ]
 
-    let apps = this.generateAppsToInstallScripts(11);
+    const apps = this.generateAppsToInstallScripts(11)
 
-    commands = commands.concat(apps);
+    commands = commands.concat(apps)
 
     commands.push({
       $: { 'wcm:action': 'add' },
@@ -150,8 +149,8 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
       Description: 'Restart System',
       RequiresUserInput: false,
       CommandLine: 'shutdown /r /t 0'
-    });
-    return commands;
+    })
+    return commands
   }
 
   /**
@@ -166,47 +165,47 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
    * For more information on the 'FirstLogonCommands' component, refer to:
    * https://docs.microsoft.com/en-us/windows-hardware/customize/desktop/unattend/microsoft-windows-shell-setup-firstlogoncommands
    */
-  private generateAppsToInstallScripts(idx: number): any[] {
-    let prisma = new PrismaClient();
+  private generateAppsToInstallScripts (idx: number): any[] {
+    const prisma = new PrismaClient()
     return this.applications
       .map((app, localIndex) => {
-        const installCommand = app.installCommand['windows'];
+        const installCommand = app.installCommand.windows
         const application = prisma.application.findUnique({
           where: {
-            id: app.applicationId,
-          },
-        });
+            id: app.applicationId
+          }
+        })
         if (!installCommand) {
-          return null;
+          return null
         }
-        const parsedCommand = this.parseInstallCommand(installCommand, app.parameters);
-        const wrappedCommand = `powershell -Command "& { $log = 'C:\\Windows\\Temp\\${app.name.replace(/\s+/g, '_')}.log'; Write-Output 'Starting installation of ${app.name}...' | Tee-Object -FilePath $log -Append; $result = $null; try { $result = (${parsedCommand}) 2>&1 | Tee-Object -FilePath $log -Append; if ($LASTEXITCODE -eq 0) { Write-Output '${app.name} installed successfully' | Tee-Object -FilePath $log -Append } else { Write-Output '${app.name} installation failed with code $LASTEXITCODE' | Tee-Object -FilePath $log -Append } } catch { Write-Output $_.Exception.Message | Tee-Object -FilePath $log -Append } }"`;
+        const parsedCommand = this.parseInstallCommand(installCommand, app.parameters)
+        const wrappedCommand = `powershell -Command "& { $log = 'C:\\Windows\\Temp\\${app.name.replace(/\s+/g, '_')}.log'; Write-Output 'Starting installation of ${app.name}...' | Tee-Object -FilePath $log -Append; $result = $null; try { $result = (${parsedCommand}) 2>&1 | Tee-Object -FilePath $log -Append; if ($LASTEXITCODE -eq 0) { Write-Output '${app.name} installed successfully' | Tee-Object -FilePath $log -Append } else { Write-Output '${app.name} installation failed with code $LASTEXITCODE' | Tee-Object -FilePath $log -Append } } catch { Write-Output $_.Exception.Message | Tee-Object -FilePath $log -Append } }"`
         return {
           $: { 'wcm:action': 'add' },
-          Description: "Install " + app.name,
+          Description: 'Install ' + app.name,
           Order: idx + localIndex,
           CommandLine: wrappedCommand,
-          RequiresUserInput: false,
-        };
+          RequiresUserInput: false
+        }
       })
-      .filter(app => app !== null);
+      .filter(app => app !== null)
   }
 
-  private parseInstallCommand(command: string, parameters: any = null): string {
+  private parseInstallCommand (command: string, parameters: any = null): string {
     // Replace placeholders in the command with actual parameters
-    let parsedCommand = command;
+    let parsedCommand = command
     if (parameters) {
       for (const [key, value] of Object.entries(parameters)) {
-        const placeholder = `{{${key}}}`;
-        parsedCommand = parsedCommand.replace(new RegExp(placeholder, 'g'), value as string);
+        const placeholder = `{{${key}}}`
+        parsedCommand = parsedCommand.replace(new RegExp(placeholder, 'g'), value as string)
       }
     }
     // TODO: Add some script to tell the host that the vm was installed properly if no error was thrown
     // or to tell the host that the vm was not installed properly if an error was thrown
-    return parsedCommand;
+    return parsedCommand
   }
 
-  private getWindowsPEConfig(): any {
+  private getWindowsPEConfig (): any {
     return {
       $: {
         pass: 'windowsPE'
@@ -343,11 +342,11 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
         },
         {
           $: {
-            name: "Microsoft-Windows-PnpCustomizationsWinPE",
-            processorArchitecture: "amd64",
-            publicKeyToken: "31bf3856ad364e35",
-            language: "neutral",
-            versionScope: "nonSxS"
+            name: 'Microsoft-Windows-PnpCustomizationsWinPE',
+            processorArchitecture: 'amd64',
+            publicKeyToken: '31bf3856ad364e35',
+            language: 'neutral',
+            versionScope: 'nonSxS'
           },
           DriverPaths: {
             PathAndCredentials: {
@@ -365,10 +364,10 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
           }
         }
       ]
-    };
+    }
   }
 
-  private getOfflineServicingConfig(): any {
+  private getOfflineServicingConfig (): any {
     return {
       $: {
         pass: 'offlineServicing'
@@ -385,10 +384,10 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
           EnableLUA: false
         }
       ]
-    };
+    }
   }
 
-  private getGeneralizeConfig(): any {
+  private getGeneralizeConfig (): any {
     return {
       $: {
         pass: 'generalize'
@@ -405,10 +404,10 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
           SkipRearm: 1
         }
       ]
-    };
+    }
   }
 
-  private getSpecializeConfig(): any {
+  private getSpecializeConfig (): any {
     return {
       $: {
         pass: 'specialize'
@@ -460,10 +459,10 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
           ProductKey: 'W269N-WFGWX-YVC9B-4J6C9-T83GX'
         }
       ]
-    };
+    }
   }
 
-  private getOobeSystemConfig(): any {
+  private getOobeSystemConfig (): any {
     return {
       $: {
         pass: 'oobeSystem'
@@ -519,9 +518,9 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
             SynchronousCommand: this.getFirstLogonCommands()
           },
           TimeZone: 'Eastern Standard Time'
-        },
-      ],
-    };
+        }
+      ]
+    }
   }
 
   /**
@@ -529,15 +528,15 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
    *
    * @returns {Promise<string>} The generated configuration string.
    */
-  async generateConfig(): Promise<string> {
-    const builder = new Builder();
-    const settings: any[] = [];
+  async generateConfig (): Promise<string> {
+    const builder = new Builder()
+    const settings: any[] = []
 
-    settings.push(this.getWindowsPEConfig());
-    settings.push(this.getOfflineServicingConfig());
-    settings.push(this.getGeneralizeConfig());
-    settings.push(this.getSpecializeConfig());
-    settings.push(this.getOobeSystemConfig());
+    settings.push(this.getWindowsPEConfig())
+    settings.push(this.getOfflineServicingConfig())
+    settings.push(this.getGeneralizeConfig())
+    settings.push(this.getSpecializeConfig())
+    settings.push(this.getOobeSystemConfig())
 
     const root: any = {
       unattend: {
@@ -545,12 +544,12 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
           xmlns: 'urn:schemas-microsoft-com:unattend',
           'xmlns:wcm': 'http://schemas.microsoft.com/WMIConfig/2002/State'
         },
-        settings: settings
+        settings
       }
-    };
+    }
 
-    const response = builder.buildObject(root);
-    return response;
+    const response = builder.buildObject(root)
+    return response
   }
 
   /**
@@ -561,18 +560,18 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
    * @throws {Error} If the extraction directory does not exist.
    * @returns {Promise<void>} A Promise that resolves when the ISO image is created and the extracted directory is removed.
    */
-  async createISO(newIsoPath: string, extractDir: string) {
+  async createISO (newIsoPath: string, extractDir: string) {
     // Ensure the extractDir exists and has content
     if (!fs.existsSync(extractDir)) {
-      throw new Error('Extraction directory does not exist.');
+      throw new Error('Extraction directory does not exist.')
     }
 
     // save the config to
-    const imageName = "windows" + this.version.toString() + ".iso";
+    const imageName = 'windows' + this.version.toString() + '.iso'
     // Define the command and arguments for creating a new ISO image
     /*
     mkisofs -b boot/etfsboot.com -no-emul-boot -c BOOT.CAT -iso-level 4 -J -l -D -N -joliet-long -relaxed-filenames -v -V "Custom" -udf -boot-info-table -eltorito-alt-boot -eltorito-boot efi/microsoft/boot/efisys_noprompt.bin -no-emul-boot -o install.iso -allow-limited-size /tmp/extracted_iso_1705986374004/
-  
+
     xorriso -as mkisofs -iso-level 4 -l -R -D -volid "CCCOMA_X64FRE_EN-US_DV9" -b boot/etfsboot.com -no-emul-boot -boot-load-size 8 -hide boot.catalog -eltorito-alt-boot -eltorito-platform efi -no-emul-boot -b efi/microsoft/boot/efisys.bin -eltorito-alt-boot -e efi/boot/bootx64.efi -no-emul-boot -isohybrid-gpt-basdat -o install.iso newWin
      */
     const isoCreationCommandParts = [
@@ -597,12 +596,12 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
       '-isohybrid-gpt-basdat',
       '-o', newIsoPath,
       extractDir
-    ];
+    ]
 
     // Create a new ISO image
-    await this.executeCommand(isoCreationCommandParts);
+    await this.executeCommand(isoCreationCommandParts)
 
     // Remove the extracted directory
-    await this.executeCommand(['rm', '-rf', extractDir]);
+    await this.executeCommand(['rm', '-rf', extractDir])
   }
 }

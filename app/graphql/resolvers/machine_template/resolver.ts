@@ -4,10 +4,10 @@ import {
   Authorized,
   Mutation,
   Query,
-  Resolver,
-} from "type-graphql"
-import { Ctx } from 'type-graphql';
-import { InfinibayContext } from "@utils/context";
+  Resolver
+  , Ctx
+} from 'type-graphql'
+import { InfinibayContext } from '@utils/context'
 import { UserInputError } from 'apollo-server-errors'
 import { MachineTemplateType, MachineTemplateOrderBy, MachineTemplateInputType } from './type'
 import { PaginationInputType } from '@utils/pagination'
@@ -20,12 +20,12 @@ export interface MachineTemplateResolverInterface {
   destroyMachineTemplateCategory(id: string, ctx: InfinibayContext): Promise<boolean>
 }
 
-const MAX_CORES = 64;
-const MIN_CORES = 1;
-const MAX_RAM = 512;
-const MIN_RAM = 1;
-const MAX_STORAGE = 1024;
-const MIN_STORAGE = 1;
+const MAX_CORES = 64
+const MIN_CORES = 1
+const MAX_RAM = 512
+const MIN_RAM = 1
+const MAX_STORAGE = 1024
+const MIN_STORAGE = 1
 
 @Resolver(_of => MachineTemplateType)
 export class MachineTemplateResolver implements MachineTemplateResolverInterface {
@@ -39,7 +39,7 @@ export class MachineTemplateResolver implements MachineTemplateResolverInterface
    */
   @Query(() => MachineTemplateType, { nullable: true })
   @Authorized('ADMIN')
-  async machineTemplate(
+  async machineTemplate (
     @Arg('id', { nullable: false }) id: string,
     @Ctx() ctx: InfinibayContext
   ): Promise<MachineTemplateType | null> {
@@ -51,12 +51,12 @@ export class MachineTemplateResolver implements MachineTemplateResolverInterface
     const totalMachines = await ctx.prisma.machine.count({
       where: { templateId: id }
     })
-    if (!machineTemplate) return null;
-    let response : MachineTemplateType = {
+    if (!machineTemplate) return null
+    const response : MachineTemplateType = {
       ...machineTemplate,
       totalMachines
     }
-    return response;
+    return response
   }
 
   /**
@@ -69,7 +69,7 @@ export class MachineTemplateResolver implements MachineTemplateResolverInterface
    */
   @Query(() => [MachineTemplateType])
   @Authorized('ADMIN')
-  async machineTemplates(
+  async machineTemplates (
     @Arg('pagination', { nullable: true }) pagination: PaginationInputType,
     @Arg('orderBy', { nullable: true }) orderBy: MachineTemplateOrderBy,
     @Ctx() ctx: InfinibayContext
@@ -84,39 +84,39 @@ export class MachineTemplateResolver implements MachineTemplateResolverInterface
       skip,
       take,
       include: { category: true }
-    });
+    })
 
     // Get the count of machines for each template
     const templatesWithCount = await Promise.all(
       machineTemplates.map(async (template) => {
         const totalMachines = await prisma.machine.count({
           where: { templateId: template.id }
-        });
+        })
         return {
           ...template,
           totalMachines
-        };
+        }
       })
-    );
+    )
 
-    return templatesWithCount;
+    return templatesWithCount
   }
 
-  private resolveOrder(orderBy: MachineTemplateOrderBy) {
+  private resolveOrder (orderBy: MachineTemplateOrderBy) {
     if (orderBy && orderBy.fieldName && orderBy.direction) {
       return {
         [orderBy.fieldName as keyof MachineTemplateType]: orderBy.direction
-      };
+      }
     }
-    return undefined;
+    return undefined
   }
 
-  private resolveSkip(pagination: PaginationInputType) {
-    return pagination && pagination.skip ? pagination.skip : 0;
+  private resolveSkip (pagination: PaginationInputType) {
+    return pagination && pagination.skip ? pagination.skip : 0
   }
 
-  private resolveTake(pagination: PaginationInputType) {
-    return pagination && pagination.take ? pagination.take : 10;
+  private resolveTake (pagination: PaginationInputType) {
+    return pagination && pagination.take ? pagination.take : 10
   }
 
   /**
@@ -131,17 +131,17 @@ export class MachineTemplateResolver implements MachineTemplateResolverInterface
    */
   @Mutation(() => MachineTemplateType)
   @Authorized('ADMIN')
-  async createMachineTemplate(
+  async createMachineTemplate (
     @Arg('input', { nullable: false }) input: MachineTemplateInputType,
     @Ctx() ctx: InfinibayContext
   ): Promise<MachineTemplateType> {
     const { prisma } = ctx
 
-    await this.checkMachineTemplateExistence(input.name, prisma);
+    await this.checkMachineTemplateExistence(input.name, prisma)
 
-    this.checkConstraintValidity(input.cores, MIN_CORES, MAX_CORES, "Cores must be between 1 and 64");
-    this.checkConstraintValidity(input.ram, MIN_RAM, MAX_RAM, "RAM must be between 1 and 512")
-    this.checkConstraintValidity(input.storage, MIN_STORAGE, MAX_STORAGE, 'Storage must be between 1 and 1024');
+    this.checkConstraintValidity(input.cores, MIN_CORES, MAX_CORES, 'Cores must be between 1 and 64')
+    this.checkConstraintValidity(input.ram, MIN_RAM, MAX_RAM, 'RAM must be between 1 and 512')
+    this.checkConstraintValidity(input.storage, MIN_STORAGE, MAX_STORAGE, 'Storage must be between 1 and 1024')
 
     const createdMachineTemplate = await prisma.machineTemplate.create({
       data: {
@@ -155,7 +155,7 @@ export class MachineTemplateResolver implements MachineTemplateResolverInterface
       include: { category: true }
     })
 
-    return createdMachineTemplate as MachineTemplateType;
+    return createdMachineTemplate as MachineTemplateType
   }
 
   // Method for checking if machine template exists
@@ -169,9 +169,9 @@ export class MachineTemplateResolver implements MachineTemplateResolverInterface
   }
 
   // Method for verifying the constraints on cores, RAM, and storage
-  checkConstraintValidity(value: number, min: number, max: number, errorMsg: string) {
+  checkConstraintValidity (value: number, min: number, max: number, errorMsg: string) {
     if (value < min || value > max) {
-      throw new UserInputError(errorMsg);
+      throw new UserInputError(errorMsg)
     }
   }
 
@@ -186,7 +186,7 @@ export class MachineTemplateResolver implements MachineTemplateResolverInterface
    */
   @Mutation(() => MachineTemplateType)
   @Authorized('ADMIN')
-  async updateMachineTemplate(
+  async updateMachineTemplate (
     @Arg('id', { nullable: false }) id: string,
     @Arg('input', { nullable: false }) input: MachineTemplateInputType,
     @Ctx() ctx: InfinibayContext
@@ -200,8 +200,8 @@ export class MachineTemplateResolver implements MachineTemplateResolverInterface
     }
 
     // Check for constraints
-    this.checkConstraintValidity(input.cores, MIN_CORES, MAX_CORES, "Cores must be between 1 and 64")
-    this.checkConstraintValidity(input.ram, MIN_RAM, MAX_RAM, "RAM must be between 1 and 512")
+    this.checkConstraintValidity(input.cores, MIN_CORES, MAX_CORES, 'Cores must be between 1 and 64')
+    this.checkConstraintValidity(input.ram, MIN_RAM, MAX_RAM, 'RAM must be between 1 and 512')
     this.checkConstraintValidity(input.storage, MIN_STORAGE, MAX_STORAGE, 'Storage must be between 1 and 1024')
 
     // Use a single call to update the machineTemplate, no need to update properties one-by-one
@@ -229,83 +229,83 @@ export class MachineTemplateResolver implements MachineTemplateResolverInterface
 
   /**
    * Deletes a machine template if it's not being used by any machines
-   * 
+   *
    * @param {string} id - The ID of the machine template to delete
    * @param {InfinibayContext} ctx - The Infinibay context
    * @returns {Promise<boolean>} - True if deletion was successful, throws error otherwise
    */
   @Mutation(() => Boolean)
   @Authorized('ADMIN')
-  async destroyMachineTemplate(
+  async destroyMachineTemplate (
     @Arg('id', { nullable: false }) id: string,
     @Ctx() ctx: InfinibayContext
   ): Promise<boolean> {
-    const { prisma } = ctx;
+    const { prisma } = ctx
 
     // Check if template exists
     const template = await prisma.machineTemplate.findUnique({
       where: { id }
-    });
+    })
 
     if (!template) {
-      throw new UserInputError('Machine template not found');
+      throw new UserInputError('Machine template not found')
     }
 
     // Check if template is in use
     const machineCount = await prisma.machine.count({
       where: { templateId: id }
-    });
+    })
 
     if (machineCount > 0) {
-      throw new UserInputError('Cannot delete template while it is being used by machines');
+      throw new UserInputError('Cannot delete template while it is being used by machines')
     }
 
     // Delete the template
     await prisma.machineTemplate.delete({
       where: { id }
-    });
+    })
 
-    return true;
+    return true
   }
 
   /**
    * Deletes a machine template category if it's not being used by any templates
-   * 
+   *
    * @param {string} id - The ID of the category to delete
    * @param {InfinibayContext} ctx - The Infinibay context
    * @returns {Promise<boolean>} - True if deletion was successful, throws error otherwise
    */
   @Mutation(() => Boolean)
   @Authorized('ADMIN')
-  async destroyMachineTemplateCategory(
+  async destroyMachineTemplateCategory (
     @Arg('id', { nullable: false }) id: string,
     @Ctx() ctx: InfinibayContext
   ): Promise<boolean> {
-    const { prisma } = ctx;
+    const { prisma } = ctx
 
     // Check if category exists
     const category = await prisma.machineTemplateCategory.findUnique({
       where: { id }
-    });
+    })
 
     if (!category) {
-      throw new UserInputError('Machine template category not found');
+      throw new UserInputError('Machine template category not found')
     }
 
     // Check if category is in use
     const templateCount = await prisma.machineTemplate.count({
       where: { categoryId: id }
-    });
+    })
 
     if (templateCount > 0) {
-      throw new UserInputError('Cannot delete category while it is being used by templates');
+      throw new UserInputError('Cannot delete category while it is being used by templates')
     }
 
     // Delete the category
     await prisma.machineTemplateCategory.delete({
       where: { id }
-    });
+    })
 
-    return true;
+    return true
   }
 }

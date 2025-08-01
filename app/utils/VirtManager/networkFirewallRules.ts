@@ -1,4 +1,4 @@
-import { NetworkService } from './types/network';
+import { NetworkService } from './types/network'
 
 export interface FirewallRule {
   protocol: string;
@@ -14,53 +14,53 @@ export class NetworkFirewallRules {
         { protocol: 'tcp', port: 3389, action: 'accept' }
       ]
     },
-    'ssh': {
+    ssh: {
       name: 'SSH',
       rules: [
         { protocol: 'tcp', port: 22, action: 'accept' }
       ]
     },
-    'http': {
+    http: {
       name: 'HTTP',
       rules: [
         { protocol: 'tcp', port: 80, action: 'accept' }
       ]
     },
-    'https': {
+    https: {
       name: 'HTTPS',
       rules: [
         { protocol: 'tcp', port: 443, action: 'accept' }
       ]
     },
-    'dns': {
+    dns: {
       name: 'DNS',
       rules: [
         { protocol: 'tcp', port: 53, action: 'accept' },
         { protocol: 'udp', port: 53, action: 'accept' }
       ]
     }
-  };
-
-  public static getServiceRules(serviceName: string): FirewallRule[] {
-    const service = this.commonServices[serviceName];
-    if (!service) {
-      throw new Error(`Service ${serviceName} not found`);
-    }
-    return service.rules;
   }
 
-  public static addCustomService(
-    name: string, 
-    displayName: string, 
+  public static getServiceRules (serviceName: string): FirewallRule[] {
+    const service = this.commonServices[serviceName]
+    if (!service) {
+      throw new Error(`Service ${serviceName} not found`)
+    }
+    return service.rules
+  }
+
+  public static addCustomService (
+    name: string,
+    displayName: string,
     rules: FirewallRule[]
   ): void {
     this.commonServices[name] = {
       name: displayName,
       rules
-    };
+    }
   }
 
-  public static getAllServices(): string[] {
-    return Object.keys(this.commonServices);
+  public static getAllServices (): string[] {
+    return Object.keys(this.commonServices)
   }
 }

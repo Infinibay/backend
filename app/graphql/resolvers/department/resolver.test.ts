@@ -1,21 +1,21 @@
-import { PrismaClient } from '@prisma/client';
-import { DepartmentResolver } from './resolver';
-import { InfinibayContext } from '../../../utils/context';
+import { PrismaClient } from '@prisma/client'
+import { DepartmentResolver } from './resolver'
+import { InfinibayContext } from '../../../utils/context'
 
-const prisma = new PrismaClient();
+const prisma = new PrismaClient()
 
 describe('DepartmentResolver', () => {
-  let resolver: DepartmentResolver;
-  let context: InfinibayContext;
+  let resolver: DepartmentResolver
+  let context: InfinibayContext
 
   beforeEach(() => {
-    resolver = new DepartmentResolver();
-    context = { prisma } as InfinibayContext;
-  });
+    resolver = new DepartmentResolver()
+    context = { prisma } as InfinibayContext
+  })
 
   afterEach(async () => {
-    await prisma.department.deleteMany();
-  });
+    await prisma.department.deleteMany()
+  })
 
   describe('departments', () => {
     it('should return all departments', async () => {
@@ -23,23 +23,23 @@ describe('DepartmentResolver', () => {
         data: [
           { name: 'Sales' },
           { name: 'Marketing' },
-          { name: 'Engineering' },
-        ],
-      });
+          { name: 'Engineering' }
+        ]
+      })
 
-      const result = await resolver.departments(context);
+      const result = await resolver.departments(context)
 
-      expect(result).toHaveLength(3);
-      expect(result.map(d => d.name)).toEqual(['Sales', 'Marketing', 'Engineering']);
-    });
-  });
+      expect(result).toHaveLength(3)
+      expect(result.map(d => d.name)).toEqual(['Sales', 'Marketing', 'Engineering'])
+    })
+  })
 
   describe('createDepartment', () => {
     it('should create a new department', async () => {
-      const result = await resolver.createDepartment('Human Resources', context);
+      const result = await resolver.createDepartment('Human Resources', context)
 
-      expect(result).toHaveProperty('id');
-      expect(result.name).toBe('Human Resources');
-    });
-  });
-});
+      expect(result).toHaveProperty('id')
+      expect(result.name).toBe('Human Resources')
+    })
+  })
+})

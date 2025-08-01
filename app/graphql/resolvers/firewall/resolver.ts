@@ -1,35 +1,35 @@
-import { Resolver, Query, Mutation, Arg, ID, Ctx, Authorized } from 'type-graphql';
-import { UserInputError } from "apollo-server-core";
-import { InfinibayContext } from '@utils/context';
-import { 
-  FilterType, 
-  GenericFilter, 
-  DepartmentFilter, 
-  VMFilter, 
+import { Resolver, Query, Mutation, Arg, ID, Ctx, Authorized } from 'type-graphql'
+import { UserInputError } from 'apollo-server-core'
+import { InfinibayContext } from '@utils/context'
+import {
+  FilterType,
+  GenericFilter,
+  DepartmentFilter,
+  VMFilter,
   FWRule,
   CreateFilterInput,
   UpdateFilterInput,
   CreateFilterRuleInput,
   UpdateFilterRuleInput
-} from './types';
-import { NetworkFilterService } from '@services/networkFilterService';
+} from './types'
+import { NetworkFilterService } from '@services/networkFilterService'
 
 @Resolver()
 export class FirewallResolver {
-  constructor(private networkFilterService: NetworkFilterService) {}
+  constructor (private networkFilterService: NetworkFilterService) {}
 
   @Query(() => [GenericFilter])
   @Authorized('ADMIN')
-  async listFilters(
+  async listFilters (
     @Ctx() { prisma }: InfinibayContext,
     @Arg('departmentId', () => ID, { nullable: true }) departmentId?: string | null,
-    @Arg('vmId', () => ID, { nullable: true }) vmId?: string | null,
+    @Arg('vmId', () => ID, { nullable: true }) vmId?: string | null
   ): Promise<GenericFilter[]> {
     if (departmentId && vmId) {
       // Error
-      throw new UserInputError('Both departmentId and vmId cannot be specified');
+      throw new UserInputError('Both departmentId and vmId cannot be specified')
     }
-    let filters: any[] = [];
+    let filters: any[] = []
     if (departmentId) {
       filters = await prisma.nWFilter.findMany({
         include: {
@@ -45,7 +45,7 @@ export class FirewallResolver {
             }
           }
         }
-      });
+      })
     } else if (vmId) {
       filters = await prisma.nWFilter.findMany({
         include: {
@@ -60,7 +60,7 @@ export class FirewallResolver {
             }
           }
         }
-      });
+      })
     } else {
       filters = await prisma.nWFilter.findMany({
         include: {
@@ -72,10 +72,10 @@ export class FirewallResolver {
         where: {
           type: 'generic'
         }
-      });
+      })
     }
 
-    return filters.map( (filter:any) => {
+    return filters.map((filter:any) => {
       return {
         id: filter.id,
         name: filter.name,
@@ -108,25 +108,25 @@ export class FirewallResolver {
         createdAt: filter.createdAt,
         updatedAt: filter.updatedAt
       }
-    });
+    })
   }
 
   @Query(() => GenericFilter, { nullable: true })
   @Authorized('ADMIN')
-  async getFilter(
+  async getFilter (
     @Arg('id', () => ID) id: string,
     @Ctx() { prisma }: InfinibayContext
   ): Promise<GenericFilter | null> {
-    let result = await prisma.nWFilter.findUnique({
+    const result = await prisma.nWFilter.findUnique({
       where: { id },
       include: {
         rules: true,
         references: true
       }
-    });
+    })
 
     if (!result) {
-      return null;
+      return null
     }
     return {
       id: result.id,
@@ -159,59 +159,59 @@ export class FirewallResolver {
       references: result.references.map((ref:any) => ref.targetFilterId),
       createdAt: result.createdAt,
       updatedAt: result.updatedAt
-    };
+    }
   }
 
   @Query(() => [FWRule])
   @Authorized('ADMIN')
-  async listFilterRules(
+  async listFilterRules (
     @Arg('filterId', () => ID, { nullable: true }) filterId: string | null,
     @Ctx() { prisma }: InfinibayContext
   ): Promise<FWRule[]> {
     if (!filterId) {
       // Cast the result to FWRule[] to handle null vs undefined differences
       return (await prisma.fWRule.findMany()).map(rule => ({
-        ...rule,
+        ...rule
         // Ensure all fields match the FWRule type definition
-      } as unknown as FWRule));
+      } as unknown as FWRule))
     }
     return (await prisma.fWRule.findMany({
       where: { nwFilterId: filterId }
     })).map(rule => ({
-      ...rule,
+      ...rule
       // Ensure all fields match the FWRule type definition
-    } as unknown as FWRule));
+    } as unknown as FWRule))
   }
 
   @Mutation(() => GenericFilter)
   @Authorized()
-  async createFilter(
-    @Arg('input') input: CreateFilterInput,
+  async createFilter (
+    @Arg('input') input: CreateFilterInput
   ): Promise<GenericFilter> {
-    let fitler:any = this.networkFilterService.createFilter(
+    const fitler:any = this.networkFilterService.createFilter(
       input.name,
       input.description,
       input.chain,
       input.type
-    );
-    fitler.rules = [];
-    fitler.references = [];
-    return fitler;
+    )
+    fitler.rules = []
+    fitler.references = []
+    return fitler
   }
 
   @Mutation(() => GenericFilter)
   @Authorized('ADMIN')
-  async updateFilter(
+  async updateFilter (
     @Arg('id', () => ID) id: string,
     @Arg('input') input: UpdateFilterInput,
     @Ctx() { prisma }: InfinibayContext
   ): Promise<GenericFilter> {
-    let result:any = this.networkFilterService.updateFilter(id, {
+    const result:any = this.networkFilterService.updateFilter(id, {
       name: input.name,
       description: input.description,
       chain: input.chain,
       type: input.type
-    });
+    })
     result.rules = (await prisma.fWRule.findMany({
       where: { nwFilterId: id }
     })).map((rule: any) => {
@@ -236,27 +236,27 @@ export class FirewallResolver {
         createdAt: rule.createdAt,
         updatedAt: rule.updatedAt
       } as FWRule
-    });
+    })
     result.references = (await prisma.filterReference.findMany({
       where: { targetFilterId: id }
-    })).map((ref: any) => ref.sourceFilterId);
-    return result;
+    })).map((ref: any) => ref.sourceFilterId)
+    return result
   }
 
   @Mutation(() => Boolean)
   @Authorized('ADMIN')
-  async deleteFilter(
+  async deleteFilter (
     @Arg('id', () => ID) id: string,
     @Ctx() { prisma }: InfinibayContext
   ): Promise<boolean> {
     return (await prisma.nWFilter.delete({
       where: { id }
-    })) !== null;
+    })) !== null
   }
 
   @Mutation(() => FWRule)
   @Authorized('ADMIN')
-  async createFilterRule(
+  async createFilterRule (
     @Arg('filterId', () => ID) filterId: string,
     @Arg('input') input: CreateFilterRuleInput,
     @Ctx() { prisma }: InfinibayContext
@@ -277,25 +277,25 @@ export class FirewallResolver {
         ipVersion: input.ipVersion,
         state: input.state
       }
-    );
-    
+    )
+
     // Cast to FWRule to handle null vs undefined differences
-    return rule as unknown as FWRule;
+    return rule as unknown as FWRule
   }
 
   @Mutation(() => FWRule)
   @Authorized('ADMIN')
-  async updateFilterRule(
+  async updateFilterRule (
     @Arg('id', () => ID) id: string,
     @Arg('input') input: UpdateFilterRuleInput,
     @Ctx() { prisma }: InfinibayContext
   ): Promise<FWRule> {
-    let rule = prisma.fWRule.findUnique({
+    const rule = prisma.fWRule.findUnique({
       where: { id }
-    });
+    })
 
     if (!rule) {
-      throw new UserInputError(`Rule with id ${id} not found`);
+      throw new UserInputError(`Rule with id ${id} not found`)
     }
 
     return await prisma.fWRule.update({
@@ -313,45 +313,45 @@ export class FirewallResolver {
         ipVersion: input.ipVersion || undefined,
         state: input.state ? JSON.parse(input.state) : undefined
       }
-    });
-    
+    })
+
     // Cast to FWRule to handle null vs undefined differences
-    return rule as unknown as FWRule;
+    return rule as unknown as FWRule
   }
 
   @Mutation(() => Boolean)
   @Authorized('ADMIN')
-  async deleteFilterRule(
+  async deleteFilterRule (
     @Arg('id', () => ID) id: string,
     @Ctx() { prisma }: InfinibayContext
   ): Promise<boolean> {
-    let rule = prisma.fWRule.findUnique({
+    const rule = prisma.fWRule.findUnique({
       where: { id }
-    });
+    })
 
     if (!rule) {
-      throw new UserInputError(`Rule with id ${id} not found`);
+      throw new UserInputError(`Rule with id ${id} not found`)
     }
 
     return (await prisma.fWRule.delete({
       where: { id }
-    })) !== null;
+    })) !== null
   }
 
-  @Mutation(() => Boolean, {description: "Apply a network filter inmediatly"})
+  @Mutation(() => Boolean, { description: 'Apply a network filter inmediatly' })
   @Authorized('ADMIN')
-  async flushFilter(
+  async flushFilter (
     @Arg('filterId', () => ID) filterId: string,
     @Ctx() { prisma }: InfinibayContext
   ): Promise<boolean> {
-    let filter = prisma.nWFilter.findUnique({
+    const filter = prisma.nWFilter.findUnique({
       where: { id: filterId }
-    });
+    })
 
     if (!filter) {
-      throw new UserInputError(`Filter with id ${filterId} not found`);
+      throw new UserInputError(`Filter with id ${filterId} not found`)
     }
 
-    return this.networkFilterService.flushNWFilter(filterId);
+    return this.networkFilterService.flushNWFilter(filterId)
   }
 }

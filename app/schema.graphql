@@ -212,10 +212,13 @@ scalar JSONObject
 
 type Machine {
   configuration: JSONObject
+  cpuCores: Int
   createdAt: DateTimeISO
   department: DepartmentType
+  gpuPciAddress: String
   id: ID!
   name: String!
+  ramGB: Int
   status: String!
   template: MachineTemplateType
   templateId: String!

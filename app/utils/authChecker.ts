@@ -1,10 +1,10 @@
-import { AuthChecker } from 'type-graphql';
-import { PrismaClient, User } from '@prisma/client';
-import jwt from 'jsonwebtoken';
-import { Debugger } from './debug';
+import { AuthChecker } from 'type-graphql'
+import { PrismaClient, User } from '@prisma/client'
+import jwt from 'jsonwebtoken'
+import { Debugger } from './debug'
 
-const debug = new Debugger('auth');
-const prisma = new PrismaClient();
+const debug = new Debugger('auth')
+const prisma = new PrismaClient()
 
 interface DecodedToken {
     userId: string;
@@ -12,78 +12,78 @@ interface DecodedToken {
 }
 
 export const authChecker: AuthChecker<{ req: any; user: User; setupMode: boolean }> = async (
-    { context },
-    roles
+  { context },
+  roles
 ) => {
-    const token = context.req.headers.authorization;
+  const token = context.req.headers.authorization
 
-    if (!token) {
-        debug.log('No token found.');
-        return false;
-    }
+  if (!token) {
+    debug.log('No token found.')
+    return false
+  }
 
-    try {
-        const decoded = jwt.verify(token, process.env.TOKENKEY || 'secret') as DecodedToken;
+  try {
+    const decoded = jwt.verify(token, process.env.TOKENKEY || 'secret') as DecodedToken
 
-        if (decoded.userId) {
-            debug.log('Token verified, fetching user...');
-            const user = await prisma.user.findUnique({
-                where: { id: decoded.userId },
-            });
-
-            if (user) {
-                context.user = user;
-                debug.log('User fetched successfully.');
-            }
-        }
-
-        return checkAccess(decoded, roles, context);
-    } catch (error) {
-        debug.log('error', `Error verifying token: ${error}`);
-        return false;
-    }
-};
-
-function checkAccess(decoded: DecodedToken, roles: string[], context: { setupMode: boolean }): boolean {
-    if (roles.includes('ADMIN')) {
-        return checkAdminAccess(decoded);
-    }
-
-    if (roles.includes('USER')) {
-        return checkUserAccess(decoded);
-    }
-
-    if (roles.includes('SETUP_MODE')) {
-        return checkSetupModeAccess(context);
-    }
-
-    debug.log('No valid role found, access denied.');
-    return false;
-}
-
-function checkAdminAccess(decoded: DecodedToken): boolean {
-    if (decoded.userRole === 'ADMIN') {
-        debug.log('Access granted for ADMIN.');
-        return true;
-    }
-    debug.log('Access denied for ADMIN.');
-    return false;
-}
-
-function checkUserAccess(decoded: DecodedToken): boolean {
     if (decoded.userId) {
-        debug.log('Access granted for USER.');
-        return true;
+      debug.log('Token verified, fetching user...')
+      const user = await prisma.user.findUnique({
+        where: { id: decoded.userId }
+      })
+
+      if (user) {
+        context.user = user
+        debug.log('User fetched successfully.')
+      }
     }
-    debug.log('Access denied for USER.');
-    return false;
+
+    return checkAccess(decoded, roles, context)
+  } catch (error) {
+    debug.log('error', `Error verifying token: ${error}`)
+    return false
+  }
 }
 
-function checkSetupModeAccess(context: { setupMode: boolean }): boolean {
-    if (context.setupMode) {
-        debug.log('Access granted for SETUP_MODE.');
-        return true;
-    }
-    debug.log('Access denied for SETUP_MODE.');
-    return false;
+function checkAccess (decoded: DecodedToken, roles: string[], context: { setupMode: boolean }): boolean {
+  if (roles.includes('ADMIN')) {
+    return checkAdminAccess(decoded)
+  }
+
+  if (roles.includes('USER')) {
+    return checkUserAccess(decoded)
+  }
+
+  if (roles.includes('SETUP_MODE')) {
+    return checkSetupModeAccess(context)
+  }
+
+  debug.log('No valid role found, access denied.')
+  return false
+}
+
+function checkAdminAccess (decoded: DecodedToken): boolean {
+  if (decoded.userRole === 'ADMIN') {
+    debug.log('Access granted for ADMIN.')
+    return true
+  }
+  debug.log('Access denied for ADMIN.')
+  return false
+}
+
+function checkUserAccess (decoded: DecodedToken): boolean {
+  if (decoded.userId) {
+    debug.log('Access granted for USER.')
+    return true
+  }
+  debug.log('Access denied for USER.')
+  return false
+}
+
+function checkSetupModeAccess (context: { setupMode: boolean }): boolean {
+  if (context.setupMode) {
+    debug.log('Access granted for SETUP_MODE.')
+    return true
+  }
+  debug.log('Access denied for SETUP_MODE.')
+  return false
 }

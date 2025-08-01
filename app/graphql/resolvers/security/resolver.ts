@@ -1,38 +1,38 @@
 /* eslint-disable @typescript-eslint/ban-types */
 /* eslint-disable @typescript-eslint/explicit-function-return-type */
 // @ts-nocheck
-import { Resolver, Query, Mutation, Arg, ID, Ctx, Authorized } from 'type-graphql';
-import { UserInputError } from 'apollo-server-core';
-import { InfinibayContext } from '../../../utils/context';
-import { PrismaClient } from '@prisma/client';
-import { 
-  ServiceDefinition as GraphQLServiceDefinition, 
-  VmServiceStatus as GraphQLVmServiceStatus, 
+import { Resolver, Query, Mutation, Arg, ID, Ctx, Authorized } from 'type-graphql'
+import { UserInputError } from 'apollo-server-core'
+import { InfinibayContext } from '../../../utils/context'
+import { PrismaClient } from '@prisma/client'
+import {
+  ServiceDefinition as GraphQLServiceDefinition,
+  VmServiceStatus as GraphQLVmServiceStatus,
   DepartmentServiceStatus as GraphQLDepartmentServiceStatus,
   GlobalServiceStatus as GraphQLGlobalServiceStatus,
   ServiceStatusSummary,
   ServiceAction
-} from './types';
-import { 
-  ToggleServiceInput, 
-  ToggleVmServiceInput, 
-  ToggleDepartmentServiceInput 
-} from './inputs';
-import { FirewallService } from '../../../services/firewallService';
-import { KNOWN_SERVICES } from '../../../config/knownServices';
+} from './types'
+import {
+  ToggleServiceInput,
+  ToggleVmServiceInput,
+  ToggleDepartmentServiceInput
+} from './inputs'
+import { FirewallService } from '../../../services/firewallService'
+import { KNOWN_SERVICES } from '../../../config/knownServices'
 
 @Resolver()
 export class SecurityResolver {
-  private firewallService: FirewallService | null = null;
+  private firewallService: FirewallService | null = null
 
   /**
    * Get or initialize the firewall service
    */
-  private getFirewallService(prisma: PrismaClient): FirewallService {
+  private getFirewallService (prisma: PrismaClient): FirewallService {
     if (!this.firewallService) {
-      this.firewallService = new FirewallService(prisma);
+      this.firewallService = new FirewallService(prisma)
     }
-    return this.firewallService;
+    return this.firewallService
   }
 
   /**
@@ -40,10 +40,10 @@ export class SecurityResolver {
    */
   @Query(() => [GraphQLServiceDefinition])
   @Authorized(['ADMIN'])
-  async listServices(
+  async listServices (
     @Ctx() { prisma }: InfinibayContext
   ): Promise<GraphQLServiceDefinition[]> {
-    return this.getFirewallService(prisma).getServices();
+    return this.getFirewallService(prisma).getServices()
   }
 
   /**
@@ -53,7 +53,7 @@ export class SecurityResolver {
    */
   @Query(() => [GraphQLVmServiceStatus])
   @Authorized(['ADMIN'])
-  async getVmServiceStatus(
+  async getVmServiceStatus (
     @Ctx() { prisma, user }: InfinibayContext,
     @Arg('vmId', () => ID) vmId: string,
     @Arg('serviceId', () => ID, { nullable: true }) serviceId?: string
@@ -62,14 +62,14 @@ export class SecurityResolver {
     const vm = await prisma.machine.findUnique({
       where: { id: vmId },
       select: { id: true }
-    });
+    })
 
     if (!vm) {
-      throw new UserInputError(`VM with ID ${vmId} not found`);
+      throw new UserInputError(`VM with ID ${vmId} not found`)
     }
 
     // Get the service status
-    return this.getFirewallService(prisma).getVmServiceStatus(vmId, serviceId);
+    return this.getFirewallService(prisma).getVmServiceStatus(vmId, serviceId)
   }
 
   /**
@@ -79,7 +79,7 @@ export class SecurityResolver {
    */
   @Query(() => [GraphQLDepartmentServiceStatus])
   @Authorized(['ADMIN'])
-  async getDepartmentServiceStatus(
+  async getDepartmentServiceStatus (
     @Ctx() { prisma, user }: InfinibayContext,
     @Arg('departmentId', () => ID) departmentId: string,
     @Arg('serviceId', () => ID, { nullable: true }) serviceId?: string
@@ -88,14 +88,14 @@ export class SecurityResolver {
     const department = await prisma.department.findUnique({
       where: { id: departmentId },
       select: { id: true }
-    });
+    })
 
     if (!department) {
-      throw new UserInputError(`Department with ID ${departmentId} not found`);
+      throw new UserInputError(`Department with ID ${departmentId} not found`)
     }
 
     // Get the department service status
-    return this.getFirewallService(prisma).getDepartmentServiceStatus(departmentId, serviceId);
+    return this.getFirewallService(prisma).getDepartmentServiceStatus(departmentId, serviceId)
   }
 
   /**
@@ -104,11 +104,11 @@ export class SecurityResolver {
    */
   @Query(() => [GraphQLGlobalServiceStatus])
   @Authorized(['ADMIN'])
-  async getGlobalServiceStatus(
+  async getGlobalServiceStatus (
     @Ctx() { prisma }: InfinibayContext,
     @Arg('serviceId', () => ID, { nullable: true }) serviceId?: string
   ): Promise<GraphQLGlobalServiceStatus[]> {
-    return this.getFirewallService(prisma).getGlobalServiceStatus(serviceId);
+    return this.getFirewallService(prisma).getGlobalServiceStatus(serviceId)
   }
 
   /**
@@ -116,15 +116,15 @@ export class SecurityResolver {
    */
   @Query(() => [ServiceStatusSummary])
   @Authorized(['ADMIN'])
-  async getServiceStatusSummary(
+  async getServiceStatusSummary (
     @Ctx() { prisma }: InfinibayContext
   ): Promise<ServiceStatusSummary[]> {
     // Get all services
-    const services = await this.getFirewallService(prisma).getServices();
-    
+    const services = await this.getFirewallService(prisma).getServices()
+
     // For each service, get VM statistics
-    const result: ServiceStatusSummary[] = [];
-    
+    const result: ServiceStatusSummary[] = []
+
     for (const service of services) {
       // Get all VMs that have ports matching this service
       const vms = await prisma.machine.findMany({
@@ -141,20 +141,20 @@ export class SecurityResolver {
             }
           }
         }
-      });
+      })
 
-      const totalVms = vms.length;
-      let runningVms = 0;
-      let enabledVms = 0;
+      const totalVms = vms.length
+      let runningVms = 0
+      let enabledVms = 0
 
       for (const vm of vms) {
         // VM is considered running this service if any matching port is running
-        const isRunning = vm.ports.some(port => port.running);
-        if (isRunning) runningVms++;
+        const isRunning = vm.ports.some(port => port.running)
+        if (isRunning) runningVms++
 
         // VM is considered to have service enabled if any matching port is enabled
-        const isEnabled = vm.ports.some(port => port.enabled);
-        if (isEnabled) enabledVms++;
+        const isEnabled = vm.ports.some(port => port.enabled)
+        if (isEnabled) enabledVms++
       }
 
       result.push({
@@ -163,10 +163,10 @@ export class SecurityResolver {
         totalVms,
         runningVms,
         enabledVms
-      });
+      })
     }
 
-    return result;
+    return result
   }
 
   /**
@@ -175,24 +175,24 @@ export class SecurityResolver {
    */
   @Mutation(() => GraphQLVmServiceStatus)
   @Authorized(['ADMIN'])
-  async toggleVmService(
+  async toggleVmService (
     @Ctx() { prisma, user }: InfinibayContext,
     @Arg('input') input: ToggleVmServiceInput
   ): Promise<GraphQLVmServiceStatus> {
-    const { vmId, serviceId, action, enabled } = input;
+    const { vmId, serviceId, action, enabled } = input
 
     // Validate that the VM exists
     const vm = await prisma.machine.findUnique({
       where: { id: vmId },
       select: { id: true }
-    });
+    })
 
     if (!vm) {
-      throw new UserInputError(`VM with ID ${vmId} not found`);
+      throw new UserInputError(`VM with ID ${vmId} not found`)
     }
 
     // Toggle the service
-    return this.getFirewallService(prisma).toggleVmService(vmId, serviceId, action, enabled);
+    return this.getFirewallService(prisma).toggleVmService(vmId, serviceId, action, enabled)
   }
 
   /**
@@ -201,24 +201,24 @@ export class SecurityResolver {
    */
   @Mutation(() => GraphQLDepartmentServiceStatus)
   @Authorized(['ADMIN'])
-  async toggleDepartmentService(
+  async toggleDepartmentService (
     @Ctx() { prisma, user }: InfinibayContext,
     @Arg('input') input: ToggleDepartmentServiceInput
   ): Promise<GraphQLDepartmentServiceStatus> {
-    const { departmentId, serviceId, action, enabled } = input;
+    const { departmentId, serviceId, action, enabled } = input
 
     // Validate that the department exists
     const department = await prisma.department.findUnique({
       where: { id: departmentId },
       select: { id: true }
-    });
+    })
 
     if (!department) {
-      throw new UserInputError(`Department with ID ${departmentId} not found`);
+      throw new UserInputError(`Department with ID ${departmentId} not found`)
     }
 
     // Toggle the service for the department
-    return this.getFirewallService(prisma).toggleDepartmentService(departmentId, serviceId, action, enabled);
+    return this.getFirewallService(prisma).toggleDepartmentService(departmentId, serviceId, action, enabled)
   }
 
   /**
@@ -227,13 +227,13 @@ export class SecurityResolver {
    */
   @Mutation(() => GraphQLGlobalServiceStatus)
   @Authorized(['ADMIN'])
-  async toggleGlobalService(
+  async toggleGlobalService (
     @Ctx() { prisma }: InfinibayContext,
     @Arg('input') input: ToggleServiceInput
   ): Promise<GraphQLGlobalServiceStatus> {
-    const { serviceId, action, enabled } = input;
+    const { serviceId, action, enabled } = input
 
     // Toggle the global service
-    return this.getFirewallService(prisma).toggleGlobalService(serviceId, action, enabled);
+    return this.getFirewallService(prisma).toggleGlobalService(serviceId, action, enabled)
   }
 }

@@ -1,44 +1,44 @@
-import { ObjectType, Field, ID, InputType } from 'type-graphql';
-import { GraphQLJSONObject } from 'graphql-type-json';
+import { ObjectType, Field, ID, InputType } from 'type-graphql'
+import { GraphQLJSONObject } from 'graphql-type-json'
 
 @ObjectType()
 export class ApplicationType {
   @Field(() => ID)
-  id: string = '';
+    id: string = ''
 
   @Field(() => String)
-  name: string = '';
+    name: string = ''
 
   @Field(() => String, { nullable: true })
-  description?: string;
+    description?: string
 
   @Field(() => [String])
-  os: string[] = [];
+    os: string[] = []
 
   @Field(() => GraphQLJSONObject)
-  installCommand!: Record<string, string>;
+    installCommand!: Record<string, string>
 
   @Field(() => GraphQLJSONObject, { nullable: true })
-  parameters: any = null;
+    parameters: any = null
 
   @Field(() => Date)
-  createdAt: Date = new Date();
+    createdAt: Date = new Date()
 }
 
 @InputType()
 export class CreateApplicationInputType {
   @Field(() => String)
-  name: string = '';
+    name: string = ''
 
   @Field(() => String, { nullable: true })
-  description?: string;
+    description?: string
 
   @Field(() => [String])
-  os: string[] = [];
+    os: string[] = []
 
   @Field(() => GraphQLJSONObject)
-  installCommand!: Record<string, string>;
+    installCommand!: Record<string, string>
 
   @Field(() => GraphQLJSONObject, { nullable: true })
-  parameters?: any = null;
+    parameters?: any = null
 }

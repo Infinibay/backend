@@ -1,20 +1,20 @@
-import { PrismaClient } from "@prisma/client";
-import bcrypt from "bcrypt";
-import dotenv from "dotenv";
-import { installNetworkFilters } from '../scripts/installation/networkFilters';
-import createApplications from './seeds/applications';
-import seedGlobalServiceConfigs from './seeds/globalServiceConfigs';
+import { PrismaClient } from '@prisma/client'
+import bcrypt from 'bcrypt'
+import dotenv from 'dotenv'
+import { installNetworkFilters } from '../scripts/installation/networkFilters'
+import createApplications from './seeds/applications'
+import seedGlobalServiceConfigs from './seeds/globalServiceConfigs'
 
-import installCallbacks from '../app/utils/modelsCallbacks';
+import installCallbacks from '../app/utils/modelsCallbacks'
 
-dotenv.config();
+dotenv.config()
 
-const prisma = new PrismaClient();
+const prisma = new PrismaClient()
 
-const DEFAULT_ADMIN_EMAIL = process.env.DEFAULT_ADMIN_EMAIL || "admin@example.com";
-const DEFAULT_ADMIN_PASSWORD = process.env.DEFAULT_ADMIN_PASSWORD || "password";
-async function createAdminUser() {
-  const password = await bcrypt.hash(DEFAULT_ADMIN_PASSWORD, 10);
+const DEFAULT_ADMIN_EMAIL = process.env.DEFAULT_ADMIN_EMAIL || 'admin@example.com'
+const DEFAULT_ADMIN_PASSWORD = process.env.DEFAULT_ADMIN_PASSWORD || 'password'
+async function createAdminUser () {
+  const password = await bcrypt.hash(DEFAULT_ADMIN_PASSWORD, 10)
   try {
     await prisma.user.upsert({
       where: {
@@ -22,115 +22,115 @@ async function createAdminUser() {
       },
       update: {
         password,
-        firstName: "Admin",
-        lastName: "User",
-        role: "ADMIN",
-        deleted: false,
+        firstName: 'Admin',
+        lastName: 'User',
+        role: 'ADMIN',
+        deleted: false
       },
       create: {
         email: DEFAULT_ADMIN_EMAIL,
         password,
-        firstName: "Admin",
-        lastName: "User",
-        role: "ADMIN",
-        deleted: false,
-      },
-    });
-    console.log("Admin user created/updated successfully");
+        firstName: 'Admin',
+        lastName: 'User',
+        role: 'ADMIN',
+        deleted: false
+      }
+    })
+    console.log('Admin user created/updated successfully')
   } catch (error) {
-    console.error("Error creating admin user:", error);
+    console.error('Error creating admin user:', error)
   }
 }
 
-async function createDefaultDepartment() {
+async function createDefaultDepartment () {
   try {
     await prisma.department.create({
       data: {
-        name: "Default",
-      },
-    });
-    console.log("Default department created successfully");
+        name: 'Default'
+      }
+    })
+    console.log('Default department created successfully')
   } catch (error) {
-    console.error("Error creating default department:", error);
+    console.error('Error creating default department:', error)
   }
 }
 
-async function createDefaultMachineTemplateCategory() {
+async function createDefaultMachineTemplateCategory () {
   try {
     const defaultCategory = await prisma.machineTemplateCategory.create({
       data: {
-        name: "Default Category",
-        description: "Default category for machine templates",
-      },
-    });
-    console.log("Default machine template category created successfully");
-    return defaultCategory;
+        name: 'Default Category',
+        description: 'Default category for machine templates'
+      }
+    })
+    console.log('Default machine template category created successfully')
+    return defaultCategory
   } catch (error) {
-    console.error("Error creating default machine template category:", error);
-    return null;
+    console.error('Error creating default machine template category:', error)
+    return null
   }
 }
 
-async function updateMachineTemplates(defaultCategoryId: string) {
+async function updateMachineTemplates (defaultCategoryId: string) {
   try {
     await prisma.machineTemplate.updateMany({
       where: { categoryId: null },
-      data: { categoryId: defaultCategoryId },
-    });
-    console.log("Machine templates updated successfully");
+      data: { categoryId: defaultCategoryId }
+    })
+    console.log('Machine templates updated successfully')
   } catch (error) {
-    console.error("Error updating machine templates:", error);
+    console.error('Error updating machine templates:', error)
   }
 }
 
-async function createDefaultMachineTemplate(defaultCategoryId: string) {
+async function createDefaultMachineTemplate (defaultCategoryId: string) {
   try {
-    const existingTemplates = await prisma.machineTemplate.findMany();
+    const existingTemplates = await prisma.machineTemplate.findMany()
     if (existingTemplates.length === 0) {
       await prisma.machineTemplate.create({
         data: {
-          name: "Basic",
-          description: "A basic machine template.",
+          name: 'Basic',
+          description: 'A basic machine template.',
           cores: 6,
           ram: 24,
           storage: 70,
-          categoryId: defaultCategoryId,
+          categoryId: defaultCategoryId
         }
-      });
-      console.log("Default machine template created successfully");
+      })
+      console.log('Default machine template created successfully')
     }
   } catch (error) {
-    console.error("Error creating default machine template:", error);
+    console.error('Error creating default machine template:', error)
   }
 }
 
-async function main() {
+async function main () {
   try {
-    installCallbacks(prisma);
+    installCallbacks(prisma)
     await prisma.$transaction(async (transactionPrisma) => {
       // First install network filters
-      await installNetworkFilters();
+      await installNetworkFilters()
 
       // Then create admin user and departments
-      await createAdminUser();
-      await createDefaultDepartment();
-      const defaultCategory = await createDefaultMachineTemplateCategory();
+      await createAdminUser()
+      await createDefaultDepartment()
+      const defaultCategory = await createDefaultMachineTemplateCategory()
       if (defaultCategory) {
-        await updateMachineTemplates(defaultCategory.id);
-        await createDefaultMachineTemplate(defaultCategory.id);
+        await updateMachineTemplates(defaultCategory.id)
+        await createDefaultMachineTemplate(defaultCategory.id)
       }
-      await createApplications(transactionPrisma);
-      
+      await createApplications(transactionPrisma)
+
       // Seed global service configurations
-      await seedGlobalServiceConfigs(transactionPrisma);
-    });
-    console.log("Seeding completed successfully");
+      await seedGlobalServiceConfigs(transactionPrisma)
+    })
+    console.log('Seeding completed successfully')
   } catch (error) {
-    console.error("Error during seeding:", error);
-    process.exit(1);
+    console.error('Error during seeding:', error)
+    process.exit(1)
   } finally {
-    await prisma.$disconnect();
+    await prisma.$disconnect()
   }
 }
 
-main();
+main()

@@ -1,11 +1,11 @@
 import {
-    Connection,
-    Machine as VirtualMachine,
-    Error as LibvirtError
-} from 'libvirt-node';
-import { DOMParser, XMLSerializer } from 'xmldom';
+  Connection,
+  Machine as VirtualMachine,
+  Error as LibvirtError
+} from 'libvirt-node'
+import { DOMParser, XMLSerializer } from 'xmldom'
 
-import { Debugger } from '@utils/debug';
+import { Debugger } from '@utils/debug'
 
 /**
  * VncPortService
@@ -53,96 +53,94 @@ import { Debugger } from '@utils/debug';
  * Note: Ensure that the libvirt connection is properly initialized before using this service.
  */
 export class GraphicPortService {
-    debug: Debugger = new Debugger('virt-manager');
-    connection: Connection | null = null;
+  debug: Debugger = new Debugger('virt-manager')
+  connection: Connection | null = null
 
-    constructor() {
-        this.connection = Connection.open('qemu:///system');
-        if (!this.connection) {
-            let error = LibvirtError.lastError();
-            this.debug.log('error', error.message);
-            this.debug.log('error', 'Failed to connect to hypervisor');
-            throw new Error('Failed to connect to hypervisor');
-        }
+  constructor () {
+    this.connection = Connection.open('qemu:///system')
+    if (!this.connection) {
+      const error = LibvirtError.lastError()
+      this.debug.log('error', error.message)
+      this.debug.log('error', 'Failed to connect to hypervisor')
+      throw new Error('Failed to connect to hypervisor')
     }
+  }
 
-
-    /**
+  /**
      * Retrieves the VNC port for a given domain.
      *
      * @param {string} domainName - The name of the domain.
      * @returns {Promise<number>} - A promise that resolves to the VNC port number.
      * @throws {Error} If the VNC port could not be retrieved.
      */
-    async getGraphicPort(domainName: string, type: string): Promise<number> {
+  async getGraphicPort (domainName: string, type: string): Promise<number> {
+    this.debug.log(`Getting graphic port for domain: ${domainName}`)
 
-        this.debug.log(`Getting graphic port for domain: ${domainName}`);
+    this.validateConnection()
 
-        this.validateConnection();
+    try {
+      const domain = await this.getDomain(domainName)
+      const xml = await this.getDomainXml(domain)
+      return this.extractGraphicPortFromXml(xml, type)
+    } catch (error) {
+      this.handleError('Failed to get VNC port', error)
+    }
+  }
 
-        try {
-            const domain = await this.getDomain(domainName);
-            const xml = await this.getDomainXml(domain);
-            return this.extractGraphicPortFromXml(xml, type);
-        } catch (error) {
-            this.handleError('Failed to get VNC port', error);
+  private validateConnection (): void {
+    if (!this.connection) {
+      throw new Error('No connection available')
+    }
+  }
+
+  private async getDomain (domainName: string): Promise<VirtualMachine> {
+    if (this.connection == null) {
+      throw new Error('No connection available')
+    }
+    const domain = VirtualMachine.lookupByName(this.connection, domainName)
+    if (domain == null) {
+      const error = LibvirtError.lastError()
+      this.debug.log('error', error.message)
+      throw new Error('Failed to find the domain')
+    }
+    this.debug.log('Domain obtained')
+    return domain
+  }
+
+  private async getDomainXml (domain: VirtualMachine): Promise<string> {
+    const xml = domain.getXmlDesc(0)
+    if (xml == null) {
+      const error = LibvirtError.lastError()
+      this.debug.log('error', error.message)
+      throw new Error('Failed to get domain XML description')
+    }
+    this.debug.log('Domain XML description obtained')
+    return xml
+  }
+
+  private extractGraphicPortFromXml (xml: string, type: string): number {
+    const parser = new DOMParser()
+    const xmlDoc = parser.parseFromString(xml, 'text/xml')
+    const graphicsElements = xmlDoc.getElementsByTagName('graphics')
+
+    if (graphicsElements && graphicsElements.length > 0) {
+      for (let i = 0; i < graphicsElements.length; i++) {
+        const graphicsElement = graphicsElements[i]
+        if (graphicsElement.getAttribute('type') === type) {
+          const port = parseInt(graphicsElement.getAttribute('port') || '-1', 10)
+          this.debug.log(`Found ${type} port: ${port}`)
+          return port
         }
+      }
     }
 
-    private validateConnection(): void {
-        if (!this.connection) {
-            throw new Error('No connection available');
-        }
-    }
+    this.debug.log(`No ${type} port found`)
+    return -1
+  }
 
-    private async getDomain(domainName: string): Promise<VirtualMachine> {
-        if (this.connection == null) {
-            throw new Error('No connection available');
-        }
-        const domain = VirtualMachine.lookupByName(this.connection, domainName);
-        if (domain == null) {
-            const error = LibvirtError.lastError();
-            this.debug.log('error', error.message);
-            throw new Error('Failed to find the domain');
-        }
-        this.debug.log('Domain obtained');
-        return domain;
-    }
-
-    private async getDomainXml(domain: VirtualMachine): Promise<string> {
-        const xml = domain.getXmlDesc(0);
-        if (xml == null) {
-            const error = LibvirtError.lastError();
-            this.debug.log('error', error.message);
-            throw new Error('Failed to get domain XML description');
-        }
-        this.debug.log('Domain XML description obtained');
-        return xml;
-    }
-
-    private extractGraphicPortFromXml(xml: string, type: string): number {
-        const parser = new DOMParser();
-        const xmlDoc = parser.parseFromString(xml, 'text/xml');
-        const graphicsElements = xmlDoc.getElementsByTagName('graphics');
-
-        if (graphicsElements && graphicsElements.length > 0) {
-            for (let i = 0; i < graphicsElements.length; i++) {
-                const graphicsElement = graphicsElements[i];
-                if (graphicsElement.getAttribute('type') === type) {
-                    const port = parseInt(graphicsElement.getAttribute('port') || '-1', 10);
-                    this.debug.log(`Found ${type} port: ${port}`);
-                    return port;
-                }
-            }
-        }
-
-        this.debug.log(`No ${type} port found`);
-        return -1;
-    }
-
-    private handleError(message: string, error: unknown): never {
-        this.debug.log('error', message);
-        this.debug.log(error instanceof Error ? error.message : String(error));
-        throw new Error(message);
-    }
+  private handleError (message: string, error: unknown): never {
+    this.debug.log('error', message)
+    this.debug.log(error instanceof Error ? error.message : String(error))
+    throw new Error(message)
+  }
 }

@@ -1,16 +1,16 @@
-import { Field, ObjectType } from 'type-graphql';
+import { Field, ObjectType } from 'type-graphql'
 
 @ObjectType()
 export class GPU {
   @Field(() => String)
-  pciBus: string = '';
+    pciBus: string = ''
 
   @Field(() => String)
-  vendor: string = '';
+    vendor: string = ''
 
   @Field(() => String)
-  model: string = '';
+    model: string = ''
 
   @Field(() => Number)
-  memory: number = 0;
+    memory: number = 0
 }

@@ -1,6 +1,5 @@
-import { Request, Response } from "express";
-import { PrismaClient } from "@prisma/client";
-import { User } from "@prisma/client";
+import { Request, Response } from 'express'
+import { PrismaClient, User } from '@prisma/client'
 
 export interface InfinibayContext {
   req: Request

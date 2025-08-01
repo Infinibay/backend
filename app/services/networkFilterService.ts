@@ -1,47 +1,47 @@
-import { PrismaClient, NWFilter, Prisma, FWRule } from '@prisma/client';
-import { v4 as uuidv4 } from 'uuid';
-import { Connection, NwFilter } from 'libvirt-node';
-import { Builder, Parser } from 'xml2js';
-import { randomBytes } from 'crypto';
+import { PrismaClient, NWFilter, Prisma, FWRule } from '@prisma/client'
+import { v4 as uuidv4 } from 'uuid'
+import { Connection, NwFilter } from 'libvirt-node'
+import { Builder, Parser } from 'xml2js'
+import { randomBytes } from 'crypto'
 
 export class NetworkFilterService {
-  private connection: Connection | null = null;
-  private xmlBuilder: Builder;
-  private xmlParser: Parser;
+  private connection: Connection | null = null
+  private xmlBuilder: Builder
+  private xmlParser: Parser
 
-  constructor(private prisma: PrismaClient) {
-    this.xmlBuilder = new Builder();
-    this.xmlParser = new Parser();
+  constructor (private prisma: PrismaClient) {
+    this.xmlBuilder = new Builder()
+    this.xmlParser = new Parser()
   }
 
-  private generateIbayName(): string {
-    return `ibay-${randomBytes(8).toString('hex')}`;
+  private generateIbayName (): string {
+    return `ibay-${randomBytes(8).toString('hex')}`
   }
 
-  private cleanUndefined(obj: any): any {
+  private cleanUndefined (obj: any): any {
     return Object.fromEntries(
       Object.entries(obj).filter(([_, v]) => v != null)
-    );
+    )
   }
 
-  async connect(): Promise<Connection> {
+  async connect (): Promise<Connection> {
     if (!this.connection) {
-      this.connection = await Connection.open('qemu:///system');
+      this.connection = await Connection.open('qemu:///system')
       if (!this.connection) {
-        throw new Error('Failed to connect to hypervisor');
+        throw new Error('Failed to connect to hypervisor')
       }
     }
-    return this.connection;
+    return this.connection
   }
 
-  async close(): Promise<void> {
+  async close (): Promise<void> {
     if (this.connection) {
-      await this.connection.close();
-      this.connection = null;
+      await this.connection.close()
+      this.connection = null
     }
   }
 
-  async createFilter(
+  async createFilter (
     name: string,
     description: string,
     chain: string | null,
@@ -54,13 +54,13 @@ export class NetworkFilterService {
         uuid: uuidv4(),
         description,
         chain,
-        type,
-      },
-    });
-    return nwFilter;
+        type
+      }
+    })
+    return nwFilter
   }
 
-  async updateFilter(
+  async updateFilter (
     id: string,
     data: {
       name?: string;
@@ -71,17 +71,17 @@ export class NetworkFilterService {
   ): Promise<NWFilter> {
     return await this.prisma.nWFilter.update({
       where: { id },
-      data,
-    });
+      data
+    })
   }
 
-  async deleteFilter(id: string): Promise<NWFilter> {
+  async deleteFilter (id: string): Promise<NWFilter> {
     return await this.prisma.nWFilter.delete({
-      where: { id },
-    });
+      where: { id }
+    })
   }
 
-  async createRule(
+  async createRule (
     filterId: string,
     action: string,
     direction: string,
@@ -117,11 +117,11 @@ export class NetworkFilterService {
         dstIpAddr: options.dstIpAddr
         // Note: We don't check 'state' because it's a JSON object and more complex to compare
       }
-    });
+    })
 
     // If an identical rule exists, return it
     if (existingRule) {
-      return existingRule;
+      return existingRule
     }
 
     // Otherwise create a new rule
@@ -140,18 +140,18 @@ export class NetworkFilterService {
         comment: options.comment,
         ipVersion: options.ipVersion,
         srcIpAddr: options.srcIpAddr,
-        dstIpAddr: options.dstIpAddr,
-      },
-    });
+        dstIpAddr: options.dstIpAddr
+      }
+    })
   }
 
-  async deleteRule(id: string): Promise<FWRule> {
+  async deleteRule (id: string): Promise<FWRule> {
     return await this.prisma.fWRule.delete({
-      where: { id },
-    });
+      where: { id }
+    })
   }
 
-  async flushNWFilter(id: string, redefine: boolean = false): Promise<boolean> {
+  async flushNWFilter (id: string, redefine: boolean = false): Promise<boolean> {
     try {
       const filter = await this.prisma.nWFilter.findUnique({
         where: { id },
@@ -163,20 +163,20 @@ export class NetworkFilterService {
             }
           }
         }
-      });
+      })
 
-      if (!filter) return false;
+      if (!filter) return false
 
-      const conn = await this.connect();
-      const existingFilter = await NwFilter.lookupByName(conn, filter.internalName);
+      const conn = await this.connect()
+      const existingFilter = await NwFilter.lookupByName(conn, filter.internalName)
       if (existingFilter) {
-        if (!redefine) return true;
+        if (!redefine) return true
         try {
-          await existingFilter.undefine();
+          await existingFilter.undefine()
         } catch (undefErr: any) {
           // ignore in-use errors, rethrow others
           if (!undefErr.message.includes('nwfilter is in use')) {
-            throw undefErr;
+            throw undefErr
           }
         }
       }
@@ -198,7 +198,7 @@ export class NetworkFilterService {
                 priority: rule.priority.toString(),
                 statematch: rule.state ? '1' : '0'
               }
-            };
+            }
 
             // Protocol-specific configuration
             const protocolConfig: any = {
@@ -211,43 +211,43 @@ export class NetworkFilterService {
                 dstportend: rule.dstPortEnd?.toString(),
                 comment: rule.comment
               })
-            };
+            }
 
             // Add protocol-specific elements
             switch (rule.protocol) {
-              case 'tcp':
-              case 'udp':
-                ruleObj[rule.protocol] = protocolConfig;
-                break;
-              case 'icmp':
-                ruleObj.icmp = {
-                  $: {
-                    ...protocolConfig.$,
-                    // Using srcIpAddr and dstIpAddr instead of removed icmpType/Code
-                    srcipaddr: rule.srcIpAddr,
-                    dstipaddr: rule.dstIpAddr
-                  }
-                };
-                break;
-              case 'mac':
-                ruleObj.mac = {
-                  $: {
-                    ...protocolConfig.$,
-                    srcmacaddr: rule.srcMacAddr // Using the correct field from schema
-                  }
-                };
-                break;
-              case 'all':
-                ruleObj.all = protocolConfig;
-                break;
-              default:
-                ruleObj[rule.protocol] = protocolConfig;
+            case 'tcp':
+            case 'udp':
+              ruleObj[rule.protocol] = protocolConfig
+              break
+            case 'icmp':
+              ruleObj.icmp = {
+                $: {
+                  ...protocolConfig.$,
+                  // Using srcIpAddr and dstIpAddr instead of removed icmpType/Code
+                  srcipaddr: rule.srcIpAddr,
+                  dstipaddr: rule.dstIpAddr
+                }
+              }
+              break
+            case 'mac':
+              ruleObj.mac = {
+                $: {
+                  ...protocolConfig.$,
+                  srcmacaddr: rule.srcMacAddr // Using the correct field from schema
+                }
+              }
+              break
+            case 'all':
+              ruleObj.all = protocolConfig
+              break
+            default:
+              ruleObj[rule.protocol] = protocolConfig
             }
 
-            return ruleObj;
+            return ruleObj
           })
         }
-      };
+      }
 
       if (filter.referencedBy.length > 0) {
         xmlObj.filter.filterref = filter.referencedBy.map(ref => ({
@@ -255,32 +255,32 @@ export class NetworkFilterService {
             filter: ref.targetFilter.internalName,
             priority: (ref.targetFilter.priority || 500).toString()
           }
-        }));
+        }))
       }
 
-      const xml = this.xmlBuilder.buildObject(xmlObj);
+      const xml = this.xmlBuilder.buildObject(xmlObj)
 
-      let result: any;
+      let result: any
       try {
-        result = await NwFilter.defineXml(conn, xml);
+        result = await NwFilter.defineXml(conn, xml)
       } catch (defErr: any) {
         // skip missing dependency errors
         if (defErr.message.includes('referenced filter') && defErr.message.includes('is missing')) {
-          console.warn(`Skipping flush for filter ${filter.internalName}: missing referenced filter.`);
-          return false;
+          console.warn(`Skipping flush for filter ${filter.internalName}: missing referenced filter.`)
+          return false
         }
-        throw defErr;
+        throw defErr
       }
 
       await this.prisma.nWFilter.update({
         where: { id: filter.id },
         data: { flushedAt: new Date() }
-      });
+      })
 
-      return result !== null;
+      return result !== null
     } catch (error) {
-      console.error('Error in flushNWFilter:', error);
-      return false;
+      console.error('Error in flushNWFilter:', error)
+      return false
     }
   }
 
@@ -290,16 +290,16 @@ export class NetworkFilterService {
    * @param filterId The ID of the filter to deduplicate
    * @returns The number of duplicate rules removed
    */
-  async deduplicateRules(filterId: string): Promise<number> {
+  async deduplicateRules (filterId: string): Promise<number> {
     // Get all rules for this filter
     const rules = await this.prisma.fWRule.findMany({
       where: { nwFilterId: filterId },
       orderBy: { createdAt: 'asc' } // Order by creation date, keeping the oldest ones
-    });
+    })
 
     // Group rules by their key attributes to find duplicates
-    const ruleGroups = new Map<string, FWRule[]>();
-    
+    const ruleGroups = new Map<string, FWRule[]>()
+
     for (const rule of rules) {
       // Create a unique key based on rule properties
       const key = JSON.stringify({
@@ -315,42 +315,42 @@ export class NetworkFilterService {
         srcIpAddr: rule.srcIpAddr,
         dstIpAddr: rule.dstIpAddr
         // Note: We don't compare 'state' because it's a JSON object
-      });
-      
+      })
+
       if (!ruleGroups.has(key)) {
-        ruleGroups.set(key, []);
+        ruleGroups.set(key, [])
       }
-      
-      ruleGroups.get(key)!.push(rule);
+
+      ruleGroups.get(key)!.push(rule)
     }
-    
+
     // Delete duplicate rules (keeping the most recent one in each group)
-    let deletedCount = 0;
+    let deletedCount = 0
     for (const group of ruleGroups.values()) {
       if (group.length > 1) {
         // Keep the most recently created rule
         const sortedGroup = [...group].sort(
           (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-        );
-        
+        )
+
         // Delete all but the most recent rule
         for (let i = 1; i < sortedGroup.length; i++) {
           await this.prisma.fWRule.delete({
             where: { id: sortedGroup[i].id }
-          });
-          deletedCount++;
+          })
+          deletedCount++
         }
       }
     }
-    
+
     // Update the filter's updatedAt timestamp to ensure it gets flushed
     if (deletedCount > 0) {
       await this.prisma.nWFilter.update({
         where: { id: filterId },
         data: { updatedAt: new Date() }
-      });
+      })
     }
-    
-    return deletedCount;
+
+    return deletedCount
   }
 }

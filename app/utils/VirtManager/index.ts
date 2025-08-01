@@ -1,43 +1,42 @@
-import { PrismaClient } from '@prisma/client';
-import { Connection, Machine as VirtualMachine, StoragePool, StorageVol, Error as LibvirtError, ErrorNumber } from 'libvirt-node';
-import { Machine, } from '@prisma/client';
-import { CreateMachineService } from '@utils/VirtManager/createMachineService';
+import { PrismaClient, Machine } from '@prisma/client'
+import { Connection, Machine as VirtualMachine, StoragePool, StorageVol, Error as LibvirtError, ErrorNumber } from 'libvirt-node'
+import { CreateMachineService } from '@utils/VirtManager/createMachineService'
 
-import { Debugger } from '@utils/debug';
+import { Debugger } from '@utils/debug'
 
 export class VirtManager {
-  private libvirt: Connection | null = null;
-  private uri: string = '';
-  private prisma: PrismaClient | null = null;
-  private debug: Debugger = new Debugger('virt-manager');
+  private libvirt: Connection | null = null
+  private uri: string = ''
+  private prisma: PrismaClient | null = null
+  private debug: Debugger = new Debugger('virt-manager')
 
-  constructor(uri: string = 'qemu:///system') {
-    this.debug.log('Creating VirtManager instance with URI', uri);
-    this.uri = uri;
-    this.connect();
+  constructor (uri: string = 'qemu:///system') {
+    this.debug.log('Creating VirtManager instance with URI', uri)
+    this.uri = uri
+    this.connect()
   }
 
-  setPrisma(prisma: PrismaClient): void {
-    this.prisma = prisma;
+  setPrisma (prisma: PrismaClient): void {
+    this.prisma = prisma
   }
 
-  connect(uri?: string): void {
-    this.debug.log('Connecting to hypervisor with URI', uri ?? '');
+  connect (uri?: string): void {
+    this.debug.log('Connecting to hypervisor with URI', uri ?? '')
     // If a new URI is provided, update the current URI
     if (uri) {
-      this.uri = uri;
+      this.uri = uri
     }
 
     // If already connected, disconnect first
     if (this.libvirt !== null) {
-      this.libvirt.close();
+      this.libvirt.close()
     }
 
     // Connect to the hypervisor
-    this.libvirt = Connection.open(this.uri);
+    this.libvirt = Connection.open(this.uri)
 
     if (!this.libvirt) {
-      throw new Error('Failed to connect to hypervisor');
+      throw new Error('Failed to connect to hypervisor')
     }
   }
 
@@ -56,10 +55,10 @@ export class VirtManager {
    * @param productKey - The product key for the new machine.
    * @returns A promise that resolves when the machine is created.
    */
-  async createMachine(machine: Machine, username: string, password: string, productKey: string | undefined, pciBus: string | null): Promise<void> {
-    this.debug.log('Creating machine', machine.name);
-    let service: CreateMachineService = new CreateMachineService(this.uri, this.prisma);
-    await service.create(machine, username, password, productKey, pciBus);
+  async createMachine (machine: Machine, username: string, password: string, productKey: string | undefined, pciBus: string | null): Promise<void> {
+    this.debug.log('Creating machine', machine.name)
+    const service: CreateMachineService = new CreateMachineService(this.uri, this.prisma)
+    await service.create(machine, username, password, productKey, pciBus)
   }
 
   /**
@@ -68,16 +67,16 @@ export class VirtManager {
    * @param domainName - The name of the domain.
    * @returns A promise that resolves to void.
    */
-  async powerOn(domainName: string): Promise<void> {
+  async powerOn (domainName: string): Promise<void> {
     if (!this.libvirt) {
-      throw new Error('Libvirt connection is not established');
+      throw new Error('Libvirt connection is not established')
     }
-    const domain = VirtualMachine.lookupByName(this.libvirt, domainName);
+    const domain = VirtualMachine.lookupByName(this.libvirt, domainName)
     if (!domain) {
-      throw new Error(`Domain ${domainName} not found`);
+      throw new Error(`Domain ${domainName} not found`)
     }
-    domain.resume();
+    domain.resume()
   }
 }
 
-export default VirtManager;
+export default VirtManager

@@ -1,9 +1,9 @@
-import { Application } from '@prisma/client';
-import * as fs from 'fs';
-import * as path from 'path';
-import { Eta } from 'eta';
+import { Application } from '@prisma/client'
+import * as fs from 'fs'
+import * as path from 'path'
+import { Eta } from 'eta'
 
-import { UnattendedManagerBase } from './unattendedManagerBase';
+import { UnattendedManagerBase } from './unattendedManagerBase'
 
 /**
  * UnattendedRedHatManager is a class that extends UnattendedManagerBase.
@@ -20,165 +20,164 @@ import { UnattendedManagerBase } from './unattendedManagerBase';
  */
 
 export class UnattendedRedHatManager extends UnattendedManagerBase {
-  private username: string;
-  private password: string;
-  private applications: Application[];
+  private username: string
+  private password: string
+  private applications: Application[]
   // protected debug: Debugger = new Debugger('unattended-redhat-manager');
 
-  constructor(username: string, password: string, applications: Application[]) {
-    super();
-    this.debug.log('Initializing UnattendedRedHatManager');
+  constructor (username: string, password: string, applications: Application[]) {
+    super()
+    this.debug.log('Initializing UnattendedRedHatManager')
     if (!username || !password) {
-      this.debug.log('error', 'Username and password are required');
-      throw new Error('Username and password are required');
+      this.debug.log('error', 'Username and password are required')
+      throw new Error('Username and password are required')
     }
-    this.isoPath = path.join(path.join(process.env.INFINIBAY_BASE_DIR ?? '/opt/infinibay', 'iso'), 'fedora.iso');
-    this.username = username;
-    this.password = password;
-    this.applications = applications;
-    this.configFileName = 'ks.cfg';
-    this.debug.log('UnattendedRedHatManager initialized');
+    this.isoPath = path.join(path.join(process.env.INFINIBAY_BASE_DIR ?? '/opt/infinibay', 'iso'), 'fedora.iso')
+    this.username = username
+    this.password = password
+    this.applications = applications
+    this.configFileName = 'ks.cfg'
+    this.debug.log('UnattendedRedHatManager initialized')
   }
 
-  async generateConfig(): Promise<string> {
-    this.debug.log('Generating RedHat kickstart configuration');
-    const applicationsPostCommands = await this.generateApplicationsConfig();
-    this.debug.log('Applications post commands generated');
+  async generateConfig (): Promise<string> {
+    this.debug.log('Generating RedHat kickstart configuration')
+    const applicationsPostCommands = await this.generateApplicationsConfig()
+    this.debug.log('Applications post commands generated')
 
     // Initialize Eta template engine
     const eta = new Eta({
       views: path.join(process.env.INFINIBAY_BASE_DIR ?? path.join(__dirname, '..'), 'templates'),
       cache: true
-    });
+    })
 
     try {
-      const templatePath = path.join(__dirname, '../templates/redhat_kickstart.cfg.eta');
-      const templateContent = fs.readFileSync(templatePath, 'utf8');
+      const templatePath = path.join(__dirname, '../templates/redhat_kickstart.cfg.eta')
+      const templateContent = fs.readFileSync(templatePath, 'utf8')
 
       // Render the template with our data
       const renderedConfig = eta.renderString(templateContent, {
         username: this.username,
         password: this.password,
         applicationsPostCommands
-      });
+      })
 
-      this.debug.log('RedHat kickstart configuration generated successfully');
-      return renderedConfig;
+      this.debug.log('RedHat kickstart configuration generated successfully')
+      return renderedConfig
     } catch (error) {
-      this.debug.log('error', `Failed to render RedHat kickstart template: ${error}`);
-      throw error;
+      this.debug.log('error', `Failed to render RedHat kickstart template: ${error}`)
+      throw error
     }
   }
 
-  public async generateApplicationsConfig(): Promise<string> {
+  public async generateApplicationsConfig (): Promise<string> {
     if (!this.applications || this.applications.length === 0) {
-      return '';
+      return ''
     }
 
     // Filter applications compatible with RedHat/Fedora
     const redHatApps = this.applications.filter(app =>
       app.os.includes('redhat') || app.os.includes('fedora')
-    );
+    )
 
     if (redHatApps.length === 0) {
-      return '';
+      return ''
     }
 
-    let postInstallScript = '%post --log=/root/ks-post.log\n';
-    postInstallScript += 'echo "Starting application installation..."\n';
+    let postInstallScript = '%post --log=/root/ks-post.log\n'
+    postInstallScript += 'echo "Starting application installation..."\n'
 
-    const installCommands: string[] = [];
+    const installCommands: string[] = []
 
     redHatApps.forEach(app => {
       // Find the Red Hat/Fedora OS index
-      const osIndex = app.os.findIndex(os => os === 'redhat' || os === 'fedora');
+      const osIndex = app.os.findIndex(os => os === 'redhat' || os === 'fedora')
       // Ensure installCommand is an array and the command exists for the found OS index
       if (osIndex !== -1 && Array.isArray(app.installCommand) && app.installCommand.length > osIndex && app.installCommand[osIndex]) {
         // Assuming installCommand contains the package name for dnf
-        installCommands.push(app.installCommand[osIndex] as string);
+        installCommands.push(app.installCommand[osIndex] as string)
       }
-    });
+    })
 
     if (installCommands.length > 0) {
-      postInstallScript += `dnf install -y ${installCommands.join(' ')}\n`;
-      postInstallScript += 'echo "Application installation finished."\n';
+      postInstallScript += `dnf install -y ${installCommands.join(' ')}\n`
+      postInstallScript += 'echo "Application installation finished."\n'
     } else {
-        postInstallScript += 'echo "No compatible applications found or install commands missing."\n';
+      postInstallScript += 'echo "No compatible applications found or install commands missing."\n'
     }
 
-    postInstallScript += '%end\n';
+    postInstallScript += '%end\n'
 
-    return postInstallScript;
+    return postInstallScript
   }
 
   /**
    * Modifies the GRUB configuration file to add Kickstart parameters.
    * @param grubCfgPath - Path to the grub.cfg file.
    */
-  private async modifyGrubConfigForKickstart(grubCfgPath: string): Promise<void> {
-    this.debug.log(`Attempting to modify GRUB config for Kickstart: ${grubCfgPath}`);
+  private async modifyGrubConfigForKickstart (grubCfgPath: string): Promise<void> {
+    this.debug.log(`Attempting to modify GRUB config for Kickstart: ${grubCfgPath}`)
     try {
-      let content = await fs.promises.readFile(grubCfgPath, 'utf-8');
+      let content = await fs.promises.readFile(grubCfgPath, 'utf-8')
 
       // Add inst.ks parameter to linux/linuxefi lines
       // Regex to find linux/linuxefi lines, capturing indentation and the rest of the line
-      const linuxLineRegex = /^(\s*)(linux|linuxefi)(\s+.*)$/gm;
-      let modified = false;
+      const linuxLineRegex = /^(\s*)(linux|linuxefi)(\s+.*)$/gm
+      let modified = false
 
       content = content.replace(linuxLineRegex, (match, indent, command, args) => {
         // Avoid adding if already present (simple check)
         if (args.includes('inst.ks=')) {
-          this.debug.log(`Kickstart parameter already found in line: ${match.trim()}`);
-          return match; // Return original match
+          this.debug.log(`Kickstart parameter already found in line: ${match.trim()}`)
+          return match // Return original match
         }
         // Append the kickstart parameter
-        let modifiedLine = `${indent}${command}${args.trimEnd()} inst.ks=cdrom:/ks.cfg`;
-        modifiedLine = modifiedLine.replace(/(\s*rd.live.check\s*)/gm, ' ');
-        modifiedLine = modifiedLine.replace(/(\s*rd.live.image\s*)/gm, ' ');
-        this.debug.log(`Modifying GRUB line: ${match.trim()} -> ${modifiedLine.trim()}`);
-        modified = true;
-        return modifiedLine;
-      });
+        let modifiedLine = `${indent}${command}${args.trimEnd()} inst.ks=cdrom:/ks.cfg`
+        modifiedLine = modifiedLine.replace(/(\s*rd.live.check\s*)/gm, ' ')
+        modifiedLine = modifiedLine.replace(/(\s*rd.live.image\s*)/gm, ' ')
+        this.debug.log(`Modifying GRUB line: ${match.trim()} -> ${modifiedLine.trim()}`)
+        modified = true
+        return modifiedLine
+      })
 
       // AAAAAAAAAAAAA
       // Set GRUB timeout to 3 seconds
-      const timeoutRegex = /^\s*set\s+timeout\s*=\s*\d+\s*$/gm;
+      const timeoutRegex = /^\s*set\s+timeout\s*=\s*\d+\s*$/gm
       if (timeoutRegex.test(content)) {
         // Replace existing timeout setting
         content = content.replace(timeoutRegex, (match) => {
-          const indent = match.match(/^\s*/)?.[0] || '';
-          this.debug.log(`Changing GRUB timeout: ${match.trim()} -> ${indent}set timeout=3`);
-          modified = true;
-          return `${indent}set timeout=3`;
-        });
+          const indent = match.match(/^\s*/)?.[0] || ''
+          this.debug.log(`Changing GRUB timeout: ${match.trim()} -> ${indent}set timeout=3`)
+          modified = true
+          return `${indent}set timeout=3`
+        })
       } else {
         // Add timeout setting if not found
         // Look for a good place to insert it - typically after the first few lines
-        const lines = content.split('\n');
-        let insertIndex = 0;
-        
+        const lines = content.split('\n')
+        let insertIndex = 0
+
         // Find a good insertion point - after initial comments and set commands
         for (let i = 0; i < Math.min(10, lines.length); i++) {
           if (lines[i].trim().startsWith('set ')) {
-            insertIndex = i + 1;
+            insertIndex = i + 1
           }
         }
-        
-        lines.splice(insertIndex, 0, 'set timeout=3');
-        content = lines.join('\n');
-        this.debug.log(`Added GRUB timeout setting at line ${insertIndex + 1}: set timeout=3`);
-        modified = true;
+
+        lines.splice(insertIndex, 0, 'set timeout=3')
+        content = lines.join('\n')
+        this.debug.log(`Added GRUB timeout setting at line ${insertIndex + 1}: set timeout=3`)
+        modified = true
       }
-      // AAAAAAAAAAAAAAAA
 
       if (modified) {
-        await fs.promises.writeFile(grubCfgPath, content, 'utf-8');
-        this.debug.log(`Successfully modified GRUB config: ${grubCfgPath}`);
+        await fs.promises.writeFile(grubCfgPath, content, 'utf-8')
+        this.debug.log(`Successfully modified GRUB config: ${grubCfgPath}`)
       } else {
-        this.debug.log('warning', `No suitable linux/linuxefi lines found or modified in ${grubCfgPath}`);
+        this.debug.log('warning', `No suitable linux/linuxefi lines found or modified in ${grubCfgPath}`)
       }
     } catch (error) {
-      this.debug.log('error', `Failed to modify GRUB config ${grubCfgPath}: ${error}`);
+      this.debug.log('error', `Failed to modify GRUB config ${grubCfgPath}: ${error}`)
       // Decide if this should be a fatal error or just a warning
       // For now, log as error but don't throw, ISO creation might still work if user manually specifies ks
     }
@@ -191,79 +190,79 @@ export class UnattendedRedHatManager extends UnattendedManagerBase {
    * @param {string} extractDir - The directory containing the extracted ISO
    * @returns {Promise<void>}
    */
-  async createISO(newIsoPath: string, extractDir: string): Promise<void> {
+  async createISO (newIsoPath: string, extractDir: string): Promise<void> {
     // Ensure the extractDir exists and has content
     if (!fs.existsSync(extractDir)) {
-      throw new Error(`Extraction directory does not exist: ${extractDir}`);
+      throw new Error(`Extraction directory does not exist: ${extractDir}`)
     }
 
-    this.debug.log('Creating Kickstart configuration file...');
+    this.debug.log('Creating Kickstart configuration file...')
 
     // Generate the configuration
-    const config = await this.generateConfig();
+    const config = await this.generateConfig()
 
     // Write ks.cfg to the root of the extracted directory
-    const kickstartPath = path.join(extractDir, 'ks.cfg');
-    await fs.promises.writeFile(kickstartPath, config);
-    this.debug.log(`Kickstart configuration written to ${kickstartPath}`);
+    const kickstartPath = path.join(extractDir, 'ks.cfg')
+    await fs.promises.writeFile(kickstartPath, config)
+    this.debug.log(`Kickstart configuration written to ${kickstartPath}`)
 
     // Find and modify GRUB configurations
     // Common paths for GRUB config in Fedora/RHEL ISOs
     const potentialGrubPaths = [
       path.join(extractDir, 'boot/grub2/grub.cfg'), // Non-EFI boot
-      path.join(extractDir, 'EFI/BOOT/grub.cfg')    // EFI boot
-    ];
+      path.join(extractDir, 'EFI/BOOT/grub.cfg') // EFI boot
+    ]
 
-    let grubModified = false;
+    let grubModified = false
     for (const grubPath of potentialGrubPaths) {
       if (fs.existsSync(grubPath)) {
-        await this.modifyGrubConfigForKickstart(grubPath);
-        grubModified = true; // Assume modification attempt means success for this flag
+        await this.modifyGrubConfigForKickstart(grubPath)
+        grubModified = true // Assume modification attempt means success for this flag
       }
     }
 
     if (!grubModified) {
-      this.debug.log('warning', 'Could not find any GRUB configuration files at expected paths to modify for Kickstart.');
+      this.debug.log('warning', 'Could not find any GRUB configuration files at expected paths to modify for Kickstart.')
       // Consider if this is a fatal error
     }
 
     // Extract the original Volume ID from the source ISO
-    let volumeId = 'INFINIBAY-FEDORA'; // Default fallback
+    let volumeId = 'INFINIBAY-FEDORA' // Default fallback
     try {
-      this.debug.log(`Extracting Volume ID using isoinfo from: ${this.isoPath}`);
-      console.log(`Extracting Volume ID using isoinfo from: ${this.isoPath}`);
-      const volIdOutput = await this.executeCommand(['isoinfo', '-d', '-i', this.isoPath as string]) as string;
+      this.debug.log(`Extracting Volume ID using isoinfo from: ${this.isoPath}`)
+      console.log(`Extracting Volume ID using isoinfo from: ${this.isoPath}`)
+      const volIdOutput = await this.executeCommand(['isoinfo', '-d', '-i', this.isoPath as string]) as string
 
       // Match 'Volume id: VALUE' from isoinfo output
-      const match = volIdOutput.match(/^Volume id:\s*(.*)$/m);
-      console.log(`Volume ID output: ${volIdOutput}`);
-      console.log(`Volume ID match: ${match}`);
+      const match = volIdOutput.match(/^Volume id:\s*(.*)$/m)
+      console.log(`Volume ID output: ${volIdOutput}`)
+      console.log(`Volume ID match: ${match}`)
       if (match && match[1]) {
-        volumeId = match[1];
-        this.debug.log(`Extracted original volume ID: ${volumeId}`);
+        volumeId = match[1]
+        this.debug.log(`Extracted original volume ID: ${volumeId}`)
       } else {
         console.log('warning', `Could not parse volume ID from isoinfo output string: ${volIdOutput}. Using default: ${volumeId}`)
-        this.debug.log(`warning', 'Could not parse volume ID from isoinfo output string: ${volIdOutput}. Using default: ${volumeId}`);
+        this.debug.log(`warning', 'Could not parse volume ID from isoinfo output string: ${volIdOutput}. Using default: ${volumeId}`)
       }
     } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : String(error);
-      console.log('error', `Failed to extract volume ID from ${this.isoPath}: ${errorMsg}. Using default: ${volumeId}`);
-      this.debug.log(`error', 'Failed to extract volume ID from ${this.isoPath}: ${errorMsg}. Using default: ${volumeId}`);
+      const errorMsg = error instanceof Error ? error.message : String(error)
+      console.log('error', `Failed to extract volume ID from ${this.isoPath}: ${errorMsg}. Using default: ${volumeId}`)
+      this.debug.log(`error', 'Failed to extract volume ID from ${this.isoPath}: ${errorMsg}. Using default: ${volumeId}`)
     }
 
-    this.debug.log('Checking necessary files for ISO recreation...');
+    this.debug.log('Checking necessary files for ISO recreation...')
     // Paths derived from xorriso report for Fedora
-    const biosBootImg = path.join(extractDir, 'images/eltorito.img');
-    const efiBootPath = path.join(extractDir, 'EFI/BOOT'); // Directory for EFI boot files
+    const biosBootImg = path.join(extractDir, 'images/eltorito.img')
+    const efiBootPath = path.join(extractDir, 'EFI/BOOT') // Directory for EFI boot files
 
     if (!fs.existsSync(biosBootImg)) {
-      this.debug.log('warning', `BIOS boot image not found at expected path: ${biosBootImg}. ISO creation might fail.`);
+      this.debug.log('warning', `BIOS boot image not found at expected path: ${biosBootImg}. ISO creation might fail.`)
     }
     if (!fs.existsSync(efiBootPath)) {
-      this.debug.log('warning', `EFI boot directory not found at expected path: ${efiBootPath}. ISO creation might fail.`);
+      this.debug.log('warning', `EFI boot directory not found at expected path: ${efiBootPath}. ISO creation might fail.`)
     }
 
-    this.debug.log('Constructing xorriso command...');
+    this.debug.log('Constructing xorriso command...')
 
     // Arguments inspired by the xorriso report for Fedora
     // Paths like `/images/eltorito.img` are relative to extractDir when running mkisofs
@@ -294,7 +293,7 @@ export class UnattendedRedHatManager extends UnattendedManagerBase {
       // EFI boot option
       '-eltorito-alt-boot',
       // Reference the EFI boot image via interval - use the one from report
-      '-e', `--interval:appended_partition_2_start_454779s_size_25864d:all::`, // Updated interval from Fedora report
+      '-e', '--interval:appended_partition_2_start_454779s_size_25864d:all::', // Updated interval from Fedora report
       '-no-emul-boot',
       // boot-load-size must match the size of the EFI image referenced by -e
       // The Fedora report showed 25864 * 512 bytes for EFI image size. boot-load-size is in 512-byte sectors.
@@ -303,31 +302,30 @@ export class UnattendedRedHatManager extends UnattendedManagerBase {
       '-o', newIsoPath,
       // Source directory
       extractDir
-    ];
+    ]
 
     // Execute the command
     try {
-      this.debug.log(`Creating Kickstart ISO with command: ${isoCreationCommandParts.join(' ')}`);
-      await this.executeCommand(isoCreationCommandParts);
-      this.debug.log(`Successfully created Kickstart ISO at ${newIsoPath}`);
+      this.debug.log(`Creating Kickstart ISO with command: ${isoCreationCommandParts.join(' ')}`)
+      await this.executeCommand(isoCreationCommandParts)
+      this.debug.log(`Successfully created Kickstart ISO at ${newIsoPath}`)
 
       // Clean up the extracted directory
-      this.debug.log(`Removing temporary directory: ${extractDir}`);
-      await this.executeCommand(['rm', '-rf', extractDir]);
-      this.debug.log(`Removed temporary directory ${extractDir}`);
-
+      this.debug.log(`Removing temporary directory: ${extractDir}`)
+      await this.executeCommand(['rm', '-rf', extractDir])
+      this.debug.log(`Removed temporary directory ${extractDir}`)
     } catch (error) {
-      this.debug.log('error', `Failed to create Kickstart ISO: ${error}`);
+      this.debug.log('error', `Failed to create Kickstart ISO: ${error}`)
       // Attempt cleanup even on failure
       try {
         if (fs.existsSync(extractDir)) {
-            this.debug.log(`Attempting cleanup of failed build directory: ${extractDir}`);
-            await this.executeCommand(['rm', '-rf', extractDir]);
+          this.debug.log(`Attempting cleanup of failed build directory: ${extractDir}`)
+          await this.executeCommand(['rm', '-rf', extractDir])
         }
       } catch (cleanupError) {
-        this.debug.log('error', `Failed to cleanup temporary directory ${extractDir} after error: ${cleanupError}`);
+        this.debug.log('error', `Failed to cleanup temporary directory ${extractDir} after error: ${cleanupError}`)
       }
-      throw error; // Re-throw the original error
+      throw error // Re-throw the original error
     }
   }
   // ... other methods ...

@@ -5,9 +5,9 @@ import {
   Ctx,
   Mutation,
   Query,
-  Resolver,
-} from "type-graphql"
-import { InfinibayContext } from "@utils/context"
+  Resolver
+} from 'type-graphql'
+import { InfinibayContext } from '@utils/context'
 import { UserInputError } from 'apollo-server-errors'
 import { MachineTemplateCategoryType, MachineTemplateCategoryInputType } from './type'
 
@@ -28,11 +28,11 @@ export class MachineTemplateCategoryResolver implements MachineTemplateCategoryR
    */
   @Query(() => [MachineTemplateCategoryType])
   @Authorized('ADMIN')
-  async machineTemplateCategories(
+  async machineTemplateCategories (
     @Ctx() ctx: InfinibayContext
   ): Promise<MachineTemplateCategoryType[]> {
     const { prisma } = ctx
-    const categories = await prisma.machineTemplateCategory.findMany();
+    const categories = await prisma.machineTemplateCategory.findMany()
 
     // Get counts for each category
     const categoriesWithCounts = await Promise.all(
@@ -40,7 +40,7 @@ export class MachineTemplateCategoryResolver implements MachineTemplateCategoryR
         // Count templates in this category
         const templates = await prisma.machineTemplate.findMany({
           where: { categoryId: category.id }
-        });
+        })
 
         // Count total machines using templates in this category
         const totalMachines = await prisma.machine.count({
@@ -49,17 +49,17 @@ export class MachineTemplateCategoryResolver implements MachineTemplateCategoryR
               in: templates.map(t => t.id)
             }
           }
-        });
+        })
 
         return {
           ...category,
           totalTemplates: templates.length,
           totalMachines
-        };
+        }
       })
-    );
+    )
 
-    return categoriesWithCounts;
+    return categoriesWithCounts
   }
 
   /**
@@ -71,21 +71,21 @@ export class MachineTemplateCategoryResolver implements MachineTemplateCategoryR
    */
   @Query(() => MachineTemplateCategoryType, { nullable: true })
   @Authorized('ADMIN')
-  async machineTemplateCategory(
+  async machineTemplateCategory (
     @Arg('id', { nullable: false }) id: string,
     @Ctx() ctx: InfinibayContext
   ): Promise<MachineTemplateCategoryType | null> {
     const { prisma } = ctx
     const category = await prisma.machineTemplateCategory.findUnique({
       where: { id }
-    });
+    })
 
-    if (!category) return null;
+    if (!category) return null
 
     // Count templates in this category
     const templates = await prisma.machineTemplate.findMany({
       where: { categoryId: id }
-    });
+    })
 
     // Count total machines using templates in this category
     const totalMachines = await prisma.machine.count({
@@ -94,13 +94,13 @@ export class MachineTemplateCategoryResolver implements MachineTemplateCategoryR
           in: templates.map(t => t.id)
         }
       }
-    });
+    })
 
     return {
       ...category,
       totalTemplates: templates.length,
       totalMachines
-    };
+    }
   }
 
   /**
@@ -113,7 +113,7 @@ export class MachineTemplateCategoryResolver implements MachineTemplateCategoryR
    */
   @Mutation(() => MachineTemplateCategoryType)
   @Authorized('ADMIN')
-  async createMachineTemplateCategory(
+  async createMachineTemplateCategory (
     @Arg('input', () => MachineTemplateCategoryInputType) input: MachineTemplateCategoryInputType,
     @Ctx() ctx: InfinibayContext
   ): Promise<MachineTemplateCategoryType> {
@@ -142,7 +142,7 @@ export class MachineTemplateCategoryResolver implements MachineTemplateCategoryR
    */
   @Mutation(() => MachineTemplateCategoryType)
   @Authorized('ADMIN')
-  async updateMachineTemplateCategory(
+  async updateMachineTemplateCategory (
     @Arg('id', { nullable: false }) id: string,
     @Arg('input', () => MachineTemplateCategoryInputType) input: MachineTemplateCategoryInputType,
     @Ctx() ctx: InfinibayContext
@@ -161,7 +161,7 @@ export class MachineTemplateCategoryResolver implements MachineTemplateCategoryR
     return this.updateCategoryInDb(prisma, id, input)
   }
 
-  private async checkCategoryExistence(name: string, prisma: PrismaClient, excludeId?: string) {
+  private async checkCategoryExistence (name: string, prisma: PrismaClient, excludeId?: string) {
     const existingCategory = await prisma.machineTemplateCategory.findFirst({
       where: {
         name,
@@ -173,11 +173,11 @@ export class MachineTemplateCategoryResolver implements MachineTemplateCategoryR
     }
   }
 
-  private async categoryExists(prisma: PrismaClient, id: string): Promise<boolean> {
+  private async categoryExists (prisma: PrismaClient, id: string): Promise<boolean> {
     return !!(await prisma.machineTemplateCategory.findUnique({ where: { id } }))
   }
 
-  private async updateCategoryInDb(prisma: PrismaClient, id: string, input: MachineTemplateCategoryInputType): Promise<MachineTemplateCategoryType> {
+  private async updateCategoryInDb (prisma: PrismaClient, id: string, input: MachineTemplateCategoryInputType): Promise<MachineTemplateCategoryType> {
     return prisma.machineTemplateCategory.update({
       where: { id },
       data: {

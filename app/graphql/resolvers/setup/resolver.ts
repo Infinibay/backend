@@ -4,12 +4,12 @@ import {
   Authorized,
   Mutation,
   Query,
-  Resolver,
-} from "type-graphql"
-import { Ctx } from 'type-graphql';
-import { InfinibayContext } from "@utils/context";
+  Resolver
+  , Ctx
+} from 'type-graphql'
+import { InfinibayContext } from '@utils/context'
 
-import { DyummyType } from "./type";
+import { DyummyType } from './type'
 
 export interface SetupResolverInterface {
   setupNode(ctx: InfinibayContext): Promise<DyummyType>
@@ -19,10 +19,9 @@ export interface SetupResolverInterface {
 export class SetupResolver implements SetupResolverInterface {
   @Mutation(() => DyummyType)
   @Authorized('SETUP_MODE')
-  async setupNode(
+  async setupNode (
     @Ctx() ctx: InfinibayContext
   ): Promise<DyummyType> {
-
     /*
     Step:
     1. Check if the node is already setup
@@ -38,20 +37,18 @@ export class SetupResolver implements SetupResolverInterface {
     10. TODO: Import the main admin user from /user.json.p7m
      */
 
-
     return {
-      value: 'dummy',
-    };
+      value: 'dummy'
+    }
   }
 
   @Query(() => DyummyType)
   @Authorized('SETUP_MODE')
-  async checkSetupStatus(
+  async checkSetupStatus (
     @Ctx() ctx: InfinibayContext
   ): Promise<DyummyType> {
     return {
-      value: 'dummy',
-    };
+      value: 'dummy'
+    }
   }
-
 }
