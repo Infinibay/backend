@@ -2,12 +2,13 @@ import { Resolver, Query, Mutation, Arg, Ctx, Authorized } from 'type-graphql'
 import { UserInputError } from 'apollo-server-errors'
 import { DepartmentType } from './type'
 import { InfinibayContext } from '../../../utils/context'
+import { getEventManager } from '../../../services/EventManager'
 
 @Resolver(DepartmentType)
 export class DepartmentResolver {
   @Query(() => [DepartmentType])
   @Authorized('USER')
-  async departments (
+  async departments(
     @Ctx() { prisma }: InfinibayContext
   ): Promise<DepartmentType[]> {
     const departments = await prisma.department.findMany({ include: { machines: true } })
@@ -29,7 +30,7 @@ export class DepartmentResolver {
 
   @Query(() => DepartmentType, { nullable: true })
   @Authorized('USER')
-  async department (
+  async department(
     @Arg('id') id: string,
     @Ctx() { prisma }: InfinibayContext
   ): Promise<DepartmentType | null> {
@@ -54,13 +55,24 @@ export class DepartmentResolver {
 
   @Mutation(() => DepartmentType)
   @Authorized('ADMIN')
-  async createDepartment (
+  async createDepartment(
     @Arg('name') name: string,
-    @Ctx() { prisma }: InfinibayContext
+    @Ctx() { prisma, user }: InfinibayContext
   ): Promise<DepartmentType> {
     const department = await prisma.department.create({
       data: { name }
     })
+
+    // Trigger real-time event for department creation
+    try {
+      const eventManager = getEventManager()
+      await eventManager.dispatchEvent('departments', 'create', { id: department.id }, user?.id)
+      console.log(`🎯 Triggered real-time event: departments:create for department ${department.id}`)
+    } catch (eventError) {
+      console.error('Failed to trigger real-time event:', eventError)
+      // Don't fail the main operation if event triggering fails
+    }
+
     return {
       id: department.id,
       name: department.name,
@@ -74,9 +86,9 @@ export class DepartmentResolver {
   // Destroy department
   @Mutation(() => DepartmentType)
   @Authorized('ADMIN')
-  async destroyDepartment (
+  async destroyDepartment(
     @Arg('id') id: string,
-    @Ctx() { prisma }: InfinibayContext
+    @Ctx() { prisma, user }: InfinibayContext
   ): Promise<DepartmentType> {
     // Check if deparment exist, if not, error, if yes, dlete it
     const department = await prisma.department.findUnique({
@@ -96,6 +108,17 @@ export class DepartmentResolver {
     const deletedDepartment = await prisma.department.delete({
       where: { id }
     })
+
+    // Trigger real-time event for department deletion
+    try {
+      const eventManager = getEventManager()
+      await eventManager.dispatchEvent('departments', 'delete', { id }, user?.id)
+      console.log(`🎯 Triggered real-time event: departments:delete for department ${id}`)
+    } catch (eventError) {
+      console.error('Failed to trigger real-time event:', eventError)
+      // Don't fail the main operation if event triggering fails
+    }
+
     return {
       id: deletedDepartment.id,
       name: deletedDepartment.name,
@@ -109,7 +132,7 @@ export class DepartmentResolver {
   // find deparment by name
   @Query(() => DepartmentType, { nullable: true })
   @Authorized('USER')
-  async findDepartmentByName (
+  async findDepartmentByName(
     @Arg('name') name: string,
     @Ctx() { prisma }: InfinibayContext
   ): Promise<DepartmentType | null> {

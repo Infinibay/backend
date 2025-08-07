@@ -14,6 +14,7 @@ import { UserInputError, AuthenticationError } from 'apollo-server-errors'
 import { UserType, UserToken, UserOrderByInputType, CreateUserInputType, UpdateUserInputType } from './type'
 import { PaginationInputType } from '@utils/pagination'
 import { InfinibayContext } from '@utils/context'
+import { getEventManager } from '../../../services/EventManager'
 
 // Helper function to generate a unique namespace for a user
 function generateUserNamespace(userId: string): string {
@@ -196,6 +197,16 @@ export class UserResolver implements UserResolverInterface {
       }
     })
 
+    // Trigger real-time event for user creation
+    try {
+      const eventManager = getEventManager()
+      await eventManager.dispatchEvent('users', 'create', { id: user.id }, user.id)
+      console.log(`🎯 Triggered real-time event: users:create for user ${user.id}`)
+    } catch (eventError) {
+      console.error('Failed to trigger real-time event:', eventError)
+      // Don't fail the main operation if event triggering fails
+    }
+
     return Promise.resolve(user as unknown as UserType)
   }
 
@@ -237,6 +248,17 @@ export class UserResolver implements UserResolverInterface {
         role: input.role || user.role
       }
     })
+
+    // Trigger real-time event for user update
+    try {
+      const eventManager = getEventManager()
+      await eventManager.dispatchEvent('users', 'update', { id }, updatedUser.id)
+      console.log(`🎯 Triggered real-time event: users:update for user ${id}`)
+    } catch (eventError) {
+      console.error('Failed to trigger real-time event:', eventError)
+      // Don't fail the main operation if event triggering fails
+    }
+
     return updatedUser as unknown as UserType
   }
 }

@@ -149,7 +149,19 @@ export class MachineMutations {
     @Ctx() { prisma, user }: InfinibayContext
   ): Promise<Machine> {
     const lifecycleService = new MachineLifecycleService(prisma, user)
-    return await lifecycleService.createMachine(input)
+    const newMachine = await lifecycleService.createMachine(input)
+
+    // Trigger real-time event for VM creation
+    try {
+      const eventManager = getEventManager()
+      await eventManager.dispatchEvent('vms', 'create', { id: newMachine.id }, user?.id)
+      console.log(`🎯 Triggered real-time event: vms:create for machine ${newMachine.id}`)
+    } catch (eventError) {
+      console.error('Failed to trigger real-time event:', eventError)
+      // Don't fail the main operation if event triggering fails
+    }
+
+    return newMachine
   }
 
   @Mutation(() => Machine)
@@ -160,6 +172,17 @@ export class MachineMutations {
   ): Promise<Machine> {
     const lifecycleService = new MachineLifecycleService(prisma, user)
     const updatedMachine = await lifecycleService.updateMachineHardware(input)
+
+    // Trigger real-time event for VM hardware update
+    try {
+      const eventManager = getEventManager()
+      await eventManager.dispatchEvent('vms', 'update', { id: input.id }, user?.id)
+      console.log(`🎯 Triggered real-time event: vms:update for machine ${input.id}`)
+    } catch (eventError) {
+      console.error('Failed to trigger real-time event:', eventError)
+      // Don't fail the main operation if event triggering fails
+    }
+
     return transformMachine(updatedMachine, prisma)
   }
 
@@ -205,7 +228,21 @@ export class MachineMutations {
     @Ctx() { prisma, user }: InfinibayContext
   ): Promise<SuccessType> {
     const lifecycleService = new MachineLifecycleService(prisma, user)
-    return await lifecycleService.destroyMachine(id)
+    const result = await lifecycleService.destroyMachine(id)
+
+    // Trigger real-time event for VM deletion if successful
+    if (result.success) {
+      try {
+        const eventManager = getEventManager()
+        await eventManager.dispatchEvent('vms', 'delete', { id }, user?.id)
+        console.log(`🎯 Triggered real-time event: vms:delete for machine ${id}`)
+      } catch (eventError) {
+        console.error('Failed to trigger real-time event:', eventError)
+        // Don't fail the main operation if event triggering fails
+      }
+    }
+
+    return result
   }
 
   /**
@@ -403,6 +440,16 @@ export class MachineMutations {
         departmentId
       }
     })
+
+    // Trigger real-time event for VM department move
+    try {
+      const eventManager = getEventManager()
+      await eventManager.dispatchEvent('vms', 'update', { id }, user?.id)
+      console.log(`🎯 Triggered real-time event: vms:update for machine move ${id}`)
+    } catch (eventError) {
+      console.error('Failed to trigger real-time event:', eventError)
+      // Don't fail the main operation if event triggering fails
+    }
 
     return transformMachine(updatedMachine, prisma)
   }
