@@ -7,8 +7,8 @@ const debug = new Debugger('auth')
 const prisma = new PrismaClient()
 
 interface DecodedToken {
-    userId: string;
-    userRole: string;
+  userId: string;
+  userRole: string;
 }
 
 export const authChecker: AuthChecker<{ req: any; user: User; setupMode: boolean }> = async (
@@ -28,7 +28,20 @@ export const authChecker: AuthChecker<{ req: any; user: User; setupMode: boolean
     if (decoded.userId) {
       debug.log('Token verified, fetching user...')
       const user = await prisma.user.findUnique({
-        where: { id: decoded.userId }
+        where: { id: decoded.userId },
+        select: {
+          id: true,
+          email: true,
+          password: true,
+          deleted: true,
+          token: true,
+          firstName: true,
+          lastName: true,
+          userImage: true,
+          role: true,
+          namespace: true,
+          createdAt: true
+        }
       })
 
       if (user) {
@@ -44,7 +57,7 @@ export const authChecker: AuthChecker<{ req: any; user: User; setupMode: boolean
   }
 }
 
-function checkAccess (decoded: DecodedToken, roles: string[], context: { setupMode: boolean }): boolean {
+function checkAccess(decoded: DecodedToken, roles: string[], context: { setupMode: boolean }): boolean {
   if (roles.includes('ADMIN')) {
     return checkAdminAccess(decoded)
   }
@@ -61,7 +74,7 @@ function checkAccess (decoded: DecodedToken, roles: string[], context: { setupMo
   return false
 }
 
-function checkAdminAccess (decoded: DecodedToken): boolean {
+function checkAdminAccess(decoded: DecodedToken): boolean {
   if (decoded.userRole === 'ADMIN') {
     debug.log('Access granted for ADMIN.')
     return true
@@ -70,7 +83,7 @@ function checkAdminAccess (decoded: DecodedToken): boolean {
   return false
 }
 
-function checkUserAccess (decoded: DecodedToken): boolean {
+function checkUserAccess(decoded: DecodedToken): boolean {
   if (decoded.userId) {
     debug.log('Access granted for USER.')
     return true
@@ -79,7 +92,7 @@ function checkUserAccess (decoded: DecodedToken): boolean {
   return false
 }
 
-function checkSetupModeAccess (context: { setupMode: boolean }): boolean {
+function checkSetupModeAccess(context: { setupMode: boolean }): boolean {
   if (context.setupMode) {
     debug.log('Access granted for SETUP_MODE.')
     return true

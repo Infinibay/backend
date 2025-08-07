@@ -628,6 +628,7 @@ type UserType {
   firstName: String!
   id: ID!
   lastName: String!
+  namespace: String
   role: String!
 }
 

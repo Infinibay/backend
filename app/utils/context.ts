@@ -1,5 +1,6 @@
 import { Request, Response } from 'express'
 import { PrismaClient, User } from '@prisma/client'
+import { EventManager } from '../services/EventManager'
 
 export interface InfinibayContext {
   req: Request
@@ -8,4 +9,5 @@ export interface InfinibayContext {
   user: User | null
   prisma: PrismaClient
   setupMode: boolean
+  eventManager?: EventManager
 }

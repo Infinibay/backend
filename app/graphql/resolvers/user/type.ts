@@ -10,41 +10,44 @@ import { PaginationInputType, OrderByDirection } from '@utils/pagination'
 
 @ObjectType({ description: 'User model' })
 export class UserType {
-    @Field(type => ID, { nullable: false })
-      id: string = ''
+  @Field(type => ID, { nullable: false })
+  id: string = ''
 
-    // Add the rest of the fields, like firstName, lastName, role, etc
-    @Field({ nullable: false })
-      firstName: string = ''
+  // Add the rest of the fields, like firstName, lastName, role, etc
+  @Field({ nullable: false })
+  firstName: string = ''
 
-    @Field({ nullable: false })
-      lastName: string = ''
+  @Field({ nullable: false })
+  lastName: string = ''
 
-    @Field({ nullable: false })
-      role: string = ''
+  @Field({ nullable: false })
+  role: string = ''
 
-    @Field({ nullable: false })
-      email: string = ''
+  @Field({ nullable: false })
+  email: string = ''
 
-    @Field({ nullable: false })
-      createdAt: Date = new Date()
+  @Field(() => String, { nullable: true })
+  namespace: string | null = null
+
+  @Field({ nullable: false })
+  createdAt: Date = new Date()
 }
 
 @ObjectType({ description: 'Token used to log in' })
 export class UserToken {
-    @Field({ nullable: false })
-      token: string = ''
+  @Field({ nullable: false })
+  token: string = ''
 }
 
 // UserOrderByField enum
 export enum UserOrderByField {
-    ID = 'id',
-    EMAIL = 'email',
-    FIRST_NAME = 'firstName',
-    LAST_NAME = 'lastName',
-    ROLE = 'role',
-    CREATED_AT = 'createdAt',
-    UPDATED_AT = 'updatedAt'
+  ID = 'id',
+  EMAIL = 'email',
+  FIRST_NAME = 'firstName',
+  LAST_NAME = 'lastName',
+  ROLE = 'role',
+  CREATED_AT = 'createdAt',
+  UPDATED_AT = 'updatedAt'
 }
 registerEnumType(UserOrderByField, {
   name: 'UserOrderByField',
@@ -54,16 +57,16 @@ registerEnumType(UserOrderByField, {
 // UserOrderBy
 @InputType()
 export class UserOrderByInputType {
-    @Field(() => UserOrderByField, { nullable: true })
-      fieldName: UserOrderByField | undefined
+  @Field(() => UserOrderByField, { nullable: true })
+  fieldName: UserOrderByField | undefined
 
-    @Field(() => OrderByDirection, { nullable: true })
-      direction: OrderByDirection | undefined
+  @Field(() => OrderByDirection, { nullable: true })
+  direction: OrderByDirection | undefined
 }
 
 export enum UserRole {
-    ADMIN = 'admin',
-    USER = 'user'
+  ADMIN = 'admin',
+  USER = 'user'
 }
 
 registerEnumType(UserRole, {
@@ -73,39 +76,39 @@ registerEnumType(UserRole, {
 
 @InputType()
 export class CreateUserInputType {
-    @Field(() => String)
-      firstName: string = ''
+  @Field(() => String)
+  firstName: string = ''
 
-    @Field(() => String)
-      lastName: string = ''
+  @Field(() => String)
+  lastName: string = ''
 
-    @Field(() => String)
-      email: string = ''
+  @Field(() => String)
+  email: string = ''
 
-    @Field(() => String)
-      password: string = ''
+  @Field(() => String)
+  password: string = ''
 
-    @Field(() => String)
-      passwordConfirmation: string = ''
+  @Field(() => String)
+  passwordConfirmation: string = ''
 
-    @Field(() => UserRole)
-      role: UserRole = UserRole.USER
+  @Field(() => UserRole)
+  role: UserRole = UserRole.USER
 }
 
 @InputType()
 export class UpdateUserInputType {
-    @Field(() => String, { nullable: true })
-      firstName: string | undefined = ''
+  @Field(() => String, { nullable: true })
+  firstName: string | undefined = ''
 
-    @Field(() => String, { nullable: true })
-      lastName: string | undefined = ''
+  @Field(() => String, { nullable: true })
+  lastName: string | undefined = ''
 
-    @Field(() => String, { nullable: true })
-      password: string | undefined = ''
+  @Field(() => String, { nullable: true })
+  password: string | undefined = ''
 
-    @Field(() => String, { nullable: true })
-      passwordConfirmation: string | undefined = ''
+  @Field(() => String, { nullable: true })
+  passwordConfirmation: string | undefined = ''
 
-    @Field(() => UserRole, { nullable: true })
-      role: UserRole | undefined = UserRole.USER
+  @Field(() => UserRole, { nullable: true })
+  role: UserRole | undefined = UserRole.USER
 }
