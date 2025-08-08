@@ -361,7 +361,7 @@ export class MachineMutations {
           }
           break
         case 'shutdown':
-          result = await domain.shutdown() || 0
+          result = await this.performShutdownWithTimeout(domain, machine.internalName)
           break
         case 'suspend':
           result = await domain.suspend() || 0
@@ -405,6 +405,93 @@ export class MachineMutations {
       // Ensure the libvirt connection is closed, even if an error occurred
       if (libvirtConnection) {
         libvirtConnection.close()
+      }
+    }
+  }
+
+  /**
+   * Performs a shutdown operation with timeout and fallback mechanisms.
+   *
+   * @param domain - The libvirt domain to shutdown
+   * @param machineName - The name of the machine for logging
+   * @returns Promise<number> - 0 on success, non-zero on failure
+   */
+  private async performShutdownWithTimeout(domain: VirtualMachine, machineName: string): Promise<number> {
+    const SHUTDOWN_TIMEOUT = 30000 // 30 seconds timeout
+    const FORCE_DESTROY_TIMEOUT = 10000 // Additional 10 seconds for force destroy
+
+    this.debug.log(`Starting graceful shutdown for machine: ${machineName}`)
+
+    try {
+      // Try graceful shutdown with timeout
+      const shutdownPromise = new Promise<number>((resolve, reject) => {
+        // Use setImmediate to ensure the operation doesn't block the event loop
+        setImmediate(() => {
+          try {
+            this.debug.log(`Calling domain.shutdown() for machine: ${machineName}`)
+            const result = domain.shutdown()
+            this.debug.log(`domain.shutdown() returned: ${result} for machine: ${machineName}`)
+
+            if (result !== null && result !== undefined) {
+              resolve(0) // Success
+            } else {
+              reject(new UserInputError('Shutdown returned null/undefined'))
+            }
+          } catch (err) {
+            this.debug.log(`domain.shutdown() threw error for machine ${machineName}: ${err}`)
+            reject(err)
+          }
+        })
+      })
+
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => {
+          this.debug.log(`Shutdown timeout reached for machine: ${machineName}`)
+          reject(new UserInputError('Shutdown timeout'))
+        }, SHUTDOWN_TIMEOUT)
+      })
+
+      const result = await Promise.race([shutdownPromise, timeoutPromise])
+      this.debug.log(`Graceful shutdown successful for machine: ${machineName}`)
+      return result
+    } catch (error) {
+      this.debug.log(`Graceful shutdown failed for machine ${machineName}: ${error}`)
+
+      // If graceful shutdown fails or times out, try force destroy
+      try {
+        this.debug.log(`Attempting force destroy for machine: ${machineName}`)
+        const destroyPromise = new Promise<number>((resolve, reject) => {
+          setImmediate(() => {
+            try {
+              this.debug.log(`Calling domain.destroy() for machine: ${machineName}`)
+              const result = domain.destroy()
+              this.debug.log(`domain.destroy() returned: ${result} for machine: ${machineName}`)
+
+              if (result !== null && result !== undefined) {
+                resolve(0) // Success
+              } else {
+                reject(new UserInputError('Force destroy returned null/undefined'))
+              }
+            } catch (err) {
+              this.debug.log(`domain.destroy() threw error for machine ${machineName}: ${err}`)
+              reject(err)
+            }
+          })
+        })
+
+        const forceTimeoutPromise = new Promise<never>((_, reject) => {
+          setTimeout(() => {
+            this.debug.log(`Force destroy timeout reached for machine: ${machineName}`)
+            reject(new UserInputError('Force destroy timeout'))
+          }, FORCE_DESTROY_TIMEOUT)
+        })
+
+        const destroyResult = await Promise.race([destroyPromise, forceTimeoutPromise])
+        this.debug.log(`Force destroy successful for machine: ${machineName}`)
+        return destroyResult
+      } catch (destroyError) {
+        this.debug.log(`Force destroy also failed for machine ${machineName}: ${destroyError}`)
+        throw new UserInputError(`Failed to shutdown machine ${machineName}: graceful shutdown and force destroy both failed`)
       }
     }
   }
