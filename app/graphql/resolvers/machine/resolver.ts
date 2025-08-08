@@ -25,10 +25,11 @@ async function transformMachine(prismaMachine: any, prisma: any): Promise<Machin
   const user = prismaMachine.userId ? await prisma.user.findUnique({ where: { id: prismaMachine.userId } }) : null
   const template = prismaMachine.templateId ? await prisma.machineTemplate.findUnique({ where: { id: prismaMachine.templateId } }) : null
   const department = prismaMachine.departmentId ? await prisma.department.findUnique({ where: { id: prismaMachine.departmentId } }) : null
-  const graphicHost = prismaMachine.configuration.graphicHost || process.env.GRAPHIC_HOST || 'localhost'
+  const graphicHost = (prismaMachine.configuration?.graphicHost) || process.env.GRAPHIC_HOST || 'localhost'
   let graphicPort
   try {
-    graphicPort = await new GraphicPortService().getGraphicPort(prismaMachine.internalName, prismaMachine.configuration.graphicProtocol)
+    const protocol = prismaMachine.configuration?.graphicProtocol || 'vnc'
+    graphicPort = await new GraphicPortService().getGraphicPort(prismaMachine.internalName, protocol)
   } catch (e) {
     console.log(e)
   }
@@ -438,13 +439,15 @@ export class MachineMutations {
       where: { id },
       data: {
         departmentId
-      }
+      },
+      include: { configuration: true, department: true, template: true, user: true }
     })
 
     // Trigger real-time event for VM department move
     try {
       const eventManager = getEventManager()
-      await eventManager.dispatchEvent('vms', 'update', { id }, user?.id)
+      // Send the full updated machine so clients receive fresh department info without refetch
+      await eventManager.dispatchEvent('vms', 'update', updatedMachine, user?.id)
       console.log(`🎯 Triggered real-time event: vms:update for machine move ${id}`)
     } catch (eventError) {
       console.error('Failed to trigger real-time event:', eventError)
