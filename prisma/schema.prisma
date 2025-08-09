@@ -68,6 +68,13 @@ model Machine {
   ports              VmPort[]
   nwFilters          VMNWFilter[]
   serviceConfigs     VMServiceConfig[]
+
+  // Infiniservice Relations
+  systemMetrics      SystemMetrics[]
+  processSnapshots   ProcessSnapshot[]
+  applicationUsage   ApplicationUsage[]
+  portUsage          PortUsage[]
+  windowsServices    WindowsService[]
 }
 
 model MachineConfiguration {
@@ -296,4 +303,177 @@ model GlobalServiceConfig {
   provideEnabled Boolean    @default(false)  // Global default for providing this service
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
+}
+
+// ============================================================================
+// INFINISERVICE DATA COLLECTION MODELS
+// ============================================================================
+
+model SystemMetrics {
+  id          String   @id @default(uuid())
+  machineId   String
+  machine     Machine  @relation(fields: [machineId], references: [id], onDelete: Cascade)
+
+  // CPU Metrics
+  cpuUsagePercent     Float
+  cpuCoresUsage       Json    // Array of per-core usage percentages
+  cpuTemperature      Float?  // CPU temperature if available
+
+  // Memory Metrics
+  totalMemoryKB       BigInt
+  usedMemoryKB        BigInt
+  availableMemoryKB   BigInt
+  swapTotalKB         BigInt?
+  swapUsedKB          BigInt?
+
+  // Disk Metrics
+  diskUsageStats      Json    // Array of {mountPoint, totalGB, usedGB, availableGB}
+  diskIOStats         Json    // {readBytesPerSec, writeBytesPerSec, readOpsPerSec, writeOpsPerSec}
+
+  // Network Metrics (summary only)
+  networkStats        Json    // Array of {interface, bytesReceived, bytesSent, packetsReceived, packetsSent}
+
+  // System Information
+  uptime              BigInt  // System uptime in seconds
+  loadAverage         Json?   // {load1min, load5min, load15min} - Linux only
+
+  timestamp           DateTime @default(now())
+
+  @@index([machineId, timestamp])
+}
+
+model ProcessSnapshot {
+  id          String   @id @default(uuid())
+  machineId   String
+  machine     Machine  @relation(fields: [machineId], references: [id], onDelete: Cascade)
+
+  processId   Int      // OS process ID
+  parentPid   Int?     // Parent process ID
+  name        String   // Process name
+  executablePath String? // Full path to executable
+  commandLine    String? // Command line arguments (truncated if too long)
+
+  // Resource Usage
+  cpuUsagePercent Float   // CPU usage percentage
+  memoryUsageKB   BigInt  // Memory usage in KB
+  diskReadBytes   BigInt? // Disk read bytes (if available)
+  diskWriteBytes  BigInt? // Disk write bytes (if available)
+
+  // Process State
+  status          String   // running, sleeping, zombie, stopped, etc.
+  startTime       DateTime? // Process start time
+
+  timestamp       DateTime @default(now())
+
+  @@index([machineId, timestamp])
+  @@index([machineId, processId, timestamp])
+}
+
+model ApplicationUsage {
+  id              String   @id @default(uuid())
+  machineId       String
+  machine         Machine  @relation(fields: [machineId], references: [id], onDelete: Cascade)
+
+  executablePath  String   // Full path to the application executable
+  applicationName String   // Friendly application name (extracted from metadata)
+  version         String?  // Application version
+  description     String?  // Application description
+  publisher       String?  // Application publisher/company
+
+  // Usage Statistics
+  lastAccessTime     DateTime? // Last time application was accessed
+  lastModifiedTime   DateTime? // Last time executable was modified
+  accessCount        Int      @default(0) // Number of times accessed
+  totalUsageMinutes  Int      @default(0) // Total usage time in minutes
+
+  // Application Metadata
+  iconData           Bytes?   // Processed icon data (PNG format, 64x64)
+  iconFormat         String?  // Original icon format (ico, png, etc.)
+  fileSize           BigInt?  // Executable file size in bytes
+
+  // Tracking Information
+  firstSeen          DateTime @default(now())
+  lastSeen           DateTime @default(now())
+  isActive           Boolean  @default(true) // Still present on system
+
+  @@unique([machineId, executablePath])
+  @@index([machineId, lastAccessTime])
+  @@index([machineId, isActive])
+}
+
+model PortUsage {
+  id          String   @id @default(uuid())
+  machineId   String
+  machine     Machine  @relation(fields: [machineId], references: [id], onDelete: Cascade)
+
+  port            Int
+  protocol        String   // TCP, UDP
+  state           String   // LISTEN, ESTABLISHED, CLOSE_WAIT, etc.
+
+  // Process Association
+  processId       Int?
+  processName     String?
+  executablePath  String?
+
+  // Usage Tracking
+  isListening     Boolean  @default(false) // Is this port in LISTEN state
+  connectionCount Int      @default(0)     // Number of active connections
+  lastActivity    DateTime @default(now()) // Last time port was active
+
+  timestamp       DateTime @default(now())
+
+  @@index([machineId, port, protocol])
+  @@index([machineId, timestamp])
+  @@index([machineId, isListening])
+}
+
+model WindowsService {
+  id              String   @id @default(uuid())
+  machineId       String
+  machine         Machine  @relation(fields: [machineId], references: [id], onDelete: Cascade)
+
+  serviceName     String   // Internal service name (e.g., "Spooler")
+  displayName     String   // User-friendly display name (e.g., "Print Spooler")
+  description     String?  // Service description
+
+  // Service Configuration
+  startType       String   // automatic, manual, disabled, delayed-auto
+  serviceType     String   // win32, driver, kernel-driver, etc.
+  executablePath  String?  // Path to service executable
+  dependencies    Json?    // Array of service dependencies
+
+  // Current State
+  currentState    String   // running, stopped, paused, start-pending, etc.
+  processId       Int?     // Process ID if running
+
+  // Usage Tracking
+  lastStateChange DateTime? // Last time service state changed
+  stateChangeCount Int     @default(0) // Number of state changes
+  isDefaultService Boolean @default(false) // Is this a default Windows service
+  usageScore      Float?   @default(0)     // Calculated usage score (0-100)
+
+  // Timestamps
+  firstSeen       DateTime @default(now())
+  lastSeen        DateTime @default(now())
+
+  // Relations
+  stateHistory    ServiceStateHistory[]
+
+  @@unique([machineId, serviceName])
+  @@index([machineId, currentState])
+  @@index([machineId, isDefaultService])
+}
+
+model ServiceStateHistory {
+  id          String   @id @default(uuid())
+  serviceId   String
+  service     WindowsService @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  fromState   String?  // Previous state (null for first record)
+  toState     String   // New state
+  reason      String?  // Reason for change (manual, automatic, dependency, error)
+
+  timestamp   DateTime @default(now())
+
+  @@index([serviceId, timestamp])
 }

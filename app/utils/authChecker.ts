@@ -39,7 +39,6 @@ export const authChecker: AuthChecker<{ req: any; user: User; setupMode: boolean
           lastName: true,
           userImage: true,
           role: true,
-          namespace: true,
           createdAt: true
         }
       })
