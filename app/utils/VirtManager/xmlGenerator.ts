@@ -410,7 +410,14 @@ export class XMLGenerator {
   }
 
   addNetworkInterface (network: string, model: string) {
-    const networkInterface = {
+    // Detect if we're using a bridge (br0, virbr0, etc.) or a libvirt network
+    const isBridge = network.startsWith('br') || network.startsWith('virbr')
+    
+    const networkInterface = isBridge ? {
+      $: { type: 'bridge' },
+      source: [{ $: { bridge: network } }],
+      model: [{ $: { type: model } }]
+    } : {
       $: { type: 'network' },
       source: [{ $: { network } }],
       model: [{ $: { type: model } }]
@@ -428,7 +435,8 @@ export class XMLGenerator {
       throw new Error('No network interface found')
     }
     this.xml.domain.devices[0].interface.forEach((iface: any) => {
-      if (iface.$.type === 'network') {
+      // Support both network and bridge interface types
+      if (iface.$.type === 'network' || iface.$.type === 'bridge') {
         iface.filterref = [{ $: { filter: filterName } }]
       }
     })
@@ -737,6 +745,82 @@ export class XMLGenerator {
       ]
     }
     this.xml.domain.devices[0].channel.push(channelDevice)
+  }
+
+  /**
+   * Add InfiniService virtio-serial channel for bidirectional communication
+   * between the VM and host for metrics collection and management.
+   * Creates a Unix socket at /opt/infinibay/sockets/<vm_id>.socket
+   */
+  addInfiniServiceChannel (): void {
+    // Ensure the channel array exists
+    this.xml.domain.devices[0].channel = this.xml.domain.devices[0].channel || []
+    
+    // Construct the socket path using the VM's ID
+    const baseDir = process.env.INFINIBAY_BASE_DIR ?? '/opt/infinibay'
+    const socketsDir = path.join(baseDir, 'sockets')
+    const socketPath = path.join(socketsDir, `${this.id}.socket`)
+    
+    // Ensure the sockets directory exists
+    try {
+      if (!fs.existsSync(socketsDir)) {
+        fs.mkdirSync(socketsDir, { recursive: true, mode: 0o755 })
+      }
+    } catch (error) {
+      console.error(`Failed to create sockets directory at ${socketsDir}:`, error)
+    }
+    
+    // Get the next available port number for virtio-serial
+    // Port 1 is typically used by guest agent, so we start from 2
+    const existingChannels = this.xml.domain.devices[0].channel || []
+    let nextPort = 2
+    
+    // Find the highest port number in use
+    existingChannels.forEach((channel: any) => {
+      if (channel.address && channel.address[0] && channel.address[0].$ && channel.address[0].$.port) {
+        const port = parseInt(channel.address[0].$.port, 10)
+        if (!isNaN(port) && port >= nextPort) {
+          nextPort = port + 1
+        }
+      }
+    })
+    
+    // Add InfiniService virtio-serial channel
+    const infiniServiceChannel = {
+      $: {
+        type: 'unix'
+      },
+      source: [
+        {
+          $: {
+            mode: 'bind',
+            path: socketPath
+          }
+        }
+      ],
+      target: [
+        {
+          $: {
+            type: 'virtio',
+            name: 'org.infinibay.ping'
+          }
+        }
+      ],
+      address: [
+        {
+          $: {
+            type: 'virtio-serial',
+            controller: '0',
+            bus: '0',
+            port: String(nextPort)
+          }
+        }
+      ]
+    }
+    
+    this.xml.domain.devices[0].channel.push(infiniServiceChannel)
+    
+    console.log(`InfiniService channel configured with socket at ${socketPath} on port ${nextPort}`)
   }
 
   /*

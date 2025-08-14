@@ -196,6 +196,17 @@ export class SocketService {
     console.log(`👑 Sent admin event ${eventName}`)
   }
 
+  // Emit event to a specific room
+  emitToRoom(room: string, eventName: string, payload: any): void {
+    if (!this.io) {
+      console.warn(`⚠️ Cannot emit to room ${room}: Socket.io not initialized`)
+      return
+    }
+
+    this.io.to(room).emit(eventName, payload)
+    console.log(`📡 Sent event ${eventName} to room ${room}`)
+  }
+
   // Get connection statistics
   getStats(): { connectedUsers: number; userIds: string[] } {
     return {

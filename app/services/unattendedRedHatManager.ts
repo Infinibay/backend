@@ -23,9 +23,10 @@ export class UnattendedRedHatManager extends UnattendedManagerBase {
   private username: string
   private password: string
   private applications: Application[]
+  private vmId: string = ''
   // protected debug: Debugger = new Debugger('unattended-redhat-manager');
 
-  constructor (username: string, password: string, applications: Application[]) {
+  constructor (username: string, password: string, applications: Application[], vmId?: string) {
     super()
     this.debug.log('Initializing UnattendedRedHatManager')
     if (!username || !password) {
@@ -36,6 +37,7 @@ export class UnattendedRedHatManager extends UnattendedManagerBase {
     this.username = username
     this.password = password
     this.applications = applications
+    this.vmId = vmId || ''
     this.configFileName = 'ks.cfg'
     this.debug.log('UnattendedRedHatManager initialized')
   }
@@ -43,7 +45,8 @@ export class UnattendedRedHatManager extends UnattendedManagerBase {
   async generateConfig (): Promise<string> {
     this.debug.log('Generating RedHat kickstart configuration')
     const applicationsPostCommands = await this.generateApplicationsConfig()
-    this.debug.log('Applications post commands generated')
+    const infiniServicePostCommands = this.generateInfiniServiceConfig()
+    this.debug.log('Applications and InfiniService post commands generated')
 
     // Initialize Eta template engine
     const eta = new Eta({
@@ -59,7 +62,8 @@ export class UnattendedRedHatManager extends UnattendedManagerBase {
       const renderedConfig = eta.renderString(templateContent, {
         username: this.username,
         password: this.password,
-        applicationsPostCommands
+        applicationsPostCommands,
+        infiniServicePostCommands
       })
 
       this.debug.log('RedHat kickstart configuration generated successfully')
@@ -108,6 +112,64 @@ export class UnattendedRedHatManager extends UnattendedManagerBase {
 
     postInstallScript += '%end\n'
 
+    return postInstallScript
+  }
+
+  /**
+   * Generates post-install commands to install InfiniService on RedHat/Fedora.
+   * Downloads the binary and installation script from the backend server.
+   * 
+   * @returns Post-install script for InfiniService installation
+   */
+  private generateInfiniServiceConfig (): string {
+    const backendHost = process.env.APP_HOST || 'localhost'
+    const backendPort = process.env.PORT || '4000'
+    const baseUrl = `http://${backendHost}:${backendPort}`
+    
+    let postInstallScript = '%post --log=/root/infiniservice-install.log\n'
+    postInstallScript += 'echo "Starting InfiniService installation..."\n'
+    postInstallScript += '\n'
+    postInstallScript += '# Create temp directory for InfiniService\n'
+    postInstallScript += 'mkdir -p /tmp/infiniservice\n'
+    postInstallScript += 'cd /tmp/infiniservice\n'
+    postInstallScript += '\n'
+    postInstallScript += '# Download InfiniService binary\n'
+    postInstallScript += 'echo "Downloading InfiniService binary..."\n'
+    postInstallScript += `if curl -f -o infiniservice "${baseUrl}/infiniservice/linux/binary"; then\n`
+    postInstallScript += '    echo "Binary downloaded successfully"\n'
+    postInstallScript += 'else\n'
+    postInstallScript += '    echo "Failed to download InfiniService binary"\n'
+    postInstallScript += '    exit 1\n'
+    postInstallScript += 'fi\n'
+    postInstallScript += '\n'
+    postInstallScript += '# Download installation script\n'
+    postInstallScript += 'echo "Downloading InfiniService installation script..."\n'
+    postInstallScript += `if curl -f -o install-linux.sh "${baseUrl}/infiniservice/linux/script"; then\n`
+    postInstallScript += '    echo "Script downloaded successfully"\n'
+    postInstallScript += 'else\n'
+    postInstallScript += '    echo "Failed to download InfiniService installation script"\n'
+    postInstallScript += '    exit 1\n'
+    postInstallScript += 'fi\n'
+    postInstallScript += '\n'
+    postInstallScript += '# Make files executable\n'
+    postInstallScript += 'chmod +x infiniservice install-linux.sh\n'
+    postInstallScript += '\n'
+    postInstallScript += '# Run installation script with VM ID\n'
+    postInstallScript += `echo "Installing InfiniService with VM ID: ${this.vmId}"\n`
+    postInstallScript += `if ./install-linux.sh normal "${this.vmId}"; then\n`
+    postInstallScript += '    echo "InfiniService installed successfully"\n'
+    postInstallScript += 'else\n'
+    postInstallScript += '    echo "InfiniService installation failed"\n'
+    postInstallScript += '    # Continue with installation even if InfiniService fails\n'
+    postInstallScript += 'fi\n'
+    postInstallScript += '\n'
+    postInstallScript += '# Clean up temp files\n'
+    postInstallScript += 'cd /\n'
+    postInstallScript += 'rm -rf /tmp/infiniservice\n'
+    postInstallScript += '\n'
+    postInstallScript += 'echo "InfiniService installation process completed"\n'
+    postInstallScript += '%end\n'
+    
     return postInstallScript
   }
 

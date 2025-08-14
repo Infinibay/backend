@@ -1,10 +1,10 @@
 import { AuthChecker } from 'type-graphql'
-import { PrismaClient, User } from '@prisma/client'
+import { User } from '@prisma/client'
 import jwt from 'jsonwebtoken'
 import { Debugger } from './debug'
+import prisma from './database'
 
 const debug = new Debugger('auth')
-const prisma = new PrismaClient()
 
 interface DecodedToken {
   userId: string;
@@ -15,6 +15,17 @@ export const authChecker: AuthChecker<{ req: any; user: User; setupMode: boolean
   { context },
   roles
 ) => {
+  // Check if user is already populated in context (from index.ts)
+  if (context.user) {
+    debug.log('User already in context, checking access...')
+    const decoded: DecodedToken = {
+      userId: context.user.id,
+      userRole: context.user.role
+    }
+    return checkAccess(decoded, roles, context)
+  }
+
+  // Fallback: Try to verify token if user not in context
   const token = context.req.headers.authorization
 
   if (!token) {
@@ -25,7 +36,8 @@ export const authChecker: AuthChecker<{ req: any; user: User; setupMode: boolean
   try {
     const decoded = jwt.verify(token, process.env.TOKENKEY || 'secret') as DecodedToken
 
-    if (decoded.userId) {
+    // If we have a userId but no user in context, try to fetch it
+    if (decoded.userId && !context.user) {
       debug.log('Token verified, fetching user...')
       const user = await prisma.user.findUnique({
         where: { id: decoded.userId },

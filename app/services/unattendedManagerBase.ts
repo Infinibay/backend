@@ -37,7 +37,10 @@ export class UnattendedManagerBase {
       const configContent = await this.generateConfig()
       this.debug.log(configContent)
       this.debug.log('Validating output path')
-      const outputPath = this.validatePath(path.join(process.env.INFINIBAY_BASE_DIR ?? '/opt/infinibay', 'iso'), '/opt/infinibay/isos')
+      // Use the temp ISO directory for generated ISOs
+      const baseDir = process.env.INFINIBAY_BASE_DIR ?? '/opt/infinibay'
+      const tempIsoDir = process.env.INFINIBAY_ISO_TEMP_DIR ?? path.join(baseDir, 'iso', 'temp')
+      const outputPath = this.validatePath(tempIsoDir, '/opt/infinibay/iso/temp')
 
       this.debug.log('Generating random file name for new ISO')
       const newIsoName = this.generateRandomFileName()
@@ -74,16 +77,20 @@ export class UnattendedManagerBase {
 
   /**
    * Validates the given path. If the path is not set or invalid, it uses the default path.
+   * Also creates the directory if it doesn't exist.
    * @param {string | undefined} envPath - The path to validate.
    * @param {string} defaultPath - The default path to use if the envPath is not set or invalid.
    * @returns {string} The validated path.
    */
   protected validatePath (envPath: string | undefined, defaultPath: string): string {
-    if (!envPath || !fs.existsSync(envPath)) {
-      console.warn(`Path not set or invalid. Using default path: ${defaultPath}`)
-      return defaultPath
+    const finalPath = envPath || defaultPath
+    
+    if (!fs.existsSync(finalPath)) {
+      this.debug.log(`Path does not exist, creating: ${finalPath}`)
+      fs.mkdirSync(finalPath, { recursive: true })
     }
-    return envPath
+    
+    return finalPath
   }
 
   /**

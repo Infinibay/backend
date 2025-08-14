@@ -26,9 +26,6 @@ export class UserType {
   @Field({ nullable: false })
   email: string = ''
 
-  @Field(() => String, { nullable: true })
-  namespace: string | null = null
-
   @Field({ nullable: false })
   createdAt: Date = new Date()
 }

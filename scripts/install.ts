@@ -7,17 +7,35 @@ import { v4 as uuidv4 } from 'uuid'
 import { DOMParser } from 'xmldom'
 
 import { installNetworkFilters } from './installation/networkFilters'
+import { downloadWindowsISO, downloadAllWindowsISOs } from './download-windows'
 
 function prepareFolders () {
   // Load environment variables
   dotenv.config()
 
   const baseDir = process.env.INFINIBAY_BASE_DIR || '/opt/infinibay'
-  const isoDir = path.join(baseDir, 'iso');
+  const isoDir = path.join(baseDir, 'iso')
+  const isoPermanentDir = process.env.INFINIBAY_ISO_PERMANENT_DIR || path.join(isoDir, 'permanent')
+  const isoTempDir = process.env.INFINIBAY_ISO_TEMP_DIR || path.join(isoDir, 'temp')
 
-  [baseDir, isoDir, path.join(isoDir, 'ubuntu'), path.join(isoDir, 'fedora'), path.join(baseDir, 'disks'), path.join(baseDir, 'isos'), path.join(baseDir, 'uefi')].forEach(dir => {
+  // Create all necessary directories
+  const directories = [
+    baseDir,
+    isoDir,
+    isoPermanentDir,
+    isoTempDir,
+    path.join(isoPermanentDir, 'ubuntu'),
+    path.join(isoPermanentDir, 'fedora'),
+    path.join(isoPermanentDir, 'windows'),
+    path.join(baseDir, 'disks'),
+    path.join(baseDir, 'uefi'),
+    path.join(baseDir, 'sockets')
+  ]
+
+  directories.forEach(dir => {
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true })
+      console.log(`Created directory: ${dir}`)
     }
   })
 }
@@ -72,8 +90,10 @@ async function downloadUbuntu () {
   const downloadUrl = `https://releases.ubuntu.com/${version}/${isoLink}`
   console.log(`Found Ubuntu ISO: ${downloadUrl}`)
 
-  // Download the ISO
-  const isoDir = path.join(process.env.INFINIBAY_BASE_DIR || '/opt/infinibay', 'iso', 'ubuntu')
+  // Download the ISO to permanent directory
+  const baseDir = process.env.INFINIBAY_BASE_DIR || '/opt/infinibay'
+  const isoPermanentDir = process.env.INFINIBAY_ISO_PERMANENT_DIR || path.join(baseDir, 'iso', 'permanent')
+  const isoDir = path.join(isoPermanentDir, 'ubuntu')
   const isoPath = path.join(isoDir, isoLink)
 
   if (fs.existsSync(isoPath)) {
@@ -125,8 +145,10 @@ async function downloadFedora () {
   const downloadUrl = `https://download.fedoraproject.org/pub/fedora/linux/releases/${isoLink}`
   console.log(`Found Fedora ISO: ${downloadUrl}`)
 
-  // Download the ISO
-  const isoDir = path.join(process.env.INFINIBAY_BASE_DIR || '/opt/infinibay', 'iso', 'fedora')
+  // Download the ISO to permanent directory
+  const baseDir = process.env.INFINIBAY_BASE_DIR || '/opt/infinibay'
+  const isoPermanentDir = process.env.INFINIBAY_ISO_PERMANENT_DIR || path.join(baseDir, 'iso', 'permanent')
+  const isoDir = path.join(isoPermanentDir, 'fedora')
   const isoPath = path.join(isoDir, path.basename(isoLink))
 
   if (fs.existsSync(isoPath)) {
@@ -227,6 +249,7 @@ async function install () {
   // await installBridge()
   // await downloadUbuntu()
   // await downloadFedora()
+  // await downloadAllWindowsISOs() // Optional: uncomment to download Windows ISOs during setup
   // BASIC APPS
   // cpu-checker for kvm-ok
   // qemu-kvm libvirt-daemon-system bridge-utils

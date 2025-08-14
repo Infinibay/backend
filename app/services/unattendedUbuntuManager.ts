@@ -15,8 +15,9 @@ export class UnattendedUbuntuManager extends UnattendedManagerBase {
   private username: string
   private password: string
   private applications: Application[]
+  private vmId: string = ''
 
-  constructor (username: string, password: string, applications: Application[]) {
+  constructor (username: string, password: string, applications: Application[], vmId?: string) {
     super()
     this.debug.log('Initializing UnattendedUbuntuManager')
     if (!username || !password) {
@@ -27,6 +28,7 @@ export class UnattendedUbuntuManager extends UnattendedManagerBase {
     this.username = username
     this.password = password
     this.applications = applications
+    this.vmId = vmId || ''
     this.configFileName = 'user-data'
     this.debug.log('UnattendedUbuntuManager initialized')
   }
@@ -107,7 +109,9 @@ export class UnattendedUbuntuManager extends UnattendedManagerBase {
         packages: [
           'qemu-guest-agent',
           'ubuntu-desktop',
-          'openssh-server'
+          'openssh-server',
+          'curl',  // Required for downloading InfiniService
+          'wget'   // Alternative download method
         ],
 
         // Use the entire disk with a single partition
@@ -139,6 +143,9 @@ export class UnattendedUbuntuManager extends UnattendedManagerBase {
       // Create directory for per-instance scripts
       'mkdir -p /target/var/lib/cloud/scripts/per-instance',
 
+      // Create InfiniService installation script
+      ...this.generateInfiniServiceInstallCommands(),
+
       // Create post-installation script
       `cat > /target/var/lib/cloud/scripts/per-instance/post_install.py << 'EOF'
 ${this.generateMasterInstallScript()}
@@ -154,6 +161,77 @@ EOF`,
       'curtin in-target -- /var/lib/cloud/scripts/per-instance/post_install.py'
     ]
 
+    return commands
+  }
+
+  /**
+   * Generates commands to install InfiniService on Ubuntu.
+   * Downloads the binary and installation script from the backend server.
+   * 
+   * @returns Array of late commands for InfiniService installation
+   */
+  private generateInfiniServiceInstallCommands (): string[] {
+    const backendHost = process.env.APP_HOST || 'localhost'
+    const backendPort = process.env.PORT || '4000'
+    const baseUrl = `http://${backendHost}:${backendPort}`
+    
+    const commands = [
+      // Create InfiniService installation script
+      `cat > /target/var/lib/cloud/scripts/per-instance/install_infiniservice.sh << 'EOF'
+#!/bin/bash
+set -e
+
+LOG_FILE="/var/log/infiniservice_install.log"
+echo "Starting InfiniService installation" | tee -a \$LOG_FILE
+
+# Create temp directory
+mkdir -p /tmp/infiniservice
+cd /tmp/infiniservice
+
+# Download InfiniService binary
+echo "Downloading InfiniService binary..." | tee -a \$LOG_FILE
+if curl -f -o infiniservice "${baseUrl}/infiniservice/linux/binary" 2>&1 | tee -a \$LOG_FILE; then
+    echo "Binary downloaded successfully" | tee -a \$LOG_FILE
+else
+    echo "Failed to download InfiniService binary" | tee -a \$LOG_FILE
+    exit 1
+fi
+
+# Download installation script
+echo "Downloading InfiniService installation script..." | tee -a \$LOG_FILE
+if curl -f -o install-linux.sh "${baseUrl}/infiniservice/linux/script" 2>&1 | tee -a \$LOG_FILE; then
+    echo "Script downloaded successfully" | tee -a \$LOG_FILE
+else
+    echo "Failed to download InfiniService installation script" | tee -a \$LOG_FILE
+    exit 1
+fi
+
+# Make files executable
+chmod +x infiniservice install-linux.sh
+
+# Run installation script with VM ID
+echo "Installing InfiniService with VM ID: ${this.vmId}" | tee -a \$LOG_FILE
+if ./install-linux.sh normal "${this.vmId}" 2>&1 | tee -a \$LOG_FILE; then
+    echo "InfiniService installed successfully" | tee -a \$LOG_FILE
+else
+    echo "InfiniService installation failed" | tee -a \$LOG_FILE
+    exit 1
+fi
+
+# Clean up temp files
+cd /
+rm -rf /tmp/infiniservice
+
+echo "InfiniService installation completed" | tee -a \$LOG_FILE
+EOF`,
+      
+      // Make the InfiniService installation script executable
+      'chmod +x /target/var/lib/cloud/scripts/per-instance/install_infiniservice.sh',
+      
+      // Run the InfiniService installation script
+      'curtin in-target -- /var/lib/cloud/scripts/per-instance/install_infiniservice.sh'
+    ]
+    
     return commands
   }
 

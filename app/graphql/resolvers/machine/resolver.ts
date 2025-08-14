@@ -36,7 +36,7 @@ async function transformMachine(prismaMachine: any, prisma: any): Promise<Machin
 
   return {
     ...prismaMachine,
-    userId: prismaMachine.userId || -1, // Add this line to include userId
+    userId: prismaMachine.userId || null, // Include userId field (can be null)
     user: user
       ? {
         id: user.id,
@@ -162,7 +162,8 @@ export class MachineMutations {
       // Don't fail the main operation if event triggering fails
     }
 
-    return newMachine
+    // Transform the machine to include all necessary fields
+    return transformMachine(newMachine, prisma)
   }
 
   @Mutation(() => Machine)
@@ -286,12 +287,16 @@ export class MachineMutations {
       }
 
       // Execute the command inside the VM
-      const result = await domain.qemuAgentCommand(JSON.stringify(jsonCommand), 0, 0)
-      if (!result) {
-        throw new UserInputError(`Error executing command: ${command}`)
-      }
+      // TODO: qemuAgentCommand is not yet implemented in libvirt-node
+      // const result = await domain.qemuAgentCommand(JSON.stringify(jsonCommand), 0, 0)
+      // if (!result) {
+      //   throw new UserInputError(`Error executing command: ${command}`)
+      // }
 
-      return { success: true, message: 'Command executed successfully', response: result }
+      // return { success: true, message: 'Command executed successfully', response: result }
+      
+      // Temporary: Return not implemented
+      return { success: false, message: 'QEMU Agent command execution is not yet implemented in libvirt-node' }
     } catch (error) {
       // Log the error and return a failure response
       this.debug.log(`Error executing command: ${error}`)

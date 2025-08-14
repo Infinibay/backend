@@ -1,4 +1,4 @@
-import { MachineApplication, Application, PrismaClient } from '@prisma/client'
+import { MachineApplication, Application } from '@prisma/client'
 import { Builder } from 'xml2js'
 import { spawn } from 'child_process'
 import * as fs from 'fs'
@@ -47,13 +47,15 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
   private password: string = ''
   private productKey: string | undefined = undefined
   private applications: any[] = []
+  private vmId: string = ''
 
   constructor (
     version: number,
     username: string,
     password: string,
     productKey: string | undefined,
-    applications: any[]
+    applications: any[],
+    vmId?: string
   ) {
     super()
     this.configFileName = 'autounattend.xml'
@@ -62,6 +64,7 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
     this.password = password
     this.productKey = productKey
     this.applications = applications
+    this.vmId = vmId || ''
     this.isoPath = path.join(path.join(process.env.INFINIBAY_BASE_DIR ?? '/opt/infinibay', 'iso'), 'windows' + this.version.toString() + '.iso')
   }
 
@@ -139,17 +142,74 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
       }
     ]
 
-    const apps = this.generateAppsToInstallScripts(11)
+    // Add InfiniService installation commands
+    const infiniServiceCommands = this.generateInfiniServiceInstallCommands(11)
+    commands = commands.concat(infiniServiceCommands)
+
+    const apps = this.generateAppsToInstallScripts(11 + infiniServiceCommands.length)
 
     commands = commands.concat(apps)
 
     commands.push({
       $: { 'wcm:action': 'add' },
-      Order: 11 + apps.length,
+      Order: 11 + infiniServiceCommands.length + apps.length,
       Description: 'Restart System',
       RequiresUserInput: false,
       CommandLine: 'shutdown /r /t 0'
     })
+    return commands
+  }
+
+  /**
+   * Generates commands to install InfiniService on Windows.
+   * Downloads the binary and installation script from the backend server.
+   * 
+   * @param idx - The starting order index for the commands
+   * @returns Array of FirstLogonCommands for InfiniService installation
+   */
+  private generateInfiniServiceInstallCommands (idx: number): any[] {
+    const backendHost = process.env.APP_HOST || 'localhost'
+    const backendPort = process.env.PORT || '4000'
+    const baseUrl = `http://${backendHost}:${backendPort}`
+    
+    const commands = [
+      {
+        $: { 'wcm:action': 'add' },
+        Order: idx,
+        Description: 'Create InfiniService temp directory',
+        RequiresUserInput: false,
+        CommandLine: 'powershell -Command "New-Item -ItemType Directory -Path C:\\Temp\\InfiniService -Force"'
+      },
+      {
+        $: { 'wcm:action': 'add' },
+        Order: idx + 1,
+        Description: 'Download InfiniService binary',
+        RequiresUserInput: false,
+        CommandLine: `powershell -Command "& { $log = 'C:\\Windows\\Temp\\infiniservice_download.log'; try { Write-Output 'Downloading InfiniService binary...' | Tee-Object -FilePath $log -Append; Invoke-WebRequest -Uri '${baseUrl}/infiniservice/windows/binary' -OutFile 'C:\\Temp\\InfiniService\\infiniservice.exe' -UseBasicParsing; Write-Output 'Binary downloaded successfully' | Tee-Object -FilePath $log -Append } catch { Write-Output $_.Exception.Message | Tee-Object -FilePath $log -Append } }"`
+      },
+      {
+        $: { 'wcm:action': 'add' },
+        Order: idx + 2,
+        Description: 'Download InfiniService installation script',
+        RequiresUserInput: false,
+        CommandLine: `powershell -Command "& { $log = 'C:\\Windows\\Temp\\infiniservice_download.log'; try { Write-Output 'Downloading InfiniService installation script...' | Tee-Object -FilePath $log -Append; Invoke-WebRequest -Uri '${baseUrl}/infiniservice/windows/script' -OutFile 'C:\\Temp\\InfiniService\\install-windows.ps1' -UseBasicParsing; Write-Output 'Script downloaded successfully' | Tee-Object -FilePath $log -Append } catch { Write-Output $_.Exception.Message | Tee-Object -FilePath $log -Append } }"`
+      },
+      {
+        $: { 'wcm:action': 'add' },
+        Order: idx + 3,
+        Description: 'Install InfiniService',
+        RequiresUserInput: false,
+        CommandLine: `powershell -ExecutionPolicy Bypass -Command "& { $log = 'C:\\Windows\\Temp\\infiniservice_install.log'; try { Write-Output 'Installing InfiniService...' | Tee-Object -FilePath $log -Append; Set-Location 'C:\\Temp\\InfiniService'; .\\install-windows.ps1 -ServiceMode 'normal' -VmId '${this.vmId}' | Tee-Object -FilePath $log -Append; Write-Output 'InfiniService installed successfully' | Tee-Object -FilePath $log -Append } catch { Write-Output $_.Exception.Message | Tee-Object -FilePath $log -Append } }"`
+      },
+      {
+        $: { 'wcm:action': 'add' },
+        Order: idx + 4,
+        Description: 'Clean up InfiniService temp files',
+        RequiresUserInput: false,
+        CommandLine: 'powershell -Command "Remove-Item -Path C:\\Temp\\InfiniService -Recurse -Force -ErrorAction SilentlyContinue"'
+      }
+    ]
+    
     return commands
   }
 
@@ -166,15 +226,11 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
    * https://docs.microsoft.com/en-us/windows-hardware/customize/desktop/unattend/microsoft-windows-shell-setup-firstlogoncommands
    */
   private generateAppsToInstallScripts (idx: number): any[] {
-    const prisma = new PrismaClient()
     return this.applications
       .map((app, localIndex) => {
         const installCommand = app.installCommand.windows
-        const application = prisma.application.findUnique({
-          where: {
-            id: app.applicationId
-          }
-        })
+        // Note: The application data is already included in the app object
+        // No need to fetch it again from the database
         if (!installCommand) {
           return null
         }

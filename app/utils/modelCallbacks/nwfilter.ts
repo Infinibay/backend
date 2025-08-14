@@ -1,4 +1,5 @@
 import { PrismaClient } from '@prisma/client'
+import dbSingleton from '../database'
 
 import { NetworkFilterService } from '../../services/networkFilterService'
 import { Debugger } from '../debug'
@@ -15,17 +16,15 @@ export async function afterCreateNWfilter (prisma: PrismaClient, params: any, fi
   // which should be after the transaction is committed
   process.nextTick(async () => {
     try {
-      // Create a new Prisma client instance to ensure we're not in the same transaction
-      const newPrisma = new PrismaClient()
-
-      // Fetch the filter again to ensure we're seeing the committed data
-      const nwFilter = await newPrisma.nWFilter.findUnique({
+      // Use the singleton Prisma client 
+      // The transaction should be committed by now, so we can safely query
+      const nwFilter = await dbSingleton.nWFilter.findUnique({
         where: { id: filter.id }
       })
 
       if (nwFilter) {
         // Apply the filter to libvirt
-        const service = new NetworkFilterService(newPrisma)
+        const service = new NetworkFilterService(dbSingleton)
         await service.connect()
         await service.flushNWFilter(nwFilter.id, true)
         await service.close()
@@ -34,9 +33,6 @@ export async function afterCreateNWfilter (prisma: PrismaClient, params: any, fi
       } else {
         debug.log('error', `Network filter with ID ${filter.id} not found after creation, cannot apply to libvirt`)
       }
-
-      // Close the new Prisma client
-      await newPrisma.$disconnect()
     } catch (error) {
       debug.log('error', `Error in deferred filter application: ${error}`)
     }

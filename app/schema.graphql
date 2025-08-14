@@ -199,6 +199,12 @@ type GraphicConfigurationType {
   protocol: String!
 }
 
+type InfiniServiceStatus {
+  error: String
+  installed: Boolean!
+  running: Boolean!
+}
+
 input IpRangeInput {
   end: String! = ""
   networkName: String! = ""
@@ -223,7 +229,7 @@ type Machine {
   template: MachineTemplateType
   templateId: String!
   user: UserType
-  userId: String!
+  userId: String
 }
 
 input MachineApplicationInputType {
@@ -441,8 +447,14 @@ type Query {
   machines(orderBy: MachineOrderBy, pagination: PaginationInputType): [Machine!]!
   network(name: String!): Network!
   networks: [Network!]!
+
+  """Get current socket connection statistics for all VMs"""
+  socketConnectionStats: SocketConnectionStats
   user(id: String!): UserType!
   users(orderBy: UserOrderByInputType, pagination: PaginationInputType): [UserType!]!
+
+  """Get comprehensive diagnostics for VM socket connection issues"""
+  vmSocketDiagnostics(vmId: String!): VmDiagnostics!
 }
 
 """Service action type (USE for outbound, PROVIDE for inbound)"""
@@ -507,6 +519,15 @@ type ServiceStatusSummary {
 
   """Total number of VMs"""
   totalVms: Float!
+}
+
+type SocketConnectionStats {
+  activeConnections: Float
+  connections: [VmConnectionInfo!]
+  isConnected: Boolean
+  lastMessageTime: String
+  reconnectAttempts: Float
+  totalConnections: Float
 }
 
 type SuccessType {
@@ -628,8 +649,26 @@ type UserType {
   firstName: String!
   id: ID!
   lastName: String!
-  namespace: String
   role: String!
+}
+
+type VmConnectionInfo {
+  isConnected: Boolean!
+  lastMessageTime: String!
+  reconnectAttempts: Float!
+  vmId: String!
+}
+
+type VmDiagnostics {
+  connectionStats: SocketConnectionStats
+  diagnostics: [String!]!
+  infiniService: InfiniServiceStatus!
+  manualCommands: [String!]!
+  recommendations: [String!]!
+  timestamp: String!
+  vmId: String!
+  vmName: String!
+  vmStatus: String!
 }
 
 type VmServiceStatus {

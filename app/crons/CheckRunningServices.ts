@@ -1,9 +1,8 @@
 import { CronJob } from 'cron'
-import { PrismaClient, Machine as PrismaMachine } from '@prisma/client'
+import { Machine as PrismaMachine } from '@prisma/client'
 import { KNOWN_SERVICES } from '../config/knownServices'
 import { Connection, Machine as LibvirtMachine } from 'libvirt-node'
-
-const prisma = new PrismaClient()
+import prisma from '../utils/database'
 
 interface PortInfo {
     protocol: string;
@@ -24,6 +23,12 @@ interface OsCommands {
 }
 
 async function getListeningPorts (libvirtMachine: LibvirtMachine, os: string): Promise<PortInfo[]> {
+  // TODO: qemuAgentCommand is not yet implemented in libvirt-node
+  // This functionality is temporarily disabled until the method is added to libvirt-node
+  console.log('Port scanning via QEMU Guest Agent is not yet implemented in libvirt-node')
+  return []
+  
+  /* Original implementation - keeping for reference
   const osCommands: OsCommands = {
     windows10: {
       command: 'netstat -an | findstr LISTENING',
@@ -185,6 +190,7 @@ async function getListeningPorts (libvirtMachine: LibvirtMachine, os: string): P
     console.error('Error getting listening ports for VM:', error)
     return []
   }
+  */
 }
 
 async function checkRunningService (prismaMachine: PrismaMachine, conn: Connection) {

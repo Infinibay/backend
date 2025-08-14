@@ -1,4 +1,5 @@
 import fs from 'fs'
+import path from 'path'
 import si from 'systeminformation'
 
 import { MachineConfiguration, PrismaClient, Machine, MachineTemplate, Application } from '@prisma/client'
@@ -93,11 +94,11 @@ export class CreateMachineService {
 
   private createUnattendedManager (machine: Machine, username: string, password: string, productKey: string | undefined, applications: any[]): UnattendedManagerBase {
     const osManagers = {
-      windows10: () => new UnattendedWindowsManager(10, username, password, productKey, applications),
-      windows11: () => new UnattendedWindowsManager(11, username, password, productKey, applications),
-      ubuntu: () => new UnattendedUbuntuManager(username, password, applications),
-      fedora: () => new UnattendedRedHatManager(username, password, applications),
-      redhat: () => new UnattendedRedHatManager(username, password, applications)
+      windows10: () => new UnattendedWindowsManager(10, username, password, productKey, applications, machine.id),
+      windows11: () => new UnattendedWindowsManager(11, username, password, productKey, applications, machine.id),
+      ubuntu: () => new UnattendedUbuntuManager(username, password, applications, machine.id),
+      fedora: () => new UnattendedRedHatManager(username, password, applications, machine.id),
+      redhat: () => new UnattendedRedHatManager(username, password, applications, machine.id)
     }
 
     const managerCreator = osManagers[machine.os as keyof typeof osManagers]
@@ -235,9 +236,20 @@ export class CreateMachineService {
   }
 
   private async rollback (machine: Machine, newIsoPath: string | null) {
-    // Delete the ISO
+    // Delete the temporary ISO (only if it's in the temp directory)
     if (newIsoPath) {
-      fs.unlinkSync(newIsoPath)
+      const baseDir = process.env.INFINIBAY_BASE_DIR ?? '/opt/infinibay'
+      const tempIsoDir = process.env.INFINIBAY_ISO_TEMP_DIR ?? path.join(baseDir, 'iso', 'temp')
+      
+      // Only delete if the ISO is in the temp directory
+      if (newIsoPath.includes(tempIsoDir)) {
+        try {
+          fs.unlinkSync(newIsoPath)
+          this.debug.log(`Deleted temporary ISO: ${newIsoPath}`)
+        } catch (e) {
+          this.debug.log(`Error deleting temporary ISO: ${e instanceof Error ? e.message : String(e)}`)
+        }
+      }
     }
 
     // Delete the storage volume
@@ -302,7 +314,18 @@ export class CreateMachineService {
       if (!filter) {
         console.error('Filter not found')
       } else {
-        xmlGenerator.addNWFilter(filter.internalName)
+        // Ensure the filter exists in libvirt before using it
+        try {
+          const { NetworkFilterService } = await import('@services/networkFilterService')
+          const networkFilterService = new NetworkFilterService(this.prisma)
+          await networkFilterService.connect()
+          await networkFilterService.flushNWFilter(filter.id, true)
+          await networkFilterService.close()
+          xmlGenerator.addNWFilter(filter.internalName)
+        } catch (error) {
+          console.error('Error ensuring network filter exists in libvirt:', error)
+          // Continue without filter if it fails
+        }
       }
     }
     xmlGenerator.setBootDevice(['hd', 'cdrom'])
@@ -322,6 +345,9 @@ export class CreateMachineService {
 
     // Add QEMU Guest Agent channel to the VM configuration
     xmlGenerator.addGuestAgentChannel()
+
+    // Add InfiniService channel for metrics collection
+    xmlGenerator.addInfiniServiceChannel()
 
     // Get a new port for the machine
     this.debug.log('Getting new port for machine', machine.name)

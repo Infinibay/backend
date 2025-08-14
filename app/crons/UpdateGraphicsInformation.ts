@@ -1,10 +1,9 @@
 import { CronJob } from 'cron'
-import { PrismaClient, Machine as PrismaMachine } from '@prisma/client'
+import { Machine as PrismaMachine } from '@prisma/client'
 import { Connection, Machine as LibvirtMachine, VirDomainXMLFlags } from 'libvirt-node'
 import { DOMParser } from 'xmldom'
 import { networkInterfaces } from 'systeminformation'
-
-const prisma = new PrismaClient()
+import prisma from '../utils/database'
 
 // Cache the local IP to avoid frequent lookups
 let cachedLocalIP: string | null = null

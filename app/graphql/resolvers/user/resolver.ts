@@ -1,7 +1,6 @@
 import { PrismaClient } from '@prisma/client'
 import bcrypt from 'bcrypt'
 import jwt from 'jsonwebtoken'
-import { randomBytes } from 'crypto'
 import {
   Arg,
   Authorized,
@@ -15,12 +14,6 @@ import { UserType, UserToken, UserOrderByInputType, CreateUserInputType, UpdateU
 import { PaginationInputType } from '@utils/pagination'
 import { InfinibayContext } from '@utils/context'
 import { getEventManager } from '../../../services/EventManager'
-
-// Helper function to generate a unique namespace for a user
-function generateUserNamespace(userId: string): string {
-  const randomSuffix = randomBytes(4).toString('hex')
-  return `user_${userId.substring(0, 8)}_${randomSuffix}`
-}
 
 export interface UserResolverInterface {
   currentUser(context: InfinibayContext): Promise<UserType | null>;
@@ -45,26 +38,14 @@ export class UserResolver implements UserResolverInterface {
   @Authorized('USER')
   async currentUser(@Ctx() context: InfinibayContext): Promise<UserType | null> {
     if (!context.user) {
+      // This shouldn't happen if @Authorized decorator works correctly
+      // But returning null is better than throwing an error
       return null
     }
 
-    // Cast user to include namespace field (it should be there after Prisma regeneration)
-    const user = context.user as any
-
-    // Check if user already has a namespace, if not generate and store one
-    if (!user.namespace) {
-      const namespace = generateUserNamespace(user.id)
-
-      // Update the user with the new namespace
-      const updatedUser = await context.prisma.user.update({
-        where: { id: user.id },
-        data: { namespace } as any
-      })
-
-      return updatedUser as unknown as UserType
-    }
-
-    return user as unknown as UserType
+    // Return the user from context directly
+    // The authChecker has already fetched the user from database
+    return context.user as unknown as UserType
   }
 
   /*
@@ -124,9 +105,8 @@ export class UserResolver implements UserResolverInterface {
         firstName: true,
         lastName: true,
         role: true,
-        namespace: true,
         createdAt: true
-      } as any
+      }
     })
     return (users || []) as unknown as UserType[]
   }

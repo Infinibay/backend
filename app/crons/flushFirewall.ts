@@ -1,8 +1,8 @@
 import { CronJob } from 'cron'
-import { PrismaClient, NWFilter } from '@prisma/client'
+import { NWFilter } from '@prisma/client'
 import { NetworkFilterService } from '../services/networkFilterService'
+import prisma from '../utils/database'
 
-const prisma = new PrismaClient()
 const service = new NetworkFilterService(prisma)
 
 const FlushFirewallJob = new CronJob('*/1 * * * *', async () => {

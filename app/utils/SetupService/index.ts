@@ -20,9 +20,9 @@ import { Debugger } from '@utils/debug'
      */
 class SetupService {
   private connection: string | undefined
-  private currentStep: string
+  private currentStep: string = ''
   private hardwareInfo: any // Placeholder type, adjust as needed
-  private blockDevices: any[] // Placeholder type, adjust as needed
+  private blockDevices: any[] = [] // Placeholder type, adjust as needed
   private debug: Debugger = new Debugger('setup-service')
 
   constructor (connection: string | undefined = undefined) {
@@ -269,7 +269,7 @@ class SetupService {
     } else {
       // Execute commands locally
       return new Promise((resolve, reject) => {
-        this.debug.log('Executing command: ', args[0], args.slice(1))
+        this.debug.log('Executing command: ', args.join(' '))
         const process = spawn(args[0], args.slice(1))
         let output = ''
 
@@ -287,7 +287,7 @@ class SetupService {
             this.debug.log(`Command executed successfully: ${args.join(' ')}`)
             resolve(output)
           } else {
-            this.debug.error(`Command failed with exit code ${code}: ${args.join(' ')}`)
+            this.debug.log('error', `Command failed with exit code ${code}: ${args.join(' ')}`)
             reject(new Error(`Command failed with exit code ${code}`))
           }
         })

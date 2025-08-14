@@ -39,8 +39,8 @@ export class Machine {
     @Field(() => String)
       status: MachineStatus = MachineStatus.STOPPED
 
-    @Field(() => String)
-      userId: string = ''
+    @Field(() => String, { nullable: true })
+      userId: string | null = null
 
     @Field(() => String)
       templateId: string = ''

@@ -3,12 +3,9 @@
 // * Update all vm to not running if they are not found in the list
 // * Update all vm to running if they are found in the list
 import { CronJob } from 'cron'
-// prisma
-import { PrismaClient } from '@prisma/client'
 // libvirt-node
 import { Connection, Machine } from 'libvirt-node'
-
-const prisma = new PrismaClient()
+import prisma from '../utils/database'
 
 async function getRunningDomainNames (): Promise<string[]> {
   try {

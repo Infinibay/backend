@@ -1,5 +1,6 @@
 import { Express } from 'express'
 import isoUploadRouter from '../routes/isoUpload'
+import infiniserviceRouter from '../routes/infiniservice'
 
 export const configureRoutes = (app: Express): void => {
   // Add health check endpoint
@@ -9,4 +10,7 @@ export const configureRoutes = (app: Express): void => {
 
   // Mount the ISO upload router
   app.use('/isoUpload', isoUploadRouter)
+  
+  // Mount the InfiniService router for serving binaries and scripts
+  app.use('/infiniservice', infiniserviceRouter)
 }

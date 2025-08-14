@@ -86,6 +86,10 @@ firewall --enabled --ssh
 qemu-guest-agent
 spice-vdagent
 
+# Required for InfiniService installation
+curl
+wget
+
 # RPM Fusion package keys
 rpmfusion-free-release
 rpmfusion-nonfree-release
@@ -102,6 +106,10 @@ gnome-software-plugin-flatpak
 
 %addon com_redhat_kdump --enable --reserve-mb='auto'
 %end
+
+<% if (it.infiniServicePostCommands && it.infiniServicePostCommands.trim()) { %>
+<%= it.infiniServicePostCommands %>
+<% } %>
 
 <% if (it.applicationsPostCommands && it.applicationsPostCommands.trim()) { %>
 <%= it.applicationsPostCommands %>

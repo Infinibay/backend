@@ -4,9 +4,10 @@ import http from 'node:http'
 import 'dotenv/config'
 import 'reflect-metadata'
 import cors from 'cors'
+import jwt from 'jsonwebtoken'
 
 // Prisma Client
-import { PrismaClient } from '@prisma/client'
+import prisma from './utils/database'
 
 // Configuration Imports
 import { configureServer } from './config/server'
@@ -25,11 +26,13 @@ import { VmEventManager } from './services/VmEventManager'
 import { UserEventManager } from './services/UserEventManager'
 import { DepartmentEventManager } from './services/DepartmentEventManager'
 import { ApplicationEventManager } from './services/ApplicationEventManager'
+import { createVirtioSocketWatcherService } from './services/VirtioSocketWatcherService'
 
 // Crons
 import { startCrons } from './crons/all'
 
-const prisma = new PrismaClient()
+// Store services for cleanup
+let virtioSocketWatcherService: any = null
 
 async function bootstrap(): Promise<void> {
   try {
@@ -58,13 +61,45 @@ async function bootstrap(): Promise<void> {
         credentials: true
       }),
       expressMiddleware(apolloServer, {
-        context: async ({ req, res }): Promise<InfinibayContext> => ({
-          prisma,
-          req,
-          res,
-          user: null,
-          setupMode: false
-        })
+        context: async ({ req, res }): Promise<InfinibayContext> => {
+          // Try to extract user from the authorization token
+          let user = null
+          const token = req.headers.authorization
+          
+          if (token) {
+            try {
+              const decoded = jwt.verify(token, process.env.TOKENKEY || 'secret') as { userId: string; userRole: string }
+              if (decoded.userId) {
+                user = await prisma.user.findUnique({
+                  where: { id: decoded.userId },
+                  select: {
+                    id: true,
+                    email: true,
+                    password: true,
+                    deleted: true,
+                    token: true,
+                    firstName: true,
+                    lastName: true,
+                    userImage: true,
+                    role: true,
+                    createdAt: true
+                  }
+                })
+              }
+            } catch (error) {
+              // Invalid token, user remains null
+              console.error('Token verification failed:', error)
+            }
+          }
+          
+          return {
+            prisma,
+            req,
+            res,
+            user,
+            setupMode: false
+          }
+        }
       })
     )
 
@@ -89,6 +124,24 @@ async function bootstrap(): Promise<void> {
 
     console.log('🎯 Real-time event system initialized with all resource managers')
 
+    // Initialize and start VirtioSocketWatcherService
+    const virtioSocketWatcher = createVirtioSocketWatcherService(prisma)
+    virtioSocketWatcher.initialize(vmEventManager)
+    
+    // Forward metrics updates to Socket.io clients
+    virtioSocketWatcher.on('metricsUpdated', ({ vmId, metrics }) => {
+      socketService.emitToRoom(`vm:${vmId}`, 'metricsUpdate', { vmId, metrics })
+    })
+    
+    try {
+      await virtioSocketWatcher.start()
+      virtioSocketWatcherService = virtioSocketWatcher // Store for cleanup
+      console.log('🔌 VirtioSocketWatcherService started successfully')
+    } catch (error) {
+      console.error('⚠️ Failed to start VirtioSocketWatcherService:', error)
+      // Don't fail the server startup if the virtio socket watcher fails
+    }
+
     // Start cron jobs
     await startCrons()
 
@@ -110,6 +163,31 @@ async function bootstrap(): Promise<void> {
     process.exit(1)
   }
 }
+
+// Graceful shutdown handler
+async function shutdown(): Promise<void> {
+  console.log('\n🛑 Shutting down gracefully...')
+  
+  // Stop VirtioSocketWatcherService
+  if (virtioSocketWatcherService) {
+    try {
+      await virtioSocketWatcherService.stop()
+      console.log('✅ VirtioSocketWatcherService stopped')
+    } catch (error) {
+      console.error('⚠️ Error stopping VirtioSocketWatcherService:', error)
+    }
+  }
+  
+  // Disconnect Prisma
+  await prisma.$disconnect()
+  console.log('✅ Database connections closed')
+  
+  process.exit(0)
+}
+
+// Handle shutdown signals
+process.on('SIGTERM', shutdown)
+process.on('SIGINT', shutdown)
 
 void bootstrap().catch((error) => {
   console.error('Unhandled error during bootstrap:', error)
