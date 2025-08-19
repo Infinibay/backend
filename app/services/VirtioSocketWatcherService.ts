@@ -18,16 +18,8 @@ import { Debugger } from '../utils/debug'
 
 // Message types from InfiniService
 interface BaseMessage {
-  type: 'ping' | 'pong' | 'metrics' | 'error'
+  type: 'metrics' | 'error' | 'handshake' | 'command' | 'response'
   timestamp: string
-}
-
-interface PingMessage extends BaseMessage {
-  type: 'ping'
-}
-
-interface PongMessage extends BaseMessage {
-  type: 'pong'
 }
 
 interface ErrorMessage extends BaseMessage {
@@ -133,7 +125,7 @@ interface MetricsMessage extends BaseMessage {
   }
 }
 
-type IncomingMessage = PingMessage | PongMessage | MetricsMessage | ErrorMessage
+type IncomingMessage = MetricsMessage | ErrorMessage
 
 // Connection state for each VM
 interface VmConnection {
@@ -238,7 +230,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   private async handleSocketFileAdded(socketPath: string): Promise<void> {
     const filename = path.basename(socketPath)
     const match = filename.match(/^(.+)\.socket$/)
-    
+
     if (!match) {
       this.debug.log('debug', `Ignoring non-socket file: ${filename}`)
       return
@@ -270,14 +262,14 @@ export class VirtioSocketWatcherService extends EventEmitter {
   private handleSocketFileRemoved(socketPath: string): void {
     const filename = path.basename(socketPath)
     const match = filename.match(/^(.+)\.socket$/)
-    
+
     if (!match) {
       return
     }
 
     const vmId = match[1]
     this.debug.log('debug', `Socket file removed for VM ${vmId}`)
-    
+
     // Close connection if exists
     this.closeConnection(vmId)
   }
@@ -313,12 +305,12 @@ export class VirtioSocketWatcherService extends EventEmitter {
       // Reset error tracking on successful connection
       connection.errorCount = 0
       connection.lastErrorType = undefined
-      
-      // Start ping timer
-      this.startPingTimer(connection)
-      
-      // Send initial ping
-      this.sendMessage(connection, { type: 'ping', timestamp: new Date().toISOString() })
+
+      // Connection established successfully
+      // Start health monitoring
+      this.startHealthMonitoring(connection)
+
+      // TODO: Implement handshake authentication here
     })
 
     socket.on('data', (data: Buffer) => {
@@ -328,8 +320,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
     socket.on('error', (error: Error) => {
       // Determine error type
       let errorType = 'UNKNOWN'
-      let shouldLog = true
-      
+
       if (error.message.includes('EACCES')) {
         errorType = 'EACCES'
       } else if (error.message.includes('ECONNREFUSED')) {
@@ -337,12 +328,12 @@ export class VirtioSocketWatcherService extends EventEmitter {
       } else if (error.message.includes('ENOENT')) {
         errorType = 'ENOENT'
       }
-      
+
       // Only log if this is a new error type or first occurrence
       if (connection.lastErrorType !== errorType || connection.errorCount === 0) {
         connection.lastErrorType = errorType
         connection.errorCount = 1
-        
+
         // Log specific error details based on type
         if (errorType === 'EACCES') {
           this.debug.log('warn', `❌ Socket permission denied for VM ${vmId}. InfiniService may not be installed or running.`)
@@ -355,18 +346,18 @@ export class VirtioSocketWatcherService extends EventEmitter {
         } else if (errorType === 'ENOENT') {
           this.debug.log('debug', `Socket file not found for VM ${vmId}. VM may be shutting down or InfiniService not started.`)
         } else {
-          this.debug.log('error', `Socket error for VM ${vmId}: ${error.message}`)
+          this.debug.log('error', `Socket error for VM ${vmId}: ${error.message.toString().slice(0, 100)}`)
         }
       } else {
         // Same error type, increment counter but only log periodically
         connection.errorCount++
-        
+
         // Log every 10th occurrence of the same error
         if (connection.errorCount % 10 === 0) {
           this.debug.log('debug', `Still experiencing ${errorType} errors for VM ${vmId} (${connection.errorCount} occurrences)`)
         }
       }
-      
+
       this.handleConnectionError(connection)
     })
 
@@ -407,20 +398,13 @@ export class VirtioSocketWatcherService extends EventEmitter {
   private async processMessage(connection: VmConnection, messageStr: string): Promise<void> {
     try {
       const message: IncomingMessage = JSON.parse(messageStr)
-      
+
       this.debug.log('debug', `Received ${message.type} message from VM ${connection.vmId}`)
 
+      // Add detailed logging to debug message structure
+      this.debug.log('debug', `Full message structure: ${JSON.stringify(message, null, 2).slice(0, 100)}`)
+
       switch (message.type) {
-        case 'ping':
-          // Respond with pong
-          this.sendMessage(connection, { type: 'pong', timestamp: new Date().toISOString() })
-          break
-
-        case 'pong':
-          // Pong received, connection is healthy
-          this.debug.log('debug', `Pong received from VM ${connection.vmId}`)
-          break
-
         case 'metrics':
           // Store metrics in database
           await this.storeMetrics(connection.vmId, message as MetricsMessage)
@@ -438,6 +422,12 @@ export class VirtioSocketWatcherService extends EventEmitter {
     } catch (error) {
       this.debug.log('error', `Failed to process message from VM ${connection.vmId}: ${error}`)
       this.debug.log('error', `Raw message: ${messageStr}`)
+      // Add more details about the parsing error
+      if (error instanceof SyntaxError) {
+        this.debug.log('error', `JSON parsing error: ${error.message}`)
+        this.debug.log('error', `Message length: ${messageStr.length} chars`)
+        this.debug.log('error', `First 500 chars: ${messageStr.substring(0, 500)}`)
+      }
     }
   }
 
@@ -445,6 +435,25 @@ export class VirtioSocketWatcherService extends EventEmitter {
   private async storeMetrics(vmId: string, message: MetricsMessage): Promise<void> {
     try {
       const { data } = message
+
+      // Log the incoming data structure for debugging
+      this.debug.log('debug', `Metrics data structure for VM ${vmId}:`)
+      this.debug.log('debug', `- system.cpu: ${JSON.stringify(data.system?.cpu)}`)
+      this.debug.log('debug', `- system.memory: ${JSON.stringify(data.system?.memory)}`)
+      this.debug.log('debug', `- system.disk: ${JSON.stringify(data.system?.disk)}`)
+      this.debug.log('debug', `- system.network: ${JSON.stringify(data.system?.network)}`)
+      this.debug.log('debug', `- system.uptime_seconds: ${data.system?.uptime_seconds}`)
+
+      // Validate required fields exist
+      if (!data.system) {
+        this.debug.log('error', `Missing 'system' field in metrics data for VM ${vmId}`)
+        return
+      }
+
+      if (!data.system.memory) {
+        this.debug.log('error', `Missing 'system.memory' field in metrics data for VM ${vmId}`)
+        return
+      }
 
       // Store system metrics
       const systemMetrics = await this.prisma.systemMetrics.create({
@@ -461,7 +470,9 @@ export class VirtioSocketWatcherService extends EventEmitter {
           diskUsageStats: data.system.disk.usage_stats,
           diskIOStats: data.system.disk.io_stats,
           networkStats: data.system.network.interfaces,
-          uptime: BigInt(data.system.uptime_seconds),
+          uptime: data.system.uptime_seconds !== undefined && data.system.uptime_seconds !== null
+            ? BigInt(data.system.uptime_seconds)
+            : BigInt(0),
           loadAverage: data.system.load_average,
           timestamp: new Date(message.timestamp)
         }
@@ -600,8 +611,8 @@ export class VirtioSocketWatcherService extends EventEmitter {
               dependencies: service.dependencies,
               currentState: service.state,
               processId: service.pid,
-              lastStateChange: existingService?.currentState !== service.state 
-                ? new Date(message.timestamp) 
+              lastStateChange: existingService?.currentState !== service.state
+                ? new Date(message.timestamp)
                 : existingService?.lastStateChange,
               stateChangeCount: existingService?.currentState !== service.state
                 ? (existingService?.stateChangeCount || 0) + 1
@@ -648,6 +659,12 @@ export class VirtioSocketWatcherService extends EventEmitter {
       this.debug.log('metrics', `Stored metrics for VM ${vmId}`)
     } catch (error) {
       this.debug.log('error', `Failed to store metrics for VM ${vmId}: ${error}`)
+      // Log more details about the specific error
+      if (error instanceof Error) {
+        this.debug.log('error', `Error details: ${error.stack}`)
+      }
+      // Log the problematic data that caused the error
+      this.debug.log('error', `Problematic message data: ${JSON.stringify(message, null, 2)}`)
     }
   }
 
@@ -666,8 +683,8 @@ export class VirtioSocketWatcherService extends EventEmitter {
     }
   }
 
-  // Start ping timer for connection health check
-  private startPingTimer(connection: VmConnection): void {
+  // Monitor connection health (no active pinging, just monitoring)
+  private startHealthMonitoring(connection: VmConnection): void {
     // Clear existing timer
     if (connection.pingTimer) {
       clearInterval(connection.pingTimer)
@@ -677,20 +694,17 @@ export class VirtioSocketWatcherService extends EventEmitter {
       // Check if connection is stale
       const timeSinceLastMessage = Date.now() - connection.lastMessageTime.getTime()
       if (timeSinceLastMessage > this.messageTimeout) {
-        this.debug.log('warn', `Connection to VM ${connection.vmId} appears stale (${Math.round(timeSinceLastMessage/1000)}s since last message), reconnecting...`)
+        this.debug.log('warn', `Connection to VM ${connection.vmId} appears stale (${Math.round(timeSinceLastMessage / 1000)}s since last message), reconnecting...`)
         this.handleConnectionError(connection)
         return
       }
-
-      // Send ping
-      this.sendMessage(connection, { type: 'ping', timestamp: new Date().toISOString() })
     }, this.pingInterval)
   }
 
   // Handle connection error
   private handleConnectionError(connection: VmConnection): void {
     connection.isConnected = false
-    
+
     // Clear ping timer
     if (connection.pingTimer) {
       clearInterval(connection.pingTimer)

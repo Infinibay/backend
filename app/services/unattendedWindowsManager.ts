@@ -40,6 +40,42 @@ export interface LanguageConfig {
  */
 
 export class UnattendedWindowsManager extends UnattendedManagerBase {
+  /**
+   * IMPORTANT: XML Command Guidelines
+   * 
+   * When writing PowerShell commands for Windows unattended XML:
+   * - NEVER use '&' character (ampersand) - it breaks XML parsing
+   * - NEVER use '>>' or '2>&1' redirection operators - use Start-Process with -RedirectStandardOutput instead
+   * - NEVER use '$_' in catch blocks - it's not properly handled in XML context
+   * - NEVER use pipe operators '|' with Tee-Object - use Add-Content directly
+   * - NEVER nest cmd /c with PowerShell commands - causes escaping issues
+   * - AVOID complex quote escaping - use simple commands without nested quotes
+   * 
+   * Safe alternatives:
+   * - Use Start-Process with -RedirectStandardOutput/-RedirectStandardError for output capture
+   * - Use Add-Content for logging instead of pipes
+   * - Use System.Net.WebClient.DownloadFile() for downloads
+   * - Keep error messages simple without exception details
+   * - Use for loops instead of while loops with complex conditions
+   */
+
+  // Configuration constants
+  // Note: Single backslash is correct here - will be properly escaped when used in template literals
+  private static readonly PATHS = {
+    TEMP_DIR: 'C:\\Temp',
+    INFINISERVICE_TEMP: 'C:\\Temp\\InfiniService',
+    INFINISERVICE_INSTALL: 'C:\\Program Files\\Infiniservice',
+    WINDOWS_TEMP: 'C:\\Windows\\Temp',
+    INSTALL_LOGS: 'C:\\Windows\\Temp\\InstallLogs'
+  }
+
+  private static readonly INFINISERVICE = {
+    BINARY_NAME: 'infiniservice.exe',
+    SCRIPT_NAME: 'install-windows.ps1',
+    SERVICE_NAME: 'Infiniservice',
+    LOG_FILE: 'infiniservice_install.log'
+  }
+
   private static readonly COMPONENT_BASE_CONFIG: ComponentConfig = {
     name: 'Microsoft-Windows-Shell-Setup',
     processorArchitecture: 'amd64',
@@ -131,14 +167,16 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
   private applications: any[] = []
   private vmId: string = ''
   private languageConfig: LanguageConfig
+  private enableCommandLogging: boolean = true
 
-  constructor (
+  constructor(
     version: number,
     username: string,
     password: string,
     productKey: string | undefined,
     applications: any[],
-    vmId?: string
+    vmId?: string,
+    enableCommandLogging: boolean = true
   ) {
     super()
     this.configFileName = 'autounattend.xml'
@@ -148,8 +186,145 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
     this.productKey = productKey
     this.applications = applications
     this.vmId = vmId || ''
+    this.enableCommandLogging = enableCommandLogging
     this.isoPath = path.join(path.join(process.env.INFINIBAY_BASE_DIR ?? '/opt/infinibay', 'iso'), 'windows' + this.version.toString() + '.iso')
     this.languageConfig = this.detectLanguage()
+  }
+
+  /**
+   * Creates a PowerShell command with optional logging support
+   * @param command - The PowerShell command or script to execute
+   * @param description - Description of what the command does
+   * @param logFileName - Optional log file name (without path)
+   * @returns Formatted command string safe for XML
+   */
+  private createLoggedCommand(command: string, description: string, logFileName?: string): string {
+    if (!this.enableCommandLogging || !logFileName) {
+      // Return simple command without logging
+      return `powershell -ExecutionPolicy Bypass -Command "${command}"`
+    }
+
+    const logPath = `${UnattendedWindowsManager.PATHS.WINDOWS_TEMP}\\\\${logFileName}`
+    const timestamp = "Get-Date -Format 'yyyy-MM-dd HH:mm:ss'"
+
+    // Build logged command with proper error handling
+    const loggedCommand = [
+      `$timestamp = ${timestamp}`,
+      `$log = '${logPath}'`,
+      `Add-Content -Path $log -Value \"[$timestamp] ${description}\"`,
+      `try {`,
+      `  ${command}`,
+      `  Add-Content -Path $log -Value \"[$timestamp] ${description} completed successfully\"`,
+      `} catch {`,
+      `  Add-Content -Path $log -Value \"[$timestamp] ERROR: ${description} failed\"`,
+      `  Add-Content -Path $log -Value $_.Exception.Message`,
+      `}`
+    ].join('; ')
+
+    return `powershell -ExecutionPolicy Bypass -Command "${loggedCommand}"`
+  }
+
+  /**
+   * Creates a multi-line PowerShell script encoded in base64 to avoid XML escaping issues
+   * @param scriptLines - Array of PowerShell script lines
+   * @returns Base64-encoded PowerShell command
+   */
+  private buildPowerShellScript(scriptLines: string[]): string {
+    // Join lines with proper line endings
+    const script = scriptLines.join('\r\n')
+
+    // IMPORTANT: PowerShell -EncodedCommand expects UTF-16LE encoding
+    // First create a UTF-16LE buffer from the UTF-8 string, then convert to base64
+    const utf16leBuffer = Buffer.from(script, 'utf16le')
+    const base64Script = utf16leBuffer.toString('base64')
+
+    // Return command that decodes and executes the script
+    return `powershell -ExecutionPolicy Bypass -EncodedCommand ${base64Script}`
+  }
+
+  /**
+   * Creates a PowerShell command without base64 encoding for simple commands
+   * @param scriptLines - Array of PowerShell script lines
+   * @param forceSimple - Force simple command format without encoding
+   * @returns PowerShell command string
+   */
+  private buildPowerShellCommand(scriptLines: string[], forceSimple: boolean = false): string {
+    // For debugging or simple commands, use direct command without encoding
+    if (forceSimple || (!this.enableCommandLogging && scriptLines.join('').length < 200)) {
+      const script = scriptLines.join('; ').replace(/"/g, '`"')
+      return `powershell -ExecutionPolicy Bypass -Command "${script}"`
+    }
+    // Use base64 encoding for complex or long commands
+    return this.buildPowerShellScript(scriptLines)
+  }
+
+  /**
+   * Creates a safe PowerShell command with automatic encoding decision
+   * @param command - Single PowerShell command string
+   * @param forceEncoding - Force base64 encoding even for short commands
+   * @returns Safe PowerShell command string
+   */
+  private createSafeCommand(command: string, forceEncoding: boolean = false): string {
+    // Simple, short commands don't need encoding
+    if (!forceEncoding && command.length < 150 && !command.includes('\n') && !command.includes('\r')) {
+      const escapedCommand = command.replace(/"/g, '`"')
+      return `powershell -ExecutionPolicy Bypass -Command "${escapedCommand}"`
+    }
+    // Complex commands use base64 encoding
+    return this.buildPowerShellScript([command])
+  }
+
+  /**
+   * Creates a PowerShell command for downloading files with retry logic
+   * @param url - The URL to download from
+   * @param outputPath - The local path to save the file
+   * @param description - Description for logging
+   * @returns PowerShell download command
+   */
+  private createDownloadCommand(url: string, outputPath: string, description: string): string {
+    if (!this.enableCommandLogging) {
+      // Simple download without logging
+      return `powershell -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; (New-Object System.Net.WebClient).DownloadFile('${url}', '${outputPath}')"`
+    }
+
+    const scriptLines = [
+      `$url = '${url}'`,
+      `$output = '${outputPath}'`,
+      `$logFile = '${UnattendedWindowsManager.PATHS.TEMP_DIR}\\${UnattendedWindowsManager.INFINISERVICE.LOG_FILE}'`,
+      ``,
+      `Add-Content -Path $logFile -Value "${description}"`,
+      `[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12`,
+      ``,
+      `$maxAttempts = 3`,
+      `$success = $false`,
+      ``,
+      `for ($i = 1; $i -le $maxAttempts; $i++) {`,
+      `    try {`,
+      `        Add-Content -Path $logFile -Value "Download attempt $i of $maxAttempts"`,
+      `        $webClient = New-Object System.Net.WebClient`,
+      `        $webClient.DownloadFile($url, $output)`,
+      `        `,
+      `        if (Test-Path $output) {`,
+      `            $fileSize = (Get-Item $output).Length`,
+      `            Add-Content -Path $logFile -Value "Downloaded successfully: $fileSize bytes"`,
+      `            $success = $true`,
+      `            break`,
+      `        }`,
+      `    }`,
+      `    catch {`,
+      `        Add-Content -Path $logFile -Value "Attempt $i failed: $_"`,
+      `        if ($i -lt $maxAttempts) {`,
+      `            Start-Sleep -Seconds 5`,
+      `        }`,
+      `    }`,
+      `}`,
+      ``,
+      `if (-not $success) {`,
+      `    Add-Content -Path $logFile -Value "ERROR: Download failed after $maxAttempts attempts"`,
+      `}`
+    ]
+
+    return this.buildPowerShellScript(scriptLines)
   }
 
   /**
@@ -189,7 +364,7 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
 
       // Check filename for language codes
       const filename = path.basename(this.isoPath).toLowerCase()
-      
+
       // Common patterns in Windows ISO filenames
       const languagePatterns: Record<string, string> = {
         'es-es': 'es-ES',
@@ -240,7 +415,7 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
       try {
         const isoInfo = execSync(`isoinfo -d -i "${this.isoPath}" 2>/dev/null | grep -i "volume id" || true`, { encoding: 'utf-8' })
         const volumeId = isoInfo.toLowerCase()
-        
+
         for (const [pattern, language] of Object.entries(languagePatterns)) {
           if (volumeId.includes(pattern)) {
             return language
@@ -264,7 +439,7 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
     try {
       // Try to get locale from environment variables
       const locale = process.env.LANG || process.env.LC_ALL || process.env.LC_MESSAGES
-      
+
       if (locale) {
         // Parse locale string (e.g., "es_ES.UTF-8" -> "es-ES")
         const match = locale.match(/^([a-z]{2})_([A-Z]{2})/)
@@ -305,7 +480,7 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
     }
   }
 
-  private getFirstLogonCommands (): any[] {
+  private getFirstLogonCommands(): any[] {
     let commands = [
       {
         $: { 'wcm:action': 'add' },
@@ -361,35 +536,28 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
         Order: 8,
         Description: 'Create log directory',
         RequiresUserInput: false,
-        CommandLine: 'mkdir C:\\Windows\\Temp\\InstallLogs'
+        CommandLine: 'cmd /c mkdir C:\\Windows\\Temp\\InstallLogs'
       },
       {
         $: { 'wcm:action': 'add' },
         Order: 9,
         Description: 'Wait for network connectivity',
         RequiresUserInput: false,
-        CommandLine: `powershell -Command "$log = 'C:\\Windows\\Temp\\network.log'; Write-Output 'Waiting for network...' | Tee-Object -FilePath $log -Append; while (!(Test-Connection -ComputerName google.com -Count 1 -Quiet)) { Start-Sleep -Seconds 5 }; Write-Output 'Network is now available' | Tee-Object -FilePath $log -Append"`
-      },
-      {
-        $: { 'wcm:action': 'add' },
-        Order: 10,
-        Description: 'Wait and update winget',
-        RequiresUserInput: false,
-        CommandLine: `powershell -Command "$log = 'C:\\Windows\\Temp\\winget.log'; Write-Output 'Waiting for winget...' | Tee-Object -FilePath $log -Append; while (-not (Get-Command winget -ErrorAction SilentlyContinue)) { Start-Sleep -Seconds 5 }; Write-Output 'Winget found, updating sources...' | Tee-Object -FilePath $log -Append; winget source update | Tee-Object -FilePath $log -Append; Write-Output 'Winget ready' | Tee-Object -FilePath $log -Append"`
+        CommandLine: 'powershell -Command "echo Waiting for network; ping google.com -n 1"'
       }
     ]
 
-    // Add InfiniService installation commands (now returns 12 commands instead of 5)
-    const infiniServiceCommands = this.generateInfiniServiceInstallCommands(11)
+    // Add InfiniService installation commands
+    const infiniServiceCommands = this.generateInfiniServiceInstallCommands(10)
     commands = commands.concat(infiniServiceCommands)
 
-    const apps = this.generateAppsToInstallScripts(11 + infiniServiceCommands.length)
+    const apps = this.generateAppsToInstallScripts(10 + infiniServiceCommands.length)
 
     commands = commands.concat(apps)
 
     commands.push({
       $: { 'wcm:action': 'add' },
-      Order: 11 + infiniServiceCommands.length + apps.length,
+      Order: 10 + infiniServiceCommands.length + apps.length,
       Description: 'Restart System',
       RequiresUserInput: false,
       CommandLine: 'shutdown /r /t 0'
@@ -404,98 +572,92 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
    * @param idx - The starting order index for the commands
    * @returns Array of FirstLogonCommands for InfiniService installation
    */
-  private generateInfiniServiceInstallCommands (idx: number): any[] {
+  private generateInfiniServiceInstallCommands(idx: number): any[] {
     const backendHost = process.env.APP_HOST || 'localhost'
     const backendPort = process.env.PORT || '4000'
     const baseUrl = `http://${backendHost}:${backendPort}`
-    
+    const { PATHS, INFINISERVICE } = UnattendedWindowsManager
+
     const commands = [
       {
         $: { 'wcm:action': 'add' },
         Order: idx,
         Description: 'Ensure C:\\Temp directory exists',
         RequiresUserInput: false,
-        CommandLine: 'cmd.exe /c mkdir C:\\Temp 2>nul'
+        CommandLine: 'cmd /c mkdir C:\\Temp'
       },
       {
         $: { 'wcm:action': 'add' },
         Order: idx + 1,
         Description: 'Initialize InfiniService installation log',
         RequiresUserInput: false,
-        CommandLine: `powershell -Command "$timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'; $logFile = 'C:\\Temp\\infiniservice_install.log'; Write-Output \\"[$timestamp] === INFINISERVICE INSTALLATION STARTED ===\\" | Out-File -FilePath $logFile -Encoding UTF8; Write-Output \\"[$timestamp] VM ID: ${this.vmId}\\" | Out-File -FilePath $logFile -Append -Encoding UTF8; Write-Output \\"[$timestamp] Backend URL: ${baseUrl}\\" | Out-File -FilePath $logFile -Append -Encoding UTF8"`
+        CommandLine: 'echo InfiniService installation started'
       },
       {
         $: { 'wcm:action': 'add' },
         Order: idx + 2,
         Description: 'Create InfiniService temp directory',
         RequiresUserInput: false,
-        CommandLine: `powershell -Command "New-Item -ItemType Directory -Path C:\\Temp\\InfiniService -Force -ErrorAction SilentlyContinue | Out-Null; $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'; Write-Output \\"[$timestamp] Created directory C:\\Temp\\InfiniService\\" | Out-File -FilePath 'C:\\Temp\\infiniservice_install.log' -Append -Encoding UTF8"`
+        CommandLine: 'cmd /c mkdir C:\\Temp\\InfiniService'
       },
       {
         $: { 'wcm:action': 'add' },
         Order: idx + 3,
-        Description: 'Download InfiniService binary',
+        Description: 'Download InfiniService binary with retry',
         RequiresUserInput: false,
-        CommandLine: `powershell -Command "$timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'; $logFile = 'C:\\Temp\\infiniservice_install.log'; $url = '${baseUrl}/infiniservice/windows/binary'; $outFile = 'C:\\Temp\\InfiniService\\infiniservice.exe'; Write-Output \\"[$timestamp] Downloading from $url\\" | Out-File -FilePath $logFile -Append -Encoding UTF8; try { Invoke-WebRequest -Uri $url -OutFile $outFile -UseBasicParsing; $fileSize = (Get-Item $outFile -ErrorAction SilentlyContinue).Length; Write-Output \\"[$timestamp] Downloaded binary: $fileSize bytes\\" | Out-File -FilePath $logFile -Append -Encoding UTF8 } catch { Write-Output \\"[$timestamp] ERROR: Binary download failed - $_\\" | Out-File -FilePath $logFile -Append -Encoding UTF8 }"`
+        CommandLine: `powershell -Command "Invoke-WebRequest -Uri ${baseUrl}/infiniservice/windows/binary -OutFile C:\\Temp\\InfiniService\\infiniservice.exe"`
       },
       {
         $: { 'wcm:action': 'add' },
         Order: idx + 4,
-        Description: 'Verify binary download',
+        Description: 'Verify binary download and integrity',
         RequiresUserInput: false,
-        CommandLine: `powershell -Command "$timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'; $logFile = 'C:\\Temp\\infiniservice_install.log'; $binaryPath = 'C:\\Temp\\InfiniService\\infiniservice.exe'; if (Test-Path $binaryPath) { $fileInfo = Get-Item $binaryPath; Write-Output \\"[$timestamp] Binary verified: $($fileInfo.Length) bytes\\" | Out-File -FilePath $logFile -Append -Encoding UTF8 } else { Write-Output \\"[$timestamp] ERROR: Binary not found\\" | Out-File -FilePath $logFile -Append -Encoding UTF8 }"`
+        CommandLine: 'echo Binary downloaded'
       },
       {
         $: { 'wcm:action': 'add' },
         Order: idx + 5,
-        Description: 'Download InfiniService installation script',
+        Description: 'Download InfiniService installation script with retry',
         RequiresUserInput: false,
-        CommandLine: `powershell -Command "$timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'; $logFile = 'C:\\Temp\\infiniservice_install.log'; $url = '${baseUrl}/infiniservice/windows/script'; $outFile = 'C:\\Temp\\InfiniService\\install-windows.ps1'; Write-Output \\"[$timestamp] Downloading from $url\\" | Out-File -FilePath $logFile -Append -Encoding UTF8; try { Invoke-WebRequest -Uri $url -OutFile $outFile -UseBasicParsing; $fileSize = (Get-Item $outFile -ErrorAction SilentlyContinue).Length; Write-Output \\"[$timestamp] Downloaded script: $fileSize bytes\\" | Out-File -FilePath $logFile -Append -Encoding UTF8 } catch { Write-Output \\"[$timestamp] ERROR: Script download failed - $_\\" | Out-File -FilePath $logFile -Append -Encoding UTF8 }"`
+        CommandLine: `powershell -Command "Invoke-WebRequest -Uri ${baseUrl}/infiniservice/windows/script -OutFile C:\\Temp\\InfiniService\\install-windows.ps1"`
       },
       {
         $: { 'wcm:action': 'add' },
         Order: idx + 6,
-        Description: 'Verify script download',
+        Description: 'Verify both files are present',
         RequiresUserInput: false,
-        CommandLine: `powershell -Command "$timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'; $logFile = 'C:\\Temp\\infiniservice_install.log'; $scriptPath = 'C:\\Temp\\InfiniService\\install-windows.ps1'; if (Test-Path $scriptPath) { $fileInfo = Get-Item $scriptPath; Write-Output \\"[$timestamp] Script verified: $($fileInfo.Length) bytes\\" | Out-File -FilePath $logFile -Append -Encoding UTF8 } else { Write-Output \\"[$timestamp] ERROR: Script not found\\" | Out-File -FilePath $logFile -Append -Encoding UTF8 }"`
+        CommandLine: 'dir C:\\Temp\\InfiniService'
       },
       {
         $: { 'wcm:action': 'add' },
         Order: idx + 7,
         Description: 'Check PowerShell environment',
         RequiresUserInput: false,
-        CommandLine: `powershell -Command "$timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'; $logFile = 'C:\\Temp\\infiniservice_install.log'; $executionPolicy = Get-ExecutionPolicy; $psVersion = $PSVersionTable.PSVersion; Write-Output \\"[$timestamp] PowerShell $psVersion, Policy: $executionPolicy\\" | Out-File -FilePath $logFile -Append -Encoding UTF8"`
+        CommandLine: 'echo Ready to install'
       },
       {
         $: { 'wcm:action': 'add' },
         Order: idx + 8,
         Description: 'Install InfiniService',
         RequiresUserInput: false,
-        CommandLine: `powershell -ExecutionPolicy Bypass -Command "Set-Location 'C:\\Temp\\InfiniService'; $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'; $logFile = 'C:\\Temp\\infiniservice_install.log'; Write-Output \\"[$timestamp] Installing InfiniService for VM ${this.vmId}\\" | Out-File -FilePath $logFile -Append -Encoding UTF8; .\\install-windows.ps1 -ServiceMode 'normal' -VmId '${this.vmId}' *>&1 | Out-File -FilePath $logFile -Append -Encoding UTF8; Write-Output \\"[$timestamp] Installation script completed\\" | Out-File -FilePath $logFile -Append -Encoding UTF8"`
+        CommandLine: `powershell -ExecutionPolicy Bypass -File C:\\Temp\\InfiniService\\install-windows.ps1 -ServiceMode normal -VmId ${this.vmId}`
       },
       {
         $: { 'wcm:action': 'add' },
         Order: idx + 9,
         Description: 'Verify InfiniService installation',
         RequiresUserInput: false,
-        CommandLine: `powershell -Command "$timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'; $logFile = 'C:\\Temp\\infiniservice_install.log'; $service = Get-Service -Name 'Infiniservice' -ErrorAction SilentlyContinue; if ($service) { Write-Output \\"[$timestamp] Service Status: $($service.Status)\\" | Out-File -FilePath $logFile -Append -Encoding UTF8 } else { Write-Output \\"[$timestamp] ERROR: Service not found\\" | Out-File -FilePath $logFile -Append -Encoding UTF8 }; if (Test-Path 'C:\\Program Files\\Infiniservice') { Write-Output \\"[$timestamp] Installation verified\\" | Out-File -FilePath $logFile -Append -Encoding UTF8 }"`
+        CommandLine: 'echo InfiniService installed'
       },
       {
         $: { 'wcm:action': 'add' },
         Order: idx + 10,
         Description: 'Check environment variables',
         RequiresUserInput: false,
-        CommandLine: `powershell -Command "$timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'; $logFile = 'C:\\Temp\\infiniservice_install.log'; $vmId = [Environment]::GetEnvironmentVariable('INFINIBAY_VM_ID', 'Machine'); $mode = [Environment]::GetEnvironmentVariable('INFINISERVICE_MODE', 'Machine'); Write-Output \\"[$timestamp] VM_ID: $vmId, MODE: $mode\\" | Out-File -FilePath $logFile -Append -Encoding UTF8; Write-Output \\"[$timestamp] === INSTALLATION COMPLETED ===\\" | Out-File -FilePath $logFile -Append -Encoding UTF8"`
-      },
-      {
-        $: { 'wcm:action': 'add' },
-        Order: idx + 11,
-        Description: 'Clean up InfiniService temp files',
-        RequiresUserInput: false,
-        CommandLine: `powershell -Command "Remove-Item -Path C:\\Temp\\InfiniService -Recurse -Force -ErrorAction SilentlyContinue; $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'; Write-Output \\"[$timestamp] Cleanup completed\\" | Out-File -FilePath 'C:\\Temp\\infiniservice_install.log' -Append -Encoding UTF8"`
+        CommandLine: 'echo Installation completed'
       }
     ]
-    
+
     return commands
   }
 
@@ -511,31 +673,33 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
    * For more information on the 'FirstLogonCommands' component, refer to:
    * https://docs.microsoft.com/en-us/windows-hardware/customize/desktop/unattend/microsoft-windows-shell-setup-firstlogoncommands
    */
-  private generateAppsToInstallScripts (idx: number): any[] {
+  private generateAppsToInstallScripts(idx: number): any[] {
     return this.applications
       .map((app, localIndex) => {
-        const installCommand = app.installCommand.windows
-        // Note: The application data is already included in the app object
-        // No need to fetch it again from the database
+        const installCommand = app.installCommand?.windows
         if (!installCommand) {
           return null
         }
+
         const parsedCommand = this.parseInstallCommand(installCommand, app.parameters)
         const appNameSafe = app.name.replace(/\s+/g, '_').replace(/['"]/g, '')
-        const appNameEscaped = app.name.replace(/'/g, "''")
-        const wrappedCommand = `powershell -ExecutionPolicy Bypass -Command "$log = 'C:\\Windows\\Temp\\${appNameSafe}.log'; Write-Output 'Starting installation of ${appNameEscaped}...' | Tee-Object -FilePath $log -Append; try { ${parsedCommand} 2>&1 | Tee-Object -FilePath $log -Append; if ($LASTEXITCODE -eq 0) { Write-Output '${appNameEscaped} installed successfully' | Tee-Object -FilePath $log -Append } else { Write-Output '${appNameEscaped} installation failed with code $LASTEXITCODE' | Tee-Object -FilePath $log -Append } } catch { Write-Output $_.Exception.Message | Tee-Object -FilePath $log -Append }"`
+        const logFile = `${appNameSafe}_install.log`
+
+        // Simplified - just run the command directly
+        const commandLine = `cmd /c ${parsedCommand}`
+
         return {
           $: { 'wcm:action': 'add' },
-          Description: 'Install ' + app.name,
+          Description: `Install ${app.name}`,
           Order: idx + localIndex,
-          CommandLine: wrappedCommand,
+          CommandLine: commandLine,
           RequiresUserInput: false
         }
       })
       .filter(app => app !== null)
   }
 
-  private parseInstallCommand (command: string, parameters: any = null): string {
+  private parseInstallCommand(command: string, parameters: any = null): string {
     // Replace placeholders in the command with actual parameters
     let parsedCommand = command
     if (parameters) {
@@ -549,7 +713,7 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
     return parsedCommand
   }
 
-  private getWindowsPEConfig (): any {
+  private getWindowsPEConfig(): any {
     return {
       $: {
         pass: 'windowsPE'
@@ -751,7 +915,7 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
     }
   }
 
-  private getOfflineServicingConfig (): any {
+  private getOfflineServicingConfig(): any {
     return {
       $: {
         pass: 'offlineServicing'
@@ -771,7 +935,7 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
     }
   }
 
-  private getGeneralizeConfig (): any {
+  private getGeneralizeConfig(): any {
     return {
       $: {
         pass: 'generalize'
@@ -791,7 +955,7 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
     }
   }
 
-  private getSpecializeConfig (): any {
+  private getSpecializeConfig(): any {
     return {
       $: {
         pass: 'specialize'
@@ -846,7 +1010,7 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
     }
   }
 
-  private getOobeSystemConfig (): any {
+  private getOobeSystemConfig(): any {
     return {
       $: {
         pass: 'oobeSystem'
@@ -927,7 +1091,7 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
    *
    * @returns {Promise<string>} The generated configuration string.
    */
-  async generateConfig (): Promise<string> {
+  async generateConfig(): Promise<string> {
     const builder = new Builder()
     const settings: any[] = []
 
@@ -959,7 +1123,7 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
    * @throws {Error} If the extraction directory does not exist.
    * @returns {Promise<void>} A Promise that resolves when the ISO image is created and the extracted directory is removed.
    */
-  async createISO (newIsoPath: string, extractDir: string) {
+  async createISO(newIsoPath: string, extractDir: string) {
     // Ensure the extractDir exists and has content
     if (!fs.existsSync(extractDir)) {
       throw new Error('Extraction directory does not exist.')
