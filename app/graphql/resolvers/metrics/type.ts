@@ -4,302 +4,302 @@ import { GraphQLJSONObject } from 'graphql-type-json'
 @ObjectType()
 export class SystemMetrics {
   @Field(() => ID)
-  id!: string
+    id!: string
 
   @Field(() => String)
-  machineId!: string
+    machineId!: string
 
   @Field(() => Float)
-  cpuUsagePercent!: number
+    cpuUsagePercent!: number
 
   @Field(() => [Float])
-  cpuCoresUsage!: number[]
+    cpuCoresUsage!: number[]
 
   @Field(() => Float, { nullable: true })
-  cpuTemperature?: number
+    cpuTemperature?: number
 
   @Field(() => Float)
-  totalMemoryKB!: number
+    totalMemoryKB!: number
 
   @Field(() => Float)
-  usedMemoryKB!: number
+    usedMemoryKB!: number
 
   @Field(() => Float)
-  availableMemoryKB!: number
+    availableMemoryKB!: number
 
   @Field(() => Float, { nullable: true })
-  swapTotalKB?: number
+    swapTotalKB?: number
 
   @Field(() => Float, { nullable: true })
-  swapUsedKB?: number
+    swapUsedKB?: number
 
   @Field(() => GraphQLJSONObject)
-  diskUsageStats!: any
+    diskUsageStats!: any
 
   @Field(() => GraphQLJSONObject)
-  diskIOStats!: any
+    diskIOStats!: any
 
   @Field(() => GraphQLJSONObject)
-  networkStats!: any
+    networkStats!: any
 
   @Field(() => Float)
-  uptime!: number
+    uptime!: number
 
   @Field(() => GraphQLJSONObject, { nullable: true })
-  loadAverage?: any
+    loadAverage?: any
 
   @Field(() => Date)
-  timestamp!: Date
+    timestamp!: Date
 }
 
 @ObjectType()
 export class ProcessSnapshot {
   @Field(() => ID)
-  id!: string
+    id!: string
 
   @Field(() => String)
-  machineId!: string
+    machineId!: string
 
   @Field(() => Int)
-  processId!: number
+    processId!: number
 
   @Field(() => Int, { nullable: true })
-  parentPid?: number
+    parentPid?: number
 
   @Field(() => String)
-  name!: string
+    name!: string
 
   @Field(() => String, { nullable: true })
-  executablePath?: string
+    executablePath?: string
 
   @Field(() => String, { nullable: true })
-  commandLine?: string
+    commandLine?: string
 
   @Field(() => Float)
-  cpuUsagePercent!: number
+    cpuUsagePercent!: number
 
   @Field(() => Float)
-  memoryUsageKB!: number
+    memoryUsageKB!: number
 
   @Field(() => Float, { nullable: true })
-  diskReadBytes?: number
+    diskReadBytes?: number
 
   @Field(() => Float, { nullable: true })
-  diskWriteBytes?: number
+    diskWriteBytes?: number
 
   @Field(() => String)
-  status!: string
+    status!: string
 
   @Field(() => Date, { nullable: true })
-  startTime?: Date
+    startTime?: Date
 
   @Field(() => Date)
-  timestamp!: Date
+    timestamp!: Date
 }
 
 @ObjectType()
 export class ApplicationUsage {
   @Field(() => ID)
-  id!: string
+    id!: string
 
   @Field(() => String)
-  machineId!: string
+    machineId!: string
 
   @Field(() => String)
-  executablePath!: string
+    executablePath!: string
 
   @Field(() => String)
-  applicationName!: string
+    applicationName!: string
 
   @Field(() => String, { nullable: true })
-  version?: string
+    version?: string
 
   @Field(() => String, { nullable: true })
-  description?: string
+    description?: string
 
   @Field(() => String, { nullable: true })
-  publisher?: string
+    publisher?: string
 
   @Field(() => Date, { nullable: true })
-  lastAccessTime?: Date
+    lastAccessTime?: Date
 
   @Field(() => Date, { nullable: true })
-  lastModifiedTime?: Date
+    lastModifiedTime?: Date
 
   @Field(() => Int)
-  accessCount!: number
+    accessCount!: number
 
   @Field(() => Int)
-  totalUsageMinutes!: number
+    totalUsageMinutes!: number
 
   @Field(() => String, { nullable: true })
-  iconFormat?: string
+    iconFormat?: string
 
   @Field(() => Float, { nullable: true })
-  fileSize?: number
+    fileSize?: number
 
   @Field(() => Date)
-  firstSeen!: Date
+    firstSeen!: Date
 
   @Field(() => Date)
-  lastSeen!: Date
+    lastSeen!: Date
 
   @Field(() => Boolean)
-  isActive!: boolean
+    isActive!: boolean
 }
 
 @ObjectType()
 export class PortUsage {
   @Field(() => ID)
-  id!: string
+    id!: string
 
   @Field(() => String)
-  machineId!: string
+    machineId!: string
 
   @Field(() => Int)
-  port!: number
+    port!: number
 
   @Field(() => String)
-  protocol!: string
+    protocol!: string
 
   @Field(() => String)
-  state!: string
+    state!: string
 
   @Field(() => Int, { nullable: true })
-  processId?: number
+    processId?: number
 
   @Field(() => String, { nullable: true })
-  processName?: string
+    processName?: string
 
   @Field(() => String, { nullable: true })
-  executablePath?: string
+    executablePath?: string
 
   @Field(() => Boolean)
-  isListening!: boolean
+    isListening!: boolean
 
   @Field(() => Int)
-  connectionCount!: number
+    connectionCount!: number
 
   @Field(() => Date)
-  lastActivity!: Date
+    lastActivity!: Date
 
   @Field(() => Date)
-  timestamp!: Date
+    timestamp!: Date
 }
 
 @ObjectType()
 export class WindowsService {
   @Field(() => ID)
-  id!: string
+    id!: string
 
   @Field(() => String)
-  machineId!: string
+    machineId!: string
 
   @Field(() => String)
-  serviceName!: string
+    serviceName!: string
 
   @Field(() => String)
-  displayName!: string
+    displayName!: string
 
   @Field(() => String, { nullable: true })
-  description?: string
+    description?: string
 
   @Field(() => String)
-  startType!: string
+    startType!: string
 
   @Field(() => String)
-  serviceType!: string
+    serviceType!: string
 
   @Field(() => String, { nullable: true })
-  executablePath?: string
+    executablePath?: string
 
   @Field(() => GraphQLJSONObject, { nullable: true })
-  dependencies?: any
+    dependencies?: any
 
   @Field(() => String)
-  currentState!: string
+    currentState!: string
 
   @Field(() => Int, { nullable: true })
-  processId?: number
+    processId?: number
 
   @Field(() => Date, { nullable: true })
-  lastStateChange?: Date
+    lastStateChange?: Date
 
   @Field(() => Int)
-  stateChangeCount!: number
+    stateChangeCount!: number
 
   @Field(() => Boolean)
-  isDefaultService!: boolean
+    isDefaultService!: boolean
 
   @Field(() => Float, { nullable: true })
-  usageScore?: number
+    usageScore?: number
 
   @Field(() => Date)
-  firstSeen!: Date
+    firstSeen!: Date
 
   @Field(() => Date)
-  lastSeen!: Date
+    lastSeen!: Date
 }
 
 @InputType()
 export class MetricsFilterInput {
   @Field(() => String, { nullable: true })
-  machineId?: string
+    machineId?: string
 
   @Field(() => Date, { nullable: true })
-  startDate?: Date
+    startDate?: Date
 
   @Field(() => Date, { nullable: true })
-  endDate?: Date
+    endDate?: Date
 
   @Field(() => Int, { nullable: true, defaultValue: 100 })
-  limit?: number
+    limit?: number
 
   @Field(() => Int, { nullable: true, defaultValue: 0 })
-  offset?: number
+    offset?: number
 }
 
 @InputType()
 export class ProcessFilterInput {
   @Field(() => String, { nullable: true })
-  machineId?: string
+    machineId?: string
 
   @Field(() => String, { nullable: true })
-  name?: string
+    name?: string
 
   @Field(() => Date, { nullable: true })
-  startDate?: Date
+    startDate?: Date
 
   @Field(() => Date, { nullable: true })
-  endDate?: Date
+    endDate?: Date
 
   @Field(() => Int, { nullable: true, defaultValue: 20 })
-  limit?: number
+    limit?: number
 }
 
 @ObjectType()
 export class MachineMetricsSummary {
   @Field(() => String)
-  machineId!: string
+    machineId!: string
 
   @Field(() => SystemMetrics, { nullable: true })
-  latestSystemMetrics?: SystemMetrics
+    latestSystemMetrics?: SystemMetrics
 
   @Field(() => Int)
-  totalDataPoints!: number
+    totalDataPoints!: number
 
   @Field(() => Date, { nullable: true })
-  firstDataPoint?: Date
+    firstDataPoint?: Date
 
   @Field(() => Date, { nullable: true })
-  lastDataPoint?: Date
+    lastDataPoint?: Date
 
   @Field(() => Int)
-  activeProcessCount!: number
+    activeProcessCount!: number
 
   @Field(() => Int)
-  openPortsCount!: number
+    openPortsCount!: number
 
   @Field(() => Int)
-  installedApplicationsCount!: number
+    installedApplicationsCount!: number
 }

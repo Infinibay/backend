@@ -68,7 +68,7 @@ export const authChecker: AuthChecker<{ req: any; user: User; setupMode: boolean
   }
 }
 
-function checkAccess(decoded: DecodedToken, roles: string[], context: { setupMode: boolean }): boolean {
+function checkAccess (decoded: DecodedToken, roles: string[], context: { setupMode: boolean }): boolean {
   if (roles.includes('ADMIN')) {
     return checkAdminAccess(decoded)
   }
@@ -85,7 +85,7 @@ function checkAccess(decoded: DecodedToken, roles: string[], context: { setupMod
   return false
 }
 
-function checkAdminAccess(decoded: DecodedToken): boolean {
+function checkAdminAccess (decoded: DecodedToken): boolean {
   if (decoded.userRole === 'ADMIN') {
     debug.log('Access granted for ADMIN.')
     return true
@@ -94,7 +94,7 @@ function checkAdminAccess(decoded: DecodedToken): boolean {
   return false
 }
 
-function checkUserAccess(decoded: DecodedToken): boolean {
+function checkUserAccess (decoded: DecodedToken): boolean {
   if (decoded.userId) {
     debug.log('Access granted for USER.')
     return true
@@ -103,7 +103,7 @@ function checkUserAccess(decoded: DecodedToken): boolean {
   return false
 }
 
-function checkSetupModeAccess(context: { setupMode: boolean }): boolean {
+function checkSetupModeAccess (context: { setupMode: boolean }): boolean {
   if (context.setupMode) {
     debug.log('Access granted for SETUP_MODE.')
     return true

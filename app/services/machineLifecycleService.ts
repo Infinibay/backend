@@ -1,45 +1,25 @@
 import { PrismaClient, Department } from '@prisma/client'
 import { v4 as uuidv4 } from 'uuid'
-import { unlink } from 'fs/promises'
-import { existsSync } from 'fs'
-import {
-  Connection,
-  Machine,
-  VirDomainXMLFlags,
-  Error as LibvirtNodeError,
-  VirDomainDestroyFlags
-} from 'libvirt-node'
-import { XMLGenerator } from '../utils/VirtManager/xmlGenerator'
 import { Debugger } from '../utils/debug'
 import VirtManager from '../utils/VirtManager'
 import { ApolloError, UserInputError } from 'apollo-server-express'
 import si from 'systeminformation'
-import { parseStringPromise as xmlParse, Builder as XmlBuilder } from 'xml2js'
 import { MachineCleanupService } from './cleanup/machineCleanupService'
 import { HardwareUpdateService } from './vm/hardwareUpdateService'
-
-// Temporary local definitions for libvirt constants and enums
-const VIR_DOMAIN_NOSTATE = 0
-const VIR_DOMAIN_RUNNING = 1
-const VIR_DOMAIN_BLOCKED = 2
-const VIR_DOMAIN_PAUSED = 3
-const VIR_DOMAIN_SHUTDOWN = 4 // State during shutdown process
-const VIR_DOMAIN_SHUTOFF = 5 // State when fully off
-const VIR_DOMAIN_CRASHED = 6
-const VIR_DOMAIN_PMSUSPENDED = 7
+import { getEventManager } from '../services/EventManager'
 
 export class MachineLifecycleService {
   private prisma: PrismaClient
   private user: any
   private debug: Debugger
 
-  constructor (prisma: PrismaClient, user: any) {
+  constructor(prisma: PrismaClient, user: any) {
     this.prisma = prisma
     this.user = user
     this.debug = new Debugger('machine-lifecycle-service')
   }
 
-  async createMachine (input: any): Promise<any> {
+  async createMachine(input: any): Promise<any> {
     // First verify the template exists
     const template = await this.prisma.machineTemplate.findUnique({
       where: { id: input.templateId }
@@ -118,7 +98,7 @@ export class MachineLifecycleService {
     return machine
   }
 
-  async destroyMachine (id: string): Promise<any> {
+  async destroyMachine(id: string): Promise<any> {
     const isAdmin = this.user?.role === 'ADMIN'
     const whereClause = isAdmin ? { id } : { id, userId: this.user?.id }
     const machine = await this.prisma.machine.findFirst({
@@ -148,7 +128,7 @@ export class MachineLifecycleService {
     }
   }
 
-  async updateMachineHardware (input: any): Promise<any> {
+  async updateMachineHardware(input: any): Promise<any> {
     const { id, cpuCores, ramGB, gpuPciAddress } = input
 
     const machine = await this.prisma.machine.findUnique({
@@ -221,7 +201,7 @@ export class MachineLifecycleService {
     return updatedMachine
   }
 
-  private async backgroundCode (id: string, username: string, password: string, productKey: string | undefined, pciBus: string | null) {
+  private async backgroundCode(id: string, username: string, password: string, productKey: string | undefined, pciBus: string | null) {
     try {
       const machine = await this.prisma.machine.findUnique({
         where: {
@@ -231,15 +211,31 @@ export class MachineLifecycleService {
       const virtManager = new VirtManager()
       virtManager.setPrisma(this.prisma)
       await virtManager.createMachine(machine as any, username, password, productKey, pciBus)
-      await virtManager.powerOn(machine?.internalName as string)
-      await this.prisma.machine.update({
+      
+      // Update machine status to running
+      const updatedMachine = await this.prisma.machine.update({
         where: {
           id
         },
         data: {
           status: 'running'
+        },
+        include: {
+          user: true,
+          template: true,
+          department: true,
+          configuration: true
         }
       })
+      
+      // Emit real-time event for VM status update
+      try {
+        const eventManager = getEventManager()
+        await eventManager.dispatchEvent('vms', 'update', updatedMachine)
+        console.log(`🎯 VM status updated to running: ${updatedMachine.name} (${id})`)
+      } catch (eventError) {
+        console.error(`Failed to emit update event for VM ${id}:`, eventError)
+      }
     } catch (error) {
       console.log(error)
     }
@@ -248,7 +244,7 @@ export class MachineLifecycleService {
   /**
    * Delegate hardware update to the dedicated HardwareUpdateService
    */
-  private async backgroundUpdateHardware (machineId: string): Promise<void> {
+  private async backgroundUpdateHardware(machineId: string): Promise<void> {
     this.debug.log(`Starting background hardware update for machine ${machineId}`)
 
     // We don't await this so it runs in the background

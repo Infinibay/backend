@@ -24,7 +24,7 @@ class TempISOCleaner {
   private permanentIsoDir: string
   private options: CleanupOptions
 
-  constructor(options: CleanupOptions = {}) {
+  constructor (options: CleanupOptions = {}) {
     const baseDir = process.env.INFINIBAY_BASE_DIR || '/opt/infinibay'
     this.tempIsoDir = process.env.INFINIBAY_ISO_TEMP_DIR || path.join(baseDir, 'iso', 'temp')
     this.permanentIsoDir = process.env.INFINIBAY_ISO_PERMANENT_DIR || path.join(baseDir, 'iso', 'permanent')
@@ -39,10 +39,10 @@ class TempISOCleaner {
   /**
    * Main cleanup method
    */
-  async cleanup(): Promise<void> {
+  async cleanup (): Promise<void> {
     console.log('🧹 Starting temporary ISO cleanup...')
     console.log(`📁 Temp ISO directory: ${this.tempIsoDir}`)
-    
+
     if (this.options.dryRun) {
       console.log('🔍 Running in DRY RUN mode - no files will be deleted')
     }
@@ -70,11 +70,11 @@ class TempISOCleaner {
 
     for (const isoFile of isoFiles) {
       const filePath = path.join(this.tempIsoDir, isoFile)
-      
+
       try {
         const stats = fs.statSync(filePath)
         const ageInDays = (Date.now() - stats.mtime.getTime()) / (1000 * 60 * 60 * 24)
-        
+
         // Skip if file is newer than specified age
         if (this.options.olderThanDays && this.options.olderThanDays > 0 && ageInDays < this.options.olderThanDays) {
           if (this.options.verbose) {
@@ -86,7 +86,7 @@ class TempISOCleaner {
 
         const fileSizeMB = (stats.size / (1024 * 1024)).toFixed(2)
         const modifiedDate = stats.mtime.toISOString().replace('T', ' ').substring(0, 19)
-        
+
         if (this.options.verbose || this.options.dryRun) {
           console.log(`🗑️  ${this.options.dryRun ? 'Would delete' : 'Deleting'}: ${isoFile}`)
           console.log(`    Size: ${fileSizeMB} MB`)
@@ -97,7 +97,7 @@ class TempISOCleaner {
         if (!this.options.dryRun) {
           fs.unlinkSync(filePath)
         }
-        
+
         deletedCount++
         totalSize += stats.size
       } catch (error) {
@@ -110,7 +110,7 @@ class TempISOCleaner {
     console.log(`   - Files ${this.options.dryRun ? 'to be deleted' : 'deleted'}: ${deletedCount}`)
     console.log(`   - Files skipped: ${skippedCount}`)
     console.log(`   - Space ${this.options.dryRun ? 'to be freed' : 'freed'}: ${(totalSize / (1024 * 1024)).toFixed(2)} MB`)
-    
+
     if (this.options.dryRun && deletedCount > 0) {
       console.log('\n💡 Run without --dry-run flag to actually delete these files')
     }
@@ -120,21 +120,21 @@ class TempISOCleaner {
    * Cleanup with simple rm -rf for all ISOs in temp directory
    * WARNING: This will delete ALL ISOs in the temp directory immediately
    */
-  async cleanupAll(): Promise<void> {
+  async cleanupAll (): Promise<void> {
     console.log('🚨 WARNING: This will delete ALL temporary ISO files!')
-    
+
     if (!fs.existsSync(this.tempIsoDir)) {
       console.log('⚠️  Temp ISO directory does not exist. Nothing to clean.')
       return
     }
 
     const command = `rm -rf ${path.join(this.tempIsoDir, '*.iso')}`
-    
+
     if (this.options.dryRun) {
       console.log(`🔍 DRY RUN - Would execute: ${command}`)
     } else {
       console.log(`🗑️  Executing: ${command}`)
-      
+
       try {
         const { execSync } = require('child_process')
         execSync(command, { stdio: 'inherit' })
@@ -147,42 +147,42 @@ class TempISOCleaner {
 }
 
 // Parse command line arguments
-function parseArgs(): { options: CleanupOptions; cleanupAll: boolean } {
+function parseArgs (): { options: CleanupOptions; cleanupAll: boolean } {
   const args = process.argv.slice(2)
   const options: CleanupOptions = {}
   let cleanupAll = false
 
   for (let i = 0; i < args.length; i++) {
     switch (args[i]) {
-      case '--dry-run':
-      case '-d':
-        options.dryRun = true
-        break
-      case '--verbose':
-      case '-v':
-        options.verbose = true
-        break
-      case '--older-than':
-      case '-o':
-        if (i + 1 < args.length) {
-          options.olderThanDays = parseInt(args[++i], 10)
-        }
-        break
-      case '--all':
-      case '-a':
-        cleanupAll = true
-        break
-      case '--help':
-      case '-h':
-        printHelp()
-        process.exit(0)
+    case '--dry-run':
+    case '-d':
+      options.dryRun = true
+      break
+    case '--verbose':
+    case '-v':
+      options.verbose = true
+      break
+    case '--older-than':
+    case '-o':
+      if (i + 1 < args.length) {
+        options.olderThanDays = parseInt(args[++i], 10)
+      }
+      break
+    case '--all':
+    case '-a':
+      cleanupAll = true
+      break
+    case '--help':
+    case '-h':
+      printHelp()
+      process.exit(0)
     }
   }
 
   return { options, cleanupAll }
 }
 
-function printHelp(): void {
+function printHelp (): void {
   console.log(`
 Infinibay Temporary ISO Cleanup Utility
 
@@ -215,7 +215,7 @@ Examples:
 }
 
 // Main execution
-async function main() {
+async function main () {
   const { options, cleanupAll } = parseArgs()
   const cleaner = new TempISOCleaner(options)
 

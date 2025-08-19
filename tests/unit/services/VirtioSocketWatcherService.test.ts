@@ -49,16 +49,16 @@ describe('VirtioSocketWatcherService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    
+
     // Reset the singleton
-    (global as any).virtioSocketWatcherService = null;
-    
+    (global as any).virtioSocketWatcherService = null
+
     // Create service with mock prisma
-    service = createVirtioSocketWatcherService(mockPrisma as any);
-    
+    service = createVirtioSocketWatcherService(mockPrisma as any)
+
     // Get the mock socket instance
     mockSocket = new MockSocket();
-    (net.Socket as any).mockImplementation(() => mockSocket);
+    (net.Socket as any).mockImplementation(() => mockSocket)
   })
 
   afterEach(() => {
@@ -73,7 +73,7 @@ describe('VirtioSocketWatcherService', () => {
         expect.stringContaining('sockets'),
         { recursive: true }
       )
-      
+
       const chokidar = require('chokidar')
       expect(chokidar.watch).toHaveBeenCalledWith(
         expect.stringContaining('sockets'),
@@ -86,7 +86,7 @@ describe('VirtioSocketWatcherService', () => {
 
     it('should stop the service and clean up connections', async () => {
       await service.start()
-      
+
       // Simulate a socket connection
       const socketPath = path.join(socketsDir, 'test-vm.socket')
       mockPrisma.machine.findUnique.mockResolvedValue({
@@ -94,7 +94,7 @@ describe('VirtioSocketWatcherService', () => {
         name: 'Test VM',
         status: 'running'
       } as any)
-      
+
       mockWatcher.emit('add', socketPath)
       await new Promise(resolve => setTimeout(resolve, 100))
 
@@ -121,7 +121,7 @@ describe('VirtioSocketWatcherService', () => {
     it('should connect to VM when socket file is added', async () => {
       const vmId = 'test-vm-123'
       const socketPath = path.join(socketsDir, `${vmId}.socket`)
-      
+
       mockPrisma.machine.findUnique.mockResolvedValue({
         id: vmId,
         name: 'Test VM',
@@ -140,7 +140,7 @@ describe('VirtioSocketWatcherService', () => {
 
     it('should ignore non-socket files', async () => {
       const filePath = path.join(socketsDir, 'random.txt')
-      
+
       mockWatcher.emit('add', filePath)
       await new Promise(resolve => setTimeout(resolve, 100))
 
@@ -150,7 +150,7 @@ describe('VirtioSocketWatcherService', () => {
 
     it('should not connect if VM does not exist in database', async () => {
       const socketPath = path.join(socketsDir, 'unknown-vm.socket')
-      
+
       mockPrisma.machine.findUnique.mockResolvedValue(null)
 
       mockWatcher.emit('add', socketPath)
@@ -162,17 +162,17 @@ describe('VirtioSocketWatcherService', () => {
     it('should close connection when socket file is removed', async () => {
       const vmId = 'test-vm'
       const socketPath = path.join(socketsDir, `${vmId}.socket`)
-      
+
       // First connect
       mockPrisma.machine.findUnique.mockResolvedValue({
         id: vmId,
         name: 'Test VM',
         status: 'running'
       } as any)
-      
+
       mockWatcher.emit('add', socketPath)
       await new Promise(resolve => setTimeout(resolve, 100))
-      
+
       // Then remove
       mockWatcher.emit('unlink', socketPath)
       await new Promise(resolve => setTimeout(resolve, 100))
@@ -184,17 +184,17 @@ describe('VirtioSocketWatcherService', () => {
   describe('Message Processing', () => {
     beforeEach(async () => {
       await service.start()
-      
+
       // Setup a connected VM
       const vmId = 'test-vm'
       const socketPath = path.join(socketsDir, `${vmId}.socket`)
-      
+
       mockPrisma.machine.findUnique.mockResolvedValue({
         id: vmId,
         name: 'Test VM',
         status: 'running'
       } as any)
-      
+
       mockWatcher.emit('add', socketPath)
       await new Promise(resolve => setTimeout(resolve, 100))
       mockSocket.emit('connect')
@@ -202,7 +202,7 @@ describe('VirtioSocketWatcherService', () => {
 
     it('should respond to ping with pong', async () => {
       const pingMessage = JSON.stringify({ type: 'ping', timestamp: new Date().toISOString() }) + '\n'
-      
+
       mockSocket.emit('data', Buffer.from(pingMessage))
       await new Promise(resolve => setTimeout(resolve, 100))
 
@@ -300,7 +300,7 @@ describe('VirtioSocketWatcherService', () => {
 
     it('should handle malformed JSON gracefully', async () => {
       const badMessage = 'not valid json\n'
-      
+
       // Should not throw
       expect(() => {
         mockSocket.emit('data', Buffer.from(badMessage))
@@ -335,7 +335,7 @@ describe('VirtioSocketWatcherService', () => {
     it('should attempt reconnection on socket error', async () => {
       const vmId = 'test-vm'
       const socketPath = path.join(socketsDir, `${vmId}.socket`)
-      
+
       mockPrisma.machine.findUnique.mockResolvedValue({
         id: vmId,
         name: 'Test VM',
@@ -344,16 +344,16 @@ describe('VirtioSocketWatcherService', () => {
 
       mockWatcher.emit('add', socketPath)
       await Promise.resolve()
-      
+
       // Simulate connection error
       mockSocket.emit('error', new Error('Connection failed'))
-      
+
       // Fast-forward time to trigger reconnection
       jest.advanceTimersByTime(1000)
-      
+
       // Socket file still exists
       ;(fs.access as any).mockImplementation((path: string, mode: any, cb: any) => cb(null))
-      
+
       jest.advanceTimersByTime(1000)
       await Promise.resolve()
 
@@ -375,7 +375,7 @@ describe('VirtioSocketWatcherService', () => {
     it('should send periodic ping messages', async () => {
       const vmId = 'test-vm'
       const socketPath = path.join(socketsDir, `${vmId}.socket`)
-      
+
       mockPrisma.machine.findUnique.mockResolvedValue({
         id: vmId,
         name: 'Test VM',
@@ -405,7 +405,7 @@ describe('VirtioSocketWatcherService', () => {
       // Add two VMs
       const vm1 = { id: 'vm-1', name: 'VM 1', status: 'running' } as any
       const vm2 = { id: 'vm-2', name: 'VM 2', status: 'running' } as any
-      
+
       mockPrisma.machine.findUnique
         .mockResolvedValueOnce(vm1)
         .mockResolvedValueOnce(vm2)
@@ -434,17 +434,17 @@ describe('VirtioSocketWatcherService', () => {
   describe('VM Cleanup', () => {
     it('should cleanup VM connection and socket file', async () => {
       await service.start()
-      
+
       const vmId = 'test-vm'
       const socketPath = path.join(socketsDir, `${vmId}.socket`)
-      
+
       // Setup connection
       mockPrisma.machine.findUnique.mockResolvedValue({
         id: vmId,
         name: 'Test VM',
         status: 'running'
       } as any)
-      
+
       mockWatcher.emit('add', socketPath)
       await new Promise(resolve => setTimeout(resolve, 100))
 
@@ -457,7 +457,7 @@ describe('VirtioSocketWatcherService', () => {
 
     it('should handle cleanup when socket file does not exist', async () => {
       await service.start()
-      
+
       ;(fs.promises.unlink as jest.Mock).mockRejectedValue({ code: 'ENOENT' })
 
       // Should not throw

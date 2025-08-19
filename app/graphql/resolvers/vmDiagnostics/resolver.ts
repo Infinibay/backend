@@ -9,14 +9,14 @@ import { Debugger } from '@main/utils/debug'
 export class VmDiagnosticsResolver {
   private debug: Debugger
 
-  constructor() {
+  constructor () {
     this.debug = new Debugger('vm-diagnostics')
   }
 
   @Query(() => VmDiagnostics, {
     description: 'Get comprehensive diagnostics for VM socket connection issues'
   })
-  async vmSocketDiagnostics(
+  async vmSocketDiagnostics (
     @Arg('vmId') vmId: string,
     @Ctx() { prisma }: InfinibayContext
   ): Promise<VmDiagnostics> {
@@ -40,18 +40,18 @@ export class VmDiagnosticsResolver {
 
       // Get QEMU Guest Agent service
       const qemuService = await getQemuGuestAgentService()
-      
+
       // Run diagnostics
       const diagnosticsResult = await qemuService.diagnoseSocketIssues(vmId)
       const infiniServiceCheck = await qemuService.checkInfiniService(vmId)
-      
+
       // Get socket watcher stats
       let connectionStats: SocketConnectionStats | undefined
       try {
         const socketWatcher = getVirtioSocketWatcherService()
         const stats = socketWatcher.getConnectionStats()
         const vmConnection = stats.connections.find(c => c.vmId === vmId)
-        
+
         if (vmConnection) {
           connectionStats = {
             isConnected: vmConnection.isConnected,
@@ -100,11 +100,11 @@ export class VmDiagnosticsResolver {
     description: 'Get current socket connection statistics for all VMs',
     nullable: true
   })
-  async socketConnectionStats(): Promise<SocketConnectionStats | null> {
+  async socketConnectionStats (): Promise<SocketConnectionStats | null> {
     try {
       const socketWatcher = getVirtioSocketWatcherService()
       const stats = socketWatcher.getConnectionStats()
-      
+
       return {
         totalConnections: stats.totalConnections,
         activeConnections: stats.activeConnections,

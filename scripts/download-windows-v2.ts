@@ -10,7 +10,7 @@ const NON_WINDOWS_USER_AGENT = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.
 // Known direct download URLs (these are CDN URLs that remain stable)
 // These URLs are publicly documented and used by various automation tools
 const WINDOWS_DIRECT_URLS = {
-  '10': {
+  10: {
     '22H2': {
       'en-US': {
         x64: 'https://software.download.prss.microsoft.com/dbazure/Win10_22H2_English_x64v1.iso?t=',
@@ -18,7 +18,7 @@ const WINDOWS_DIRECT_URLS = {
       }
     }
   },
-  '11': {
+  11: {
     '23H2': {
       'en-US': {
         x64: 'https://software.download.prss.microsoft.com/dbazure/Win11_23H2_English_x64v2.iso?t=',
@@ -34,7 +34,7 @@ const WINDOWS_DIRECT_URLS = {
   }
 }
 
-async function testDirectUrl(url: string): Promise<boolean> {
+async function testDirectUrl (url: string): Promise<boolean> {
   try {
     const response = await axios.head(url, {
       headers: {
@@ -49,11 +49,11 @@ async function testDirectUrl(url: string): Promise<boolean> {
   }
 }
 
-async function findWorkingDownloadUrl(windowsVersion: '10' | '11'): Promise<{ url: string; fileName: string } | null> {
+async function findWorkingDownloadUrl (windowsVersion: '10' | '11'): Promise<{ url: string; fileName: string } | null> {
   console.log(`Searching for working Windows ${windowsVersion} download URLs...`)
-  
+
   const versions = WINDOWS_DIRECT_URLS[windowsVersion]
-  
+
   for (const [version, languages] of Object.entries(versions)) {
     const langData = languages['en-US']
     if (langData) {
@@ -61,13 +61,13 @@ async function findWorkingDownloadUrl(windowsVersion: '10' | '11'): Promise<{ ur
       // Try with a recent timestamp parameter
       const timestamp = new Date().toISOString()
       const testUrl = baseUrl + encodeURIComponent(timestamp)
-      
+
       console.log(`Testing ${version} URL...`)
-      
+
       // For actual download, we'll try without the timestamp parameter
       // as the CDN URLs sometimes work without it
       const simpleUrl = baseUrl.replace('?t=', '')
-      
+
       // Return the URL structure - actual download will handle redirects
       return {
         url: simpleUrl,
@@ -75,27 +75,27 @@ async function findWorkingDownloadUrl(windowsVersion: '10' | '11'): Promise<{ ur
       }
     }
   }
-  
+
   return null
 }
 
-async function getAlternativeDownloadMethod(windowsVersion: '10' | '11'): Promise<{ url: string; fileName: string } | null> {
+async function getAlternativeDownloadMethod (windowsVersion: '10' | '11'): Promise<{ url: string; fileName: string } | null> {
   console.log(`\nAttempting alternative download method for Windows ${windowsVersion}...`)
-  
+
   // Alternative: Use Windows evaluation versions (legal and free for testing)
   const evaluationUrls = {
-    '10': {
+    10: {
       url: 'https://www.microsoft.com/en-us/evalcenter/evaluate-windows-10-enterprise',
       isoUrl: 'https://software-static.download.prss.microsoft.com/dbazure/Windows_10_Enterprise_2019_LTSC.iso',
       fileName: 'Windows_10_Enterprise_Evaluation.iso'
     },
-    '11': {
+    11: {
       url: 'https://www.microsoft.com/en-us/evalcenter/evaluate-windows-11-enterprise',
       isoUrl: 'https://software-static.download.prss.microsoft.com/dbazure/Windows_11_Enterprise.iso',
       fileName: 'Windows_11_Enterprise_Evaluation.iso'
     }
   }
-  
+
   const evalData = evaluationUrls[windowsVersion]
   if (evalData) {
     console.log('Note: Using Enterprise Evaluation version (90-day trial)')
@@ -105,11 +105,11 @@ async function getAlternativeDownloadMethod(windowsVersion: '10' | '11'): Promis
       fileName: evalData.fileName
     }
   }
-  
+
   return null
 }
 
-async function downloadWindowsISO(windowsVersion: '10' | '11', useEvaluation: boolean = false): Promise<void> {
+async function downloadWindowsISO (windowsVersion: '10' | '11', useEvaluation: boolean = false): Promise<void> {
   console.log(`\n=== Downloading Windows ${windowsVersion} ===\n`)
   console.log('LEGAL NOTICE: This script downloads Windows ISOs from official Microsoft servers.')
   console.log('Windows licenses must be purchased separately for production use.')
@@ -117,9 +117,9 @@ async function downloadWindowsISO(windowsVersion: '10' | '11', useEvaluation: bo
 
   const baseDir = process.env.INFINIBAY_BASE_DIR || '/opt/infinibay'
   const tempDir = process.env.INFINIBAY_TEMP_DIR || '/tmp/infinibay'
-  
+
   let isoDir = path.join(baseDir, 'iso', 'windows')
-  
+
   // Check if we can write to the target directory
   try {
     if (!fs.existsSync(isoDir)) {
@@ -129,26 +129,26 @@ async function downloadWindowsISO(windowsVersion: '10' | '11', useEvaluation: bo
     console.warn(`Cannot write to ${isoDir}, using temp directory ${tempDir}`)
     isoDir = path.join(tempDir, 'iso', 'windows')
   }
-  
+
   if (!fs.existsSync(isoDir)) {
     fs.mkdirSync(isoDir, { recursive: true })
   }
 
   try {
     let downloadInfo = null
-    
+
     if (useEvaluation) {
       downloadInfo = await getAlternativeDownloadMethod(windowsVersion)
     } else {
       downloadInfo = await findWorkingDownloadUrl(windowsVersion)
-      
+
       if (!downloadInfo) {
         console.log('\nDirect download URLs not available.')
         console.log('Falling back to evaluation version...')
         downloadInfo = await getAlternativeDownloadMethod(windowsVersion)
       }
     }
-    
+
     if (!downloadInfo) {
       console.error(`\nNo Windows ${windowsVersion} downloads available.`)
       console.error('This might be because:')
@@ -161,7 +161,7 @@ async function downloadWindowsISO(windowsVersion: '10' | '11', useEvaluation: bo
     }
 
     const isoPath = path.join(isoDir, downloadInfo.fileName)
-    
+
     if (fs.existsSync(isoPath)) {
       const stats = fs.statSync(isoPath)
       const sizeGB = (stats.size / (1024 * 1024 * 1024)).toFixed(2)
@@ -175,7 +175,7 @@ async function downloadWindowsISO(windowsVersion: '10' | '11', useEvaluation: bo
     console.log('This may take a while (ISO size is typically 4-6 GB)...\n')
 
     const writer = fs.createWriteStream(isoPath)
-    
+
     let lastProgress = 0
     const response = await axios({
       url: downloadInfo.url,
@@ -183,9 +183,9 @@ async function downloadWindowsISO(windowsVersion: '10' | '11', useEvaluation: bo
       responseType: 'stream',
       headers: {
         'User-Agent': NON_WINDOWS_USER_AGENT,
-        'Accept': '*/*',
+        Accept: '*/*',
         'Accept-Encoding': 'gzip, deflate, br',
-        'Connection': 'keep-alive'
+        Connection: 'keep-alive'
       },
       timeout: 300000, // 5 minutes timeout for large file
       maxRedirects: 10,
@@ -225,31 +225,31 @@ async function downloadWindowsISO(windowsVersion: '10' | '11', useEvaluation: bo
     if (axios.isAxiosError(error)) {
       if (error.response) {
         console.error(`\n❌ Download failed with status ${error.response.status}`)
-        console.error(`This usually means the direct URL is not available.`)
+        console.error('This usually means the direct URL is not available.')
       } else if (error.code === 'ECONNABORTED') {
-        console.error(`\n❌ Download timeout - the file is too large or connection is slow`)
+        console.error('\n❌ Download timeout - the file is too large or connection is slow')
       } else {
-        console.error(`\n❌ Network error:`, error.message)
+        console.error('\n❌ Network error:', error.message)
       }
     } else {
-      console.error(`\n❌ Error:`, error instanceof Error ? error.message : String(error))
+      console.error('\n❌ Error:', error instanceof Error ? error.message : String(error))
     }
-    
+
     console.error('\nTroubleshooting:')
     console.error('1. Try using --eval flag for evaluation versions')
     console.error('2. Check your internet connection')
     console.error('3. Ensure you have enough disk space')
     console.error('4. Download manually from Microsoft website')
-    
+
     throw error
   }
 }
 
-async function main() {
+async function main () {
   const args = process.argv.slice(2)
   const useEval = args.includes('--eval')
   const version = args.find(arg => arg === '10' || arg === '11' || arg === 'all')
-  
+
   if (!version || version === 'all') {
     console.log('Downloading both Windows 10 and 11...')
     try {

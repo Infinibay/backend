@@ -1,6 +1,6 @@
 /**
  * VirtioSocketWatcherService - Manages connections to VM InfiniService agents
- * 
+ *
  * Debug output control:
  * - To see all debug messages: DEBUG=infinibay:virtio-socket:* npm run dev
  * - To see only errors/warnings: DEBUG=infinibay:virtio-socket:error,infinibay:virtio-socket:warn npm run dev
@@ -138,8 +138,8 @@ interface VmConnection {
   lastMessageTime: Date
   pingTimer?: NodeJS.Timeout
   isConnected: boolean
-  lastErrorType?: string  // Track last error type to avoid repetitive logging
-  errorCount: number      // Track error frequency
+  lastErrorType?: string // Track last error type to avoid repetitive logging
+  errorCount: number // Track error frequency
 }
 
 export class VirtioSocketWatcherService extends EventEmitter {
@@ -155,7 +155,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   private readonly messageTimeout = 60000 // Consider connection dead after 60 seconds
   private debug: Debugger
 
-  constructor(prisma: PrismaClient) {
+  constructor (prisma: PrismaClient) {
     super()
     this.prisma = prisma
     this.socketDir = path.join(process.env.INFINIBAY_BASE_DIR || '/opt/infinibay', 'sockets')
@@ -163,12 +163,12 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Initialize the service with optional dependencies
-  initialize(vmEventManager?: VmEventManager): void {
+  initialize (vmEventManager?: VmEventManager): void {
     this.vmEventManager = vmEventManager
   }
 
   // Start watching for socket files
-  async start(): Promise<void> {
+  async start (): Promise<void> {
     if (this.isRunning) {
       this.debug.log('info', 'VirtioSocketWatcherService is already running')
       return
@@ -204,7 +204,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Stop the service and clean up
-  async stop(): Promise<void> {
+  async stop (): Promise<void> {
     if (!this.isRunning) {
       return
     }
@@ -227,7 +227,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Handle new socket file detected
-  private async handleSocketFileAdded(socketPath: string): Promise<void> {
+  private async handleSocketFileAdded (socketPath: string): Promise<void> {
     const filename = path.basename(socketPath)
     const match = filename.match(/^(.+)\.socket$/)
 
@@ -259,7 +259,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Handle socket file removal
-  private handleSocketFileRemoved(socketPath: string): void {
+  private handleSocketFileRemoved (socketPath: string): void {
     const filename = path.basename(socketPath)
     const match = filename.match(/^(.+)\.socket$/)
 
@@ -275,7 +275,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Connect to a VM's Unix domain socket
-  private async connectToVm(vmId: string, socketPath: string): Promise<void> {
+  private async connectToVm (vmId: string, socketPath: string): Promise<void> {
     // Close existing connection if any
     if (this.connections.has(vmId)) {
       this.debug.log('debug', `🔌 Closing existing connection for VM ${vmId}`)
@@ -378,7 +378,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Handle incoming data from socket
-  private handleSocketData(connection: VmConnection, data: Buffer): void {
+  private handleSocketData (connection: VmConnection, data: Buffer): void {
     connection.buffer += data.toString()
     connection.lastMessageTime = new Date()
 
@@ -395,7 +395,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Process a complete message
-  private async processMessage(connection: VmConnection, messageStr: string): Promise<void> {
+  private async processMessage (connection: VmConnection, messageStr: string): Promise<void> {
     try {
       const message: IncomingMessage = JSON.parse(messageStr)
 
@@ -405,19 +405,19 @@ export class VirtioSocketWatcherService extends EventEmitter {
       this.debug.log('debug', `Full message structure: ${JSON.stringify(message, null, 2).slice(0, 100)}`)
 
       switch (message.type) {
-        case 'metrics':
-          // Store metrics in database
-          await this.storeMetrics(connection.vmId, message as MetricsMessage)
-          break
+      case 'metrics':
+        // Store metrics in database
+        await this.storeMetrics(connection.vmId, message as MetricsMessage)
+        break
 
-        case 'error':
-          // Log error from VM
-          const errorMsg = message as ErrorMessage
-          this.debug.log('error', `Error from VM ${connection.vmId}: ${errorMsg.error} ${errorMsg.details ? JSON.stringify(errorMsg.details) : ''}`)
-          break
+      case 'error':
+        // Log error from VM
+        const errorMsg = message as ErrorMessage
+        this.debug.log('error', `Error from VM ${connection.vmId}: ${errorMsg.error} ${errorMsg.details ? JSON.stringify(errorMsg.details) : ''}`)
+        break
 
-        default:
-          this.debug.log('warn', `Unknown message type from VM ${connection.vmId}: ${(message as any).type}`)
+      default:
+        this.debug.log('warn', `Unknown message type from VM ${connection.vmId}: ${(message as any).type}`)
       }
     } catch (error) {
       this.debug.log('error', `Failed to process message from VM ${connection.vmId}: ${error}`)
@@ -432,7 +432,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Store metrics in database
-  private async storeMetrics(vmId: string, message: MetricsMessage): Promise<void> {
+  private async storeMetrics (vmId: string, message: MetricsMessage): Promise<void> {
     try {
       const { data } = message
 
@@ -669,7 +669,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Send message to VM
-  private sendMessage(connection: VmConnection, message: any): void {
+  private sendMessage (connection: VmConnection, message: any): void {
     if (!connection.isConnected) {
       this.debug.log('warn', `Cannot send message to disconnected VM ${connection.vmId}`)
       return
@@ -684,7 +684,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Monitor connection health (no active pinging, just monitoring)
-  private startHealthMonitoring(connection: VmConnection): void {
+  private startHealthMonitoring (connection: VmConnection): void {
     // Clear existing timer
     if (connection.pingTimer) {
       clearInterval(connection.pingTimer)
@@ -696,13 +696,12 @@ export class VirtioSocketWatcherService extends EventEmitter {
       if (timeSinceLastMessage > this.messageTimeout) {
         this.debug.log('warn', `Connection to VM ${connection.vmId} appears stale (${Math.round(timeSinceLastMessage / 1000)}s since last message), reconnecting...`)
         this.handleConnectionError(connection)
-        return
       }
     }, this.pingInterval)
   }
 
   // Handle connection error
-  private handleConnectionError(connection: VmConnection): void {
+  private handleConnectionError (connection: VmConnection): void {
     connection.isConnected = false
 
     // Clear ping timer
@@ -748,7 +747,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Handle connection closed
-  private handleConnectionClosed(connection: VmConnection): void {
+  private handleConnectionClosed (connection: VmConnection): void {
     // If this was an intentional close, don't reconnect
     if (!this.isRunning) {
       this.closeConnection(connection.vmId)
@@ -760,7 +759,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Close and clean up a connection
-  private closeConnection(vmId: string): void {
+  private closeConnection (vmId: string): void {
     const connection = this.connections.get(vmId)
     if (!connection) {
       return
@@ -787,7 +786,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Get connection statistics
-  getConnectionStats(): {
+  getConnectionStats (): {
     totalConnections: number
     activeConnections: number
     connections: Array<{
@@ -796,7 +795,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
       reconnectAttempts: number
       lastMessageTime: Date
     }>
-  } {
+    } {
     const connections = Array.from(this.connections.values()).map(conn => ({
       vmId: conn.vmId,
       isConnected: conn.isConnected,
@@ -812,7 +811,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Clean up connections for a deleted VM
-  async cleanupVmConnection(vmId: string): Promise<void> {
+  async cleanupVmConnection (vmId: string): Promise<void> {
     this.debug.log('debug', `Cleaning up connection for deleted VM ${vmId}`)
     this.closeConnection(vmId)
 

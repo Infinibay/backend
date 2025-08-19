@@ -7,13 +7,13 @@ export class VmEventManager implements ResourceEventManager {
   private socketService: SocketService
   private prisma: PrismaClient
 
-  constructor(socketService: SocketService, prisma: PrismaClient) {
+  constructor (socketService: SocketService, prisma: PrismaClient) {
     this.socketService = socketService
     this.prisma = prisma
   }
 
   // Main event handler for VM events
-  async handleEvent(action: EventAction, vmData: any, triggeredBy?: string): Promise<void> {
+  async handleEvent (action: EventAction, vmData: any, triggeredBy?: string): Promise<void> {
     try {
       console.log(`🖥️ Handling VM event: ${action}`, { vmId: vmData?.id, triggeredBy })
 
@@ -46,7 +46,7 @@ export class VmEventManager implements ResourceEventManager {
   }
 
   // Get complete VM data from database
-  private async getVmData(vmData: any): Promise<any> {
+  private async getVmData (vmData: any): Promise<any> {
     try {
       // If we already have complete data, use it
       if (vmData && typeof vmData === 'object' && vmData.name && vmData.status) {
@@ -95,7 +95,7 @@ export class VmEventManager implements ResourceEventManager {
   }
 
   // Determine which users should receive this VM event based on permissions
-  private async getTargetUsers(vm: any, action: EventAction): Promise<string[]> {
+  private async getTargetUsers (vm: any, action: EventAction): Promise<string[]> {
     try {
       const targetUsers: Set<string> = new Set()
 
@@ -106,9 +106,9 @@ export class VmEventManager implements ResourceEventManager {
 
       // 2. Include all admin users (they can see everything)
       const adminUsers = await this.prisma.user.findMany({
-        where: { 
+        where: {
           role: 'ADMIN',
-          deleted: false 
+          deleted: false
         },
         select: { id: true }
       })
@@ -149,19 +149,19 @@ export class VmEventManager implements ResourceEventManager {
 
   // Specific VM event handlers with additional logic
 
-  async handleVmCreated(vmData: any, triggeredBy?: string): Promise<void> {
+  async handleVmCreated (vmData: any, triggeredBy?: string): Promise<void> {
     await this.handleEvent('create', vmData, triggeredBy)
   }
 
-  async handleVmUpdated(vmData: any, triggeredBy?: string): Promise<void> {
+  async handleVmUpdated (vmData: any, triggeredBy?: string): Promise<void> {
     await this.handleEvent('update', vmData, triggeredBy)
   }
 
-  async handleVmDeleted(vmData: any, triggeredBy?: string): Promise<void> {
+  async handleVmDeleted (vmData: any, triggeredBy?: string): Promise<void> {
     // For delete events, we might not have full VM data anymore
     // So we'll send the basic info we have
     const targetUsers = await this.getTargetUsersForDeletedVm(vmData)
-    
+
     const payload: EventPayload = {
       status: 'success',
       data: {
@@ -176,20 +176,20 @@ export class VmEventManager implements ResourceEventManager {
     }
   }
 
-  async handleVmPowerStateChange(vmData: any, action: 'power_on' | 'power_off' | 'suspend', triggeredBy?: string): Promise<void> {
+  async handleVmPowerStateChange (vmData: any, action: 'power_on' | 'power_off' | 'suspend', triggeredBy?: string): Promise<void> {
     await this.handleEvent(action, vmData, triggeredBy)
   }
 
   // Special handling for deleted VMs (limited data available)
-  private async getTargetUsersForDeletedVm(vmData: any): Promise<string[]> {
+  private async getTargetUsersForDeletedVm (vmData: any): Promise<string[]> {
     try {
       const targetUsers: Set<string> = new Set()
 
       // Include all admin users
       const adminUsers = await this.prisma.user.findMany({
-        where: { 
+        where: {
           role: 'ADMIN',
-          deleted: false 
+          deleted: false
         },
         select: { id: true }
       })

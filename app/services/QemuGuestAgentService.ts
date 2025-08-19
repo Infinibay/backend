@@ -11,14 +11,14 @@ export class QemuGuestAgentService {
   private debug: Debugger
   private libvirt: Connection | null = null
 
-  constructor() {
+  constructor () {
     this.debug = new Debugger('qemu-guest-agent')
   }
 
   /**
    * Initialize the service with libvirt connection
    */
-  async initialize(): Promise<void> {
+  async initialize (): Promise<void> {
     try {
       this.libvirt = await getLibvirtConnection()
       this.debug.log('info', 'QEMU Guest Agent Service initialized')
@@ -32,7 +32,7 @@ export class QemuGuestAgentService {
    * Execute a command inside a VM using QEMU Guest Agent
    * Note: This requires qemuAgentCommand to be implemented in libvirt-node
    */
-  async executeCommand(
+  async executeCommand (
     vmId: string,
     command: string,
     args: string[] = []
@@ -56,11 +56,11 @@ export class QemuGuestAgentService {
       // Note: qemuAgentCommand is not yet implemented in libvirt-node
       // This is a placeholder for when it becomes available
       this.debug.log('warn', 'qemuAgentCommand is not yet implemented in libvirt-node')
-      
+
       // For now, provide manual debugging instructions
       const virshCommand = this.buildVirshCommand(vmId, command, args)
       this.debug.log('info', `To manually debug, run: ${virshCommand}`)
-      
+
       return {
         success: false,
         error: 'QEMU Guest Agent commands not yet supported. Use virsh manually.',
@@ -89,13 +89,13 @@ export class QemuGuestAgentService {
           execute: 'guest-exec-status',
           arguments: { pid: resultObj.pid }
         }
-        
+
         const status = await domain.qemuAgentCommand(JSON.stringify(statusCmd), 30, 0)
         const statusObj = JSON.parse(status)
 
         if (statusObj.exited) {
-          const output = statusObj['out-data'] 
-            ? Buffer.from(statusObj['out-data'], 'base64').toString() 
+          const output = statusObj['out-data']
+            ? Buffer.from(statusObj['out-data'], 'base64').toString()
             : ''
           const error = statusObj['err-data']
             ? Buffer.from(statusObj['err-data'], 'base64').toString()
@@ -123,14 +123,14 @@ export class QemuGuestAgentService {
   /**
    * Check if InfiniService is installed and running in a VM
    */
-  async checkInfiniService(vmId: string): Promise<{
+  async checkInfiniService (vmId: string): Promise<{
     installed: boolean
     running: boolean
     error?: string
     diagnostics: string[]
   }> {
     const diagnostics: string[] = []
-    
+
     // Generate diagnostic commands
     diagnostics.push('Diagnostic commands to run manually:')
     diagnostics.push('')
@@ -153,7 +153,7 @@ export class QemuGuestAgentService {
 
     // Try to check service status (placeholder for now)
     const result = await this.executeCommand(vmId, 'systemctl', ['status', 'infiniservice'])
-    
+
     return {
       installed: false,
       running: false,
@@ -165,7 +165,7 @@ export class QemuGuestAgentService {
   /**
    * Get system information from a VM
    */
-  async getSystemInfo(vmId: string): Promise<{
+  async getSystemInfo (vmId: string): Promise<{
     success: boolean
     info?: {
       hostname?: string
@@ -202,7 +202,7 @@ export class QemuGuestAgentService {
   /**
    * Build virsh command for manual execution
    */
-  private buildVirshCommand(vmId: string, command: string, args: string[]): string {
+  private buildVirshCommand (vmId: string, command: string, args: string[]): string {
     const guestExecCmd = {
       execute: 'guest-exec',
       arguments: {
@@ -217,7 +217,7 @@ export class QemuGuestAgentService {
   /**
    * Diagnose socket connection issues
    */
-  async diagnoseSocketIssues(vmId: string): Promise<{
+  async diagnoseSocketIssues (vmId: string): Promise<{
     diagnostics: string[]
     recommendations: string[]
   }> {
@@ -238,7 +238,7 @@ export class QemuGuestAgentService {
           const state = domain.getState()
           if (state) {
             diagnostics.push(`VM State: ${this.getStateName(state.result)}`)
-            
+
             if (state.result !== 1) {
               recommendations.push('• VM is not running. Start the VM first.')
             }
@@ -292,7 +292,7 @@ export class QemuGuestAgentService {
   /**
    * Get human-readable VM state name
    */
-  private getStateName(state: number): string {
+  private getStateName (state: number): string {
     const states: { [key: number]: string } = {
       0: 'No State',
       1: 'Running',

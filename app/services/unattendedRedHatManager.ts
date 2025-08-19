@@ -118,14 +118,14 @@ export class UnattendedRedHatManager extends UnattendedManagerBase {
   /**
    * Generates post-install commands to install InfiniService on RedHat/Fedora.
    * Downloads the binary and installation script from the backend server.
-   * 
+   *
    * @returns Post-install script for InfiniService installation
    */
   private generateInfiniServiceConfig (): string {
     const backendHost = process.env.APP_HOST || 'localhost'
     const backendPort = process.env.PORT || '4000'
     const baseUrl = `http://${backendHost}:${backendPort}`
-    
+
     let postInstallScript = '%post --log=/root/infiniservice-install.log\n'
     postInstallScript += 'echo "Starting InfiniService installation..."\n'
     postInstallScript += '\n'
@@ -169,7 +169,7 @@ export class UnattendedRedHatManager extends UnattendedManagerBase {
     postInstallScript += '\n'
     postInstallScript += 'echo "InfiniService installation process completed"\n'
     postInstallScript += '%end\n'
-    
+
     return postInstallScript
   }
 

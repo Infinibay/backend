@@ -240,7 +240,7 @@ export class CreateMachineService {
     if (newIsoPath) {
       const baseDir = process.env.INFINIBAY_BASE_DIR ?? '/opt/infinibay'
       const tempIsoDir = process.env.INFINIBAY_ISO_TEMP_DIR ?? path.join(baseDir, 'iso', 'temp')
-      
+
       // Only delete if the ISO is in the temp directory
       if (newIsoPath.includes(tempIsoDir)) {
         try {

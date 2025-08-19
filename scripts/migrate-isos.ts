@@ -39,7 +39,7 @@ class ISOMigrator {
     'Win11'
   ]
 
-  constructor(options: MigrationOptions = {}) {
+  constructor (options: MigrationOptions = {}) {
     this.baseDir = process.env.INFINIBAY_BASE_DIR || '/opt/infinibay'
     this.oldIsoDir = path.join(this.baseDir, 'iso')
     this.tempIsoDir = process.env.INFINIBAY_ISO_TEMP_DIR || path.join(this.baseDir, 'iso', 'temp')
@@ -54,7 +54,7 @@ class ISOMigrator {
   /**
    * Check if an ISO should be considered permanent
    */
-  private isPermanentISO(filename: string): boolean {
+  private isPermanentISO (filename: string): boolean {
     const lowerFilename = filename.toLowerCase()
     return this.permanentISOPatterns.some(pattern => {
       const regex = new RegExp(pattern.toLowerCase())
@@ -65,7 +65,7 @@ class ISOMigrator {
   /**
    * Create necessary directories
    */
-  private ensureDirectories(): void {
+  private ensureDirectories (): void {
     const dirs = [
       this.tempIsoDir,
       this.permanentIsoDir,
@@ -89,9 +89,9 @@ class ISOMigrator {
   /**
    * Get the appropriate permanent subdirectory for an ISO
    */
-  private getPermanentSubdir(filename: string): string {
+  private getPermanentSubdir (filename: string): string {
     const lowerFilename = filename.toLowerCase()
-    
+
     if (lowerFilename.includes('ubuntu')) {
       return path.join(this.permanentIsoDir, 'ubuntu')
     }
@@ -101,7 +101,7 @@ class ISOMigrator {
     if (lowerFilename.includes('windows') || lowerFilename.includes('win10') || lowerFilename.includes('win11')) {
       return path.join(this.permanentIsoDir, 'windows')
     }
-    
+
     // Default to root permanent directory
     return this.permanentIsoDir
   }
@@ -109,12 +109,12 @@ class ISOMigrator {
   /**
    * Main migration method
    */
-  async migrate(): Promise<void> {
+  async migrate (): Promise<void> {
     console.log('🔄 Starting ISO migration...')
     console.log(`📁 Old ISO directory: ${this.oldIsoDir}`)
     console.log(`📁 Temp ISO directory: ${this.tempIsoDir}`)
     console.log(`📁 Permanent ISO directory: ${this.permanentIsoDir}`)
-    
+
     if (this.options.dryRun) {
       console.log('🔍 Running in DRY RUN mode - no files will be moved')
     }
@@ -210,7 +210,7 @@ class ISOMigrator {
     console.log(`   - Files ${this.options.dryRun ? 'to be moved' : 'moved'} to permanent: ${movedToPermanent}`)
     console.log(`   - Files ${this.options.dryRun ? 'to be moved' : 'moved'} to temporary: ${movedToTemp}`)
     console.log(`   - Files skipped: ${skipped}`)
-    
+
     if (this.options.dryRun && (movedToPermanent + movedToTemp) > 0) {
       console.log('\n💡 Run without --dry-run flag to actually move these files')
     }
@@ -219,9 +219,9 @@ class ISOMigrator {
   /**
    * Update the virtio-win ISO path in .env file
    */
-  async updateEnvFile(): Promise<void> {
+  async updateEnvFile (): Promise<void> {
     const envPath = path.join(this.baseDir, '..', 'backend', '.env')
-    
+
     if (!fs.existsSync(envPath)) {
       console.log('⚠️  .env file not found, skipping environment update')
       return
@@ -248,31 +248,31 @@ class ISOMigrator {
 }
 
 // Parse command line arguments
-function parseArgs(): MigrationOptions {
+function parseArgs (): MigrationOptions {
   const args = process.argv.slice(2)
   const options: MigrationOptions = {}
 
   for (let i = 0; i < args.length; i++) {
     switch (args[i]) {
-      case '--dry-run':
-      case '-d':
-        options.dryRun = true
-        break
-      case '--verbose':
-      case '-v':
-        options.verbose = true
-        break
-      case '--help':
-      case '-h':
-        printHelp()
-        process.exit(0)
+    case '--dry-run':
+    case '-d':
+      options.dryRun = true
+      break
+    case '--verbose':
+    case '-v':
+      options.verbose = true
+      break
+    case '--help':
+    case '-h':
+      printHelp()
+      process.exit(0)
     }
   }
 
   return options
 }
 
-function printHelp(): void {
+function printHelp (): void {
   console.log(`
 Infinibay ISO Migration Utility
 
@@ -311,7 +311,7 @@ Examples:
 }
 
 // Main execution
-async function main() {
+async function main () {
   const options = parseArgs()
   const migrator = new ISOMigrator(options)
 

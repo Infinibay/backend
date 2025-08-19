@@ -15,7 +15,7 @@ import { InfinibayContext } from '@main/utils/context'
 export class MetricsResolver {
   @Query(() => [SystemMetrics])
   @Authorized(['ADMIN', 'USER'])
-  async systemMetrics(
+  async systemMetrics (
     @Arg('filter', { nullable: true }) filter: MetricsFilterInput,
     @Ctx() { prisma }: InfinibayContext
   ): Promise<SystemMetrics[]> {
@@ -57,7 +57,7 @@ export class MetricsResolver {
 
   @Query(() => SystemMetrics, { nullable: true })
   @Authorized(['ADMIN', 'USER'])
-  async latestSystemMetrics(
+  async latestSystemMetrics (
     @Arg('machineId') machineId: string,
     @Ctx() { prisma }: InfinibayContext
   ): Promise<SystemMetrics | null> {
@@ -83,7 +83,7 @@ export class MetricsResolver {
 
   @Query(() => [ProcessSnapshot])
   @Authorized(['ADMIN', 'USER'])
-  async processSnapshots(
+  async processSnapshots (
     @Arg('filter', { nullable: true }) filter: ProcessFilterInput,
     @Ctx() { prisma }: InfinibayContext
   ): Promise<ProcessSnapshot[]> {
@@ -133,7 +133,7 @@ export class MetricsResolver {
 
   @Query(() => [ProcessSnapshot])
   @Authorized(['ADMIN', 'USER'])
-  async topProcessesByMachine(
+  async topProcessesByMachine (
     @Arg('machineId') machineId: string,
     @Arg('limit', { nullable: true, defaultValue: 10 }) limit: number,
     @Ctx() { prisma }: InfinibayContext
@@ -173,7 +173,7 @@ export class MetricsResolver {
 
   @Query(() => [ApplicationUsage])
   @Authorized(['ADMIN', 'USER'])
-  async applicationUsage(
+  async applicationUsage (
     @Arg('machineId', { nullable: true }) machineId: string | undefined,
     @Arg('limit', { nullable: true, defaultValue: 50 }) limit: number,
     @Ctx() { prisma }: InfinibayContext
@@ -208,7 +208,7 @@ export class MetricsResolver {
 
   @Query(() => [PortUsage])
   @Authorized(['ADMIN', 'USER'])
-  async portUsage(
+  async portUsage (
     @Arg('machineId') machineId: string,
     @Arg('listeningOnly', { nullable: true, defaultValue: false }) listeningOnly: boolean,
     @Ctx() { prisma }: InfinibayContext
@@ -245,7 +245,7 @@ export class MetricsResolver {
 
   @Query(() => [WindowsService])
   @Authorized(['ADMIN', 'USER'])
-  async windowsServices(
+  async windowsServices (
     @Arg('machineId') machineId: string,
     @Arg('runningOnly', { nullable: true, defaultValue: false }) runningOnly: boolean,
     @Ctx() { prisma }: InfinibayContext
@@ -278,7 +278,7 @@ export class MetricsResolver {
 
   @Query(() => MachineMetricsSummary, { nullable: true })
   @Authorized(['ADMIN', 'USER'])
-  async machineMetricsSummary(
+  async machineMetricsSummary (
     @Arg('machineId') machineId: string,
     @Ctx() { prisma }: InfinibayContext
   ): Promise<MachineMetricsSummary | null> {
@@ -330,17 +330,19 @@ export class MetricsResolver {
       return null
     }
 
-    const formattedMetrics = latestSystemMetrics ? {
-      ...latestSystemMetrics,
-      cpuCoresUsage: latestSystemMetrics.cpuCoresUsage as number[],
-      cpuTemperature: latestSystemMetrics.cpuTemperature ?? undefined,
-      totalMemoryKB: Number(latestSystemMetrics.totalMemoryKB),
-      usedMemoryKB: Number(latestSystemMetrics.usedMemoryKB),
-      availableMemoryKB: Number(latestSystemMetrics.availableMemoryKB),
-      swapTotalKB: latestSystemMetrics.swapTotalKB ? Number(latestSystemMetrics.swapTotalKB) : undefined,
-      swapUsedKB: latestSystemMetrics.swapUsedKB ? Number(latestSystemMetrics.swapUsedKB) : undefined,
-      uptime: Number(latestSystemMetrics.uptime)
-    } : undefined
+    const formattedMetrics = latestSystemMetrics
+      ? {
+        ...latestSystemMetrics,
+        cpuCoresUsage: latestSystemMetrics.cpuCoresUsage as number[],
+        cpuTemperature: latestSystemMetrics.cpuTemperature ?? undefined,
+        totalMemoryKB: Number(latestSystemMetrics.totalMemoryKB),
+        usedMemoryKB: Number(latestSystemMetrics.usedMemoryKB),
+        availableMemoryKB: Number(latestSystemMetrics.availableMemoryKB),
+        swapTotalKB: latestSystemMetrics.swapTotalKB ? Number(latestSystemMetrics.swapTotalKB) : undefined,
+        swapUsedKB: latestSystemMetrics.swapUsedKB ? Number(latestSystemMetrics.swapUsedKB) : undefined,
+        uptime: Number(latestSystemMetrics.uptime)
+      }
+      : undefined
 
     return {
       machineId,
@@ -356,7 +358,7 @@ export class MetricsResolver {
 
   @Query(() => [SystemMetrics])
   @Authorized(['ADMIN', 'USER'])
-  async systemMetricsHistory(
+  async systemMetricsHistory (
     @Arg('machineId') machineId: string,
     @Arg('hours', { nullable: true, defaultValue: 24 }) hours: number,
     @Arg('maxPoints', { nullable: true, defaultValue: 100 }) maxPoints: number,
@@ -386,7 +388,7 @@ export class MetricsResolver {
 
     // Sample data to reduce number of points
     const sampledData = allData.filter((_, index) => index % skipInterval === 0)
-    
+
     return sampledData.map(r => ({
       ...r,
       cpuCoresUsage: r.cpuCoresUsage as number[],
@@ -405,7 +407,7 @@ export class MetricsResolver {
     topics: 'SYSTEM_METRICS_UPDATED'
   })
   @Authorized(['ADMIN', 'USER'])
-  async systemMetricsUpdated(
+  async systemMetricsUpdated (
     @Arg('machineId', { nullable: true }) machineId?: string,
     @Root() payload?: { machineId: string; metrics: SystemMetrics }
   ): Promise<SystemMetrics> {

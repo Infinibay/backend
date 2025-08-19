@@ -8,7 +8,7 @@ let libvirtConnection: Connection | null = null
 /**
  * Get or create a libvirt connection
  */
-export async function getLibvirtConnection(): Promise<Connection> {
+export async function getLibvirtConnection (): Promise<Connection> {
   if (!libvirtConnection) {
     try {
       const libvirt = await import('../../lib/libvirt-node')
@@ -28,7 +28,7 @@ export async function getLibvirtConnection(): Promise<Connection> {
 /**
  * Close the libvirt connection
  */
-export async function closeLibvirtConnection(): Promise<void> {
+export async function closeLibvirtConnection (): Promise<void> {
   if (libvirtConnection) {
     try {
       libvirtConnection.close()

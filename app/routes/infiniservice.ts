@@ -30,30 +30,30 @@ const INFINISERVICE_FILES = {
 router.get('/:platform/binary', async (req, res) => {
   try {
     const { platform } = req.params
-    
+
     if (!['windows', 'linux'].includes(platform)) {
       return res.status(400).json({ error: 'Invalid platform. Must be "windows" or "linux"' })
     }
-    
+
     const infiniDir = getInfiniServiceDir()
     const binaryName = INFINISERVICE_FILES[platform as keyof typeof INFINISERVICE_FILES].binary
     const binaryPath = path.join(infiniDir, 'binaries', platform, binaryName)
-    
+
     // Check if binary exists
     try {
       await fs.access(binaryPath, constants.R_OK)
     } catch {
       return res.status(404).json({ error: `Binary not found for platform: ${platform}` })
     }
-    
+
     // Get file stats for headers
     const stats = await fs.stat(binaryPath)
-    
+
     // Set appropriate headers
     res.setHeader('Content-Type', 'application/octet-stream')
     res.setHeader('Content-Length', stats.size.toString())
     res.setHeader('Content-Disposition', `attachment; filename="${binaryName}"`)
-    
+
     // Stream the file
     const fileStream = await fs.readFile(binaryPath)
     res.send(fileStream)
@@ -70,31 +70,31 @@ router.get('/:platform/binary', async (req, res) => {
 router.get('/:platform/script', async (req, res) => {
   try {
     const { platform } = req.params
-    
+
     if (!['windows', 'linux'].includes(platform)) {
       return res.status(400).json({ error: 'Invalid platform. Must be "windows" or "linux"' })
     }
-    
+
     const infiniDir = getInfiniServiceDir()
     const scriptName = INFINISERVICE_FILES[platform as keyof typeof INFINISERVICE_FILES].script
     const scriptPath = path.join(infiniDir, 'install', scriptName)
-    
+
     // Check if script exists
     try {
       await fs.access(scriptPath, constants.R_OK)
     } catch {
       return res.status(404).json({ error: `Installation script not found for platform: ${platform}` })
     }
-    
+
     // Get file stats for headers
     const stats = await fs.stat(scriptPath)
-    
+
     // Set appropriate headers
     const contentType = platform === 'windows' ? 'text/plain' : 'application/x-sh'
     res.setHeader('Content-Type', contentType)
     res.setHeader('Content-Length', stats.size.toString())
     res.setHeader('Content-Disposition', `attachment; filename="${scriptName}"`)
-    
+
     // Stream the file
     const fileContent = await fs.readFile(scriptPath, 'utf-8')
     res.send(fileContent)
@@ -112,7 +112,7 @@ router.get('/metadata', async (req, res) => {
   try {
     const infiniDir = getInfiniServiceDir()
     const metadataPath = path.join(infiniDir, 'metadata.json')
-    
+
     // Check if metadata exists
     try {
       await fs.access(metadataPath, constants.R_OK)

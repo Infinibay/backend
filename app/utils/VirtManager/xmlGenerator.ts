@@ -17,7 +17,7 @@ export class XMLGenerator {
   private id: string
   private os: string
 
-  constructor(name: string, id: string, os: string) {
+  constructor (name: string, id: string, os: string) {
     this.xml = {
       domain: {
         $: {
@@ -57,7 +57,7 @@ export class XMLGenerator {
  * Load an external XML object and normalize its structure to be compatible with the XMLGenerator
  * @param externalXml The external XML object to load
  */
-  load(externalXml: any) {
+  load (externalXml: any) {
     // Determine if we have a full XML object or just the domain part
     if (externalXml.domain) {
       this.xml = externalXml
@@ -75,7 +75,7 @@ export class XMLGenerator {
    * This converts single objects to arrays where the code expects arrays
    * @param domain The domain object to normalize
    */
-  private normalizeXmlStructure(domain: any): void {
+  private normalizeXmlStructure (domain: any): void {
     if (!domain) return
 
     // Top-level properties that should be arrays
@@ -241,7 +241,7 @@ export class XMLGenerator {
    * @param obj The object containing properties to normalize
    * @param props Array of property names to normalize
    */
-  private normalizeArrayProps(obj: any, props: string[]): void {
+  private normalizeArrayProps (obj: any, props: string[]): void {
     if (!obj) return
 
     for (const prop of props) {
@@ -251,11 +251,11 @@ export class XMLGenerator {
     }
   }
 
-  getXmlObject(): any {
+  getXmlObject (): any {
     return this.xml
   }
 
-  setMemory(size: number): void {
+  setMemory (size: number): void {
     // Convert size from Gb to KiB (1 Gb = 1024 * 1024 KiB)
     const sizeInKiB = size * 1024 * 1024
     this.xml.domain.memory = [{ _: sizeInKiB, $: { unit: 'KiB' } }]
@@ -289,7 +289,7 @@ export class XMLGenerator {
     }
   }
 
-  setVCPUs(count: number): void {
+  setVCPUs (count: number): void {
     console.log(`Setting VCPUs to ${count}: ${this.xml.domain}`)
     this.xml.domain.vcpu = [{ _: count, $: { placement: 'static', current: count } }]
     this.xml.domain.cpu = {
@@ -338,7 +338,7 @@ export class XMLGenerator {
    *
    * @param strategy Optional CPU pinning strategy (defaults to HybridRandomStrategy)
    */
-  setCpuPinningOptimization(strategy?: BaseCpuPinningStrategy): void {
+  setCpuPinningOptimization (strategy?: BaseCpuPinningStrategy): void {
     const vcpuCount = Number(this.xml.domain.vcpu[0]._)
 
     if (!strategy) {
@@ -405,23 +405,25 @@ export class XMLGenerator {
   }
 
   // Renamed method: setBootDevice -> setBootOrder
-  setBootOrder(devices: ('fd' | 'hd' | 'cdrom' | 'network')[]): void {
+  setBootOrder (devices: ('fd' | 'hd' | 'cdrom' | 'network')[]): void {
     this.xml.domain.os[0].boot = devices.map(device => ({ $: { dev: device } }))
   }
 
-  addNetworkInterface(network: string, model: string) {
+  addNetworkInterface (network: string, model: string) {
     // Detect if we're using a bridge (br0, virbr0, etc.) or a libvirt network
     const isBridge = network.startsWith('br') || network.startsWith('virbr')
 
-    const networkInterface = isBridge ? {
-      $: { type: 'bridge' },
-      source: [{ $: { bridge: network } }],
-      model: [{ $: { type: model } }]
-    } : {
-      $: { type: 'network' },
-      source: [{ $: { network } }],
-      model: [{ $: { type: model } }]
-    }
+    const networkInterface = isBridge
+      ? {
+        $: { type: 'bridge' },
+        source: [{ $: { bridge: network } }],
+        model: [{ $: { type: model } }]
+      }
+      : {
+        $: { type: 'network' },
+        source: [{ $: { network } }],
+        model: [{ $: { type: model } }]
+      }
 
     this.xml.domain.devices[0].interface = this.xml.domain.devices[0].interface || []
     this.xml.domain.devices[0].interface.push(networkInterface)
@@ -429,7 +431,7 @@ export class XMLGenerator {
     // TODO: Add ip address
   }
 
-  addNWFilter(filterName: string) {
+  addNWFilter (filterName: string) {
     // find the network interface and add the filterref
     if (!this.xml.domain.devices[0].interface) {
       throw new Error('No network interface found')
@@ -442,7 +444,7 @@ export class XMLGenerator {
     })
   }
 
-  enableTPM(version: '1.2' | '2.0' = '2.0'): void {
+  enableTPM (version: '1.2' | '2.0' = '2.0'): void {
     const secretUUID = uuidv4()
     this.xml.domain.devices[0].tpm = [{
       $: { model: 'tpm-tis' },
@@ -452,7 +454,7 @@ export class XMLGenerator {
     }]
   }
 
-  enableFeatures(): void {
+  enableFeatures (): void {
     if (!this.xml.domain.features) {
       this.xml.domain.features = [{}]
     }
@@ -467,7 +469,7 @@ export class XMLGenerator {
     }
   }
 
-  setUEFI(): void {
+  setUEFI (): void {
     this.enableFeatures()
     let efiPath: string
     let nvramPath: string
@@ -491,7 +493,7 @@ export class XMLGenerator {
     this.xml.domain.os[0].nvram = [{ _: nvramPath }]
   }
 
-  addDisk(path: string, bus: 'ide' | 'sata' | 'virtio', size: number): string {
+  addDisk (path: string, bus: 'ide' | 'sata' | 'virtio', size: number): string {
     let dev: string = ''
     if (bus === 'ide') {
       dev = 'hd'
@@ -517,12 +519,12 @@ export class XMLGenerator {
     return dev
   }
 
-  setStorage(size: number): void {
+  setStorage (size: number): void {
     const diskPath = path.join(process.env.INFINIBAY_BASE_DIR ?? '/opt/infinibay', 'disks') || '/opt/infinibay/disks'
     this.addDisk(`${diskPath}/${this.xml.domain.name[0]}-main.qcow2`, 'virtio', size)
   }
 
-  addNetwork(model: NetworkModel, network: string): void {
+  addNetwork (model: NetworkModel, network: string): void {
     const networkInterface = {
       $: { type: 'network' },
       source: [{ $: { network } }],
@@ -534,7 +536,7 @@ export class XMLGenerator {
     this.xml.domain.devices[0].interface.push(networkInterface)
   }
 
-  addVirtIODrivers(): string {
+  addVirtIODrivers (): string {
     const virtioIsoPath = process.env.VIRTIO_WIN_ISO_PATH
     if (!virtioIsoPath) {
       throw new Error('VIRTIO_WIN_ISO_PATH environment variable is not set')
@@ -543,7 +545,7 @@ export class XMLGenerator {
     return this.addCDROM(virtioIsoPath, 'sata')
   }
 
-  addCDROM(path: string, bus: 'ide' | 'sata' | 'virtio'): string {
+  addCDROM (path: string, bus: 'ide' | 'sata' | 'virtio'): string {
     let dev: string = ''
     if (bus === 'ide') {
       dev = 'hd'
@@ -566,7 +568,7 @@ export class XMLGenerator {
     return dev
   }
 
-  addVNC(port: number, autoport: boolean = true, listen: string = '0.0.0.0'): string {
+  addVNC (port: number, autoport: boolean = true, listen: string = '0.0.0.0'): string {
     this.xml.domain.devices[0].graphics = this.xml.domain.devices[0].graphics || []
     // Check if a VNC configuration already exists
     const existingVNC = this.xml.domain.devices[0].graphics?.find((g: any) => g.$.type === 'vnc')
@@ -593,11 +595,11 @@ export class XMLGenerator {
     return password
   }
 
-  setBootDevice(devices: string[]): void {
+  setBootDevice (devices: string[]): void {
     this.xml.domain.os[0].boot = devices.map(device => ({ $: { dev: device } }))
   }
 
-  generate(): string {
+  generate (): string {
     // Convert the JSON object to XML
     const builder = new xml2js.Builder()
     console.log('Generating XML')
@@ -615,7 +617,7 @@ export class XMLGenerator {
    * getNextBus('vd') -> 'vdb'
    * getNextBus('hd') -> 'hda'
    */
-  protected getNextBus(dev: string): string {
+  protected getNextBus (dev: string): string {
     // Get all devices
     const devices = this.xml.domain.devices[0].disk || []
 
@@ -641,21 +643,21 @@ export class XMLGenerator {
     return dev + incrementedChar
   }
 
-  getStoragePath(): string {
+  getStoragePath (): string {
     const diskPath = path.join(process.env.INFINIBAY_BASE_DIR ?? '/opt/infinibay', 'disks') || '/opt/infinibay/disks'
     return path.join(diskPath, `${this.id}.img`)
   }
 
-  getUefiVarFile(): string {
+  getUefiVarFile (): string {
     return this.xml?.domain?.os?.[0]?.nvram?.[0]?._ as string
   }
 
-  getDisks(): string[] {
+  getDisks (): string[] {
     return this.xml?.domain?.devices?.[0]?.disk?.map((disk: any) => disk.source[0].$.file) || []
   }
 
   // Enable high resolution graphics for the VM
-  enableHighResolutionGraphics(vramSize: number = 512, driver: string = 'qxl'): void {
+  enableHighResolutionGraphics (vramSize: number = 512, driver: string = 'qxl'): void {
     // Ensure the video array exists
     this.xml.domain.devices[0].video = this.xml.domain.devices[0].video || []
 
@@ -703,7 +705,7 @@ export class XMLGenerator {
 
   // Enable USB tablet input device
   // Improves mouse input in the guest OS, especially the synchronization between the host and guest cursor.
-  enableInputTablet(): void {
+  enableInputTablet (): void {
     // Ensure the input array exists
     this.xml.domain.devices[0].input = this.xml.domain.devices[0].input || []
     // Add USB tablet input device
@@ -716,7 +718,7 @@ export class XMLGenerator {
     this.xml.domain.devices[0].input.push(inputDevice)
   }
 
-  addGuestAgentChannel(): void {
+  addGuestAgentChannel (): void {
     // Ensure the channel array exists
     this.xml.domain.devices[0].channel = this.xml.domain.devices[0].channel || []
     // Add QEMU Guest Agent virtio channel
@@ -752,7 +754,7 @@ export class XMLGenerator {
    * between the VM and host for metrics collection and management.
    * Creates a Unix socket at /opt/infinibay/sockets/<vm_id>.socket
    */
-  addInfiniServiceChannel(): void {
+  addInfiniServiceChannel (): void {
     // Ensure the channel array exists
     this.xml.domain.devices[0].channel = this.xml.domain.devices[0].channel || []
 
@@ -828,7 +830,7 @@ export class XMLGenerator {
   * @param pciBus - The PCI bus address of the GPU in the format `0000:B4:00.0`
   * @returns {void}
   */
-  addGPUPassthrough(
+  addGPUPassthrough (
     pciBus: string
   ): void {
     this.xml.domain.devices[0].hostdev = this.xml.domain.devices[0].hostdev || []
@@ -859,7 +861,7 @@ export class XMLGenerator {
     this.xml.domain.devices[0].hostdev.push(gpuPassthrough)
   }
 
-  addAudioDevice(): void {
+  addAudioDevice (): void {
     this.xml.domain.devices[0].sound = this.xml.domain.devices[0].sound || []
     const audioDevice = {
       $: { model: 'ich9' }
@@ -867,14 +869,14 @@ export class XMLGenerator {
     this.xml.domain.devices[0].sound.push(audioDevice)
   }
 
-  disablePowerManagement(): void {
+  disablePowerManagement (): void {
     this.xml.domain.pm = {
       'suspend-to-mem': { $: { enabled: 'no' } },
       'suspend-to-disk': { $: { enabled: 'no' } }
     }
   }
 
-  addSPICE(enableAudio: boolean = true, enableOpenGL: boolean = true): string {
+  addSPICE (enableAudio: boolean = true, enableOpenGL: boolean = true): string {
     // Generate a random password for SPICE
     const password = Math.random().toString(36).slice(-8) // 8-character random password
 

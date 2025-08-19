@@ -8,7 +8,7 @@ import { getEventManager } from '../../../services/EventManager'
 export class DepartmentResolver {
   @Query(() => [DepartmentType])
   @Authorized('USER')
-  async departments(
+  async departments (
     @Ctx() { prisma }: InfinibayContext
   ): Promise<DepartmentType[]> {
     const departments = await prisma.department.findMany({ include: { machines: true } })
@@ -30,7 +30,7 @@ export class DepartmentResolver {
 
   @Query(() => DepartmentType, { nullable: true })
   @Authorized('USER')
-  async department(
+  async department (
     @Arg('id') id: string,
     @Ctx() { prisma }: InfinibayContext
   ): Promise<DepartmentType | null> {
@@ -55,7 +55,7 @@ export class DepartmentResolver {
 
   @Mutation(() => DepartmentType)
   @Authorized('ADMIN')
-  async createDepartment(
+  async createDepartment (
     @Arg('name') name: string,
     @Ctx() { prisma, user }: InfinibayContext
   ): Promise<DepartmentType> {
@@ -86,7 +86,7 @@ export class DepartmentResolver {
   // Destroy department
   @Mutation(() => DepartmentType)
   @Authorized('ADMIN')
-  async destroyDepartment(
+  async destroyDepartment (
     @Arg('id') id: string,
     @Ctx() { prisma, user }: InfinibayContext
   ): Promise<DepartmentType> {
@@ -132,7 +132,7 @@ export class DepartmentResolver {
   // find deparment by name
   @Query(() => DepartmentType, { nullable: true })
   @Authorized('USER')
-  async findDepartmentByName(
+  async findDepartmentByName (
     @Arg('name') name: string,
     @Ctx() { prisma }: InfinibayContext
   ): Promise<DepartmentType | null> {

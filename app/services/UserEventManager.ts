@@ -7,13 +7,13 @@ export class UserEventManager implements ResourceEventManager {
   private socketService: SocketService
   private prisma: PrismaClient
 
-  constructor(socketService: SocketService, prisma: PrismaClient) {
+  constructor (socketService: SocketService, prisma: PrismaClient) {
     this.socketService = socketService
     this.prisma = prisma
   }
 
   // Main event handler for user events
-  async handleEvent(action: EventAction, userData: any, triggeredBy?: string): Promise<void> {
+  async handleEvent (action: EventAction, userData: any, triggeredBy?: string): Promise<void> {
     try {
       console.log(`👤 Handling user event: ${action}`, { userId: userData?.id, triggeredBy })
 
@@ -46,7 +46,7 @@ export class UserEventManager implements ResourceEventManager {
   }
 
   // Get complete user data from database
-  private async getUserData(userData: any): Promise<any> {
+  private async getUserData (userData: any): Promise<any> {
     try {
       // If we already have complete data, use it
       if (userData && typeof userData === 'object' && userData.email && userData.firstName) {
@@ -88,13 +88,13 @@ export class UserEventManager implements ResourceEventManager {
   }
 
   // Remove sensitive data from user object before sending
-  private sanitizeUserData(user: any): any {
+  private sanitizeUserData (user: any): any {
     const { password, token, ...sanitizedUser } = user
     return sanitizedUser
   }
 
   // Determine which users should receive this user event based on permissions
-  private async getTargetUsers(user: any, action: EventAction): Promise<string[]> {
+  private async getTargetUsers (user: any, action: EventAction): Promise<string[]> {
     try {
       const targetUsers: Set<string> = new Set()
 
@@ -105,9 +105,9 @@ export class UserEventManager implements ResourceEventManager {
 
       // 2. Always include all admin users (they can see all user events)
       const adminUsers = await this.prisma.user.findMany({
-        where: { 
+        where: {
           role: 'ADMIN',
-          deleted: false 
+          deleted: false
         },
         select: { id: true }
       })
@@ -136,7 +136,7 @@ export class UserEventManager implements ResourceEventManager {
   }
 
   // Get users who are related to this user (shared departments, VMs, etc.)
-  private async getRelatedUsers(userId: string): Promise<string[]> {
+  private async getRelatedUsers (userId: string): Promise<string[]> {
     try {
       const relatedUsers: Set<string> = new Set()
 
@@ -176,18 +176,18 @@ export class UserEventManager implements ResourceEventManager {
 
   // Specific user event handlers
 
-  async handleUserCreated(userData: any, triggeredBy?: string): Promise<void> {
+  async handleUserCreated (userData: any, triggeredBy?: string): Promise<void> {
     await this.handleEvent('create', userData, triggeredBy)
   }
 
-  async handleUserUpdated(userData: any, triggeredBy?: string): Promise<void> {
+  async handleUserUpdated (userData: any, triggeredBy?: string): Promise<void> {
     await this.handleEvent('update', userData, triggeredBy)
   }
 
-  async handleUserDeleted(userData: any, triggeredBy?: string): Promise<void> {
+  async handleUserDeleted (userData: any, triggeredBy?: string): Promise<void> {
     // For delete events, we might not have full user data anymore
     const targetUsers = await this.getTargetUsersForDeletedUser(userData)
-    
+
     const payload: EventPayload = {
       status: 'success',
       data: {
@@ -203,15 +203,15 @@ export class UserEventManager implements ResourceEventManager {
   }
 
   // Special handling for deleted users (limited data available)
-  private async getTargetUsersForDeletedUser(userData: any): Promise<string[]> {
+  private async getTargetUsersForDeletedUser (userData: any): Promise<string[]> {
     try {
       const targetUsers: Set<string> = new Set()
 
       // Include all admin users
       const adminUsers = await this.prisma.user.findMany({
-        where: { 
+        where: {
           role: 'ADMIN',
-          deleted: false 
+          deleted: false
         },
         select: { id: true }
       })

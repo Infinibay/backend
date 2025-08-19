@@ -4,8 +4,9 @@
 // * Update all vm to running if they are found in the list
 import { CronJob } from 'cron'
 // libvirt-node
-import { Connection, Machine } from 'libvirt-node'
+import { Connection } from 'libvirt-node'
 import prisma from '../utils/database'
+import { getEventManager } from '../services/EventManager'
 
 async function getRunningDomainNames (): Promise<string[]> {
   try {
@@ -67,6 +68,29 @@ const UpdateVmStatusJob = new CronJob('*/1 * * * *', async () => {
         where: { id: { in: runningVmIds } },
         data: { status: 'running' }
       })
+
+      // Emit update events for each VM that became running
+      const eventManager = getEventManager()
+      for (const vmId of runningVmIds) {
+        try {
+          // Fetch complete VM data to send in the event
+          const vm = await prisma.machine.findUnique({
+            where: { id: vmId },
+            include: {
+              user: true,
+              template: true,
+              department: true,
+              configuration: true
+            }
+          })
+          if (vm) {
+            await eventManager.dispatchEvent('vms', 'update', vm)
+            console.log(`🎯 VM status update: ${vm.name} (${vmId}) -> running`)
+          }
+        } catch (error) {
+          console.error(`Failed to emit update event for VM ${vmId}:`, error)
+        }
+      }
     }
 
     // Update stopped VMs
@@ -75,6 +99,29 @@ const UpdateVmStatusJob = new CronJob('*/1 * * * *', async () => {
         where: { id: { in: stoppedVmIds } },
         data: { status: 'stopped' }
       })
+
+      // Emit update events for each VM that became stopped
+      const eventManager = getEventManager()
+      for (const vmId of stoppedVmIds) {
+        try {
+          // Fetch complete VM data to send in the event
+          const vm = await prisma.machine.findUnique({
+            where: { id: vmId },
+            include: {
+              user: true,
+              template: true,
+              department: true,
+              configuration: true
+            }
+          })
+          if (vm) {
+            await eventManager.dispatchEvent('vms', 'update', vm)
+            console.log(`🎯 VM status update: ${vm.name} (${vmId}) -> stopped`)
+          }
+        } catch (error) {
+          console.error(`Failed to emit update event for VM ${vmId}:`, error)
+        }
+      }
     }
   } catch (error) {
     console.error('Error in UpdateVmStatusJob:', error)

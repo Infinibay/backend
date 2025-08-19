@@ -7,7 +7,7 @@ declare global {
 const prismaClientSingleton = (): PrismaClient => {
   // Parse the DATABASE_URL to add connection pool parameters
   const databaseUrl = process.env.DATABASE_URL || ''
-  
+
   // Add connection pooling parameters to the URL if not already present
   let pooledUrl = databaseUrl
   if (!pooledUrl.includes('connection_limit=')) {

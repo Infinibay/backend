@@ -7,13 +7,13 @@ export class ApplicationEventManager implements ResourceEventManager {
   private socketService: SocketService
   private prisma: PrismaClient
 
-  constructor(socketService: SocketService, prisma: PrismaClient) {
+  constructor (socketService: SocketService, prisma: PrismaClient) {
     this.socketService = socketService
     this.prisma = prisma
   }
 
   // Main event handler for application events
-  async handleEvent(action: EventAction, appData: any, triggeredBy?: string): Promise<void> {
+  async handleEvent (action: EventAction, appData: any, triggeredBy?: string): Promise<void> {
     try {
       console.log(`📱 Handling application event: ${action}`, { appId: appData?.id, triggeredBy })
 
@@ -46,7 +46,7 @@ export class ApplicationEventManager implements ResourceEventManager {
   }
 
   // Get complete application data from database
-  private async getApplicationData(appData: any): Promise<any> {
+  private async getApplicationData (appData: any): Promise<any> {
     try {
       // If we already have complete data, use it
       if (appData && typeof appData === 'object' && appData.name) {
@@ -86,7 +86,7 @@ export class ApplicationEventManager implements ResourceEventManager {
   }
 
   // Determine which users should receive this application event
-  private async getTargetUsers(application: any, action: EventAction): Promise<string[]> {
+  private async getTargetUsers (application: any, action: EventAction): Promise<string[]> {
     try {
       const targetUsers: Set<string> = new Set()
 
@@ -150,15 +150,15 @@ export class ApplicationEventManager implements ResourceEventManager {
 
   // Specific application event handlers
 
-  async handleApplicationCreated(appData: any, triggeredBy?: string): Promise<void> {
+  async handleApplicationCreated (appData: any, triggeredBy?: string): Promise<void> {
     await this.handleEvent('create', appData, triggeredBy)
   }
 
-  async handleApplicationUpdated(appData: any, triggeredBy?: string): Promise<void> {
+  async handleApplicationUpdated (appData: any, triggeredBy?: string): Promise<void> {
     await this.handleEvent('update', appData, triggeredBy)
   }
 
-  async handleApplicationDeleted(appData: any, triggeredBy?: string): Promise<void> {
+  async handleApplicationDeleted (appData: any, triggeredBy?: string): Promise<void> {
     // For delete events, we might not have full application data anymore
     const targetUsers = await this.getTargetUsersForDeletedApplication(appData)
 
@@ -177,7 +177,7 @@ export class ApplicationEventManager implements ResourceEventManager {
   }
 
   // Special handling for deleted applications (limited data available)
-  private async getTargetUsersForDeletedApplication(appData: any): Promise<string[]> {
+  private async getTargetUsersForDeletedApplication (appData: any): Promise<string[]> {
     try {
       const targetUsers: Set<string> = new Set()
 

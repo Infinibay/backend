@@ -16,7 +16,7 @@ export async function afterCreateNWfilter (prisma: PrismaClient, params: any, fi
   // which should be after the transaction is committed
   process.nextTick(async () => {
     try {
-      // Use the singleton Prisma client 
+      // Use the singleton Prisma client
       // The transaction should be committed by now, so we can safely query
       const nwFilter = await dbSingleton.nWFilter.findUnique({
         where: { id: filter.id }

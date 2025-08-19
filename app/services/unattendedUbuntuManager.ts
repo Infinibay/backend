@@ -110,8 +110,8 @@ export class UnattendedUbuntuManager extends UnattendedManagerBase {
           'qemu-guest-agent',
           'ubuntu-desktop',
           'openssh-server',
-          'curl',  // Required for downloading InfiniService
-          'wget'   // Alternative download method
+          'curl', // Required for downloading InfiniService
+          'wget' // Alternative download method
         ],
 
         // Use the entire disk with a single partition
@@ -167,14 +167,14 @@ EOF`,
   /**
    * Generates commands to install InfiniService on Ubuntu.
    * Downloads the binary and installation script from the backend server.
-   * 
+   *
    * @returns Array of late commands for InfiniService installation
    */
   private generateInfiniServiceInstallCommands (): string[] {
     const backendHost = process.env.APP_HOST || 'localhost'
     const backendPort = process.env.PORT || '4000'
     const baseUrl = `http://${backendHost}:${backendPort}`
-    
+
     const commands = [
       // Create InfiniService installation script
       `cat > /target/var/lib/cloud/scripts/per-instance/install_infiniservice.sh << 'EOF'
@@ -224,14 +224,14 @@ rm -rf /tmp/infiniservice
 
 echo "InfiniService installation completed" | tee -a \$LOG_FILE
 EOF`,
-      
+
       // Make the InfiniService installation script executable
       'chmod +x /target/var/lib/cloud/scripts/per-instance/install_infiniservice.sh',
-      
+
       // Run the InfiniService installation script
       'curtin in-target -- /var/lib/cloud/scripts/per-instance/install_infiniservice.sh'
     ]
-    
+
     return commands
   }
 

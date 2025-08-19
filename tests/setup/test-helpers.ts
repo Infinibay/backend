@@ -1,8 +1,7 @@
-import { GraphQLSchema } from 'graphql';
-import { graphql } from 'graphql';
-import { buildSchema } from 'type-graphql';
-import * as jwt from 'jsonwebtoken';
-import { User } from '@prisma/client';
+import { GraphQLSchema, graphql } from 'graphql'
+import { buildSchema } from 'type-graphql'
+import * as jwt from 'jsonwebtoken'
+import { User } from '@prisma/client'
 
 // Authentication context builder
 export interface TestContext {
@@ -11,7 +10,7 @@ export interface TestContext {
   token?: string;
 }
 
-export function createMockContext(overrides?: Partial<TestContext>): TestContext {
+export function createMockContext (overrides?: Partial<TestContext>): TestContext {
   const defaultUser: User = {
     id: 'test-user-id',
     email: 'test@example.com',
@@ -22,16 +21,16 @@ export function createMockContext(overrides?: Partial<TestContext>): TestContext
     lastName: 'User',
     userImage: null,
     role: 'USER',
-    createdAt: new Date(),
-  };
+    createdAt: new Date()
+  }
 
   return {
     user: defaultUser,
-    ...overrides,
-  };
+    ...overrides
+  }
 }
 
-export function createAdminContext(): TestContext {
+export function createAdminContext (): TestContext {
   return createMockContext({
     user: {
       id: 'admin-user-id',
@@ -43,22 +42,22 @@ export function createAdminContext(): TestContext {
       lastName: 'User',
       userImage: null,
       role: 'ADMIN',
-      createdAt: new Date(),
-    },
-  });
+      createdAt: new Date()
+    }
+  })
 }
 
 // JWT token generation for testing
-export function generateTestToken(userId: string, role: string = 'USER'): string {
+export function generateTestToken (userId: string, role: string = 'USER'): string {
   return jwt.sign(
     { id: userId, role },
     process.env.TOKENKEY || 'test-secret-key',
     { expiresIn: '24h' }
-  );
+  )
 }
 
 // GraphQL query/mutation executor
-export async function executeGraphQL(
+export async function executeGraphQL (
   schema: GraphQLSchema,
   query: string,
   variables?: any,
@@ -68,10 +67,10 @@ export async function executeGraphQL(
     schema,
     source: query,
     variableValues: variables,
-    contextValue: context,
-  });
+    contextValue: context
+  })
 
-  return result;
+  return result
 }
 
 // Common GraphQL queries and mutations for testing
@@ -88,7 +87,7 @@ export const TestQueries = {
       }
     }
   `,
-  
+
   CURRENT_USER: `
     query CurrentUser {
       currentUser {
@@ -100,7 +99,7 @@ export const TestQueries = {
       }
     }
   `,
-  
+
   GET_USER: `
     query GetUser($id: String!) {
       user(id: $id) {
@@ -113,7 +112,7 @@ export const TestQueries = {
       }
     }
   `,
-  
+
   LIST_USERS: `
     query ListUsers($orderBy: String, $take: Int, $skip: Int) {
       users(orderBy: $orderBy, take: $take, skip: $skip) {
@@ -128,7 +127,7 @@ export const TestQueries = {
       }
     }
   `,
-  
+
   GET_MACHINE: `
     query GetMachine($id: String!) {
       machine(id: $id) {
@@ -143,7 +142,7 @@ export const TestQueries = {
       }
     }
   `,
-  
+
   LIST_MACHINES: `
     query ListMachines($take: Int, $skip: Int) {
       machines(take: $take, skip: $skip) {
@@ -157,7 +156,7 @@ export const TestQueries = {
       }
     }
   `,
-  
+
   LIST_DEPARTMENTS: `
     query ListDepartments {
       departments {
@@ -166,8 +165,8 @@ export const TestQueries = {
         totalMachines
       }
     }
-  `,
-};
+  `
+}
 
 export const TestMutations = {
   CREATE_USER: `
@@ -181,7 +180,7 @@ export const TestMutations = {
       }
     }
   `,
-  
+
   UPDATE_USER: `
     mutation UpdateUser($id: String!, $input: UserInput!) {
       updateUser(id: $id, input: $input) {
@@ -192,7 +191,7 @@ export const TestMutations = {
       }
     }
   `,
-  
+
   CREATE_MACHINE: `
     mutation CreateMachine($input: MachineInput!) {
       createMachine(input: $input) {
@@ -204,7 +203,7 @@ export const TestMutations = {
       }
     }
   `,
-  
+
   POWER_ON: `
     mutation PowerOn($id: String!) {
       powerOn(id: $id) {
@@ -213,7 +212,7 @@ export const TestMutations = {
       }
     }
   `,
-  
+
   POWER_OFF: `
     mutation PowerOff($id: String!) {
       powerOff(id: $id) {
@@ -222,7 +221,7 @@ export const TestMutations = {
       }
     }
   `,
-  
+
   DESTROY_MACHINE: `
     mutation DestroyMachine($id: String!) {
       destroyMachine(id: $id) {
@@ -231,7 +230,7 @@ export const TestMutations = {
       }
     }
   `,
-  
+
   CREATE_DEPARTMENT: `
     mutation CreateDepartment($name: String!) {
       createDepartment(name: $name) {
@@ -240,7 +239,7 @@ export const TestMutations = {
       }
     }
   `,
-  
+
   DESTROY_DEPARTMENT: `
     mutation DestroyDepartment($id: String!) {
       destroyDepartment(id: $id) {
@@ -248,33 +247,33 @@ export const TestMutations = {
         message
       }
     }
-  `,
-};
+  `
+}
 
 // Error matchers
 export const ErrorMatchers = {
   unauthorized: expect.objectContaining({
-    message: expect.stringContaining('Unauthorized'),
+    message: expect.stringContaining('Unauthorized')
   }),
-  
+
   notFound: expect.objectContaining({
-    message: expect.stringContaining('not found'),
+    message: expect.stringContaining('not found')
   }),
-  
+
   validationError: expect.objectContaining({
-    message: expect.stringContaining('Validation'),
+    message: expect.stringContaining('Validation')
   }),
-  
+
   duplicateError: expect.objectContaining({
-    message: expect.stringContaining('already exists'),
-  }),
-};
+    message: expect.stringContaining('already exists')
+  })
+}
 
 // Test data cleanup utilities
-export async function cleanupTestData(prisma: any, tables: string[]) {
+export async function cleanupTestData (prisma: any, tables: string[]) {
   for (const table of tables.reverse()) {
     try {
-      await prisma[table].deleteMany({});
+      await prisma[table].deleteMany({})
     } catch (error) {
       // Ignore errors for non-existent tables
     }
@@ -282,30 +281,30 @@ export async function cleanupTestData(prisma: any, tables: string[]) {
 }
 
 // Wait utility for async operations
-export function waitFor(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
+export function waitFor (ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms))
 }
 
 // Mock libvirt state helper
-export function setupLibvirtMockState(state: any) {
-  const libvirt = require('libvirt-node');
+export function setupLibvirtMockState (state: any) {
+  const libvirt = require('libvirt-node')
   if (libvirt.__setLibvirtMockState) {
-    libvirt.__setLibvirtMockState(state);
+    libvirt.__setLibvirtMockState(state)
   }
 }
 
 // Response assertion helpers
-export function assertGraphQLSuccess(result: any) {
-  expect(result.errors).toBeUndefined();
-  expect(result.data).toBeDefined();
+export function assertGraphQLSuccess (result: any) {
+  expect(result.errors).toBeUndefined()
+  expect(result.data).toBeDefined()
 }
 
-export function assertGraphQLError(result: any, expectedError?: string) {
-  expect(result.errors).toBeDefined();
-  expect(result.errors.length).toBeGreaterThan(0);
-  
+export function assertGraphQLError (result: any, expectedError?: string) {
+  expect(result.errors).toBeDefined()
+  expect(result.errors.length).toBeGreaterThan(0)
+
   if (expectedError) {
-    expect(result.errors[0].message).toContain(expectedError);
+    expect(result.errors[0].message).toContain(expectedError)
   }
 }
 
@@ -316,7 +315,7 @@ export interface PaginationInput {
   orderBy?: string;
 }
 
-export function createPaginationInput(
+export function createPaginationInput (
   page: number = 1,
   pageSize: number = 10,
   orderBy: string = 'createdAt'
@@ -324,6 +323,6 @@ export function createPaginationInput(
   return {
     take: pageSize,
     skip: (page - 1) * pageSize,
-    orderBy,
-  };
+    orderBy
+  }
 }

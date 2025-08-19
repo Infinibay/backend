@@ -7,13 +7,13 @@ export class DepartmentEventManager implements ResourceEventManager {
   private socketService: SocketService
   private prisma: PrismaClient
 
-  constructor(socketService: SocketService, prisma: PrismaClient) {
+  constructor (socketService: SocketService, prisma: PrismaClient) {
     this.socketService = socketService
     this.prisma = prisma
   }
 
   // Main event handler for department events
-  async handleEvent(action: EventAction, deptData: any, triggeredBy?: string): Promise<void> {
+  async handleEvent (action: EventAction, deptData: any, triggeredBy?: string): Promise<void> {
     try {
       console.log(`🏢 Handling department event: ${action}`, { deptId: deptData?.id, triggeredBy })
 
@@ -46,7 +46,7 @@ export class DepartmentEventManager implements ResourceEventManager {
   }
 
   // Get complete department data from database
-  private async getDepartmentData(deptData: any): Promise<any> {
+  private async getDepartmentData (deptData: any): Promise<any> {
     try {
       // If we already have complete data, use it
       if (deptData && typeof deptData === 'object' && deptData.name) {
@@ -81,15 +81,15 @@ export class DepartmentEventManager implements ResourceEventManager {
   }
 
   // Determine which users should receive this department event
-  private async getTargetUsers(department: any, action: EventAction): Promise<string[]> {
+  private async getTargetUsers (department: any, action: EventAction): Promise<string[]> {
     try {
       const targetUsers: Set<string> = new Set()
 
       // 1. Always include all admin users (they can see all departments)
       const adminUsers = await this.prisma.user.findMany({
-        where: { 
+        where: {
           role: 'ADMIN',
-          deleted: false 
+          deleted: false
         },
         select: { id: true }
       })
@@ -130,18 +130,18 @@ export class DepartmentEventManager implements ResourceEventManager {
 
   // Specific department event handlers
 
-  async handleDepartmentCreated(deptData: any, triggeredBy?: string): Promise<void> {
+  async handleDepartmentCreated (deptData: any, triggeredBy?: string): Promise<void> {
     await this.handleEvent('create', deptData, triggeredBy)
   }
 
-  async handleDepartmentUpdated(deptData: any, triggeredBy?: string): Promise<void> {
+  async handleDepartmentUpdated (deptData: any, triggeredBy?: string): Promise<void> {
     await this.handleEvent('update', deptData, triggeredBy)
   }
 
-  async handleDepartmentDeleted(deptData: any, triggeredBy?: string): Promise<void> {
+  async handleDepartmentDeleted (deptData: any, triggeredBy?: string): Promise<void> {
     // For delete events, we might not have full department data anymore
     const targetUsers = await this.getTargetUsersForDeletedDepartment(deptData)
-    
+
     const payload: EventPayload = {
       status: 'success',
       data: {
@@ -157,15 +157,15 @@ export class DepartmentEventManager implements ResourceEventManager {
   }
 
   // Special handling for deleted departments (limited data available)
-  private async getTargetUsersForDeletedDepartment(deptData: any): Promise<string[]> {
+  private async getTargetUsersForDeletedDepartment (deptData: any): Promise<string[]> {
     try {
       const targetUsers: Set<string> = new Set()
 
       // Include all admin users
       const adminUsers = await this.prisma.user.findMany({
-        where: { 
+        where: {
           role: 'ADMIN',
-          deleted: false 
+          deleted: false
         },
         select: { id: true }
       })

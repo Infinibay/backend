@@ -3,77 +3,77 @@ import { ObjectType, Field } from 'type-graphql'
 @ObjectType()
 export class InfiniServiceStatus {
   @Field()
-  installed!: boolean
+    installed!: boolean
 
   @Field()
-  running!: boolean
+    running!: boolean
 
   @Field({ nullable: true })
-  error?: string
+    error?: string
 }
 
 @ObjectType()
 export class VmConnectionInfo {
   @Field()
-  vmId!: string
+    vmId!: string
 
   @Field()
-  isConnected!: boolean
+    isConnected!: boolean
 
   @Field()
-  reconnectAttempts!: number
+    reconnectAttempts!: number
 
   @Field()
-  lastMessageTime!: string
+    lastMessageTime!: string
 }
 
 @ObjectType()
 export class SocketConnectionStats {
   @Field({ nullable: true })
-  totalConnections?: number
+    totalConnections?: number
 
   @Field({ nullable: true })
-  activeConnections?: number
+    activeConnections?: number
 
   @Field(() => [VmConnectionInfo], { nullable: true })
-  connections?: VmConnectionInfo[]
+    connections?: VmConnectionInfo[]
 
   @Field({ nullable: true })
-  isConnected?: boolean
+    isConnected?: boolean
 
   @Field({ nullable: true })
-  reconnectAttempts?: number
+    reconnectAttempts?: number
 
   @Field({ nullable: true })
-  lastMessageTime?: string
+    lastMessageTime?: string
 }
 
 @ObjectType()
 export class VmDiagnostics {
   @Field()
-  vmId!: string
+    vmId!: string
 
   @Field()
-  vmName!: string
+    vmName!: string
 
   @Field()
-  vmStatus!: string
+    vmStatus!: string
 
   @Field()
-  timestamp!: string
+    timestamp!: string
 
   @Field(() => [String])
-  diagnostics!: string[]
+    diagnostics!: string[]
 
   @Field(() => [String])
-  recommendations!: string[]
+    recommendations!: string[]
 
   @Field(() => InfiniServiceStatus)
-  infiniService!: InfiniServiceStatus
+    infiniService!: InfiniServiceStatus
 
   @Field(() => SocketConnectionStats, { nullable: true })
-  connectionStats?: SocketConnectionStats
+    connectionStats?: SocketConnectionStats
 
   @Field(() => [String])
-  manualCommands!: string[]
+    manualCommands!: string[]
 }

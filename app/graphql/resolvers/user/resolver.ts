@@ -36,7 +36,7 @@ export interface UserResolverInterface {
 export class UserResolver implements UserResolverInterface {
   @Query(() => UserType)
   @Authorized('USER')
-  async currentUser(@Ctx() context: InfinibayContext): Promise<UserType | null> {
+  async currentUser (@Ctx() context: InfinibayContext): Promise<UserType | null> {
     if (!context.user) {
       // This shouldn't happen if @Authorized decorator works correctly
       // But returning null is better than throwing an error
@@ -56,7 +56,7 @@ export class UserResolver implements UserResolverInterface {
   */
   @Query(_returns => UserType)
   @Authorized('ADMIN')
-  async user(
+  async user (
     @Arg('id') id: string
   ): Promise<UserType | null> {
     const prisma = new PrismaClient()
@@ -78,7 +78,7 @@ export class UserResolver implements UserResolverInterface {
   */
   @Query(() => [UserType])
   @Authorized('ADMIN')
-  async users(
+  async users (
     @Arg('orderBy', { nullable: true }) orderBy: UserOrderByInputType,
     @Arg('pagination', { nullable: true }) pagination: PaginationInputType
   ): Promise<UserType[]> {
@@ -113,7 +113,7 @@ export class UserResolver implements UserResolverInterface {
 
   // Login query, requires email and password, returns { token: string }
   @Query(() => UserToken)
-  async login(
+  async login (
     @Arg('email') email: string,
     @Arg('password') password: string
   ): Promise<UserToken | null> {
@@ -146,7 +146,7 @@ export class UserResolver implements UserResolverInterface {
   */
   @Mutation(() => UserType)
   @Authorized('ADMIN')
-  async createUser(
+  async createUser (
     @Arg('input', { nullable: false }) input: CreateUserInputType
   ): Promise<UserType> {
     const prisma = new PrismaClient()
@@ -204,7 +204,7 @@ export class UserResolver implements UserResolverInterface {
   */
   @Mutation(() => UserType)
   @Authorized('ADMIN')
-  async updateUser(
+  async updateUser (
     @Arg('id') id: string,
     @Arg('input', { nullable: false }) input: UpdateUserInputType
   ): Promise<UserType> {

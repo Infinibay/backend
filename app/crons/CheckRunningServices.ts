@@ -27,7 +27,7 @@ async function getListeningPorts (libvirtMachine: LibvirtMachine, os: string): P
   // This functionality is temporarily disabled until the method is added to libvirt-node
   console.log('Port scanning via QEMU Guest Agent is not yet implemented in libvirt-node')
   return []
-  
+
   /* Original implementation - keeping for reference
   const osCommands: OsCommands = {
     windows10: {

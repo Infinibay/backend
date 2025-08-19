@@ -1,6 +1,6 @@
-import 'reflect-metadata';
-import { MachineResolver } from '@resolvers/machine/resolver';
-import { mockPrisma } from '../../setup/jest.setup';
+import 'reflect-metadata'
+import { MachineResolver } from '@resolvers/machine/resolver'
+import { mockPrisma } from '../../setup/jest.setup'
 import {
   createMockMachine,
   createMockMachineTemplate,
@@ -9,14 +9,14 @@ import {
   createMockMachineConfiguration,
   createMockMachineInput,
   createMockMachines,
-  createMockDomainXML,
-} from '../../setup/mock-factories';
+  createMockDomainXML
+} from '../../setup/mock-factories'
 import {
   createMockContext,
   createAdminContext,
-  setupLibvirtMockState,
-} from '../../setup/test-helpers';
-import { UserInputError } from 'apollo-server-errors';
+  setupLibvirtMockState
+} from '../../setup/test-helpers'
+import { UserInputError } from 'apollo-server-errors'
 
 // Mock VirtManager
 jest.mock('@utils/VirtManager', () => ({
@@ -39,48 +39,48 @@ jest.mock('@utils/VirtManager', () => ({
       deleteSnapshot: jest.fn(),
       listSnapshots: jest.fn(),
       getMachineXML: jest.fn(),
-      setAutostart: jest.fn(),
-    })),
-  },
-}));
+      setAutostart: jest.fn()
+    }))
+  }
+}))
 
 // Mock EventManager
 jest.mock('@services/EventManager', () => ({
   getEventManager: jest.fn(() => ({
-    dispatch: jest.fn(),
-  })),
-}));
+    dispatch: jest.fn()
+  }))
+}))
 
 describe('MachineResolver', () => {
-  let resolver: MachineResolver;
-  let mockVirtManager: any;
+  let resolver: MachineResolver
+  let mockVirtManager: any
 
   beforeEach(() => {
-    resolver = new MachineResolver();
-    const VirtManager = require('@utils/VirtManager').VirtManager;
-    mockVirtManager = VirtManager.getInstance();
-    jest.clearAllMocks();
-  });
+    resolver = new MachineResolver()
+    const VirtManager = require('@utils/VirtManager').VirtManager
+    mockVirtManager = VirtManager.getInstance()
+    jest.clearAllMocks()
+  })
 
   describe('machine', () => {
     it('should return machine by id', async () => {
-      const mockMachine = createMockMachine();
-      const mockTemplate = createMockMachineTemplate();
-      const mockDepartment = createMockDepartment();
-      const mockUser = createMockUser();
-      const mockConfig = createMockMachineConfiguration({ machineId: mockMachine.id });
+      const mockMachine = createMockMachine()
+      const mockTemplate = createMockMachineTemplate()
+      const mockDepartment = createMockDepartment()
+      const mockUser = createMockUser()
+      const mockConfig = createMockMachineConfiguration({ machineId: mockMachine.id })
 
       const machineWithRelations = {
         ...mockMachine,
         template: mockTemplate,
         department: mockDepartment,
         user: mockUser,
-        configuration: mockConfig,
-      };
+        configuration: mockConfig
+      }
 
-      mockPrisma.machine.findUnique.mockResolvedValue(machineWithRelations);
+      mockPrisma.machine.findUnique.mockResolvedValue(machineWithRelations)
 
-      const result = await resolver.machine(mockMachine.id);
+      const result = await resolver.machine(mockMachine.id)
 
       expect(mockPrisma.machine.findUnique).toHaveBeenCalledWith({
         where: { id: mockMachine.id },
@@ -90,36 +90,36 @@ describe('MachineResolver', () => {
           user: true,
           configuration: true,
           applications: {
-            include: { application: true },
+            include: { application: true }
           },
           nwFilters: {
-            include: { nwFilter: true },
+            include: { nwFilter: true }
           },
           ports: true,
-          serviceConfigs: true,
-        },
-      });
-      expect(result).toEqual(machineWithRelations);
-    });
+          serviceConfigs: true
+        }
+      })
+      expect(result).toEqual(machineWithRelations)
+    })
 
     it('should return null if machine not found', async () => {
-      mockPrisma.machine.findUnique.mockResolvedValue(null);
+      mockPrisma.machine.findUnique.mockResolvedValue(null)
 
-      const result = await resolver.machine('non-existent-id');
+      const result = await resolver.machine('non-existent-id')
 
-      expect(result).toBeNull();
-    });
-  });
+      expect(result).toBeNull()
+    })
+  })
 
   describe('machines', () => {
     it('should return paginated machines list', async () => {
-      const mockMachines = createMockMachines(5);
-      const total = 10;
+      const mockMachines = createMockMachines(5)
+      const total = 10
 
-      mockPrisma.machine.findMany.mockResolvedValue(mockMachines);
-      mockPrisma.machine.count.mockResolvedValue(total);
+      mockPrisma.machine.findMany.mockResolvedValue(mockMachines)
+      mockPrisma.machine.count.mockResolvedValue(total)
 
-      const result = await resolver.machines({ take: 5, skip: 0 });
+      const result = await resolver.machines({ take: 5, skip: 0 })
 
       expect(mockPrisma.machine.findMany).toHaveBeenCalledWith({
         take: 5,
@@ -128,72 +128,72 @@ describe('MachineResolver', () => {
           template: true,
           department: true,
           user: true,
-          configuration: true,
+          configuration: true
         },
-        orderBy: { createdAt: 'desc' },
-      });
+        orderBy: { createdAt: 'desc' }
+      })
       expect(result).toEqual({
         machines: mockMachines,
-        total,
-      });
-    });
+        total
+      })
+    })
 
     it('should filter machines by status', async () => {
-      const runningMachines = createMockMachines(3).map(m => ({ ...m, status: 'running' }));
-      
-      mockPrisma.machine.findMany.mockResolvedValue(runningMachines);
-      mockPrisma.machine.count.mockResolvedValue(3);
+      const runningMachines = createMockMachines(3).map(m => ({ ...m, status: 'running' }))
 
-      await resolver.machines({ take: 10, skip: 0 }, { status: 'running' });
+      mockPrisma.machine.findMany.mockResolvedValue(runningMachines)
+      mockPrisma.machine.count.mockResolvedValue(3)
+
+      await resolver.machines({ take: 10, skip: 0 }, { status: 'running' })
 
       expect(mockPrisma.machine.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { status: 'running' },
+          where: { status: 'running' }
         })
-      );
-    });
+      )
+    })
 
     it('should filter machines by department', async () => {
-      const departmentId = 'dept-123';
-      const deptMachines = createMockMachines(3).map(m => ({ ...m, departmentId }));
-      
-      mockPrisma.machine.findMany.mockResolvedValue(deptMachines);
-      mockPrisma.machine.count.mockResolvedValue(3);
+      const departmentId = 'dept-123'
+      const deptMachines = createMockMachines(3).map(m => ({ ...m, departmentId }))
 
-      await resolver.machines({ take: 10, skip: 0 }, { departmentId });
+      mockPrisma.machine.findMany.mockResolvedValue(deptMachines)
+      mockPrisma.machine.count.mockResolvedValue(3)
+
+      await resolver.machines({ take: 10, skip: 0 }, { departmentId })
 
       expect(mockPrisma.machine.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { departmentId },
+          where: { departmentId }
         })
-      );
-    });
+      )
+    })
 
     it('should filter machines by user', async () => {
-      const userId = 'user-123';
-      const userMachines = createMockMachines(2).map(m => ({ ...m, userId }));
-      
-      mockPrisma.machine.findMany.mockResolvedValue(userMachines);
-      mockPrisma.machine.count.mockResolvedValue(2);
+      const userId = 'user-123'
+      const userMachines = createMockMachines(2).map(m => ({ ...m, userId }))
 
-      await resolver.machines({ take: 10, skip: 0 }, { userId });
+      mockPrisma.machine.findMany.mockResolvedValue(userMachines)
+      mockPrisma.machine.count.mockResolvedValue(2)
+
+      await resolver.machines({ take: 10, skip: 0 }, { userId })
 
       expect(mockPrisma.machine.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { userId },
+          where: { userId }
         })
-      );
-    });
-  });
+      )
+    })
+  })
 
   describe('createMachine', () => {
     it('should create machine with valid input', async () => {
-      const template = createMockMachineTemplate();
-      const department = createMockDepartment();
+      const template = createMockMachineTemplate()
+      const department = createMockDepartment()
       const input = createMockMachineInput({
         templateId: template.id,
-        departmentId: department.id,
-      });
+        departmentId: department.id
+      })
 
       const createdMachine = createMockMachine({
         ...input,
@@ -201,374 +201,374 @@ describe('MachineResolver', () => {
         status: 'stopped',
         cpuCores: template.cores,
         ramGB: template.ram,
-        diskSizeGB: template.storage,
-      });
+        diskSizeGB: template.storage
+      })
 
-      mockPrisma.machineTemplate.findUnique.mockResolvedValue(template);
-      mockPrisma.department.findUnique.mockResolvedValue(department);
-      mockPrisma.machine.create.mockResolvedValue(createdMachine);
+      mockPrisma.machineTemplate.findUnique.mockResolvedValue(template)
+      mockPrisma.department.findUnique.mockResolvedValue(department)
+      mockPrisma.machine.create.mockResolvedValue(createdMachine)
       mockVirtManager.createMachine.mockResolvedValue({
         success: true,
-        xml: createMockDomainXML(createdMachine.internalName),
-      });
+        xml: createMockDomainXML(createdMachine.internalName)
+      })
 
-      const context = createAdminContext();
-      const result = await resolver.createMachine(context, input);
+      const context = createAdminContext()
+      const result = await resolver.createMachine(context, input)
 
       expect(mockPrisma.machineTemplate.findUnique).toHaveBeenCalledWith({
-        where: { id: input.templateId },
-      });
-      expect(mockPrisma.machine.create).toHaveBeenCalled();
-      expect(mockVirtManager.createMachine).toHaveBeenCalled();
-      expect(result).toEqual(createdMachine);
-    });
+        where: { id: input.templateId }
+      })
+      expect(mockPrisma.machine.create).toHaveBeenCalled()
+      expect(mockVirtManager.createMachine).toHaveBeenCalled()
+      expect(result).toEqual(createdMachine)
+    })
 
     it('should throw error if template not found', async () => {
-      const input = createMockMachineInput();
-      mockPrisma.machineTemplate.findUnique.mockResolvedValue(null);
+      const input = createMockMachineInput()
+      mockPrisma.machineTemplate.findUnique.mockResolvedValue(null)
 
-      const context = createAdminContext();
-      await expect(resolver.createMachine(context, input)).rejects.toThrow(UserInputError);
-    });
+      const context = createAdminContext()
+      await expect(resolver.createMachine(context, input)).rejects.toThrow(UserInputError)
+    })
 
     it('should throw error if department not found', async () => {
-      const template = createMockMachineTemplate();
+      const template = createMockMachineTemplate()
       const input = createMockMachineInput({
         templateId: template.id,
-        departmentId: 'non-existent',
-      });
+        departmentId: 'non-existent'
+      })
 
-      mockPrisma.machineTemplate.findUnique.mockResolvedValue(template);
-      mockPrisma.department.findUnique.mockResolvedValue(null);
+      mockPrisma.machineTemplate.findUnique.mockResolvedValue(template)
+      mockPrisma.department.findUnique.mockResolvedValue(null)
 
-      const context = createAdminContext();
-      await expect(resolver.createMachine(context, input)).rejects.toThrow(UserInputError);
-    });
+      const context = createAdminContext()
+      await expect(resolver.createMachine(context, input)).rejects.toThrow(UserInputError)
+    })
 
     it('should handle libvirt creation failure', async () => {
-      const template = createMockMachineTemplate();
-      const input = createMockMachineInput({ templateId: template.id });
+      const template = createMockMachineTemplate()
+      const input = createMockMachineInput({ templateId: template.id })
 
-      mockPrisma.machineTemplate.findUnique.mockResolvedValue(template);
-      mockPrisma.machine.create.mockResolvedValue(createMockMachine());
-      mockVirtManager.createMachine.mockRejectedValue(new Error('Libvirt error'));
+      mockPrisma.machineTemplate.findUnique.mockResolvedValue(template)
+      mockPrisma.machine.create.mockResolvedValue(createMockMachine())
+      mockVirtManager.createMachine.mockRejectedValue(new Error('Libvirt error'))
 
-      const context = createAdminContext();
-      await expect(resolver.createMachine(context, input)).rejects.toThrow('Libvirt error');
-    });
-  });
+      const context = createAdminContext()
+      await expect(resolver.createMachine(context, input)).rejects.toThrow('Libvirt error')
+    })
+  })
 
   describe('destroyMachine', () => {
     it('should destroy machine successfully', async () => {
-      const machine = createMockMachine({ status: 'stopped' });
-      
-      mockPrisma.machine.findUnique.mockResolvedValue(machine);
-      mockVirtManager.destroyMachine.mockResolvedValue({ success: true });
-      mockPrisma.machine.delete.mockResolvedValue(machine);
+      const machine = createMockMachine({ status: 'stopped' })
 
-      const result = await resolver.destroyMachine(machine.id);
+      mockPrisma.machine.findUnique.mockResolvedValue(machine)
+      mockVirtManager.destroyMachine.mockResolvedValue({ success: true })
+      mockPrisma.machine.delete.mockResolvedValue(machine)
+
+      const result = await resolver.destroyMachine(machine.id)
 
       expect(mockPrisma.machine.findUnique).toHaveBeenCalledWith({
-        where: { id: machine.id },
-      });
-      expect(mockVirtManager.destroyMachine).toHaveBeenCalledWith(machine.internalName);
+        where: { id: machine.id }
+      })
+      expect(mockVirtManager.destroyMachine).toHaveBeenCalledWith(machine.internalName)
       expect(mockPrisma.machine.delete).toHaveBeenCalledWith({
-        where: { id: machine.id },
-      });
+        where: { id: machine.id }
+      })
       expect(result).toEqual({
         success: true,
-        message: expect.stringContaining('destroyed'),
-      });
-    });
+        message: expect.stringContaining('destroyed')
+      })
+    })
 
     it('should force destroy running machine if force flag is set', async () => {
-      const machine = createMockMachine({ status: 'running' });
-      
-      mockPrisma.machine.findUnique.mockResolvedValue(machine);
-      mockVirtManager.destroyMachine.mockResolvedValue({ success: true });
-      mockPrisma.machine.delete.mockResolvedValue(machine);
+      const machine = createMockMachine({ status: 'running' })
 
-      const result = await resolver.destroyMachine(machine.id, true);
+      mockPrisma.machine.findUnique.mockResolvedValue(machine)
+      mockVirtManager.destroyMachine.mockResolvedValue({ success: true })
+      mockPrisma.machine.delete.mockResolvedValue(machine)
 
-      expect(mockVirtManager.destroyMachine).toHaveBeenCalled();
-      expect(result.success).toBe(true);
-    });
+      const result = await resolver.destroyMachine(machine.id, true)
+
+      expect(mockVirtManager.destroyMachine).toHaveBeenCalled()
+      expect(result.success).toBe(true)
+    })
 
     it('should not destroy running machine without force flag', async () => {
-      const machine = createMockMachine({ status: 'running' });
-      
-      mockPrisma.machine.findUnique.mockResolvedValue(machine);
+      const machine = createMockMachine({ status: 'running' })
 
-      await expect(resolver.destroyMachine(machine.id, false)).rejects.toThrow(UserInputError);
-      expect(mockVirtManager.destroyMachine).not.toHaveBeenCalled();
-    });
+      mockPrisma.machine.findUnique.mockResolvedValue(machine)
+
+      await expect(resolver.destroyMachine(machine.id, false)).rejects.toThrow(UserInputError)
+      expect(mockVirtManager.destroyMachine).not.toHaveBeenCalled()
+    })
 
     it('should throw error if machine not found', async () => {
-      mockPrisma.machine.findUnique.mockResolvedValue(null);
+      mockPrisma.machine.findUnique.mockResolvedValue(null)
 
-      await expect(resolver.destroyMachine('non-existent')).rejects.toThrow(UserInputError);
-    });
-  });
+      await expect(resolver.destroyMachine('non-existent')).rejects.toThrow(UserInputError)
+    })
+  })
 
   describe('powerOn', () => {
     it('should power on stopped machine', async () => {
-      const machine = createMockMachine({ status: 'stopped' });
-      
-      mockPrisma.machine.findUnique.mockResolvedValue(machine);
-      mockVirtManager.powerOn.mockResolvedValue({ success: true });
-      mockPrisma.machine.update.mockResolvedValue({ ...machine, status: 'running' });
+      const machine = createMockMachine({ status: 'stopped' })
 
-      const result = await resolver.powerOn(machine.id);
+      mockPrisma.machine.findUnique.mockResolvedValue(machine)
+      mockVirtManager.powerOn.mockResolvedValue({ success: true })
+      mockPrisma.machine.update.mockResolvedValue({ ...machine, status: 'running' })
 
-      expect(mockVirtManager.powerOn).toHaveBeenCalledWith(machine.internalName);
+      const result = await resolver.powerOn(machine.id)
+
+      expect(mockVirtManager.powerOn).toHaveBeenCalledWith(machine.internalName)
       expect(mockPrisma.machine.update).toHaveBeenCalledWith({
         where: { id: machine.id },
-        data: { status: 'running' },
-      });
+        data: { status: 'running' }
+      })
       expect(result).toEqual({
         success: true,
-        message: expect.stringContaining('powered on'),
-      });
-    });
+        message: expect.stringContaining('powered on')
+      })
+    })
 
     it('should not power on already running machine', async () => {
-      const machine = createMockMachine({ status: 'running' });
-      
-      mockPrisma.machine.findUnique.mockResolvedValue(machine);
+      const machine = createMockMachine({ status: 'running' })
 
-      await expect(resolver.powerOn(machine.id)).rejects.toThrow(UserInputError);
-      expect(mockVirtManager.powerOn).not.toHaveBeenCalled();
-    });
+      mockPrisma.machine.findUnique.mockResolvedValue(machine)
+
+      await expect(resolver.powerOn(machine.id)).rejects.toThrow(UserInputError)
+      expect(mockVirtManager.powerOn).not.toHaveBeenCalled()
+    })
 
     it('should handle libvirt power on failure', async () => {
-      const machine = createMockMachine({ status: 'stopped' });
-      
-      mockPrisma.machine.findUnique.mockResolvedValue(machine);
-      mockVirtManager.powerOn.mockRejectedValue(new Error('Failed to start domain'));
+      const machine = createMockMachine({ status: 'stopped' })
 
-      await expect(resolver.powerOn(machine.id)).rejects.toThrow('Failed to start domain');
-    });
-  });
+      mockPrisma.machine.findUnique.mockResolvedValue(machine)
+      mockVirtManager.powerOn.mockRejectedValue(new Error('Failed to start domain'))
+
+      await expect(resolver.powerOn(machine.id)).rejects.toThrow('Failed to start domain')
+    })
+  })
 
   describe('powerOff', () => {
     it('should power off running machine', async () => {
-      const machine = createMockMachine({ status: 'running' });
-      
-      mockPrisma.machine.findUnique.mockResolvedValue(machine);
-      mockVirtManager.powerOff.mockResolvedValue({ success: true });
-      mockPrisma.machine.update.mockResolvedValue({ ...machine, status: 'stopped' });
+      const machine = createMockMachine({ status: 'running' })
 
-      const result = await resolver.powerOff(machine.id);
+      mockPrisma.machine.findUnique.mockResolvedValue(machine)
+      mockVirtManager.powerOff.mockResolvedValue({ success: true })
+      mockPrisma.machine.update.mockResolvedValue({ ...machine, status: 'stopped' })
 
-      expect(mockVirtManager.powerOff).toHaveBeenCalledWith(machine.internalName, false);
+      const result = await resolver.powerOff(machine.id)
+
+      expect(mockVirtManager.powerOff).toHaveBeenCalledWith(machine.internalName, false)
       expect(mockPrisma.machine.update).toHaveBeenCalledWith({
         where: { id: machine.id },
-        data: { status: 'stopped' },
-      });
+        data: { status: 'stopped' }
+      })
       expect(result).toEqual({
         success: true,
-        message: expect.stringContaining('powered off'),
-      });
-    });
+        message: expect.stringContaining('powered off')
+      })
+    })
 
     it('should force power off with force flag', async () => {
-      const machine = createMockMachine({ status: 'running' });
-      
-      mockPrisma.machine.findUnique.mockResolvedValue(machine);
-      mockVirtManager.powerOff.mockResolvedValue({ success: true });
-      mockPrisma.machine.update.mockResolvedValue({ ...machine, status: 'stopped' });
+      const machine = createMockMachine({ status: 'running' })
 
-      await resolver.powerOff(machine.id, true);
+      mockPrisma.machine.findUnique.mockResolvedValue(machine)
+      mockVirtManager.powerOff.mockResolvedValue({ success: true })
+      mockPrisma.machine.update.mockResolvedValue({ ...machine, status: 'stopped' })
 
-      expect(mockVirtManager.powerOff).toHaveBeenCalledWith(machine.internalName, true);
-    });
+      await resolver.powerOff(machine.id, true)
+
+      expect(mockVirtManager.powerOff).toHaveBeenCalledWith(machine.internalName, true)
+    })
 
     it('should not power off already stopped machine', async () => {
-      const machine = createMockMachine({ status: 'stopped' });
-      
-      mockPrisma.machine.findUnique.mockResolvedValue(machine);
+      const machine = createMockMachine({ status: 'stopped' })
 
-      await expect(resolver.powerOff(machine.id)).rejects.toThrow(UserInputError);
-      expect(mockVirtManager.powerOff).not.toHaveBeenCalled();
-    });
-  });
+      mockPrisma.machine.findUnique.mockResolvedValue(machine)
+
+      await expect(resolver.powerOff(machine.id)).rejects.toThrow(UserInputError)
+      expect(mockVirtManager.powerOff).not.toHaveBeenCalled()
+    })
+  })
 
   describe('rebootMachine', () => {
     it('should reboot running machine', async () => {
-      const machine = createMockMachine({ status: 'running' });
-      
-      mockPrisma.machine.findUnique.mockResolvedValue(machine);
-      mockVirtManager.rebootMachine.mockResolvedValue({ success: true });
+      const machine = createMockMachine({ status: 'running' })
 
-      const result = await resolver.rebootMachine(machine.id);
+      mockPrisma.machine.findUnique.mockResolvedValue(machine)
+      mockVirtManager.rebootMachine.mockResolvedValue({ success: true })
 
-      expect(mockVirtManager.rebootMachine).toHaveBeenCalledWith(machine.internalName, false);
+      const result = await resolver.rebootMachine(machine.id)
+
+      expect(mockVirtManager.rebootMachine).toHaveBeenCalledWith(machine.internalName, false)
       expect(result).toEqual({
         success: true,
-        message: expect.stringContaining('rebooted'),
-      });
-    });
+        message: expect.stringContaining('rebooted')
+      })
+    })
 
     it('should force reboot with force flag', async () => {
-      const machine = createMockMachine({ status: 'running' });
-      
-      mockPrisma.machine.findUnique.mockResolvedValue(machine);
-      mockVirtManager.rebootMachine.mockResolvedValue({ success: true });
+      const machine = createMockMachine({ status: 'running' })
 
-      await resolver.rebootMachine(machine.id, true);
+      mockPrisma.machine.findUnique.mockResolvedValue(machine)
+      mockVirtManager.rebootMachine.mockResolvedValue({ success: true })
 
-      expect(mockVirtManager.rebootMachine).toHaveBeenCalledWith(machine.internalName, true);
-    });
+      await resolver.rebootMachine(machine.id, true)
+
+      expect(mockVirtManager.rebootMachine).toHaveBeenCalledWith(machine.internalName, true)
+    })
 
     it('should not reboot stopped machine', async () => {
-      const machine = createMockMachine({ status: 'stopped' });
-      
-      mockPrisma.machine.findUnique.mockResolvedValue(machine);
+      const machine = createMockMachine({ status: 'stopped' })
 
-      await expect(resolver.rebootMachine(machine.id)).rejects.toThrow(UserInputError);
-    });
-  });
+      mockPrisma.machine.findUnique.mockResolvedValue(machine)
+
+      await expect(resolver.rebootMachine(machine.id)).rejects.toThrow(UserInputError)
+    })
+  })
 
   describe('suspendMachine', () => {
     it('should suspend running machine', async () => {
-      const machine = createMockMachine({ status: 'running' });
-      
-      mockPrisma.machine.findUnique.mockResolvedValue(machine);
-      mockVirtManager.suspendMachine.mockResolvedValue({ success: true });
-      mockPrisma.machine.update.mockResolvedValue({ ...machine, status: 'paused' });
+      const machine = createMockMachine({ status: 'running' })
 
-      const result = await resolver.suspendMachine(machine.id);
+      mockPrisma.machine.findUnique.mockResolvedValue(machine)
+      mockVirtManager.suspendMachine.mockResolvedValue({ success: true })
+      mockPrisma.machine.update.mockResolvedValue({ ...machine, status: 'paused' })
 
-      expect(mockVirtManager.suspendMachine).toHaveBeenCalledWith(machine.internalName);
+      const result = await resolver.suspendMachine(machine.id)
+
+      expect(mockVirtManager.suspendMachine).toHaveBeenCalledWith(machine.internalName)
       expect(mockPrisma.machine.update).toHaveBeenCalledWith({
         where: { id: machine.id },
-        data: { status: 'paused' },
-      });
+        data: { status: 'paused' }
+      })
       expect(result).toEqual({
         success: true,
-        message: expect.stringContaining('suspended'),
-      });
-    });
+        message: expect.stringContaining('suspended')
+      })
+    })
 
     it('should not suspend already suspended machine', async () => {
-      const machine = createMockMachine({ status: 'paused' });
-      
-      mockPrisma.machine.findUnique.mockResolvedValue(machine);
+      const machine = createMockMachine({ status: 'paused' })
 
-      await expect(resolver.suspendMachine(machine.id)).rejects.toThrow(UserInputError);
-    });
-  });
+      mockPrisma.machine.findUnique.mockResolvedValue(machine)
+
+      await expect(resolver.suspendMachine(machine.id)).rejects.toThrow(UserInputError)
+    })
+  })
 
   describe('resumeMachine', () => {
     it('should resume suspended machine', async () => {
-      const machine = createMockMachine({ status: 'paused' });
-      
-      mockPrisma.machine.findUnique.mockResolvedValue(machine);
-      mockVirtManager.resumeMachine.mockResolvedValue({ success: true });
-      mockPrisma.machine.update.mockResolvedValue({ ...machine, status: 'running' });
+      const machine = createMockMachine({ status: 'paused' })
 
-      const result = await resolver.resumeMachine(machine.id);
+      mockPrisma.machine.findUnique.mockResolvedValue(machine)
+      mockVirtManager.resumeMachine.mockResolvedValue({ success: true })
+      mockPrisma.machine.update.mockResolvedValue({ ...machine, status: 'running' })
 
-      expect(mockVirtManager.resumeMachine).toHaveBeenCalledWith(machine.internalName);
+      const result = await resolver.resumeMachine(machine.id)
+
+      expect(mockVirtManager.resumeMachine).toHaveBeenCalledWith(machine.internalName)
       expect(mockPrisma.machine.update).toHaveBeenCalledWith({
         where: { id: machine.id },
-        data: { status: 'running' },
-      });
+        data: { status: 'running' }
+      })
       expect(result).toEqual({
         success: true,
-        message: expect.stringContaining('resumed'),
-      });
-    });
+        message: expect.stringContaining('resumed')
+      })
+    })
 
     it('should not resume running machine', async () => {
-      const machine = createMockMachine({ status: 'running' });
-      
-      mockPrisma.machine.findUnique.mockResolvedValue(machine);
+      const machine = createMockMachine({ status: 'running' })
 
-      await expect(resolver.resumeMachine(machine.id)).rejects.toThrow(UserInputError);
-    });
-  });
+      mockPrisma.machine.findUnique.mockResolvedValue(machine)
+
+      await expect(resolver.resumeMachine(machine.id)).rejects.toThrow(UserInputError)
+    })
+  })
 
   describe('updateMachineResources', () => {
     it('should update machine CPU cores', async () => {
-      const machine = createMockMachine({ cpuCores: 4 });
-      const newCores = 8;
-      
-      mockPrisma.machine.findUnique.mockResolvedValue(machine);
-      mockVirtManager.updateMachineResources.mockResolvedValue({ success: true });
-      mockPrisma.machine.update.mockResolvedValue({ ...machine, cpuCores: newCores });
+      const machine = createMockMachine({ cpuCores: 4 })
+      const newCores = 8
 
-      const result = await resolver.updateMachineResources(machine.id, { cpuCores: newCores });
+      mockPrisma.machine.findUnique.mockResolvedValue(machine)
+      mockVirtManager.updateMachineResources.mockResolvedValue({ success: true })
+      mockPrisma.machine.update.mockResolvedValue({ ...machine, cpuCores: newCores })
+
+      const result = await resolver.updateMachineResources(machine.id, { cpuCores: newCores })
 
       expect(mockVirtManager.updateMachineResources).toHaveBeenCalledWith(
         machine.internalName,
         { cpuCores: newCores }
-      );
+      )
       expect(mockPrisma.machine.update).toHaveBeenCalledWith({
         where: { id: machine.id },
-        data: { cpuCores: newCores },
-      });
-      expect(result.cpuCores).toBe(newCores);
-    });
+        data: { cpuCores: newCores }
+      })
+      expect(result.cpuCores).toBe(newCores)
+    })
 
     it('should update machine RAM', async () => {
-      const machine = createMockMachine({ ramGB: 8 });
-      const newRam = 16;
-      
-      mockPrisma.machine.findUnique.mockResolvedValue(machine);
-      mockVirtManager.updateMachineResources.mockResolvedValue({ success: true });
-      mockPrisma.machine.update.mockResolvedValue({ ...machine, ramGB: newRam });
+      const machine = createMockMachine({ ramGB: 8 })
+      const newRam = 16
 
-      const result = await resolver.updateMachineResources(machine.id, { ramGB: newRam });
+      mockPrisma.machine.findUnique.mockResolvedValue(machine)
+      mockVirtManager.updateMachineResources.mockResolvedValue({ success: true })
+      mockPrisma.machine.update.mockResolvedValue({ ...machine, ramGB: newRam })
+
+      const result = await resolver.updateMachineResources(machine.id, { ramGB: newRam })
 
       expect(mockVirtManager.updateMachineResources).toHaveBeenCalledWith(
         machine.internalName,
         { ramGB: newRam }
-      );
-      expect(result.ramGB).toBe(newRam);
-    });
+      )
+      expect(result.ramGB).toBe(newRam)
+    })
 
     it('should update machine disk size', async () => {
-      const machine = createMockMachine({ diskSizeGB: 100 });
-      const newDiskSize = 200;
-      
-      mockPrisma.machine.findUnique.mockResolvedValue(machine);
-      mockVirtManager.updateMachineResources.mockResolvedValue({ success: true });
-      mockPrisma.machine.update.mockResolvedValue({ ...machine, diskSizeGB: newDiskSize });
+      const machine = createMockMachine({ diskSizeGB: 100 })
+      const newDiskSize = 200
 
-      const result = await resolver.updateMachineResources(machine.id, { diskSizeGB: newDiskSize });
+      mockPrisma.machine.findUnique.mockResolvedValue(machine)
+      mockVirtManager.updateMachineResources.mockResolvedValue({ success: true })
+      mockPrisma.machine.update.mockResolvedValue({ ...machine, diskSizeGB: newDiskSize })
+
+      const result = await resolver.updateMachineResources(machine.id, { diskSizeGB: newDiskSize })
 
       expect(mockVirtManager.updateMachineResources).toHaveBeenCalledWith(
         machine.internalName,
         { diskSizeGB: newDiskSize }
-      );
-      expect(result.diskSizeGB).toBe(newDiskSize);
-    });
+      )
+      expect(result.diskSizeGB).toBe(newDiskSize)
+    })
 
     it('should validate resource limits', async () => {
-      const machine = createMockMachine();
-      mockPrisma.machine.findUnique.mockResolvedValue(machine);
+      const machine = createMockMachine()
+      mockPrisma.machine.findUnique.mockResolvedValue(machine)
 
       // Test invalid CPU cores
       await expect(
         resolver.updateMachineResources(machine.id, { cpuCores: 0 })
-      ).rejects.toThrow(UserInputError);
+      ).rejects.toThrow(UserInputError)
 
       // Test invalid RAM
       await expect(
         resolver.updateMachineResources(machine.id, { ramGB: -1 })
-      ).rejects.toThrow(UserInputError);
+      ).rejects.toThrow(UserInputError)
 
       // Test invalid disk size (can't shrink)
       await expect(
         resolver.updateMachineResources(machine.id, { diskSizeGB: machine.diskSizeGB - 10 })
-      ).rejects.toThrow(UserInputError);
-    });
-  });
+      ).rejects.toThrow(UserInputError)
+    })
+  })
 
   describe('getMachineStats', () => {
     it('should return machine statistics', async () => {
-      const machine = createMockMachine({ status: 'running' });
+      const machine = createMockMachine({ status: 'running' })
       const stats = {
         cpuUsage: 45.5,
         memoryUsage: 4096,
@@ -576,92 +576,92 @@ describe('MachineResolver', () => {
         diskRead: 1000000,
         diskWrite: 500000,
         networkRx: 2000000,
-        networkTx: 1000000,
-      };
-      
-      mockPrisma.machine.findUnique.mockResolvedValue(machine);
-      mockVirtManager.getMachineStats.mockResolvedValue(stats);
+        networkTx: 1000000
+      }
 
-      const result = await resolver.getMachineStats(machine.id);
+      mockPrisma.machine.findUnique.mockResolvedValue(machine)
+      mockVirtManager.getMachineStats.mockResolvedValue(stats)
 
-      expect(mockVirtManager.getMachineStats).toHaveBeenCalledWith(machine.internalName);
-      expect(result).toEqual(stats);
-    });
+      const result = await resolver.getMachineStats(machine.id)
+
+      expect(mockVirtManager.getMachineStats).toHaveBeenCalledWith(machine.internalName)
+      expect(result).toEqual(stats)
+    })
 
     it('should return null for stopped machine', async () => {
-      const machine = createMockMachine({ status: 'stopped' });
-      
-      mockPrisma.machine.findUnique.mockResolvedValue(machine);
+      const machine = createMockMachine({ status: 'stopped' })
 
-      const result = await resolver.getMachineStats(machine.id);
+      mockPrisma.machine.findUnique.mockResolvedValue(machine)
 
-      expect(mockVirtManager.getMachineStats).not.toHaveBeenCalled();
-      expect(result).toBeNull();
-    });
-  });
+      const result = await resolver.getMachineStats(machine.id)
+
+      expect(mockVirtManager.getMachineStats).not.toHaveBeenCalled()
+      expect(result).toBeNull()
+    })
+  })
 
   describe('setMachineAutostart', () => {
     it('should enable autostart', async () => {
-      const machine = createMockMachine();
-      
-      mockPrisma.machine.findUnique.mockResolvedValue(machine);
-      mockVirtManager.setAutostart.mockResolvedValue({ success: true });
+      const machine = createMockMachine()
 
-      const result = await resolver.setMachineAutostart(machine.id, true);
+      mockPrisma.machine.findUnique.mockResolvedValue(machine)
+      mockVirtManager.setAutostart.mockResolvedValue({ success: true })
 
-      expect(mockVirtManager.setAutostart).toHaveBeenCalledWith(machine.internalName, true);
+      const result = await resolver.setMachineAutostart(machine.id, true)
+
+      expect(mockVirtManager.setAutostart).toHaveBeenCalledWith(machine.internalName, true)
       expect(result).toEqual({
         success: true,
-        message: expect.stringContaining('autostart enabled'),
-      });
-    });
+        message: expect.stringContaining('autostart enabled')
+      })
+    })
 
     it('should disable autostart', async () => {
-      const machine = createMockMachine();
-      
-      mockPrisma.machine.findUnique.mockResolvedValue(machine);
-      mockVirtManager.setAutostart.mockResolvedValue({ success: true });
+      const machine = createMockMachine()
 
-      const result = await resolver.setMachineAutostart(machine.id, false);
+      mockPrisma.machine.findUnique.mockResolvedValue(machine)
+      mockVirtManager.setAutostart.mockResolvedValue({ success: true })
 
-      expect(mockVirtManager.setAutostart).toHaveBeenCalledWith(machine.internalName, false);
+      const result = await resolver.setMachineAutostart(machine.id, false)
+
+      expect(mockVirtManager.setAutostart).toHaveBeenCalledWith(machine.internalName, false)
       expect(result).toEqual({
         success: true,
-        message: expect.stringContaining('autostart disabled'),
-      });
-    });
-  });
+        message: expect.stringContaining('autostart disabled')
+      })
+    })
+  })
 
   describe('Authorization Tests', () => {
     it('should allow USER to view their own machines', async () => {
-      const user = createMockUser();
-      const userMachine = createMockMachine({ userId: user.id });
-      const context = createMockContext({ user });
+      const user = createMockUser()
+      const userMachine = createMockMachine({ userId: user.id })
+      const context = createMockContext({ user })
 
-      mockPrisma.machine.findUnique.mockResolvedValue(userMachine);
+      mockPrisma.machine.findUnique.mockResolvedValue(userMachine)
 
-      const result = await resolver.machine(userMachine.id);
-      expect(result).toEqual(userMachine);
-    });
+      const result = await resolver.machine(userMachine.id)
+      expect(result).toEqual(userMachine)
+    })
 
     it('should require ADMIN for createMachine', () => {
-      const metadata = Reflect.getMetadata('custom:authorized', MachineResolver.prototype, 'createMachine');
-      expect(metadata).toBe('ADMIN');
-    });
+      const metadata = Reflect.getMetadata('custom:authorized', MachineResolver.prototype, 'createMachine')
+      expect(metadata).toBe('ADMIN')
+    })
 
     it('should require ADMIN for destroyMachine', () => {
-      const metadata = Reflect.getMetadata('custom:authorized', MachineResolver.prototype, 'destroyMachine');
-      expect(metadata).toBe('ADMIN');
-    });
+      const metadata = Reflect.getMetadata('custom:authorized', MachineResolver.prototype, 'destroyMachine')
+      expect(metadata).toBe('ADMIN')
+    })
 
     it('should require USER for power operations', () => {
-      const powerOnMeta = Reflect.getMetadata('custom:authorized', MachineResolver.prototype, 'powerOn');
-      const powerOffMeta = Reflect.getMetadata('custom:authorized', MachineResolver.prototype, 'powerOff');
-      const rebootMeta = Reflect.getMetadata('custom:authorized', MachineResolver.prototype, 'rebootMachine');
-      
-      expect(powerOnMeta).toBe('USER');
-      expect(powerOffMeta).toBe('USER');
-      expect(rebootMeta).toBe('USER');
-    });
-  });
-});
+      const powerOnMeta = Reflect.getMetadata('custom:authorized', MachineResolver.prototype, 'powerOn')
+      const powerOffMeta = Reflect.getMetadata('custom:authorized', MachineResolver.prototype, 'powerOff')
+      const rebootMeta = Reflect.getMetadata('custom:authorized', MachineResolver.prototype, 'rebootMachine')
+
+      expect(powerOnMeta).toBe('USER')
+      expect(powerOffMeta).toBe('USER')
+      expect(rebootMeta).toBe('USER')
+    })
+  })
+})

@@ -2,24 +2,24 @@ import { config as loadEnv } from 'dotenv'
 import path from 'path'
 import { execSync } from 'child_process'
 
-function log(msg: string) {
+function log (msg: string) {
   // eslint-disable-next-line no-console
   console.log(`[test-db] ${msg}`)
 }
 
-function warn(msg: string) {
+function warn (msg: string) {
   // eslint-disable-next-line no-console
   console.warn(`[test-db] ${msg}`)
 }
 
-async function main() {
+async function main () {
   const args = process.argv.slice(2)
   const doReset = args.includes('--reset')
 
   // Load .env.test if present
   loadEnv({ path: path.resolve(__dirname, '../.env.test') })
 
-  let dbUrl = process.env.DATABASE_URL
+  const dbUrl = process.env.DATABASE_URL
   if (!dbUrl) {
     warn('DATABASE_URL is not set. Set it in backend/.env.test to enable DB-backed tests.')
     process.exit(0)
@@ -97,4 +97,3 @@ async function main() {
 }
 
 main()
-

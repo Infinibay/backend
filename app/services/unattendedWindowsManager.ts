@@ -42,7 +42,7 @@ export interface LanguageConfig {
 export class UnattendedWindowsManager extends UnattendedManagerBase {
   /**
    * IMPORTANT: XML Command Guidelines
-   * 
+   *
    * When writing PowerShell commands for Windows unattended XML:
    * - NEVER use '&' character (ampersand) - it breaks XML parsing
    * - NEVER use '>>' or '2>&1' redirection operators - use Start-Process with -RedirectStandardOutput instead
@@ -50,7 +50,7 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
    * - NEVER use pipe operators '|' with Tee-Object - use Add-Content directly
    * - NEVER nest cmd /c with PowerShell commands - causes escaping issues
    * - AVOID complex quote escaping - use simple commands without nested quotes
-   * 
+   *
    * Safe alternatives:
    * - Use Start-Process with -RedirectStandardOutput/-RedirectStandardError for output capture
    * - Use Add-Content for logging instead of pipes
@@ -169,7 +169,7 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
   private languageConfig: LanguageConfig
   private enableCommandLogging: boolean = true
 
-  constructor(
+  constructor (
     version: number,
     username: string,
     password: string,
@@ -198,27 +198,27 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
    * @param logFileName - Optional log file name (without path)
    * @returns Formatted command string safe for XML
    */
-  private createLoggedCommand(command: string, description: string, logFileName?: string): string {
+  private createLoggedCommand (command: string, description: string, logFileName?: string): string {
     if (!this.enableCommandLogging || !logFileName) {
       // Return simple command without logging
       return `powershell -ExecutionPolicy Bypass -Command "${command}"`
     }
 
     const logPath = `${UnattendedWindowsManager.PATHS.WINDOWS_TEMP}\\\\${logFileName}`
-    const timestamp = "Get-Date -Format 'yyyy-MM-dd HH:mm:ss'"
+    const timestamp = 'Get-Date -Format \'yyyy-MM-dd HH:mm:ss\''
 
     // Build logged command with proper error handling
     const loggedCommand = [
       `$timestamp = ${timestamp}`,
       `$log = '${logPath}'`,
       `Add-Content -Path $log -Value \"[$timestamp] ${description}\"`,
-      `try {`,
+      'try {',
       `  ${command}`,
       `  Add-Content -Path $log -Value \"[$timestamp] ${description} completed successfully\"`,
-      `} catch {`,
+      '} catch {',
       `  Add-Content -Path $log -Value \"[$timestamp] ERROR: ${description} failed\"`,
-      `  Add-Content -Path $log -Value $_.Exception.Message`,
-      `}`
+      '  Add-Content -Path $log -Value $_.Exception.Message',
+      '}'
     ].join('; ')
 
     return `powershell -ExecutionPolicy Bypass -Command "${loggedCommand}"`
@@ -229,7 +229,7 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
    * @param scriptLines - Array of PowerShell script lines
    * @returns Base64-encoded PowerShell command
    */
-  private buildPowerShellScript(scriptLines: string[]): string {
+  private buildPowerShellScript (scriptLines: string[]): string {
     // Join lines with proper line endings
     const script = scriptLines.join('\r\n')
 
@@ -248,7 +248,7 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
    * @param forceSimple - Force simple command format without encoding
    * @returns PowerShell command string
    */
-  private buildPowerShellCommand(scriptLines: string[], forceSimple: boolean = false): string {
+  private buildPowerShellCommand (scriptLines: string[], forceSimple: boolean = false): string {
     // For debugging or simple commands, use direct command without encoding
     if (forceSimple || (!this.enableCommandLogging && scriptLines.join('').length < 200)) {
       const script = scriptLines.join('; ').replace(/"/g, '`"')
@@ -264,7 +264,7 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
    * @param forceEncoding - Force base64 encoding even for short commands
    * @returns Safe PowerShell command string
    */
-  private createSafeCommand(command: string, forceEncoding: boolean = false): string {
+  private createSafeCommand (command: string, forceEncoding: boolean = false): string {
     // Simple, short commands don't need encoding
     if (!forceEncoding && command.length < 150 && !command.includes('\n') && !command.includes('\r')) {
       const escapedCommand = command.replace(/"/g, '`"')
@@ -281,7 +281,7 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
    * @param description - Description for logging
    * @returns PowerShell download command
    */
-  private createDownloadCommand(url: string, outputPath: string, description: string): string {
+  private createDownloadCommand (url: string, outputPath: string, description: string): string {
     if (!this.enableCommandLogging) {
       // Simple download without logging
       return `powershell -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; (New-Object System.Net.WebClient).DownloadFile('${url}', '${outputPath}')"`
@@ -291,37 +291,37 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
       `$url = '${url}'`,
       `$output = '${outputPath}'`,
       `$logFile = '${UnattendedWindowsManager.PATHS.TEMP_DIR}\\${UnattendedWindowsManager.INFINISERVICE.LOG_FILE}'`,
-      ``,
+      '',
       `Add-Content -Path $logFile -Value "${description}"`,
-      `[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12`,
-      ``,
-      `$maxAttempts = 3`,
-      `$success = $false`,
-      ``,
-      `for ($i = 1; $i -le $maxAttempts; $i++) {`,
-      `    try {`,
-      `        Add-Content -Path $logFile -Value "Download attempt $i of $maxAttempts"`,
-      `        $webClient = New-Object System.Net.WebClient`,
-      `        $webClient.DownloadFile($url, $output)`,
-      `        `,
-      `        if (Test-Path $output) {`,
-      `            $fileSize = (Get-Item $output).Length`,
-      `            Add-Content -Path $logFile -Value "Downloaded successfully: $fileSize bytes"`,
-      `            $success = $true`,
-      `            break`,
-      `        }`,
-      `    }`,
-      `    catch {`,
-      `        Add-Content -Path $logFile -Value "Attempt $i failed: $_"`,
-      `        if ($i -lt $maxAttempts) {`,
-      `            Start-Sleep -Seconds 5`,
-      `        }`,
-      `    }`,
-      `}`,
-      ``,
-      `if (-not $success) {`,
-      `    Add-Content -Path $logFile -Value "ERROR: Download failed after $maxAttempts attempts"`,
-      `}`
+      '[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12',
+      '',
+      '$maxAttempts = 3',
+      '$success = $false',
+      '',
+      'for ($i = 1; $i -le $maxAttempts; $i++) {',
+      '    try {',
+      '        Add-Content -Path $logFile -Value "Download attempt $i of $maxAttempts"',
+      '        $webClient = New-Object System.Net.WebClient',
+      '        $webClient.DownloadFile($url, $output)',
+      '        ',
+      '        if (Test-Path $output) {',
+      '            $fileSize = (Get-Item $output).Length',
+      '            Add-Content -Path $logFile -Value "Downloaded successfully: $fileSize bytes"',
+      '            $success = $true',
+      '            break',
+      '        }',
+      '    }',
+      '    catch {',
+      '        Add-Content -Path $logFile -Value "Attempt $i failed: $_"',
+      '        if ($i -lt $maxAttempts) {',
+      '            Start-Sleep -Seconds 5',
+      '        }',
+      '    }',
+      '}',
+      '',
+      'if (-not $success) {',
+      '    Add-Content -Path $logFile -Value "ERROR: Download failed after $maxAttempts attempts"',
+      '}'
     ]
 
     return this.buildPowerShellScript(scriptLines)
@@ -331,7 +331,7 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
    * Detects the appropriate language configuration for the Windows installation.
    * Priority: 1. ISO language, 2. Host system language, 3. Default to en-US
    */
-  private detectLanguage(): LanguageConfig {
+  private detectLanguage (): LanguageConfig {
     // First try to detect ISO language
     const isoLanguage = this.detectISOLanguage()
     if (isoLanguage && UnattendedWindowsManager.LANGUAGE_MAP[isoLanguage]) {
@@ -355,7 +355,7 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
    * Attempts to detect the language from the Windows ISO file.
    * This checks the ISO filename and content for language indicators.
    */
-  private detectISOLanguage(): string | null {
+  private detectISOLanguage (): string | null {
     try {
       // Check if ISO path is set and file exists
       if (!this.isoPath || !fs.existsSync(this.isoPath)) {
@@ -368,41 +368,41 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
       // Common patterns in Windows ISO filenames
       const languagePatterns: Record<string, string> = {
         'es-es': 'es-ES',
-        'es_es': 'es-ES',
-        'spanish': 'es-ES',
-        'espanol': 'es-ES',
+        es_es: 'es-ES',
+        spanish: 'es-ES',
+        espanol: 'es-ES',
         'es-mx': 'es-MX',
-        'es_mx': 'es-MX',
+        es_mx: 'es-MX',
         'en-us': 'en-US',
-        'en_us': 'en-US',
-        'english': 'en-US',
+        en_us: 'en-US',
+        english: 'en-US',
         'fr-fr': 'fr-FR',
-        'fr_fr': 'fr-FR',
-        'french': 'fr-FR',
+        fr_fr: 'fr-FR',
+        french: 'fr-FR',
         'de-de': 'de-DE',
-        'de_de': 'de-DE',
-        'german': 'de-DE',
+        de_de: 'de-DE',
+        german: 'de-DE',
         'it-it': 'it-IT',
-        'it_it': 'it-IT',
-        'italian': 'it-IT',
+        it_it: 'it-IT',
+        italian: 'it-IT',
         'pt-br': 'pt-BR',
-        'pt_br': 'pt-BR',
-        'brazilian': 'pt-BR',
+        pt_br: 'pt-BR',
+        brazilian: 'pt-BR',
         'pt-pt': 'pt-PT',
-        'pt_pt': 'pt-PT',
-        'portuguese': 'pt-PT',
+        pt_pt: 'pt-PT',
+        portuguese: 'pt-PT',
         'ja-jp': 'ja-JP',
-        'ja_jp': 'ja-JP',
-        'japanese': 'ja-JP',
+        ja_jp: 'ja-JP',
+        japanese: 'ja-JP',
         'zh-cn': 'zh-CN',
-        'zh_cn': 'zh-CN',
-        'chinese': 'zh-CN',
+        zh_cn: 'zh-CN',
+        chinese: 'zh-CN',
         'ko-kr': 'ko-KR',
-        'ko_kr': 'ko-KR',
-        'korean': 'ko-KR',
+        ko_kr: 'ko-KR',
+        korean: 'ko-KR',
         'ru-ru': 'ru-RU',
-        'ru_ru': 'ru-RU',
-        'russian': 'ru-RU'
+        ru_ru: 'ru-RU',
+        russian: 'ru-RU'
       }
 
       for (const [pattern, language] of Object.entries(languagePatterns)) {
@@ -435,7 +435,7 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
   /**
    * Gets the language configuration from the host system.
    */
-  private getHostSystemLanguage(): string | null {
+  private getHostSystemLanguage (): string | null {
     try {
       // Try to get locale from environment variables
       const locale = process.env.LANG || process.env.LC_ALL || process.env.LC_MESSAGES
@@ -480,7 +480,7 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
     }
   }
 
-  private getFirstLogonCommands(): any[] {
+  private getFirstLogonCommands (): any[] {
     let commands = [
       {
         $: { 'wcm:action': 'add' },
@@ -568,11 +568,11 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
   /**
    * Generates commands to install InfiniService on Windows.
    * Downloads the binary and installation script from the backend server.
-   * 
+   *
    * @param idx - The starting order index for the commands
    * @returns Array of FirstLogonCommands for InfiniService installation
    */
-  private generateInfiniServiceInstallCommands(idx: number): any[] {
+  private generateInfiniServiceInstallCommands (idx: number): any[] {
     const backendHost = process.env.APP_HOST || 'localhost'
     const backendPort = process.env.PORT || '4000'
     const baseUrl = `http://${backendHost}:${backendPort}`
@@ -673,7 +673,7 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
    * For more information on the 'FirstLogonCommands' component, refer to:
    * https://docs.microsoft.com/en-us/windows-hardware/customize/desktop/unattend/microsoft-windows-shell-setup-firstlogoncommands
    */
-  private generateAppsToInstallScripts(idx: number): any[] {
+  private generateAppsToInstallScripts (idx: number): any[] {
     return this.applications
       .map((app, localIndex) => {
         const installCommand = app.installCommand?.windows
@@ -699,7 +699,7 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
       .filter(app => app !== null)
   }
 
-  private parseInstallCommand(command: string, parameters: any = null): string {
+  private parseInstallCommand (command: string, parameters: any = null): string {
     // Replace placeholders in the command with actual parameters
     let parsedCommand = command
     if (parameters) {
@@ -713,7 +713,7 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
     return parsedCommand
   }
 
-  private getWindowsPEConfig(): any {
+  private getWindowsPEConfig (): any {
     return {
       $: {
         pass: 'windowsPE'
@@ -848,45 +848,47 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
             FullName: this.username,
             Organization: 'OrgName'
           },
-          RunSynchronous: this.version >= 11 ? {
-            RunSynchronousCommand: [
-              {
-                $: {
-                  'wcm:action': 'add'
+          RunSynchronous: this.version >= 11
+            ? {
+              RunSynchronousCommand: [
+                {
+                  $: {
+                    'wcm:action': 'add'
+                  },
+                  Order: 1,
+                  Path: 'reg add HKLM\\SYSTEM\\Setup\\LabConfig /v BypassTPMCheck /t REG_DWORD /d 1 /f'
                 },
-                Order: 1,
-                Path: 'reg add HKLM\\SYSTEM\\Setup\\LabConfig /v BypassTPMCheck /t REG_DWORD /d 1 /f'
-              },
-              {
-                $: {
-                  'wcm:action': 'add'
+                {
+                  $: {
+                    'wcm:action': 'add'
+                  },
+                  Order: 2,
+                  Path: 'reg add HKLM\\SYSTEM\\Setup\\LabConfig /v BypassSecureBootCheck /t REG_DWORD /d 1 /f'
                 },
-                Order: 2,
-                Path: 'reg add HKLM\\SYSTEM\\Setup\\LabConfig /v BypassSecureBootCheck /t REG_DWORD /d 1 /f'
-              },
-              {
-                $: {
-                  'wcm:action': 'add'
+                {
+                  $: {
+                    'wcm:action': 'add'
+                  },
+                  Order: 3,
+                  Path: 'reg add HKLM\\SYSTEM\\Setup\\LabConfig /v BypassRAMCheck /t REG_DWORD /d 1 /f'
                 },
-                Order: 3,
-                Path: 'reg add HKLM\\SYSTEM\\Setup\\LabConfig /v BypassRAMCheck /t REG_DWORD /d 1 /f'
-              },
-              {
-                $: {
-                  'wcm:action': 'add'
+                {
+                  $: {
+                    'wcm:action': 'add'
+                  },
+                  Order: 4,
+                  Path: 'reg add HKLM\\SYSTEM\\Setup\\LabConfig /v BypassStorageCheck /t REG_DWORD /d 1 /f'
                 },
-                Order: 4,
-                Path: 'reg add HKLM\\SYSTEM\\Setup\\LabConfig /v BypassStorageCheck /t REG_DWORD /d 1 /f'
-              },
-              {
-                $: {
-                  'wcm:action': 'add'
-                },
-                Order: 5,
-                Path: 'reg add HKLM\\SYSTEM\\Setup\\LabConfig /v BypassCPUCheck /t REG_DWORD /d 1 /f'
-              }
-            ]
-          } : undefined
+                {
+                  $: {
+                    'wcm:action': 'add'
+                  },
+                  Order: 5,
+                  Path: 'reg add HKLM\\SYSTEM\\Setup\\LabConfig /v BypassCPUCheck /t REG_DWORD /d 1 /f'
+                }
+              ]
+            }
+            : undefined
         },
         {
           $: {
@@ -915,7 +917,7 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
     }
   }
 
-  private getOfflineServicingConfig(): any {
+  private getOfflineServicingConfig (): any {
     return {
       $: {
         pass: 'offlineServicing'
@@ -935,7 +937,7 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
     }
   }
 
-  private getGeneralizeConfig(): any {
+  private getGeneralizeConfig (): any {
     return {
       $: {
         pass: 'generalize'
@@ -955,7 +957,7 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
     }
   }
 
-  private getSpecializeConfig(): any {
+  private getSpecializeConfig (): any {
     return {
       $: {
         pass: 'specialize'
@@ -1010,7 +1012,7 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
     }
   }
 
-  private getOobeSystemConfig(): any {
+  private getOobeSystemConfig (): any {
     return {
       $: {
         pass: 'oobeSystem'
@@ -1091,7 +1093,7 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
    *
    * @returns {Promise<string>} The generated configuration string.
    */
-  async generateConfig(): Promise<string> {
+  async generateConfig (): Promise<string> {
     const builder = new Builder()
     const settings: any[] = []
 
@@ -1123,7 +1125,7 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
    * @throws {Error} If the extraction directory does not exist.
    * @returns {Promise<void>} A Promise that resolves when the ISO image is created and the extracted directory is removed.
    */
-  async createISO(newIsoPath: string, extractDir: string) {
+  async createISO (newIsoPath: string, extractDir: string) {
     // Ensure the extractDir exists and has content
     if (!fs.existsSync(extractDir)) {
       throw new Error('Extraction directory does not exist.')

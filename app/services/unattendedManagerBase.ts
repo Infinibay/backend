@@ -15,7 +15,7 @@ export class UnattendedManagerBase {
   configFileName: string | null = null
   isoPath: string | null = null
 
-  public async generateConfig(): Promise<string> {
+  public async generateConfig (): Promise<string> {
     return ''
   }
 
@@ -25,7 +25,7 @@ export class UnattendedManagerBase {
    * @returns A Promise that resolves to the path of the generated image.
    * @throws If there is an error generating the image.
    */
-  async generateNewImage(): Promise<string> {
+  async generateNewImage (): Promise<string> {
     this.debug.log('Starting to generate new image')
     let extractDir: string | null = null
     try {
@@ -50,7 +50,7 @@ export class UnattendedManagerBase {
       extractDir = await this.extractISO(this.isoPath)
       if (this.configFileName) {
         this.debug.log('Adding autoinstall config file')
-        console.log("Adding autoinstall config file")
+        console.log('Adding autoinstall config file')
         console.log(configContent)
         await this.addAutonistallConfigFile(configContent, extractDir, this.configFileName)
       } else {
@@ -84,7 +84,7 @@ export class UnattendedManagerBase {
    * @param {string} defaultPath - The default path to use if the envPath is not set or invalid.
    * @returns {string} The validated path.
    */
-  protected validatePath(envPath: string | undefined, defaultPath: string): string {
+  protected validatePath (envPath: string | undefined, defaultPath: string): string {
     const finalPath = envPath || defaultPath
 
     if (!fs.existsSync(finalPath)) {
@@ -101,7 +101,7 @@ export class UnattendedManagerBase {
    * and then takes a substring of the result. It appends the '.iso' extension to the end of the string.
    * @returns {string} The random file name.
    */
-  protected generateRandomFileName(): string {
+  protected generateRandomFileName (): string {
     return Math.random().toString(36).substring(2, 15) + '.iso'
   }
 
@@ -111,7 +111,7 @@ export class UnattendedManagerBase {
    * @param {string} isoPath - The path to the ISO file.
    * @returns {Promise<string>} The path to the directory where the ISO file was extracted.
    */
-  protected async extractISO(isoPath: string): Promise<string> {
+  protected async extractISO (isoPath: string): Promise<string> {
     const extractDir = path.join(os.tmpdir(), 'extracted_iso_' + Date.now())
     await fsPromises.mkdir(extractDir, { recursive: true })
     await this.executeCommand(['7z', 'x', isoPath, '-o' + extractDir])
@@ -125,7 +125,7 @@ export class UnattendedManagerBase {
    * @param {string} extractDir - The directory where the XML file will be copied.
    * @returns {Promise<void>}
    */
-  protected async addAutonistallConfigFile(content: string, extractDir: string, fileName: string): Promise<void> {
+  protected async addAutonistallConfigFile (content: string, extractDir: string, fileName: string): Promise<void> {
     this.debug.log(`Starting to add Autonistall Config File: ${fileName}`)
     const destPath = path.join(extractDir, fileName)
     await fsPromises.writeFile(destPath, content)
@@ -139,7 +139,7 @@ export class UnattendedManagerBase {
    * @param {string} extractDir - The directory from which the ISO file will be created.
    * @returns {Promise<void>}
    */
-  protected async createISO(newIsoPath: string, extractDir: string): Promise<void> {
+  protected async createISO (newIsoPath: string, extractDir: string): Promise<void> {
     throw new Error('Not implemented')
   }
 
@@ -149,7 +149,7 @@ export class UnattendedManagerBase {
    * @param {string} extractDir - The directory to be cleaned up.
    * @returns {Promise<void>}
    */
-  protected async cleanup(extractDir: string): Promise<void> {
+  protected async cleanup (extractDir: string): Promise<void> {
     try {
       // Safety check: Ensure extractDir is not empty and is within the system's temp directory
       if (!extractDir || !extractDir.startsWith(os.tmpdir())) {
@@ -174,7 +174,7 @@ export class UnattendedManagerBase {
    * @param {string[]} commandParts - The command to execute and its arguments.
    * @returns {Promise<void>}
    */
-  protected executeCommand(commandParts: string[]): Promise<string> {
+  protected executeCommand (commandParts: string[]): Promise<string> {
     return new Promise((resolve, reject) => {
       const process = spawn(commandParts[0], commandParts.slice(1))
       let output = ''

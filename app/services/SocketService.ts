@@ -24,12 +24,12 @@ export class SocketService {
   private prisma: PrismaClient
   private connectedUsers: Map<string, AuthenticatedSocket> = new Map()
 
-  constructor(prisma: PrismaClient) {
+  constructor (prisma: PrismaClient) {
     this.prisma = prisma
   }
 
   // Initialize Socket.io server
-  initialize(httpServer: HTTPServer): void {
+  initialize (httpServer: HTTPServer): void {
     this.io = new SocketIOServer(httpServer, {
       cors: {
         origin: process.env.FRONTEND_URL || 'http://localhost:3000',
@@ -46,7 +46,7 @@ export class SocketService {
   }
 
   // Setup JWT authentication middleware
-  private setupAuthentication(): void {
+  private setupAuthentication (): void {
     this.io?.use(async (socket: any, next) => {
       try {
         const token = socket.handshake.auth.token || socket.handshake.headers.authorization
@@ -70,25 +70,17 @@ export class SocketService {
             email: true,
             firstName: true,
             lastName: true,
-            role: true,
-            namespace: true
-          } as any
+            role: true
+          }
         })
 
         if (!user) {
           return next(new Error('User not found'))
         }
 
-        // Use stored namespace or generate and store one if it doesn't exist
-        let userNamespace = (user as any).namespace
-        if (!userNamespace) {
-          userNamespace = this.generateUserNamespace((user as any).id)
-          // Store the generated namespace in the database for future use
-          await this.prisma.user.update({
-            where: { id: (user as any).id },
-            data: { namespace: userNamespace } as any
-          })
-        }
+        // Generate a namespace for this user session
+        // Since namespace field doesn't exist in the database, we generate it per session
+        const userNamespace = this.generateUserNamespace((user as any).id)
 
         // Attach user info to socket
         socket.userId = (user as any).id
@@ -105,7 +97,7 @@ export class SocketService {
   }
 
   // Setup connection event handlers
-  private setupConnectionHandlers(): void {
+  private setupConnectionHandlers (): void {
     this.io?.on('connection', (socket: any) => {
       const authSocket = socket as AuthenticatedSocket
 
@@ -139,15 +131,14 @@ export class SocketService {
   }
 
   // Generate unique namespace for user (fallback for users without stored namespace)
-  private generateUserNamespace(userId: string): string {
-    // Format: user_<userId_prefix>_<random>
-    // This creates a persistent namespace for the user
-    const randomSuffix = Math.random().toString(36).substring(2, 8)
-    return `user_${userId.substring(0, 8)}_${randomSuffix}`
+  private generateUserNamespace (userId: string): string {
+    // Format: user_<userId_prefix>
+    // This creates a consistent namespace for the user across sessions
+    return `user_${userId.substring(0, 8)}`
   }
 
   // Send event to specific user namespace
-  sendToUserNamespace(namespace: string, resource: string, action: string, payload: any): void {
+  sendToUserNamespace (namespace: string, resource: string, action: string, payload: any): void {
     if (!this.io) {
       console.warn('⚠️ Socket.io not initialized, cannot send event')
       return
@@ -166,7 +157,7 @@ export class SocketService {
   }
 
   // Send event to specific user by userId
-  sendToUser(userId: string, resource: string, action: string, payload: any): void {
+  sendToUser (userId: string, resource: string, action: string, payload: any): void {
     const connectedUser = this.connectedUsers.get(userId)
     if (connectedUser) {
       this.sendToUserNamespace(connectedUser.userNamespace, resource, action, payload)
@@ -174,14 +165,14 @@ export class SocketService {
   }
 
   // Send event to multiple users
-  sendToUsers(userIds: string[], resource: string, action: string, payload: any): void {
+  sendToUsers (userIds: string[], resource: string, action: string, payload: any): void {
     userIds.forEach(userId => {
       this.sendToUser(userId, resource, action, payload)
     })
   }
 
   // Send event to all admin users
-  sendToAdmins(resource: string, action: string, payload: any): void {
+  sendToAdmins (resource: string, action: string, payload: any): void {
     if (!this.io) return
 
     const eventName = `admin:${resource}:${action}`
@@ -197,7 +188,7 @@ export class SocketService {
   }
 
   // Emit event to a specific room
-  emitToRoom(room: string, eventName: string, payload: any): void {
+  emitToRoom (room: string, eventName: string, payload: any): void {
     if (!this.io) {
       console.warn(`⚠️ Cannot emit to room ${room}: Socket.io not initialized`)
       return
@@ -208,7 +199,7 @@ export class SocketService {
   }
 
   // Get connection statistics
-  getStats(): { connectedUsers: number; userIds: string[] } {
+  getStats (): { connectedUsers: number; userIds: string[] } {
     return {
       connectedUsers: this.connectedUsers.size,
       userIds: Array.from(this.connectedUsers.keys())
@@ -216,7 +207,7 @@ export class SocketService {
   }
 
   // Get Socket.io server instance (for EventManager)
-  getIO(): SocketIOServer | null {
+  getIO (): SocketIOServer | null {
     return this.io
   }
 }

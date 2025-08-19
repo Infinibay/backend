@@ -1,7 +1,7 @@
-import 'reflect-metadata';
-import { PrismaClient } from '@prisma/client';
-import { MachineLifecycleService } from '@services/machineLifecycleService';
-import { MachineCleanupService } from '@services/cleanup/machineCleanupService';
+import 'reflect-metadata'
+import { PrismaClient } from '@prisma/client'
+import { MachineLifecycleService } from '@services/machineLifecycleService'
+import { MachineCleanupService } from '@services/cleanup/machineCleanupService'
 import {
   createMockUser,
   createMockAdminUser,
@@ -11,12 +11,12 @@ import {
   createMockMachineConfiguration,
   createMockApplication,
   generateId
-} from '../setup/mock-factories';
-import { mockPrisma } from '../setup/jest.setup';
-import { Connection } from 'libvirt-node';
+} from '../setup/mock-factories'
+import { mockPrisma } from '../setup/jest.setup'
+import { Connection } from 'libvirt-node'
 
 // Mock libvirt-node
-jest.mock('libvirt-node');
+jest.mock('libvirt-node')
 
 // Mock VirtManager
 jest.mock('@utils/VirtManager', () => ({
@@ -28,7 +28,7 @@ jest.mock('@utils/VirtManager', () => ({
     getVMState: jest.fn().mockResolvedValue('running'),
     updateVMHardware: jest.fn().mockResolvedValue(true)
   }))
-}));
+}))
 
 // Mock XMLGenerator
 jest.mock('@utils/VirtManager/xmlGenerator', () => ({
@@ -36,7 +36,7 @@ jest.mock('@utils/VirtManager/xmlGenerator', () => ({
     generateDomainXML: jest.fn().mockReturnValue('<domain>...</domain>'),
     generateNetworkXML: jest.fn().mockReturnValue('<network>...</network>')
   }))
-}));
+}))
 
 // Mock GraphicPortService
 jest.mock('@utils/VirtManager/graphicPortService', () => ({
@@ -45,24 +45,24 @@ jest.mock('@utils/VirtManager/graphicPortService', () => ({
     allocatePort: jest.fn().mockResolvedValue(5901),
     releasePort: jest.fn().mockResolvedValue(true)
   }))
-}));
+}))
 
 describe('VM Lifecycle Integration Tests', () => {
-  let prisma: PrismaClient;
-  let lifecycleService: MachineLifecycleService;
-  let cleanupService: MachineCleanupService;
-  let mockAdmin: any;
+  let prisma: PrismaClient
+  let lifecycleService: MachineLifecycleService
+  let cleanupService: MachineCleanupService
+  let mockAdmin: any
 
   beforeAll(() => {
-    prisma = mockPrisma as any;
-    mockAdmin = createMockAdminUser();
-  });
+    prisma = mockPrisma as any
+    mockAdmin = createMockAdminUser()
+  })
 
   beforeEach(() => {
-    jest.clearAllMocks();
-    lifecycleService = new MachineLifecycleService(prisma, mockAdmin);
-    cleanupService = new MachineCleanupService(prisma);
-  });
+    jest.clearAllMocks()
+    lifecycleService = new MachineLifecycleService(prisma, mockAdmin)
+    cleanupService = new MachineCleanupService(prisma)
+  })
 
   describe('VM Creation Workflow', () => {
     it('should successfully create a VM with all resources', async () => {
@@ -70,13 +70,13 @@ describe('VM Lifecycle Integration Tests', () => {
         cores: 4,
         ram: 8,
         storage: 100
-      });
-      const department = createMockDepartment();
-      const application = createMockApplication();
+      })
+      const department = createMockDepartment()
+      const application = createMockApplication()
 
-      const vmId = generateId();
-      const internalName = `vm-${vmId}`;
-      
+      const vmId = generateId()
+      const internalName = `vm-${vmId}`
+
       const newMachine = createMockMachine({
         id: vmId,
         name: 'Test VM',
@@ -87,14 +87,14 @@ describe('VM Lifecycle Integration Tests', () => {
         cpuCores: template.cores,
         ramGB: template.ram,
         diskSizeGB: template.storage
-      });
+      })
 
       const configuration = createMockMachineConfiguration({
         machineId: vmId,
         graphicProtocol: 'spice',
         graphicPort: 5900,
         graphicHost: '192.168.1.100'
-      });
+      })
 
       // Setup mocks for transaction
       const mockTransaction = {
@@ -125,8 +125,8 @@ describe('VM Lifecycle Integration Tests', () => {
 
       (prisma.machineTemplate.findUnique as jest.Mock).mockResolvedValue(template);
       (prisma.$transaction as jest.Mock).mockImplementation(async (callback) => {
-        return callback(mockTransaction);
-      });
+        return callback(mockTransaction)
+      })
 
       const input = {
         name: 'Test VM',
@@ -141,22 +141,22 @@ describe('VM Lifecycle Integration Tests', () => {
           applicationId: application.id,
           parameters: {}
         }]
-      };
+      }
 
-      const result = await lifecycleService.createMachine(input);
+      const result = await lifecycleService.createMachine(input)
 
-      expect(result).toBeDefined();
-      expect(result.id).toBe(vmId);
-      expect(result.name).toBe('Test VM');
-      expect(result.status).toBe('building');
-      expect(result.cpuCores).toBe(template.cores);
-      expect(result.ramGB).toBe(template.ram);
-      expect(result.diskSizeGB).toBe(template.storage);
+      expect(result).toBeDefined()
+      expect(result.id).toBe(vmId)
+      expect(result.name).toBe('Test VM')
+      expect(result.status).toBe('building')
+      expect(result.cpuCores).toBe(template.cores)
+      expect(result.ramGB).toBe(template.ram)
+      expect(result.diskSizeGB).toBe(template.storage)
 
       // Verify template was validated
       expect(prisma.machineTemplate.findUnique).toHaveBeenCalledWith({
         where: { id: template.id }
-      });
+      })
 
       // Verify machine was created with correct data
       expect(mockTransaction.machine.create).toHaveBeenCalledWith(
@@ -173,7 +173,7 @@ describe('VM Lifecycle Integration Tests', () => {
             diskSizeGB: template.storage
           })
         })
-      );
+      )
 
       // Verify application was attached
       expect(mockTransaction.machineApplication.create).toHaveBeenCalledWith({
@@ -182,11 +182,11 @@ describe('VM Lifecycle Integration Tests', () => {
           applicationId: application.id,
           parameters: {}
         }
-      });
-    });
+      })
+    })
 
     it('should fail VM creation with non-existent template', async () => {
-      (prisma.machineTemplate.findUnique as jest.Mock).mockResolvedValue(null);
+      (prisma.machineTemplate.findUnique as jest.Mock).mockResolvedValue(null)
 
       const input = {
         name: 'Test VM',
@@ -195,13 +195,13 @@ describe('VM Lifecycle Integration Tests', () => {
         username: 'testuser',
         password: 'TestPass123!',
         applications: []
-      };
+      }
 
-      await expect(lifecycleService.createMachine(input)).rejects.toThrow('Machine template not found');
-    });
+      await expect(lifecycleService.createMachine(input)).rejects.toThrow('Machine template not found')
+    })
 
     it('should fail VM creation when no department exists', async () => {
-      const template = createMockMachineTemplate();
+      const template = createMockMachineTemplate()
 
       const mockTransaction = {
         department: {
@@ -212,8 +212,8 @@ describe('VM Lifecycle Integration Tests', () => {
 
       (prisma.machineTemplate.findUnique as jest.Mock).mockResolvedValue(template);
       (prisma.$transaction as jest.Mock).mockImplementation(async (callback) => {
-        return callback(mockTransaction);
-      });
+        return callback(mockTransaction)
+      })
 
       const input = {
         name: 'Test VM',
@@ -222,15 +222,15 @@ describe('VM Lifecycle Integration Tests', () => {
         username: 'testuser',
         password: 'TestPass123!',
         applications: []
-      };
+      }
 
-      await expect(lifecycleService.createMachine(input)).rejects.toThrow('Department not found');
-    });
-  });
+      await expect(lifecycleService.createMachine(input)).rejects.toThrow('Department not found')
+    })
+  })
 
   describe('Power State Transitions', () => {
     it('should successfully power on a stopped VM', async () => {
-      const machine = createMockMachine({ status: 'stopped' });
+      const machine = createMockMachine({ status: 'stopped' })
       const configuration = createMockMachineConfiguration({ machineId: machine.id });
 
       (prisma.machine.findFirst as jest.Mock).mockResolvedValue({
@@ -241,33 +241,33 @@ describe('VM Lifecycle Integration Tests', () => {
       (prisma.machine.update as jest.Mock).mockResolvedValue({
         ...machine,
         status: 'running'
-      });
+      })
 
       const mockConn = {
         lookupDomainByName: jest.fn().mockResolvedValue({
           create: jest.fn().mockResolvedValue(true),
-          getState: jest.fn().mockResolvedValue([1, 1])  // Running state
+          getState: jest.fn().mockResolvedValue([1, 1]) // Running state
         })
       };
 
-      (Connection.open as jest.Mock).mockResolvedValue(mockConn);
+      (Connection.open as jest.Mock).mockResolvedValue(mockConn)
 
       // Simulate power on operation
-      const whereClause = { id: machine.id, userId: mockAdmin.id };
-      const foundMachine = await prisma.machine.findFirst({ where: whereClause });
-      expect(foundMachine).toBeDefined();
+      const whereClause = { id: machine.id, userId: mockAdmin.id }
+      const foundMachine = await prisma.machine.findFirst({ where: whereClause })
+      expect(foundMachine).toBeDefined()
 
       // Update status to running
       const updatedMachine = await prisma.machine.update({
         where: { id: machine.id },
         data: { status: 'running' }
-      });
+      })
 
-      expect(updatedMachine.status).toBe('running');
-    });
+      expect(updatedMachine.status).toBe('running')
+    })
 
     it('should successfully power off a running VM', async () => {
-      const machine = createMockMachine({ status: 'running' });
+      const machine = createMockMachine({ status: 'running' })
       const configuration = createMockMachineConfiguration({ machineId: machine.id });
 
       (prisma.machine.findFirst as jest.Mock).mockResolvedValue({
@@ -278,44 +278,44 @@ describe('VM Lifecycle Integration Tests', () => {
       (prisma.machine.update as jest.Mock).mockResolvedValue({
         ...machine,
         status: 'stopped'
-      });
+      })
 
       const mockDomain = {
         shutdown: jest.fn().mockResolvedValue(true),
-        getState: jest.fn().mockResolvedValue([5, 1])  // Shutoff state
-      };
+        getState: jest.fn().mockResolvedValue([5, 1]) // Shutoff state
+      }
 
       const mockConn = {
         lookupDomainByName: jest.fn().mockResolvedValue(mockDomain)
       };
 
-      (Connection.open as jest.Mock).mockResolvedValue(mockConn);
+      (Connection.open as jest.Mock).mockResolvedValue(mockConn)
 
       // Simulate power off operation
       const foundMachine = await prisma.machine.findFirst({
         where: { id: machine.id }
-      });
-      expect(foundMachine).toBeDefined();
+      })
+      expect(foundMachine).toBeDefined()
 
       // Update status to stopped
       const updatedMachine = await prisma.machine.update({
         where: { id: machine.id },
         data: { status: 'stopped' }
-      });
+      })
 
-      expect(updatedMachine.status).toBe('stopped');
-    });
+      expect(updatedMachine.status).toBe('stopped')
+    })
 
     it('should handle force shutdown when graceful shutdown fails', async () => {
       const machine = createMockMachine({ status: 'running' });
 
-      (prisma.machine.findFirst as jest.Mock).mockResolvedValue(machine);
-      
+      (prisma.machine.findFirst as jest.Mock).mockResolvedValue(machine)
+
       const mockDomain = {
         shutdown: jest.fn().mockRejectedValue(new Error('Shutdown failed')),
         destroy: jest.fn().mockResolvedValue(true),
         getState: jest.fn().mockResolvedValue([5, 1])
-      };
+      }
 
       const mockConn = {
         lookupDomainByName: jest.fn().mockResolvedValue(mockDomain)
@@ -325,22 +325,22 @@ describe('VM Lifecycle Integration Tests', () => {
       (prisma.machine.update as jest.Mock).mockResolvedValue({
         ...machine,
         status: 'stopped'
-      });
+      })
 
       // First attempt graceful shutdown (will fail)
-      await expect(mockDomain.shutdown()).rejects.toThrow('Shutdown failed');
+      await expect(mockDomain.shutdown()).rejects.toThrow('Shutdown failed')
 
       // Force shutdown should succeed
-      await expect(mockDomain.destroy()).resolves.toBe(true);
+      await expect(mockDomain.destroy()).resolves.toBe(true)
 
       const updatedMachine = await prisma.machine.update({
         where: { id: machine.id },
         data: { status: 'stopped' }
-      });
+      })
 
-      expect(updatedMachine.status).toBe('stopped');
-    });
-  });
+      expect(updatedMachine.status).toBe('stopped')
+    })
+  })
 
   describe('Resource Allocation and Deallocation', () => {
     it('should allocate resources when creating VM', async () => {
@@ -348,16 +348,16 @@ describe('VM Lifecycle Integration Tests', () => {
         cores: 4,
         ram: 8,
         storage: 100
-      });
-      const department = createMockDepartment();
+      })
+      const department = createMockDepartment()
 
       // Track resource allocation
-      let allocatedResources = {
+      const allocatedResources = {
         cpu: 0,
         memory: 0,
         storage: 0,
         graphicPort: null as number | null
-      };
+      }
 
       const mockTransaction = {
         machineTemplate: {
@@ -369,10 +369,10 @@ describe('VM Lifecycle Integration Tests', () => {
         machine: {
           create: jest.fn().mockImplementation(({ data }) => {
             // Simulate resource allocation
-            allocatedResources.cpu = data.cpuCores;
-            allocatedResources.memory = data.ramGB;
-            allocatedResources.storage = data.diskSizeGB;
-            allocatedResources.graphicPort = 5900;
+            allocatedResources.cpu = data.cpuCores
+            allocatedResources.memory = data.ramGB
+            allocatedResources.storage = data.diskSizeGB
+            allocatedResources.graphicPort = 5900
 
             return Promise.resolve({
               ...createMockMachine(data),
@@ -380,7 +380,7 @@ describe('VM Lifecycle Integration Tests', () => {
                 machineId: data.id,
                 graphicPort: 5900
               })
-            });
+            })
           })
         },
         machineApplication: {
@@ -390,8 +390,8 @@ describe('VM Lifecycle Integration Tests', () => {
 
       (prisma.machineTemplate.findUnique as jest.Mock).mockResolvedValue(template);
       (prisma.$transaction as jest.Mock).mockImplementation(async (callback) => {
-        return callback(mockTransaction);
-      });
+        return callback(mockTransaction)
+      })
 
       const input = {
         name: 'Resource Test VM',
@@ -400,23 +400,23 @@ describe('VM Lifecycle Integration Tests', () => {
         username: 'testuser',
         password: 'TestPass123!',
         applications: []
-      };
+      }
 
-      await lifecycleService.createMachine(input);
+      await lifecycleService.createMachine(input)
 
       // Verify resources were allocated
-      expect(allocatedResources.cpu).toBe(template.cores);
-      expect(allocatedResources.memory).toBe(template.ram);
-      expect(allocatedResources.storage).toBe(template.storage);
-      expect(allocatedResources.graphicPort).toBe(5900);
-    });
+      expect(allocatedResources.cpu).toBe(template.cores)
+      expect(allocatedResources.memory).toBe(template.ram)
+      expect(allocatedResources.storage).toBe(template.storage)
+      expect(allocatedResources.graphicPort).toBe(5900)
+    })
 
     it('should deallocate resources when destroying VM', async () => {
-      const machine = createMockMachine();
+      const machine = createMockMachine()
       const configuration = createMockMachineConfiguration({
         machineId: machine.id,
         graphicPort: 5900
-      });
+      })
 
       const nwFilter = {
         id: generateId(),
@@ -431,7 +431,7 @@ describe('VM Lifecycle Integration Tests', () => {
         ...machine,
         configuration,
         nwFilters: [nwFilter]
-      });
+      })
 
       // Track cleanup operations
       const cleanupOps = {
@@ -439,22 +439,22 @@ describe('VM Lifecycle Integration Tests', () => {
         portReleased: false,
         filterRemoved: false,
         databaseDeleted: false
-      };
+      }
 
       const mockDomain = {
         destroy: jest.fn().mockImplementation(() => {
-          cleanupOps.vmDestroyed = true;
-          return Promise.resolve(true);
+          cleanupOps.vmDestroyed = true
+          return Promise.resolve(true)
         }),
         undefine: jest.fn().mockResolvedValue(true)
-      };
+      }
 
       const mockConn = {
         lookupDomainByName: jest.fn().mockResolvedValue(mockDomain),
         lookupNwFilterByUUID: jest.fn().mockResolvedValue({
           undefine: jest.fn().mockImplementation(() => {
-            cleanupOps.filterRemoved = true;
-            return Promise.resolve(true);
+            cleanupOps.filterRemoved = true
+            return Promise.resolve(true)
           })
         })
       };
@@ -462,26 +462,26 @@ describe('VM Lifecycle Integration Tests', () => {
       (Connection.open as jest.Mock).mockResolvedValue(mockConn);
 
       (prisma.machineConfiguration.delete as jest.Mock).mockImplementation(() => {
-        cleanupOps.portReleased = true;
-        return Promise.resolve(true);
+        cleanupOps.portReleased = true
+        return Promise.resolve(true)
       });
 
       (prisma.machine.delete as jest.Mock).mockImplementation(() => {
-        cleanupOps.databaseDeleted = true;
-        return Promise.resolve(true);
-      });
+        cleanupOps.databaseDeleted = true
+        return Promise.resolve(true)
+      })
 
-      const result = await lifecycleService.destroyMachine(machine.id);
+      const result = await lifecycleService.destroyMachine(machine.id)
 
-      expect(result.success).toBe(true);
+      expect(result.success).toBe(true)
       // Note: The actual cleanup happens in the MachineCleanupService
       // which would need to be properly mocked for full verification
-    });
-  });
+    })
+  })
 
   describe('Cleanup on VM Deletion', () => {
     it('should clean up all VM resources on deletion', async () => {
-      const machine = createMockMachine();
+      const machine = createMockMachine()
       const configuration = createMockMachineConfiguration({
         machineId: machine.id
       });
@@ -491,7 +491,7 @@ describe('VM Lifecycle Integration Tests', () => {
         configuration,
         nwFilters: [],
         applications: []
-      });
+      })
 
       // Mock cleanup service operations
       const cleanupSteps = {
@@ -503,52 +503,52 @@ describe('VM Lifecycle Integration Tests', () => {
       };
 
       (prisma.machine.update as jest.Mock).mockImplementation(({ data }) => {
-        if (data.status === 'stopped') cleanupSteps.stopVM = true;
-        return Promise.resolve({ ...machine, ...data });
+        if (data.status === 'stopped') cleanupSteps.stopVM = true
+        return Promise.resolve({ ...machine, ...data })
       });
 
       (prisma.machineConfiguration.delete as jest.Mock).mockImplementation(() => {
-        cleanupSteps.releaseGraphicPort = true;
-        return Promise.resolve(configuration);
+        cleanupSteps.releaseGraphicPort = true
+        return Promise.resolve(configuration)
       });
 
       (prisma.machine.delete as jest.Mock).mockImplementation(() => {
-        cleanupSteps.removeFromDatabase = true;
-        return Promise.resolve(machine);
-      });
+        cleanupSteps.removeFromDatabase = true
+        return Promise.resolve(machine)
+      })
 
       const mockDomain = {
         destroy: jest.fn().mockResolvedValue(true),
         undefine: jest.fn().mockImplementation(() => {
-          cleanupSteps.removeDisks = true;
-          return Promise.resolve(true);
+          cleanupSteps.removeDisks = true
+          return Promise.resolve(true)
         })
-      };
+      }
 
       const mockConn = {
         lookupDomainByName: jest.fn().mockResolvedValue(mockDomain)
       };
 
-      (Connection.open as jest.Mock).mockResolvedValue(mockConn);
+      (Connection.open as jest.Mock).mockResolvedValue(mockConn)
 
-      await cleanupService.cleanupVM(machine.id);
+      await cleanupService.cleanupVM(machine.id)
 
       // Verify all cleanup steps
       expect(prisma.machine.findUnique).toHaveBeenCalledWith({
         where: { id: machine.id },
         include: expect.any(Object)
-      });
-    });
+      })
+    })
 
     it('should handle partial cleanup failures gracefully', async () => {
       const machine = createMockMachine();
 
-      (prisma.machine.findUnique as jest.Mock).mockResolvedValue(machine);
+      (prisma.machine.findUnique as jest.Mock).mockResolvedValue(machine)
 
       const mockDomain = {
         destroy: jest.fn().mockRejectedValue(new Error('Failed to destroy')),
         undefine: jest.fn().mockResolvedValue(true)
-      };
+      }
 
       const mockConn = {
         lookupDomainByName: jest.fn().mockResolvedValue(mockDomain)
@@ -557,92 +557,92 @@ describe('VM Lifecycle Integration Tests', () => {
       (Connection.open as jest.Mock).mockResolvedValue(mockConn);
 
       // Even if destroy fails, cleanup should continue
-      (prisma.machine.delete as jest.Mock).mockResolvedValue(machine);
+      (prisma.machine.delete as jest.Mock).mockResolvedValue(machine)
 
       // Cleanup should not throw even if some operations fail
-      await expect(cleanupService.cleanupVM(machine.id)).resolves.not.toThrow();
-    });
+      await expect(cleanupService.cleanupVM(machine.id)).resolves.not.toThrow()
+    })
 
     it('should remove orphaned resources during cleanup', async () => {
-      const machine = createMockMachine();
+      const machine = createMockMachine()
       const orphanedDiskPath = `/var/lib/libvirt/images/${machine.internalName}.qcow2`;
 
       (prisma.machine.findUnique as jest.Mock).mockResolvedValue({
         ...machine,
-        configuration: null,  // No configuration
+        configuration: null, // No configuration
         nwFilters: []
-      });
+      })
 
       // Mock file system operations for disk cleanup
-      const fs = require('fs/promises');
-      jest.spyOn(fs, 'unlink').mockResolvedValue(undefined);
-      jest.spyOn(require('fs'), 'existsSync').mockReturnValue(true);
+      const fs = require('fs/promises')
+      jest.spyOn(fs, 'unlink').mockResolvedValue(undefined)
+      jest.spyOn(require('fs'), 'existsSync').mockReturnValue(true)
 
       const mockConn = {
         lookupDomainByName: jest.fn().mockRejectedValue(new Error('Domain not found'))
       };
 
       (Connection.open as jest.Mock).mockResolvedValue(mockConn);
-      (prisma.machine.delete as jest.Mock).mockResolvedValue(machine);
+      (prisma.machine.delete as jest.Mock).mockResolvedValue(machine)
 
-      await cleanupService.cleanupVM(machine.id);
+      await cleanupService.cleanupVM(machine.id)
 
       // Verify database entry was still cleaned up
       expect(prisma.machine.delete).toHaveBeenCalledWith({
         where: { id: machine.id }
-      });
-    });
-  });
+      })
+    })
+  })
 
   describe('Authorization Checks', () => {
     it('should allow admin to manage any VM', async () => {
-      const otherUser = createMockUser();
+      const otherUser = createMockUser()
       const machine = createMockMachine({ userId: otherUser.id });
 
-      (prisma.machine.findFirst as jest.Mock).mockResolvedValue(machine);
+      (prisma.machine.findFirst as jest.Mock).mockResolvedValue(machine)
 
       const adminService = new MachineLifecycleService(prisma, mockAdmin);
-      
+
       // Admin should be able to destroy any machine
       (prisma.machine.update as jest.Mock).mockResolvedValue({
         ...machine,
         status: 'stopped'
-      });
+      })
 
-      const result = await adminService.destroyMachine(machine.id);
-      
+      const result = await adminService.destroyMachine(machine.id)
+
       expect(prisma.machine.findFirst).toHaveBeenCalledWith({
-        where: { id: machine.id },  // No userId constraint for admin
+        where: { id: machine.id }, // No userId constraint for admin
         include: expect.any(Object)
-      });
-    });
+      })
+    })
 
     it('should restrict regular users to their own VMs', async () => {
-      const regularUser = createMockUser({ role: 'USER' });
-      const otherUser = createMockUser();
-      const machine = createMockMachine({ userId: otherUser.id });
+      const regularUser = createMockUser({ role: 'USER' })
+      const otherUser = createMockUser()
+      const machine = createMockMachine({ userId: otherUser.id })
 
       const userService = new MachineLifecycleService(prisma, regularUser);
 
-      (prisma.machine.findFirst as jest.Mock).mockResolvedValue(null);  // User can't see other's VMs
+      (prisma.machine.findFirst as jest.Mock).mockResolvedValue(null) // User can't see other's VMs
 
-      const result = await userService.destroyMachine(machine.id);
+      const result = await userService.destroyMachine(machine.id)
 
-      expect(result.success).toBe(false);
-      expect(result.message).toBe('Machine not found');
-      
+      expect(result.success).toBe(false)
+      expect(result.message).toBe('Machine not found')
+
       expect(prisma.machine.findFirst).toHaveBeenCalledWith({
-        where: { id: machine.id, userId: regularUser.id },  // userId constraint for regular user
+        where: { id: machine.id, userId: regularUser.id }, // userId constraint for regular user
         include: expect.any(Object)
-      });
-    });
+      })
+    })
 
     it('should track VM ownership throughout lifecycle', async () => {
-      const user = createMockUser();
-      const template = createMockMachineTemplate();
-      const department = createMockDepartment();
+      const user = createMockUser()
+      const template = createMockMachineTemplate()
+      const department = createMockDepartment()
 
-      const userService = new MachineLifecycleService(prisma, user);
+      const userService = new MachineLifecycleService(prisma, user)
 
       const mockTransaction = {
         machineTemplate: {
@@ -653,8 +653,8 @@ describe('VM Lifecycle Integration Tests', () => {
         },
         machine: {
           create: jest.fn().mockImplementation(({ data }) => {
-            expect(data.userId).toBe(user.id);  // Verify ownership is set
-            return Promise.resolve(createMockMachine(data));
+            expect(data.userId).toBe(user.id) // Verify ownership is set
+            return Promise.resolve(createMockMachine(data))
           })
         },
         machineApplication: {
@@ -664,8 +664,8 @@ describe('VM Lifecycle Integration Tests', () => {
 
       (prisma.machineTemplate.findUnique as jest.Mock).mockResolvedValue(template);
       (prisma.$transaction as jest.Mock).mockImplementation(async (callback) => {
-        return callback(mockTransaction);
-      });
+        return callback(mockTransaction)
+      })
 
       const input = {
         name: 'User VM',
@@ -674,28 +674,28 @@ describe('VM Lifecycle Integration Tests', () => {
         username: 'testuser',
         password: 'TestPass123!',
         applications: []
-      };
+      }
 
-      const result = await userService.createMachine(input);
+      const result = await userService.createMachine(input)
 
       expect(mockTransaction.machine.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
           userId: user.id
         }),
         include: expect.any(Object)
-      });
-    });
-  });
+      })
+    })
+  })
 
   describe('State Consistency', () => {
     it('should maintain state consistency between database and libvirt', async () => {
       const machine = createMockMachine({ status: 'running' });
 
-      (prisma.machine.findFirst as jest.Mock).mockResolvedValue(machine);
+      (prisma.machine.findFirst as jest.Mock).mockResolvedValue(machine)
 
       const mockDomain = {
-        getState: jest.fn().mockResolvedValue([5, 1])  // Shutoff in libvirt
-      };
+        getState: jest.fn().mockResolvedValue([5, 1]) // Shutoff in libvirt
+      }
 
       const mockConn = {
         lookupDomainByName: jest.fn().mockResolvedValue(mockDomain)
@@ -707,22 +707,22 @@ describe('VM Lifecycle Integration Tests', () => {
       (prisma.machine.update as jest.Mock).mockResolvedValue({
         ...machine,
         status: 'stopped'
-      });
+      })
 
       // Simulate state sync
-      const libvirtState = await mockDomain.getState();
-      const expectedStatus = libvirtState[0] === 5 ? 'stopped' : 'running';
+      const libvirtState = await mockDomain.getState()
+      const expectedStatus = libvirtState[0] === 5 ? 'stopped' : 'running'
 
       const updatedMachine = await prisma.machine.update({
         where: { id: machine.id },
         data: { status: expectedStatus }
-      });
+      })
 
-      expect(updatedMachine.status).toBe('stopped');
-    });
+      expect(updatedMachine.status).toBe('stopped')
+    })
 
     it('should handle VM state transitions atomically', async () => {
-      const machine = createMockMachine({ status: 'stopped' });
+      const machine = createMockMachine({ status: 'stopped' })
 
       let transactionCompleted = false;
 
@@ -734,32 +734,32 @@ describe('VM Lifecycle Integration Tests', () => {
               status: 'running'
             })
           }
-        });
-        transactionCompleted = true;
-        return result;
-      });
+        })
+        transactionCompleted = true
+        return result
+      })
 
       const mockDomain = {
         create: jest.fn().mockResolvedValue(true)
-      };
+      }
 
       const mockConn = {
         lookupDomainByName: jest.fn().mockResolvedValue(mockDomain)
       };
 
-      (Connection.open as jest.Mock).mockResolvedValue(mockConn);
+      (Connection.open as jest.Mock).mockResolvedValue(mockConn)
 
       // Simulate atomic state change
       await prisma.$transaction(async (tx: any) => {
-        await mockDomain.create();
+        await mockDomain.create()
         await tx.machine.update({
           where: { id: machine.id },
           data: { status: 'running' }
-        });
-      });
+        })
+      })
 
-      expect(transactionCompleted).toBe(true);
-      expect(mockDomain.create).toHaveBeenCalled();
-    });
-  });
-});
+      expect(transactionCompleted).toBe(true)
+      expect(mockDomain.create).toHaveBeenCalled()
+    })
+  })
+})

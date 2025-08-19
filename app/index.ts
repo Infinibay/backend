@@ -34,7 +34,7 @@ import { startCrons } from './crons/all'
 // Store services for cleanup
 let virtioSocketWatcherService: any = null
 
-async function bootstrap(): Promise<void> {
+async function bootstrap (): Promise<void> {
   try {
     // Clean up stale GPU assignments before server starts
     await checkGpuAffinity(prisma)
@@ -65,7 +65,7 @@ async function bootstrap(): Promise<void> {
           // Try to extract user from the authorization token
           let user = null
           const token = req.headers.authorization
-          
+
           if (token) {
             try {
               const decoded = jwt.verify(token, process.env.TOKENKEY || 'secret') as { userId: string; userRole: string }
@@ -91,7 +91,7 @@ async function bootstrap(): Promise<void> {
               console.error('Token verification failed:', error)
             }
           }
-          
+
           return {
             prisma,
             req,
@@ -127,12 +127,12 @@ async function bootstrap(): Promise<void> {
     // Initialize and start VirtioSocketWatcherService
     const virtioSocketWatcher = createVirtioSocketWatcherService(prisma)
     virtioSocketWatcher.initialize(vmEventManager)
-    
+
     // Forward metrics updates to Socket.io clients
     virtioSocketWatcher.on('metricsUpdated', ({ vmId, metrics }) => {
       socketService.emitToRoom(`vm:${vmId}`, 'metricsUpdate', { vmId, metrics })
     })
-    
+
     try {
       await virtioSocketWatcher.start()
       virtioSocketWatcherService = virtioSocketWatcher // Store for cleanup
@@ -154,7 +154,7 @@ async function bootstrap(): Promise<void> {
         console.log(`🚀 Server ready at http://${host}:${port}`)
         console.log(`🚀 GraphQL endpoint: http://${host}:${port}/graphql`)
         console.log(`🚀 Health check endpoint available at http://${host}:${port}/health`)
-        console.log(`🔌 Socket.io ready for real-time connections`)
+        console.log('🔌 Socket.io ready for real-time connections')
         resolve()
       })
     })
@@ -165,9 +165,9 @@ async function bootstrap(): Promise<void> {
 }
 
 // Graceful shutdown handler
-async function shutdown(): Promise<void> {
+async function shutdown (): Promise<void> {
   console.log('\n🛑 Shutting down gracefully...')
-  
+
   // Stop VirtioSocketWatcherService
   if (virtioSocketWatcherService) {
     try {
@@ -177,11 +177,11 @@ async function shutdown(): Promise<void> {
       console.error('⚠️ Error stopping VirtioSocketWatcherService:', error)
     }
   }
-  
+
   // Disconnect Prisma
   await prisma.$disconnect()
   console.log('✅ Database connections closed')
-  
+
   process.exit(0)
 }
 

@@ -8,7 +8,7 @@ import { getEventManager } from '../../../services/EventManager'
 export class ApplicationQueries {
   @Query(() => [ApplicationType])
   @Authorized('USER')
-  async applications(
+  async applications (
     @Ctx() { prisma }: InfinibayContext
   ): Promise<Application[]> {
     return prisma.application.findMany()
@@ -16,7 +16,7 @@ export class ApplicationQueries {
 
   @Query(() => ApplicationType, { nullable: true })
   @Authorized('USER')
-  async application(
+  async application (
     @Arg('id') id: string,
     @Ctx() { prisma }: InfinibayContext
   ): Promise<Application | null> {
@@ -30,7 +30,7 @@ export class ApplicationQueries {
 export class ApplicationMutations {
   @Mutation(() => ApplicationType)
   @Authorized('ADMIN')
-  async createApplication(
+  async createApplication (
     @Arg('input') input: CreateApplicationInputType,
     @Ctx() { prisma, user }: InfinibayContext
   ): Promise<Application> {
@@ -59,7 +59,7 @@ export class ApplicationMutations {
 
   @Mutation(() => ApplicationType)
   @Authorized('ADMIN')
-  async updateApplication(
+  async updateApplication (
     @Arg('id') id: string,
     @Arg('input') input: CreateApplicationInputType,
     @Ctx() { prisma, user }: InfinibayContext
@@ -90,7 +90,7 @@ export class ApplicationMutations {
 
   @Mutation(() => Boolean)
   @Authorized('ADMIN')
-  async deleteApplication(
+  async deleteApplication (
     @Arg('id') id: string,
     @Ctx() { prisma, user }: InfinibayContext
   ): Promise<boolean> {

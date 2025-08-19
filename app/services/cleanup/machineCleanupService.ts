@@ -35,27 +35,27 @@ export class MachineCleanupService {
     if (machine.configuration?.xml) {
       const xmlGen = new XMLGenerator('', '', '')
       xmlGen.load(machine.configuration.xml)
-      
+
       // Get temp ISO directory path
       const baseDir = process.env.INFINIBAY_BASE_DIR ?? '/opt/infinibay'
       const tempIsoDir = process.env.INFINIBAY_ISO_TEMP_DIR ?? path.join(baseDir, 'iso', 'temp')
       const permanentIsoDir = process.env.INFINIBAY_ISO_PERMANENT_DIR ?? path.join(baseDir, 'iso', 'permanent')
-      
+
       filesToDelete = [
         xmlGen.getUefiVarFile(),
         ...xmlGen.getDisks()
       ].filter((file): file is string => {
         if (!file || !existsSync(file)) return false
-        
+
         // Don't delete permanent ISOs (virtio-win, OS installation ISOs)
         if (file.includes(permanentIsoDir)) return false
-        
+
         // Don't delete virtio drivers (legacy check for backward compatibility)
         if (file.includes('virtio')) return false
-        
+
         // Only delete ISOs from temp directory
         if (file.endsWith('.iso') && !file.includes(tempIsoDir)) return false
-        
+
         return true
       })
     }

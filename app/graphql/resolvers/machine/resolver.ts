@@ -20,18 +20,21 @@ import { Debugger } from '@utils/debug'
 import { MachineLifecycleService } from '../../../services/machineLifecycleService'
 import { getEventManager } from '../../../services/EventManager'
 
-async function transformMachine(prismaMachine: any, prisma: any): Promise<Machine> {
+async function transformMachine (prismaMachine: any, prisma: any): Promise<Machine> {
   // TODO: fix n+1 problem
   const user = prismaMachine.userId ? await prisma.user.findUnique({ where: { id: prismaMachine.userId } }) : null
   const template = prismaMachine.templateId ? await prisma.machineTemplate.findUnique({ where: { id: prismaMachine.templateId } }) : null
   const department = prismaMachine.departmentId ? await prisma.department.findUnique({ where: { id: prismaMachine.departmentId } }) : null
   const graphicHost = (prismaMachine.configuration?.graphicHost) || process.env.GRAPHIC_HOST || 'localhost'
   let graphicPort
-  try {
-    const protocol = prismaMachine.configuration?.graphicProtocol || 'vnc'
-    graphicPort = await new GraphicPortService().getGraphicPort(prismaMachine.internalName, protocol)
-  } catch (e) {
-    console.log(e)
+  // Only try to get the graphic port if the VM is running
+  if (prismaMachine.status === 'running') {
+    try {
+      const protocol = prismaMachine.configuration?.graphicProtocol || 'vnc'
+      graphicPort = await new GraphicPortService().getGraphicPort(prismaMachine.internalName, protocol)
+    } catch (e) {
+      console.log(`Could not get graphic port for VM ${prismaMachine.internalName}:`, e)
+    }
   }
 
   return {
@@ -81,7 +84,7 @@ export class MachineQueries {
 
   @Query(() => Machine, { nullable: true })
   @Authorized('USER')
-  async machine(
+  async machine (
     @Arg('id') id: string,
     @Ctx() { prisma, user }: InfinibayContext
   ): Promise<Machine | null> {
@@ -96,7 +99,7 @@ export class MachineQueries {
 
   @Query(() => [Machine])
   @Authorized('USER')
-  async machines(
+  async machines (
     @Arg('pagination', { nullable: true }) pagination: PaginationInputType,
     @Arg('orderBy', { nullable: true }) orderBy: MachineOrderBy,
     @Ctx() { prisma, user }: InfinibayContext
@@ -117,7 +120,7 @@ export class MachineQueries {
 
   @Query(() => GraphicConfigurationType, { nullable: true })
   @Authorized('USER')
-  async graphicConnection(
+  async graphicConnection (
     @Arg('id') id: string,
     @Ctx() { prisma, user }: InfinibayContext
   ): Promise<GraphicConfigurationType | null> {
@@ -145,7 +148,7 @@ export class MachineMutations {
 
   @Mutation(() => Machine)
   @Authorized('ADMIN')
-  async createMachine(
+  async createMachine (
     @Arg('input') input: CreateMachineInputType,
     @Ctx() { prisma, user }: InfinibayContext
   ): Promise<Machine> {
@@ -168,7 +171,7 @@ export class MachineMutations {
 
   @Mutation(() => Machine)
   @Authorized('ADMIN')
-  async updateMachineHardware(
+  async updateMachineHardware (
     @Arg('input') input: UpdateMachineHardwareInput,
     @Ctx() { prisma, user }: InfinibayContext
   ): Promise<Machine> {
@@ -190,7 +193,7 @@ export class MachineMutations {
 
   @Mutation(() => SuccessType)
   @Authorized('USER')
-  async powerOn(
+  async powerOn (
     @Arg('id') id: string,
     @Ctx() { prisma, user }: InfinibayContext
   ): Promise<SuccessType> {
@@ -199,7 +202,7 @@ export class MachineMutations {
 
   @Mutation(() => SuccessType)
   @Authorized('USER')
-  async powerOff(
+  async powerOff (
     @Arg('id') id: string,
     @Ctx() { prisma, user }: InfinibayContext
   ): Promise<SuccessType> {
@@ -208,7 +211,7 @@ export class MachineMutations {
 
   @Mutation(() => SuccessType)
   @Authorized('USER')
-  async suspend(
+  async suspend (
     @Arg('id') id: string,
     @Ctx() { prisma, user }: InfinibayContext
   ): Promise<SuccessType> {
@@ -225,7 +228,7 @@ export class MachineMutations {
    */
   @Mutation(() => SuccessType)
   @Authorized('USER')
-  async destroyMachine(
+  async destroyMachine (
     @Arg('id') id: string,
     @Ctx() { prisma, user }: InfinibayContext
   ): Promise<SuccessType> {
@@ -258,7 +261,7 @@ export class MachineMutations {
    */
   @Mutation(() => CommandExecutionResponseType)
   @Authorized('ADMIN')
-  async executeCommand(
+  async executeCommand (
     @Arg('id') id: string,
     @Arg('command') command: string,
     @Ctx() { prisma, user }: InfinibayContext
@@ -294,7 +297,7 @@ export class MachineMutations {
       // }
 
       // return { success: true, message: 'Command executed successfully', response: result }
-      
+
       // Temporary: Return not implemented
       return { success: false, message: 'QEMU Agent command execution is not yet implemented in libvirt-node' }
     } catch (error) {
@@ -319,7 +322,7 @@ export class MachineMutations {
    * @param newStatus - The new status to set: 'running', 'off', or 'suspended'.
    * @returns A SuccessType object indicating the result of the operation.
    */
-  private async changeMachineState(
+  private async changeMachineState (
     id: string,
     prisma: any,
     user: any,
@@ -353,26 +356,26 @@ export class MachineMutations {
       // Perform the requested action on the domain
       let result
       switch (action) {
-        case 'powerOn':
-          result = await domain.create() || 0
-          break
-        case 'destroy':
-          try {
-            result = await domain.destroy() || 0
-          } catch (error) {
-            console.log(error)
-            result = 0
-            // result = await domain.destroy(libvirt.VIR_DOMAIN_DESTROY_GRACEFUL);
-          }
-          break
-        case 'shutdown':
-          result = await this.performShutdownWithTimeout(domain, machine.internalName)
-          break
-        case 'suspend':
-          result = await domain.suspend() || 0
-          break
-        default:
-          throw new UserInputError(`Invalid action: ${action}`)
+      case 'powerOn':
+        result = await domain.create() || 0
+        break
+      case 'destroy':
+        try {
+          result = await domain.destroy() || 0
+        } catch (error) {
+          console.log(error)
+          result = 0
+          // result = await domain.destroy(libvirt.VIR_DOMAIN_DESTROY_GRACEFUL);
+        }
+        break
+      case 'shutdown':
+        result = await this.performShutdownWithTimeout(domain, machine.internalName)
+        break
+      case 'suspend':
+        result = await domain.suspend() || 0
+        break
+      default:
+        throw new UserInputError(`Invalid action: ${action}`)
       }
 
       // Check if the action was successful
@@ -389,10 +392,13 @@ export class MachineMutations {
       // Trigger real-time event for VM state change
       try {
         const eventManager = getEventManager()
-        const eventAction = action === 'powerOn' ? 'power_on' :
-          action === 'shutdown' ? 'power_off' :
-            action === 'destroy' ? 'power_off' :
-              action === 'suspend' ? 'suspend' : 'update'
+        const eventAction = action === 'powerOn'
+          ? 'power_on'
+          : action === 'shutdown'
+            ? 'power_off'
+            : action === 'destroy'
+              ? 'power_off'
+              : action === 'suspend' ? 'suspend' : 'update'
 
         await eventManager.dispatchEvent('vms', eventAction, { id }, user?.id)
         console.log(`🎯 Triggered real-time event: vms:${eventAction} for machine ${id}`)
@@ -421,7 +427,7 @@ export class MachineMutations {
    * @param machineName - The name of the machine for logging
    * @returns Promise<number> - 0 on success, non-zero on failure
    */
-  private async performShutdownWithTimeout(domain: VirtualMachine, machineName: string): Promise<number> {
+  private async performShutdownWithTimeout (domain: VirtualMachine, machineName: string): Promise<number> {
     const SHUTDOWN_TIMEOUT = 30000 // 30 seconds timeout
     const FORCE_DESTROY_TIMEOUT = 10000 // Additional 10 seconds for force destroy
 
@@ -503,7 +509,7 @@ export class MachineMutations {
 
   @Mutation(() => Machine)
   @Authorized('ADMIN')
-  async moveMachine(
+  async moveMachine (
     @Arg('id') id: string,
     @Arg('departmentId') departmentId: string,
     @Ctx() { prisma, user }: InfinibayContext

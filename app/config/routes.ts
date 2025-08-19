@@ -10,7 +10,7 @@ export const configureRoutes = (app: Express): void => {
 
   // Mount the ISO upload router
   app.use('/isoUpload', isoUploadRouter)
-  
+
   // Mount the InfiniService router for serving binaries and scripts
   app.use('/infiniservice', infiniserviceRouter)
 }
