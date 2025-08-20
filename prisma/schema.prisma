@@ -41,13 +41,29 @@ model Disk {
   status          String
 }
 
+model ISO {
+  id            String   @id @default(uuid())
+  filename      String   @unique
+  os            String   // windows10, windows11, ubuntu, fedora
+  version       String?
+  size          BigInt
+  uploadedAt    DateTime @default(now())
+  lastVerified  DateTime?
+  isAvailable   Boolean  @default(true)
+  checksum      String?
+  downloadUrl   String?  // For remote ISOs
+  path          String   // Local filesystem path
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
 model Machine {
   id                 String  @id @default(uuid())
   name               String
   internalName       String
   status             String
   userId             String?
-  templateId         String
+  templateId         String?
   os                 String
   // Hardware Configuration
   cpuCores           Int     @default(0)    // Number of CPU cores
@@ -58,7 +74,7 @@ model Machine {
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
   // Relations
-  template           MachineTemplate @relation(fields: [templateId], references: [id])
+  template           MachineTemplate? @relation(fields: [templateId], references: [id])
   user               User?           @relation(fields: [userId], references: [id])
   applications       MachineApplication[]
   configuration      MachineConfiguration?

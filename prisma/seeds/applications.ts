@@ -1,6 +1,6 @@
 import { Prisma, PrismaClient } from '@prisma/client'
 
-function generateAppEntry (name: string, description: string, os: string[], installCommand: Prisma.JsonObject) {
+function generateAppEntry(name: string, description: string, os: string[], installCommand: Prisma.JsonObject) {
   return {
     name,
     description,
@@ -11,7 +11,7 @@ function generateAppEntry (name: string, description: string, os: string[], inst
 }
 
 // Helper function to generate Fedora Flatpak installation command
-function getFedoraFlatpakCommand (flatpakId: string): string {
+function getFedoraFlatpakCommand(flatpakId: string): string {
   return `dnf install -y flatpak && flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo && flatpak install -y flathub ${flatpakId}`
 }
 
@@ -63,19 +63,6 @@ const createApplications = async (prisma: Prisma.TransactionClient | PrismaClien
         windows: 'winget install -e --silent --accept-source-agreements --accept-package-agreements --id=Google.Chrome',
         ubuntu: 'wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - && echo \'deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main\' > /etc/apt/sources.list.d/google-chrome.list && apt-get update && apt-get install -y google-chrome-stable',
         fedora: 'dnf install -y fedora-workstation-repositories && dnf config-manager --set-enabled google-chrome && dnf install -y google-chrome-stable'
-      }
-    )
-  })
-  // Skype (RIP)
-  await prisma.application.create({
-    data: generateAppEntry(
-      'Skype',
-      'Skype keeps the world talking. Call, message, and share whatever you want - for free.',
-      ['windows', 'ubuntu', 'fedora'],
-      {
-        windows: 'winget install -e --silent --accept-source-agreements --accept-package-agreements --id=Skype',
-        ubuntu: 'snap install skype --classic',
-        fedora: getFedoraFlatpakCommand('com.skype.Client')
       }
     )
   })

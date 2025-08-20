@@ -47,7 +47,9 @@ export class CreateMachineService {
       await this.executeTransaction(async (tx: any) => {
         await this.updateMachineStatus(tx, machine.id, 'building')
         const storagePool = await this.ensureStoragePool()
-        const storageVolume = await this.createStorageVolume(storagePool, machine, template.storage)
+        // Use machine's diskSizeGB if no template, otherwise use template's storage
+        const storageSize = template ? template.storage : machine.diskSizeGB
+        const storageVolume = await this.createStorageVolume(storagePool, machine, storageSize)
         const vm = await this.defineAndStartVM(xmlGenerator, machine)
         await this.updateMachineStatus(tx, machine.id, 'running')
       })
@@ -67,7 +69,10 @@ export class CreateMachineService {
     }
   }
 
-  private async fetchMachineTemplate (machine: Machine): Promise<MachineTemplate> {
+  private async fetchMachineTemplate (machine: Machine): Promise<MachineTemplate | null> {
+    if (!machine.templateId) {
+      return null
+    }
     const template = await this.prisma!.machineTemplate.findUnique({ where: { id: machine.templateId } })
     if (!template) {
       throw new Error(`Template not found for machine ${machine.name}`)
@@ -280,7 +285,7 @@ export class CreateMachineService {
 
   async generateXML (
     machine: Machine,
-    template: MachineTemplate,
+    template: MachineTemplate | null,
     configuration: MachineConfiguration,
     newIsoPath: string | null,
     pciBus: string | null
@@ -302,10 +307,14 @@ export class CreateMachineService {
     // Create a new XMLGenerator instance
     const xmlGenerator = new XMLGenerator(machineName, machine.id, machine.os)
 
-    // Set the machine's properties
-    xmlGenerator.setMemory(template.ram)
+    // Set the machine's properties - use machine values when no template
+    const ram = template ? template.ram : machine.ramGB
+    const storage = template ? template.storage : machine.diskSizeGB
+    const cores = template ? template.cores : machine.cpuCores
+    
+    xmlGenerator.setMemory(ram)
     xmlGenerator.enableTPM('2.0')
-    xmlGenerator.setStorage(template.storage)
+    xmlGenerator.setStorage(storage)
     xmlGenerator.setUEFI()
     xmlGenerator.addNetworkInterface(process.env.BRIDGE_NAME ?? 'default', 'virtio')
     const vmFilter = await this.prisma.vMNWFilter.findFirst({ where: { vmId: machine.id } })
@@ -330,7 +339,7 @@ export class CreateMachineService {
     }
     xmlGenerator.setBootDevice(['hd', 'cdrom'])
     xmlGenerator.addAudioDevice()
-    xmlGenerator.setVCPUs(template.cores)
+    xmlGenerator.setVCPUs(cores)
     xmlGenerator.setCpuPinningOptimization()
     if (newIsoPath) {
       xmlGenerator.addCDROM(newIsoPath, 'sata')

@@ -34,7 +34,7 @@ export interface UserResolverInterface {
 
 @Resolver(_of => UserType)
 export class UserResolver implements UserResolverInterface {
-  @Query(() => UserType)
+  @Query(() => UserType, { nullable: true })
   @Authorized('USER')
   async currentUser (@Ctx() context: InfinibayContext): Promise<UserType | null> {
     if (!context.user) {
@@ -43,9 +43,15 @@ export class UserResolver implements UserResolverInterface {
       return null
     }
 
-    // Return the user from context directly
-    // The authChecker has already fetched the user from database
-    return context.user as unknown as UserType
+    // Generate namespace for the user (same format as SocketService)
+    const user = context.user as any
+    const namespace = `user_${user.id.substring(0, 8)}`
+
+    // Return the user with namespace
+    return {
+      ...user,
+      namespace
+    } as unknown as UserType
   }
 
   /*

@@ -20,13 +20,32 @@ export class MachineLifecycleService {
   }
 
   async createMachine(input: any): Promise<any> {
-    // First verify the template exists
-    const template = await this.prisma.machineTemplate.findUnique({
-      where: { id: input.templateId }
-    })
+    let cpuCores: number
+    let ramGB: number
+    let diskSizeGB: number
+    let template = null
 
-    if (!template) {
-      throw new UserInputError('Machine template not found')
+    // Check if using custom hardware or template
+    if (input.templateId === 'custom' || !input.templateId) {
+      // Using custom hardware
+      if (!input.customCores || !input.customRam || !input.customStorage) {
+        throw new UserInputError('Custom hardware specifications are required when not using a template')
+      }
+      cpuCores = input.customCores
+      ramGB = input.customRam
+      diskSizeGB = input.customStorage
+    } else {
+      // Using template
+      template = await this.prisma.machineTemplate.findUnique({
+        where: { id: input.templateId }
+      })
+
+      if (!template) {
+        throw new UserInputError('Machine template not found')
+      }
+      cpuCores = template.cores
+      ramGB = template.ram
+      diskSizeGB = template.storage
     }
 
     const internalName = uuidv4()
@@ -50,12 +69,12 @@ export class MachineLifecycleService {
           userId: this.user?.id,
           status: 'building',
           os: input.os,
-          templateId: input.templateId,
+          templateId: template ? input.templateId : null,
           internalName,
           departmentId: department.id,
-          cpuCores: template.cores,
-          ramGB: template.ram,
-          diskSizeGB: template.storage,
+          cpuCores,
+          ramGB,
+          diskSizeGB,
           gpuPciAddress: input.pciBus,
           configuration: {
             create: {

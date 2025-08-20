@@ -2,7 +2,7 @@ import { PrismaClient } from '@prisma/client'
 import { SocketService } from './SocketService'
 
 // Event action types
-export type EventAction = 'create' | 'update' | 'delete' | 'power_on' | 'power_off' | 'suspend' | 'resume'
+export type EventAction = 'create' | 'update' | 'delete' | 'power_on' | 'power_off' | 'suspend' | 'resume' | 'registered' | 'removed' | 'validated' | 'progress' | 'status_changed'
 
 // Event payload interface
 export interface EventPayload {

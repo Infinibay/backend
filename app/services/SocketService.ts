@@ -43,15 +43,18 @@ export class SocketService {
     this.setupConnectionHandlers()
 
     console.log('🔌 Socket.io service initialized')
+    console.log('🔌 Socket.io CORS origin:', process.env.FRONTEND_URL || 'http://localhost:3000')
   }
 
   // Setup JWT authentication middleware
   private setupAuthentication (): void {
     this.io?.use(async (socket: any, next) => {
+      console.log('🔐 Socket.io authentication attempt from:', socket.handshake.address)
       try {
         const token = socket.handshake.auth.token || socket.handshake.headers.authorization
 
         if (!token) {
+          console.log('🔐 No token provided in Socket.io handshake')
           return next(new Error('Authentication token required'))
         }
 

@@ -158,7 +158,7 @@ export class MachineMutations {
     // Trigger real-time event for VM creation
     try {
       const eventManager = getEventManager()
-      await eventManager.dispatchEvent('vms', 'create', { id: newMachine.id }, user?.id)
+      await eventManager.dispatchEvent('vms', 'create', newMachine, user?.id)
       console.log(`🎯 Triggered real-time event: vms:create for machine ${newMachine.id}`)
     } catch (eventError) {
       console.error('Failed to trigger real-time event:', eventError)
@@ -181,7 +181,7 @@ export class MachineMutations {
     // Trigger real-time event for VM hardware update
     try {
       const eventManager = getEventManager()
-      await eventManager.dispatchEvent('vms', 'update', { id: input.id }, user?.id)
+      await eventManager.dispatchEvent('vms', 'update', updatedMachine, user?.id)
       console.log(`🎯 Triggered real-time event: vms:update for machine ${input.id}`)
     } catch (eventError) {
       console.error('Failed to trigger real-time event:', eventError)
@@ -384,9 +384,15 @@ export class MachineMutations {
       }
 
       // Update the machine's status in the database
-      await prisma.machine.update({
+      const updatedMachine = await prisma.machine.update({
         where: { id },
-        data: { status: newStatus }
+        data: { status: newStatus },
+        include: {
+          user: true,
+          template: true,
+          department: true,
+          configuration: true
+        }
       })
 
       // Trigger real-time event for VM state change
@@ -400,7 +406,7 @@ export class MachineMutations {
               ? 'power_off'
               : action === 'suspend' ? 'suspend' : 'update'
 
-        await eventManager.dispatchEvent('vms', eventAction, { id }, user?.id)
+        await eventManager.dispatchEvent('vms', eventAction, updatedMachine, user?.id)
         console.log(`🎯 Triggered real-time event: vms:${eventAction} for machine ${id}`)
       } catch (eventError) {
         console.error('Failed to trigger real-time event:', eventError)

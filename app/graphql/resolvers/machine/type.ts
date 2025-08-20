@@ -42,8 +42,8 @@ export class Machine {
     @Field(() => String, { nullable: true })
       userId: string | null = null
 
-    @Field(() => String)
-      templateId: string = ''
+    @Field(() => String, { nullable: true })
+      templateId: string | null = null
 
     @Field(() => Date, { nullable: true })
       createdAt: Date | null = null
@@ -161,8 +161,8 @@ export class MachineApplicationInputType {
 
 @InputType()
 export class CreateMachineInputType {
-    @Field(() => String)
-      templateId: string = ''
+    @Field(() => String, { nullable: true })
+      templateId?: string
 
     @Field(() => ID, { nullable: true }) // Temporarly is nullable, but it should not
       departmentId: string = ''
@@ -187,6 +187,15 @@ export class CreateMachineInputType {
 
     @Field(() => [MachineApplicationInputType])
       applications: MachineApplicationInputType[] = []
+
+    @Field(() => Int, { nullable: true })
+      customCores?: number
+
+    @Field(() => Int, { nullable: true })
+      customRam?: number
+
+    @Field(() => Int, { nullable: true })
+      customStorage?: number
 }
 
 @InputType()

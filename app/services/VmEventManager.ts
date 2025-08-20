@@ -17,6 +17,12 @@ export class VmEventManager implements ResourceEventManager {
     try {
       console.log(`🖥️ Handling VM event: ${action}`, { vmId: vmData?.id, triggeredBy })
 
+      // Special handling for delete events
+      if (action === 'delete') {
+        await this.handleVmDeleted(vmData, triggeredBy)
+        return
+      }
+
       // Get fresh VM data from database if we only have an ID
       const vm = await this.getVmData(vmData)
       if (!vm) {
@@ -161,6 +167,7 @@ export class VmEventManager implements ResourceEventManager {
     // For delete events, we might not have full VM data anymore
     // So we'll send the basic info we have
     const targetUsers = await this.getTargetUsersForDeletedVm(vmData)
+    console.log(`🗑️ Sending VM delete event to ${targetUsers.length} users`)
 
     const payload: EventPayload = {
       status: 'success',
@@ -172,8 +179,11 @@ export class VmEventManager implements ResourceEventManager {
     }
 
     for (const userId of targetUsers) {
+      console.log(`📤 Sending delete event to user: ${userId}`)
       this.socketService.sendToUser(userId, 'vms', 'delete', payload)
     }
+    
+    console.log(`✅ VM delete event sent to ${targetUsers.length} users`)
   }
 
   async handleVmPowerStateChange (vmData: any, action: 'power_on' | 'power_off' | 'suspend', triggeredBy?: string): Promise<void> {

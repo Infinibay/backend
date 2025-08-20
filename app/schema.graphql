@@ -56,13 +56,16 @@ input CreateFilterRuleInput {
 
 input CreateMachineInputType {
   applications: [MachineApplicationInputType!]! = []
+  customCores: Int
+  customRam: Int
+  customStorage: Int
   departmentId: ID = ""
   name: String! = ""
   os: MachineOs! = WINDOWS10
   password: String! = ""
   pciBus: String = null
   productKey: String
-  templateId: String! = ""
+  templateId: String
   username: String! = ""
 }
 
@@ -199,6 +202,33 @@ type GraphicConfigurationType {
   protocol: String!
 }
 
+type ISO {
+  checksum: String
+  createdAt: DateTimeISO!
+  downloadUrl: String
+  filename: String!
+  id: ID!
+  isAvailable: Boolean!
+  lastVerified: DateTimeISO
+  os: String!
+  path: String!
+  size: String!
+  updatedAt: DateTimeISO!
+  uploadedAt: DateTimeISO!
+  version: String
+}
+
+type ISOAvailabilityMap {
+  available: Boolean!
+  os: String!
+}
+
+type ISOStatus {
+  available: Boolean!
+  iso: ISO
+  os: String!
+}
+
 type InfiniServiceStatus {
   error: String
   installed: Boolean!
@@ -227,7 +257,7 @@ type Machine {
   ramGB: Int
   status: String!
   template: MachineTemplateType
-  templateId: String!
+  templateId: String
   user: UserType
   userId: String
 }
@@ -323,6 +353,8 @@ type MachineTemplateType {
 }
 
 type Mutation {
+  """Calculate ISO checksum"""
+  calculateISOChecksum(isoId: String!): String!
   createApplication(input: CreateApplicationInputType!): ApplicationType!
   createDepartment(name: String!): DepartmentType!
   createFilter(input: CreateFilterInput!): GenericFilter!
@@ -347,11 +379,20 @@ type Mutation {
   moveMachine(departmentId: String!, id: String!): Machine!
   powerOff(id: String!): SuccessType!
   powerOn(id: String!): SuccessType!
+
+  """Register uploaded ISO"""
+  registerISO(filename: String!, os: String!, path: String!, size: Float!): ISO!
+
+  """Remove ISO file"""
+  removeISO(isoId: String!): Boolean!
   setNetworkBridgeName(input: BridgeNameInput!): Boolean!
   setNetworkIp(input: NetworkIpInput!): Boolean!
   setNetworkIpRange(input: IpRangeInput!): Boolean!
   setupNode: DyummyType!
   suspend(id: String!): SuccessType!
+
+  """Sync ISOs with filesystem"""
+  syncISOs: Boolean!
   toggleDepartmentService(input: ToggleDepartmentServiceInput!): DepartmentServiceStatus!
   toggleGlobalService(input: ToggleServiceInput!): GlobalServiceStatus!
   toggleVmService(input: ToggleVmServiceInput!): VmServiceStatus!
@@ -362,6 +403,9 @@ type Mutation {
   updateMachineTemplate(id: String!, input: MachineTemplateInputType!): MachineTemplateType!
   updateMachineTemplateCategory(id: String!, input: MachineTemplateCategoryInputType!): MachineTemplateCategoryType!
   updateUser(id: String!, input: UpdateUserInputType!): UserType!
+
+  """Validate ISO file integrity"""
+  validateISO(isoId: String!): Boolean!
 }
 
 type Network {
@@ -421,10 +465,24 @@ input PaginationInputType {
 }
 
 type Query {
+  """Get all ISOs (available and unavailable)"""
+  allISOs: [ISO!]!
   application(id: String!): ApplicationType
   applications: [ApplicationType!]!
+
+  """Get all available ISOs"""
+  availableISOs: [ISO!]!
+
+  """Check if ISO is available for specific OS"""
+  checkISOStatus(os: String!): ISOStatus!
+
+  """Check availability for multiple OS types"""
+  checkMultipleOSAvailability(osList: [String!]!): [ISOAvailabilityMap!]!
   checkSetupStatus: DyummyType!
-  currentUser: UserType!
+
+  """Check overall system readiness"""
+  checkSystemReadiness: SystemReadiness!
+  currentUser: UserType
   department(id: String!): DepartmentType
   departments: [DepartmentType!]!
   findDepartmentByName(name: String!): DepartmentType
@@ -433,6 +491,9 @@ type Query {
   getGlobalServiceStatus(serviceId: ID): [GlobalServiceStatus!]!
   getGraphics: [GPU!]!
   getServiceStatusSummary: [ServiceStatusSummary!]!
+
+  """Get supported OS types"""
+  getSupportedOSTypes: [String!]!
   getVmServiceStatus(serviceId: ID, vmId: ID!): [VmServiceStatus!]!
   graphicConnection(id: String!): GraphicConfigurationType
   listFilterRules(filterId: ID): [FWRule!]!
@@ -533,6 +594,12 @@ type SocketConnectionStats {
 type SuccessType {
   message: String!
   success: Boolean!
+}
+
+type SystemReadiness {
+  availableOS: [String!]!
+  missingOS: [String!]!
+  ready: Boolean!
 }
 
 input ToggleDepartmentServiceInput {
@@ -649,6 +716,9 @@ type UserType {
   firstName: String!
   id: ID!
   lastName: String!
+
+  """User namespace for real-time events"""
+  namespace: String
   role: String!
 }
 

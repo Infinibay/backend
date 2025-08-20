@@ -35,9 +35,9 @@ export async function checkGpuAffinity (prisma: PrismaClient): Promise<void> {
 
       // Fetch VM and regenerate XML without GPU
       const machine = await prisma.machine.findUnique({ where: { id: machineId } })
-      const template = await prisma.machineTemplate.findUnique({ where: { id: machine?.templateId } })
+      const template = machine?.templateId ? await prisma.machineTemplate.findUnique({ where: { id: machine.templateId } }) : null
       const config = await prisma.machineConfiguration.findUnique({ where: { machineId } })
-      if (machine && template && config) {
+      if (machine && config) {
         const xmlGenerator = await vmService.generateXML(
           machine,
           template,

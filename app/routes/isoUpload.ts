@@ -8,6 +8,9 @@ import multer from 'multer'
 // Import admin authentication middleware
 import { adminAuthMiddleware } from '../middleware/adminAuth'
 
+// Import ISO Service
+import ISOService from '../services/ISOService'
+
 // Types
 interface UploadMetadata {
   fileName: string;
@@ -118,11 +121,21 @@ router.post('/',
       const targetPath = path.join(isoDir, `${uploadMetadata.os}.iso`)
       await fs.rename(req.file.path, targetPath)
 
+      // Register ISO in database
+      const isoService = ISOService.getInstance()
+      const iso = await isoService.registerISO(
+        `${uploadMetadata.os}.iso`,
+        uploadMetadata.os,
+        req.file.size,
+        targetPath
+      )
+
       res.status(200).json({
         message: 'File uploaded successfully',
         bytesReceived: req.file.size,
         fileName: uploadMetadata.fileName,
-        os: uploadMetadata.os
+        os: uploadMetadata.os,
+        isoId: iso.id
       })
     } catch (error) {
       if (error instanceof Error) {

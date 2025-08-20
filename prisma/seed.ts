@@ -84,24 +84,9 @@ async function updateMachineTemplates (defaultCategoryId: string) {
 }
 
 async function createDefaultMachineTemplate (defaultCategoryId: string) {
-  try {
-    const existingTemplates = await prisma.machineTemplate.findMany()
-    if (existingTemplates.length === 0) {
-      await prisma.machineTemplate.create({
-        data: {
-          name: 'Basic',
-          description: 'A basic machine template.',
-          cores: 6,
-          ram: 24,
-          storage: 70,
-          categoryId: defaultCategoryId
-        }
-      })
-      console.log('Default machine template created successfully')
-    }
-  } catch (error) {
-    console.error('Error creating default machine template:', error)
-  }
+  // Removed default template creation - users should create their own templates
+  // or use custom hardware configuration
+  console.log('Skipping default template creation - users will use custom hardware')
 }
 
 async function main () {

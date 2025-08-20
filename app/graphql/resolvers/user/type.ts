@@ -28,6 +28,9 @@ export class UserType {
 
   @Field({ nullable: false })
     createdAt: Date = new Date()
+
+  @Field({ nullable: true, description: 'User namespace for real-time events' })
+    namespace?: string
 }
 
 @ObjectType({ description: 'Token used to log in' })
