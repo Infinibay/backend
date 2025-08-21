@@ -165,6 +165,13 @@ enum FilterType {
   VM
 }
 
+type GPU {
+  memory: Float!
+  model: String!
+  pciBus: String!
+  vendor: String!
+}
+
 type GenericFilter {
   createdAt: DateTimeISO!
   description: String
@@ -483,6 +490,7 @@ type Query {
   getDepartmentServiceStatus(departmentId: ID!, serviceId: ID): [DepartmentServiceStatus!]!
   getFilter(id: ID!): GenericFilter
   getGlobalServiceStatus(serviceId: ID): [GlobalServiceStatus!]!
+  getGraphics: [GPU!]!
   getServiceStatusSummary: [ServiceStatusSummary!]!
 
   """Get supported OS types"""

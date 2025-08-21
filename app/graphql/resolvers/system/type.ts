@@ -1,6 +1,21 @@
 import { ObjectType, Field, Float } from 'type-graphql';
 
 @ObjectType()
+export class GPU {
+  @Field(() => String)
+  pciBus: string = '';
+
+  @Field(() => String)
+  vendor: string = '';
+
+  @Field(() => String)
+  model: string = '';
+
+  @Field(() => Float)
+  memory: number = 0;
+}
+
+@ObjectType()
 export class SystemResourceCPU {
   @Field(() => Float)
   total!: number;
