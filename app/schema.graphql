@@ -165,13 +165,6 @@ enum FilterType {
   VM
 }
 
-type GPU {
-  memory: Float!
-  model: String!
-  pciBus: String!
-  vendor: String!
-}
-
 type GenericFilter {
   createdAt: DateTimeISO!
   description: String
@@ -490,11 +483,11 @@ type Query {
   getDepartmentServiceStatus(departmentId: ID!, serviceId: ID): [DepartmentServiceStatus!]!
   getFilter(id: ID!): GenericFilter
   getGlobalServiceStatus(serviceId: ID): [GlobalServiceStatus!]!
-  getGraphics: [GPU!]!
   getServiceStatusSummary: [ServiceStatusSummary!]!
 
   """Get supported OS types"""
   getSupportedOSTypes: [String!]!
+  getSystemResources: SystemResources!
   getVmServiceStatus(serviceId: ID, vmId: ID!): [VmServiceStatus!]!
   graphicConnection(id: String!): GraphicConfigurationType
   listFilterRules(filterId: ID): [FWRule!]!
@@ -601,6 +594,28 @@ type SystemReadiness {
   availableOS: [String!]!
   missingOS: [String!]!
   ready: Boolean!
+}
+
+type SystemResourceCPU {
+  available: Float!
+  total: Float!
+}
+
+type SystemResourceDisk {
+  available: Float!
+  total: Float!
+  used: Float!
+}
+
+type SystemResourceMemory {
+  available: Float!
+  total: Float!
+}
+
+type SystemResources {
+  cpu: SystemResourceCPU!
+  disk: SystemResourceDisk!
+  memory: SystemResourceMemory!
 }
 
 input ToggleDepartmentServiceInput {
