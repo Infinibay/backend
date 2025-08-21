@@ -1,12 +1,15 @@
 import { Prisma, PrismaClient } from '@prisma/client'
+import { getApplicationIcon } from './applicationIcons'
 
 function generateAppEntry(name: string, description: string, os: string[], installCommand: Prisma.JsonObject) {
+  const icon = getApplicationIcon(name)
   return {
     name,
     description,
     os,
     installCommand,
-    parameters: {}
+    parameters: {},
+    icon: icon || undefined
   }
 }
 

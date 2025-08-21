@@ -6,6 +6,7 @@
 type ApplicationType {
   createdAt: DateTimeISO!
   description: String
+  icon: String
   id: ID!
   installCommand: JSONObject!
   name: String!

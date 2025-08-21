@@ -21,6 +21,9 @@ export class ApplicationType {
   @Field(() => GraphQLJSONObject, { nullable: true })
     parameters: any = null
 
+  @Field(() => String, { nullable: true })
+    icon?: string
+
   @Field(() => Date)
     createdAt: Date = new Date()
 }
