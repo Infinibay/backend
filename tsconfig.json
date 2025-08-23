@@ -119,6 +119,7 @@
     "moduleResolution": "node"
   },
   "include": [
-    "app/**/*.ts"
+    "app/**/*.ts",
+    "types/**/*.d.ts"
   ]
 }

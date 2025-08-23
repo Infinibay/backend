@@ -1,6 +1,9 @@
+/// <reference path="../../types/libvirt-node.d.ts" />
+
 import { Debugger } from '../utils/debug'
 import { getLibvirtConnection } from '../utils/libvirt'
-import { Connection, Machine, Snapshot } from '@infinibay/libvirt-node'
+import { Connection, Machine } from '@infinibay/libvirt-node'
+import type { Snapshot } from '@infinibay/libvirt-node'
 import { Builder, Parser } from 'xml2js'
 
 export interface SnapshotInfo {
