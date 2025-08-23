@@ -13,6 +13,7 @@ import * as fs from 'fs'
 import * as path from 'path'
 import * as chokidar from 'chokidar'
 import { EventEmitter } from 'events'
+import { v4 as uuidv4 } from 'uuid'
 import { VmEventManager } from './VmEventManager'
 import { Debugger } from '../utils/debug'
 
@@ -125,7 +126,48 @@ interface MetricsMessage extends BaseMessage {
   }
 }
 
-type IncomingMessage = MetricsMessage | ErrorMessage
+// Command-related message types
+interface CommandMessage extends BaseMessage {
+  type: 'command'
+  id: string
+  commandType: SafeCommandType | UnsafeCommandRequest
+}
+
+interface ResponseMessage extends BaseMessage {
+  type: 'response'
+  id: string
+  success: boolean
+  data?: any
+  error?: string
+  stdout?: string
+  stderr?: string
+}
+
+// Safe command types matching InfiniService
+export interface SafeCommandType {
+  action: 'ServiceList' | 'ServiceControl' | 'PackageList' | 'PackageInstall' | 
+          'PackageRemove' | 'PackageUpdate' | 'PackageSearch' | 'ProcessList' | 
+          'ProcessKill' | 'ProcessTop' | 'SystemInfo' | 'OsInfo'
+  params?: any
+}
+
+export interface UnsafeCommandRequest {
+  rawCommand: string
+  shell?: string
+  timeout?: number
+  workingDir?: string
+  envVars?: Record<string, string>
+}
+
+export interface CommandResponse {
+  success: boolean
+  data?: any
+  error?: string
+  stdout?: string
+  stderr?: string
+}
+
+type IncomingMessage = MetricsMessage | ErrorMessage | ResponseMessage
 
 // Connection state for each VM
 interface VmConnection {
@@ -140,6 +182,11 @@ interface VmConnection {
   isConnected: boolean
   lastErrorType?: string // Track last error type to avoid repetitive logging
   errorCount: number // Track error frequency
+  pendingCommands: Map<string, {
+    resolve: (value: CommandResponse) => void
+    reject: (error: Error) => void
+    timeout: NodeJS.Timeout
+  }> // Track pending commands awaiting responses
 }
 
 export class VirtioSocketWatcherService extends EventEmitter {
@@ -291,7 +338,8 @@ export class VirtioSocketWatcherService extends EventEmitter {
       reconnectAttempts: 0,
       lastMessageTime: new Date(),
       isConnected: false,
-      errorCount: 0
+      errorCount: 0,
+      pendingCommands: new Map()
     }
 
     this.connections.set(vmId, connection)
@@ -414,6 +462,26 @@ export class VirtioSocketWatcherService extends EventEmitter {
         // Log error from VM
         const errorMsg = message as ErrorMessage
         this.debug.log('error', `Error from VM ${connection.vmId}: ${errorMsg.error} ${errorMsg.details ? JSON.stringify(errorMsg.details) : ''}`)
+        break
+
+      case 'response':
+        // Handle command response
+        const response = message as ResponseMessage
+        const pendingCommand = connection.pendingCommands.get(response.id)
+        if (pendingCommand) {
+          clearTimeout(pendingCommand.timeout)
+          pendingCommand.resolve({
+            success: response.success,
+            data: response.data,
+            error: response.error,
+            stdout: response.stdout,
+            stderr: response.stderr
+          })
+          connection.pendingCommands.delete(response.id)
+          this.debug.log('debug', `Command ${response.id} completed for VM ${connection.vmId}`)
+        } else {
+          this.debug.log('warn', `Received response for unknown command ${response.id} from VM ${connection.vmId}`)
+        }
         break
 
       default:
@@ -683,6 +751,118 @@ export class VirtioSocketWatcherService extends EventEmitter {
     }
   }
 
+  // Public method to send safe commands to a VM
+  public async sendSafeCommand(
+    vmId: string,
+    commandType: SafeCommandType,
+    timeout: number = 30000
+  ): Promise<CommandResponse> {
+    const connection = this.connections.get(vmId)
+    if (!connection) {
+      throw new Error(`No connection to VM ${vmId}`)
+    }
+
+    if (!connection.isConnected) {
+      throw new Error(`VM ${vmId} is not connected`)
+    }
+
+    const commandId = uuidv4()
+    
+    return new Promise<CommandResponse>((resolve, reject) => {
+      // Set up timeout
+      const timeoutHandle = setTimeout(() => {
+        connection.pendingCommands.delete(commandId)
+        reject(new Error(`Command timeout after ${timeout}ms`))
+      }, timeout)
+
+      // Store pending command
+      connection.pendingCommands.set(commandId, {
+        resolve,
+        reject,
+        timeout: timeoutHandle
+      })
+
+      // Send command
+      const message = {
+        type: 'SafeCommand',
+        id: commandId,
+        command_type: commandType,
+        params: commandType.params,
+        timeout: Math.floor(timeout / 1000) // Convert to seconds for InfiniService
+      }
+
+      this.debug.log('debug', `Sending safe command ${commandId} to VM ${vmId}: ${JSON.stringify(commandType)}`)
+      this.sendMessage(connection, message)
+    })
+  }
+
+  // Public method to send unsafe (raw) commands to a VM
+  public async sendUnsafeCommand(
+    vmId: string,
+    rawCommand: string,
+    options: Partial<UnsafeCommandRequest> = {},
+    timeout: number = 30000
+  ): Promise<CommandResponse> {
+    const connection = this.connections.get(vmId)
+    if (!connection) {
+      throw new Error(`No connection to VM ${vmId}`)
+    }
+
+    if (!connection.isConnected) {
+      throw new Error(`VM ${vmId} is not connected`)
+    }
+
+    const commandId = uuidv4()
+    
+    return new Promise<CommandResponse>((resolve, reject) => {
+      // Set up timeout
+      const timeoutHandle = setTimeout(() => {
+        connection.pendingCommands.delete(commandId)
+        reject(new Error(`Command timeout after ${timeout}ms`))
+      }, timeout)
+
+      // Store pending command
+      connection.pendingCommands.set(commandId, {
+        resolve,
+        reject,
+        timeout: timeoutHandle
+      })
+
+      // Send command
+      const message = {
+        type: 'UnsafeCommand',
+        id: commandId,
+        raw_command: rawCommand,
+        shell: options.shell,
+        timeout: Math.floor(timeout / 1000),
+        working_dir: options.workingDir,
+        env_vars: options.envVars
+      }
+
+      this.debug.log('debug', `Sending unsafe command ${commandId} to VM ${vmId}: ${rawCommand}`)
+      this.sendMessage(connection, message)
+    })
+  }
+
+  // Helper method specifically for package management commands
+  public async sendPackageCommand(
+    vmId: string,
+    action: 'PackageList' | 'PackageInstall' | 'PackageRemove' | 'PackageUpdate' | 'PackageSearch',
+    packageName?: string,
+    timeout: number = 60000 // Higher timeout for package operations
+  ): Promise<CommandResponse> {
+    const commandType: SafeCommandType = {
+      action,
+      params: packageName ? { package: packageName } : undefined
+    }
+
+    if (action === 'PackageSearch' && packageName) {
+      commandType.params = { query: packageName }
+    }
+
+    return this.sendSafeCommand(vmId, commandType, timeout)
+  }
+
   // Monitor connection health (no active pinging, just monitoring)
   private startHealthMonitoring (connection: VmConnection): void {
     // Clear existing timer
@@ -766,6 +946,14 @@ export class VirtioSocketWatcherService extends EventEmitter {
     }
 
     this.debug.log('debug', `🔌 Closing connection for VM ${vmId}`)
+
+    // Reject all pending commands
+    for (const [commandId, pending] of connection.pendingCommands) {
+      clearTimeout(pending.timeout)
+      pending.reject(new Error('Connection closed'))
+      this.debug.log('debug', `Rejected pending command ${commandId} due to connection close`)
+    }
+    connection.pendingCommands.clear()
 
     // Clear timers
     if (connection.pingTimer) {

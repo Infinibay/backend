@@ -25,6 +25,24 @@ type CommandExecutionResponseType {
   success: Boolean!
 }
 
+"""Generic command execution result"""
+type CommandResult {
+  """Error message if command failed"""
+  error: String
+
+  """Command output"""
+  output: String
+
+  """Standard error"""
+  stderr: String
+
+  """Standard output"""
+  stdout: String
+
+  """Whether the command was successful"""
+  success: Boolean!
+}
+
 input CreateApplicationInputType {
   description: String
   installCommand: JSONObject!
@@ -400,6 +418,12 @@ type Mutation {
 
   """Force power off and restore snapshot (emergency recovery)"""
   forceRestoreSnapshot(input: RestoreSnapshotInput!): SuccessType!
+
+  """Install a package on a virtual machine (legacy compatibility)"""
+  installPackage(machineId: ID!, packageName: String!): CommandResult!
+
+  """Install, remove, or update a package on a virtual machine"""
+  managePackage(input: PackageManagementInput!): PackageManagementResult!
   moveMachine(departmentId: String!, id: String!): Machine!
   powerOff(id: String!): SuccessType!
   powerOn(id: String!): SuccessType!
@@ -409,6 +433,9 @@ type Mutation {
 
   """Remove ISO file"""
   removeISO(isoId: String!): Boolean!
+
+  """Remove a package from a virtual machine (legacy compatibility)"""
+  removePackage(machineId: ID!, packageName: String!): CommandResult!
 
   """Restore a virtual machine to a snapshot"""
   restoreSnapshot(input: RestoreSnapshotInput!): SuccessType!
@@ -429,6 +456,9 @@ type Mutation {
   updateMachineHardware(input: UpdateMachineHardwareInput!): Machine!
   updateMachineTemplate(id: String!, input: MachineTemplateInputType!): MachineTemplateType!
   updateMachineTemplateCategory(id: String!, input: MachineTemplateCategoryInputType!): MachineTemplateCategoryType!
+
+  """Update a package on a virtual machine (legacy compatibility)"""
+  updatePackage(machineId: ID!, packageName: String!): CommandResult!
   updateUser(id: String!, input: UpdateUserInputType!): UserType!
 
   """Validate ISO file integrity"""
@@ -486,6 +516,67 @@ enum OrderByDirection {
   DESC
 }
 
+"""Available package management actions"""
+enum PackageAction {
+  INSTALL
+  REMOVE
+  UPDATE
+}
+
+"""Information about a software package"""
+type PackageInfo {
+  """Package description"""
+  description: String
+
+  """Whether the package is installed"""
+  installed: Boolean!
+
+  """Package name"""
+  name: String!
+
+  """Package publisher or vendor"""
+  publisher: String
+
+  """Package source or repository"""
+  source: String
+
+  """Package version"""
+  version: String!
+}
+
+"""Input for package management operations"""
+input PackageManagementInput {
+  """Action to perform on the package"""
+  action: PackageAction! = INSTALL
+
+  """ID of the target machine"""
+  machineId: ID! = ""
+
+  """Name of the package to manage"""
+  packageName: String! = ""
+}
+
+"""Result of a package management operation"""
+type PackageManagementResult {
+  """Error message if operation failed"""
+  error: String
+
+  """Human-readable message about the operation"""
+  message: String!
+
+  """List of packages (for list operations)"""
+  packages: [PackageInfo!]
+
+  """Standard error from the command"""
+  stderr: String
+
+  """Standard output from the command"""
+  stdout: String
+
+  """Whether the operation was successful"""
+  success: Boolean!
+}
+
 input PaginationInputType {
   skip: Int = 0
   take: Int = 20
@@ -530,6 +621,9 @@ type Query {
   listFilterRules(filterId: ID): [FWRule!]!
   listFilters(departmentId: ID, vmId: ID): [GenericFilter!]!
 
+  """List all installed packages on a virtual machine"""
+  listInstalledPackages(machineId: ID!): [PackageInfo!]!
+
   """List all services running on a virtual machine"""
   listServices(machineId: String!): [ServiceInfo!]!
   login(email: String!, password: String!): UserToken!
@@ -544,6 +638,9 @@ type Query {
   machines(orderBy: MachineOrderBy, pagination: PaginationInputType): [Machine!]!
   network(name: String!): Network!
   networks: [Network!]!
+
+  """Search for available packages on a virtual machine"""
+  searchPackages(machineId: ID!, query: String!): [PackageInfo!]!
 
   """Get current socket connection statistics for all VMs"""
   socketConnectionStats: SocketConnectionStats

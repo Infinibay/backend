@@ -1,6 +1,10 @@
 import { Resolver, Query, Mutation, Arg, Ctx, Authorized } from 'type-graphql'
 import { InfinibayContext } from '@utils/context'
-import { ServiceManager } from '@services/ServiceManager'
+import { 
+  ServiceManager,
+  InternalServiceInfo,
+  InternalServiceControlResult
+} from '@services/ServiceManager'
 import {
   ServiceInfo,
   ServiceControlInput,
@@ -12,6 +16,34 @@ import {
 
 @Resolver()
 export class ServiceResolver {
+  /**
+   * Maps internal service info to GraphQL type
+   */
+  private mapToGraphQLServiceInfo(internal: InternalServiceInfo): ServiceInfo {
+    const serviceInfo = new ServiceInfo()
+    serviceInfo.name = internal.name
+    serviceInfo.displayName = internal.displayName
+    serviceInfo.status = internal.status as ServiceStatus
+    serviceInfo.startType = internal.startType as ServiceStartType
+    serviceInfo.description = internal.description
+    serviceInfo.pid = internal.pid
+    return serviceInfo
+  }
+
+  /**
+   * Maps internal service control result to GraphQL type
+   */
+  private mapToGraphQLResult(internal: InternalServiceControlResult): ServiceStatusType {
+    const result = new ServiceStatusType()
+    result.success = internal.success
+    result.message = internal.message
+    result.error = internal.error
+    if (internal.service) {
+      result.service = this.mapToGraphQLServiceInfo(internal.service)
+    }
+    return result
+  }
+
   @Query(() => [ServiceInfo], { description: 'List all services running on a virtual machine' })
   @Authorized('USER')
   async listServices(
@@ -37,14 +69,10 @@ export class ServiceResolver {
       }
 
       const serviceManager = new ServiceManager(prisma)
-      const services = await serviceManager.listServices(machineId)
+      const internalServices = await serviceManager.listServices(machineId)
       
-      // Convert service info to GraphQL types
-      return services.map(svc => ({
-        ...svc,
-        status: svc.status as ServiceStatus,
-        startType: svc.startType as ServiceStartType
-      }))
+      // Map internal types to GraphQL types
+      return internalServices.map(svc => this.mapToGraphQLServiceInfo(svc))
     } catch (error) {
       console.error('Error listing services:', error)
       return []
@@ -93,25 +121,14 @@ export class ServiceResolver {
       }
 
       const serviceManager = new ServiceManager(prisma)
-      const result = await serviceManager.controlService(
+      const internalResult = await serviceManager.controlService(
         input.machineId,
         input.serviceName,
         input.action
       )
 
-      // Convert service info to GraphQL type if present
-      const service = result.service ? {
-        ...result.service,
-        status: result.service.status as ServiceStatus,
-        startType: result.service.startType as ServiceStartType
-      } : undefined
-
-      return {
-        success: result.success,
-        message: result.message,
-        service,
-        error: result.error
-      } as ServiceStatusType
+      // Map internal type to GraphQL type
+      return this.mapToGraphQLResult(internalResult)
     } catch (error) {
       console.error('Error controlling service:', error)
       return {

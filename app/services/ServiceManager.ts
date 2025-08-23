@@ -8,7 +8,8 @@ type Connection = typeof libvirtNode.Connection
 type LibvirtMachine = typeof libvirtNode.Machine
 type GuestAgent = typeof libvirtNode.GuestAgent
 
-export interface ServiceInfo {
+// Internal service types - not exposed via GraphQL
+export interface InternalServiceInfo {
   name: string
   displayName?: string
   status: 'running' | 'stopped' | 'disabled' | 'unknown'
@@ -19,10 +20,10 @@ export interface ServiceInfo {
 
 export type VMServiceAction = 'START' | 'STOP' | 'RESTART' | 'ENABLE' | 'DISABLE' | 'STATUS'
 
-export interface ServiceControlResult {
+export interface InternalServiceControlResult {
   success: boolean
   message: string
-  service?: ServiceInfo
+  service?: InternalServiceInfo
   error?: string
 }
 
@@ -80,7 +81,7 @@ export class ServiceManager {
     return { machine, domain }
   }
 
-  async listServices(machineId: string): Promise<ServiceInfo[]> {
+  async listServices(machineId: string): Promise<InternalServiceInfo[]> {
     try {
       const domainInfo = await this.getDomain(machineId)
       if (!domainInfo) {
@@ -93,7 +94,7 @@ export class ServiceManager {
 
       this.debug.log('info', `Listing services for ${os} machine ${machineId}`)
 
-      let services: ServiceInfo[] = []
+      let services: InternalServiceInfo[] = []
 
       if (os === 'windows') {
         services = await this.listWindowsServices(agent)
@@ -110,7 +111,7 @@ export class ServiceManager {
     }
   }
 
-  private async listWindowsServices(agent: GuestAgent): Promise<ServiceInfo[]> {
+  private async listWindowsServices(agent: GuestAgent): Promise<InternalServiceInfo[]> {
     try {
       const result = agent.exec(
         'powershell.exe',
@@ -142,7 +143,7 @@ export class ServiceManager {
     }
   }
 
-  private async listLinuxServices(agent: GuestAgent): Promise<ServiceInfo[]> {
+  private async listLinuxServices(agent: GuestAgent): Promise<InternalServiceInfo[]> {
     try {
       // Try systemctl first (systemd)
       let result = agent.exec(
@@ -180,7 +181,7 @@ export class ServiceManager {
     }
   }
 
-  private parseSystemdServices(output: string): ServiceInfo[] {
+  private parseSystemdServices(output: string): InternalServiceInfo[] {
     try {
       const units = JSON.parse(output)
       return units.map((unit: any) => ({
@@ -194,8 +195,8 @@ export class ServiceManager {
     }
   }
 
-  private parseSystemdServicesText(output: string): ServiceInfo[] {
-    const services: ServiceInfo[] = []
+  private parseSystemdServicesText(output: string): InternalServiceInfo[] {
+    const services: InternalServiceInfo[] = []
     const lines = output.split('\n')
     
     for (const line of lines) {
@@ -216,8 +217,8 @@ export class ServiceManager {
     return services
   }
 
-  private parseSysVServices(output: string): ServiceInfo[] {
-    const services: ServiceInfo[] = []
+  private parseSysVServices(output: string): InternalServiceInfo[] {
+    const services: InternalServiceInfo[] = []
     const lines = output.split('\n')
     
     for (const line of lines) {
@@ -237,7 +238,7 @@ export class ServiceManager {
     machineId: string,
     serviceName: string,
     action: VMServiceAction
-  ): Promise<ServiceControlResult> {
+  ): Promise<InternalServiceControlResult> {
     try {
       const domainInfo = await this.getDomain(machineId)
       if (!domainInfo) {
@@ -279,7 +280,7 @@ export class ServiceManager {
     agent: GuestAgent,
     serviceName: string,
     action: VMServiceAction
-  ): Promise<ServiceControlResult> {
+  ): Promise<InternalServiceControlResult> {
     let command: string
     let args: string[]
 
@@ -346,7 +347,7 @@ export class ServiceManager {
     agent: GuestAgent,
     serviceName: string,
     action: VMServiceAction
-  ): Promise<ServiceControlResult> {
+  ): Promise<InternalServiceControlResult> {
     let command = 'systemctl'
     let args: string[]
 
@@ -412,7 +413,7 @@ export class ServiceManager {
     }
   }
 
-  private async getWindowsServiceStatus(agent: GuestAgent, serviceName: string): Promise<ServiceInfo | undefined> {
+  private async getWindowsServiceStatus(agent: GuestAgent, serviceName: string): Promise<InternalServiceInfo | undefined> {
     try {
       const result = agent.exec(
         'powershell.exe',
@@ -440,7 +441,7 @@ export class ServiceManager {
     return undefined
   }
 
-  private async getLinuxServiceStatus(agent: GuestAgent, serviceName: string): Promise<ServiceInfo | undefined> {
+  private async getLinuxServiceStatus(agent: GuestAgent, serviceName: string): Promise<InternalServiceInfo | undefined> {
     try {
       const result = agent.exec('systemctl', ['status', serviceName, '--no-pager'], true)
       
