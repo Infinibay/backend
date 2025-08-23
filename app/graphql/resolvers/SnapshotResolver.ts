@@ -1,5 +1,3 @@
-/// <reference path="../../../types/libvirt-node.d.ts" />
-
 import { Resolver, Query, Mutation, Arg, Authorized } from 'type-graphql';
 import { 
   Snapshot, 

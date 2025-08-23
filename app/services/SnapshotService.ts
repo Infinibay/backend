@@ -1,10 +1,12 @@
-/// <reference path="../../types/libvirt-node.d.ts" />
-
 import { Debugger } from '../utils/debug'
 import { getLibvirtConnection } from '../utils/libvirt'
-import { Connection, Machine } from '@infinibay/libvirt-node'
-import type { Snapshot } from '@infinibay/libvirt-node'
+const libvirtNode = require('../../lib/libvirt-node')
 import { Builder, Parser } from 'xml2js'
+
+// Type aliases for libvirt-node types
+type Connection = typeof libvirtNode.Connection
+type Machine = typeof libvirtNode.Machine
+type Snapshot = typeof libvirtNode.Snapshot
 
 export interface SnapshotInfo {
   name: string
@@ -54,7 +56,7 @@ export class SnapshotService {
   ): Promise<{ success: boolean; message: string; snapshot?: SnapshotInfo }> {
     try {
       const conn = await this.ensureConnection()
-      const domain = Machine.lookupByUuidString(conn, vmId)
+      const domain = libvirtNode.Machine.lookupByUuidString(conn, vmId)
       
       if (!domain) {
         return { success: false, message: `VM ${vmId} not found` }
@@ -108,7 +110,7 @@ export class SnapshotService {
   async listSnapshots(vmId: string): Promise<{ success: boolean; snapshots: SnapshotInfo[] }> {
     try {
       const conn = await this.ensureConnection()
-      const domain = Machine.lookupByUuidString(conn, vmId)
+      const domain = libvirtNode.Machine.lookupByUuidString(conn, vmId)
       
       if (!domain) {
         return { success: false, snapshots: [] }
@@ -178,7 +180,7 @@ export class SnapshotService {
   ): Promise<{ success: boolean; message: string }> {
     try {
       const conn = await this.ensureConnection()
-      const domain = Machine.lookupByUuidString(conn, vmId)
+      const domain = libvirtNode.Machine.lookupByUuidString(conn, vmId)
       
       if (!domain) {
         return { success: false, message: `VM ${vmId} not found` }
@@ -212,7 +214,7 @@ export class SnapshotService {
   ): Promise<{ success: boolean; message: string }> {
     try {
       const conn = await this.ensureConnection()
-      const domain = Machine.lookupByUuidString(conn, vmId)
+      const domain = libvirtNode.Machine.lookupByUuidString(conn, vmId)
       
       if (!domain) {
         return { success: false, message: `VM ${vmId} not found` }
@@ -243,7 +245,7 @@ export class SnapshotService {
   async getCurrentSnapshot(vmId: string): Promise<SnapshotInfo | null> {
     try {
       const conn = await this.ensureConnection()
-      const domain = Machine.lookupByUuidString(conn, vmId)
+      const domain = libvirtNode.Machine.lookupByUuidString(conn, vmId)
       
       if (!domain) {
         return null

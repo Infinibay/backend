@@ -367,6 +367,9 @@ type MachineTemplateType {
 type Mutation {
   """Calculate ISO checksum"""
   calculateISOChecksum(isoId: String!): String!
+
+  """Control a service on a virtual machine"""
+  controlService(input: ServiceControlInput!): ServiceStatusType!
   createApplication(input: CreateApplicationInputType!): ApplicationType!
   createDepartment(name: String!): DepartmentType!
   createFilter(input: CreateFilterInput!): GenericFilter!
@@ -526,7 +529,9 @@ type Query {
   graphicConnection(id: String!): GraphicConfigurationType
   listFilterRules(filterId: ID): [FWRule!]!
   listFilters(departmentId: ID, vmId: ID): [GenericFilter!]!
-  listServices: [ServiceDefinition!]!
+
+  """List all services running on a virtual machine"""
+  listServices(machineId: String!): [ServiceInfo!]!
   login(email: String!, password: String!): UserToken!
   machine(id: String!): Machine
 
@@ -560,45 +565,35 @@ enum ServiceAction {
   USE
 }
 
-type ServiceDefinition {
-  """Description of the service"""
-  description: String!
+input ServiceControlInput {
+  action: VMServiceAction!
+  machineId: String!
+  serviceName: String!
+}
 
-  """Human-readable name of the service"""
-  displayName: String!
-
-  """Unique identifier for the service"""
-  id: ID!
-
-  """Internal name of the service"""
+type ServiceInfo {
+  description: String
+  displayName: String
   name: String!
-
-  """Port configurations for the service"""
-  ports: [ServicePort!]!
-
-  """Description of the risk"""
-  riskDescription: String!
-
-  """Risk level of the service"""
-  riskLevel: ServiceRiskLevel!
+  pid: Float
+  startType: ServiceStartType
+  status: ServiceStatus!
 }
 
-type ServicePort {
-  """Ending port number"""
-  portEnd: Float!
-
-  """Starting port number"""
-  portStart: Float!
-
-  """Protocol (TCP or UDP)"""
-  protocol: String!
+"""The startup type of a system service"""
+enum ServiceStartType {
+  AUTOMATIC
+  DISABLED
+  MANUAL
+  UNKNOWN
 }
 
-"""Risk level of a service"""
-enum ServiceRiskLevel {
-  HIGH
-  LOW
-  MEDIUM
+"""The current status of a system service"""
+enum ServiceStatus {
+  DISABLED
+  RUNNING
+  STOPPED
+  UNKNOWN
 }
 
 type ServiceStatusSummary {
@@ -616,6 +611,13 @@ type ServiceStatusSummary {
 
   """Total number of VMs"""
   totalVms: Float!
+}
+
+type ServiceStatusType {
+  error: String
+  message: String!
+  service: ServiceInfo
+  success: Boolean!
 }
 
 type Snapshot {
@@ -803,6 +805,16 @@ type UserType {
   """User namespace for real-time events"""
   namespace: String
   role: String!
+}
+
+"""Actions that can be performed on a VM service"""
+enum VMServiceAction {
+  DISABLE
+  ENABLE
+  RESTART
+  START
+  STATUS
+  STOP
 }
 
 type VmConnectionInfo {
