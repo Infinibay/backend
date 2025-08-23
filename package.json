@@ -30,6 +30,7 @@
   "dependencies": {
     "@apollo/server": "^4.3.0",
     "@graphql-tools/jest-transform": "^1.2.2",
+    "@infinibay/libvirt-node": "file:lib/libvirt-node/infinibay-libvirt-node-0.0.1.tgz",
     "@prisma/client": "^6.3.1",
     "@types/axios": "^0.14.0",
     "@types/chokidar": "^2.1.7",

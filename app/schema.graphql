@@ -79,6 +79,12 @@ input CreateNetworkInput {
   name: String! = ""
 }
 
+input CreateSnapshotInput {
+  description: String
+  machineId: String!
+  name: String!
+}
+
 input CreateUserInputType {
   email: String! = ""
   firstName: String! = ""
@@ -95,6 +101,11 @@ scalar DateTimeISO
 
 input DeleteNetworkInput {
   name: String!
+}
+
+input DeleteSnapshotInput {
+  machineId: String!
+  snapshotName: String!
 }
 
 type DepartmentServiceStatus {
@@ -364,11 +375,17 @@ type Mutation {
   createMachineTemplate(input: MachineTemplateInputType!): MachineTemplateType!
   createMachineTemplateCategory(input: MachineTemplateCategoryInputType!): MachineTemplateCategoryType!
   createNetwork(input: CreateNetworkInput!): Boolean!
+
+  """Create a snapshot of a virtual machine"""
+  createSnapshot(input: CreateSnapshotInput!): SnapshotResult!
   createUser(input: CreateUserInputType!): UserType!
   deleteApplication(id: String!): Boolean!
   deleteFilter(id: ID!): Boolean!
   deleteFilterRule(id: ID!): Boolean!
   deleteNetwork(input: DeleteNetworkInput!): Boolean!
+
+  """Delete a snapshot from a virtual machine"""
+  deleteSnapshot(input: DeleteSnapshotInput!): SuccessType!
   destroyDepartment(id: String!): DepartmentType!
   destroyMachine(id: String!): SuccessType!
   destroyMachineTemplate(id: String!): Boolean!
@@ -377,6 +394,9 @@ type Mutation {
 
   """Apply a network filter inmediatly"""
   flushFilter(filterId: ID!): Boolean!
+
+  """Force power off and restore snapshot (emergency recovery)"""
+  forceRestoreSnapshot(input: RestoreSnapshotInput!): SuccessType!
   moveMachine(departmentId: String!, id: String!): Machine!
   powerOff(id: String!): SuccessType!
   powerOn(id: String!): SuccessType!
@@ -386,6 +406,9 @@ type Mutation {
 
   """Remove ISO file"""
   removeISO(isoId: String!): Boolean!
+
+  """Restore a virtual machine to a snapshot"""
+  restoreSnapshot(input: RestoreSnapshotInput!): SuccessType!
   setNetworkBridgeName(input: BridgeNameInput!): Boolean!
   setNetworkIp(input: NetworkIpInput!): Boolean!
   setNetworkIpRange(input: IpRangeInput!): Boolean!
@@ -483,6 +506,9 @@ type Query {
 
   """Check overall system readiness"""
   checkSystemReadiness: SystemReadiness!
+
+  """Get the current snapshot of a virtual machine"""
+  currentSnapshot(machineId: String!): Snapshot
   currentUser: UserType
   department(id: String!): DepartmentType
   departments: [DepartmentType!]!
@@ -503,6 +529,9 @@ type Query {
   listServices: [ServiceDefinition!]!
   login(email: String!, password: String!): UserToken!
   machine(id: String!): Machine
+
+  """List all snapshots for a virtual machine"""
+  machineSnapshots(machineId: String!): SnapshotListResult!
   machineTemplate(id: String!): MachineTemplateType
   machineTemplateCategories: [MachineTemplateCategoryType!]!
   machineTemplateCategory(id: String!): MachineTemplateCategoryType
@@ -518,6 +547,11 @@ type Query {
 
   """Get comprehensive diagnostics for VM socket connection issues"""
   vmSocketDiagnostics(vmId: String!): VmDiagnostics!
+}
+
+input RestoreSnapshotInput {
+  machineId: String!
+  snapshotName: String!
 }
 
 """Service action type (USE for outbound, PROVIDE for inbound)"""
@@ -582,6 +616,31 @@ type ServiceStatusSummary {
 
   """Total number of VMs"""
   totalVms: Float!
+}
+
+type Snapshot {
+  createdAt: DateTimeISO!
+  description: String
+  hasMetadata: Boolean!
+  id: ID!
+  isCurrent: Boolean!
+  name: String!
+  parentId: String
+  state: String!
+  vmId: String!
+  vmName: String!
+}
+
+type SnapshotListResult {
+  message: String!
+  snapshots: [Snapshot!]!
+  success: Boolean!
+}
+
+type SnapshotResult {
+  message: String!
+  snapshot: Snapshot
+  success: Boolean!
 }
 
 type SocketConnectionStats {
