@@ -13,6 +13,10 @@ import {
   PackageManagementResult,
   CommandResult
 } from '../types/PackageType'
+import { getSocketService } from '@services/SocketService'
+import Debug from 'debug'
+
+const debug = Debug('infinibay:package-resolver')
 
 @Resolver()
 export class PackageResolver {
@@ -166,11 +170,54 @@ export class PackageResolver {
       console.log(`User ${ctx.user?.email} is performing ${input.action} on package ${input.packageName} for machine ${machine.name}`)
 
       const packageManager = this.getPackageManager(ctx)
+      
+      // Emit starting event
+      if (ctx.user) {
+        try {
+          const socketService = getSocketService()
+          const eventAction = input.action === 'INSTALL' ? 'installing' : 
+                             input.action === 'REMOVE' ? 'removing' : 'updating'
+          
+          socketService.sendToUser(machine.userId || ctx.user.id, 'vm', `package:${eventAction}`, {
+            data: {
+              machineId: input.machineId,
+              packageName: input.packageName,
+              action: input.action
+            }
+          })
+          debug(`📡 Emitted vm:package:${eventAction} event for machine ${input.machineId}`)
+        } catch (eventError) {
+          debug(`Failed to emit WebSocket event: ${eventError}`)
+        }
+      }
+      
       const internalResult = await packageManager.managePackage(
         input.machineId,
         input.packageName,
         input.action
       )
+      
+      // Emit completion event
+      if (internalResult.success && ctx.user) {
+        try {
+          const socketService = getSocketService()
+          const eventAction = input.action === 'INSTALL' ? 'installed' : 
+                             input.action === 'REMOVE' ? 'removed' : 'updated'
+          
+          socketService.sendToUser(machine.userId || ctx.user.id, 'vm', `package:${eventAction}`, {
+            data: {
+              machineId: input.machineId,
+              packageName: input.packageName,
+              action: input.action,
+              success: true
+            }
+          })
+          debug(`📡 Emitted vm:package:${eventAction} event for machine ${input.machineId}`)
+        } catch (eventError) {
+          debug(`Failed to emit WebSocket event: ${eventError}`)
+        }
+      }
+      
       // Map internal type to GraphQL type
       return this.mapToGraphQLResult(internalResult)
     } catch (error) {
@@ -218,7 +265,34 @@ export class PackageResolver {
       }
 
       const packageManager = this.getPackageManager(ctx)
+      
+      // Emit installing event
+      if (ctx.user) {
+        try {
+          const socketService = getSocketService()
+          socketService.sendToUser(machine.userId || ctx.user.id, 'vm', 'package:installing', {
+            data: { machineId, packageName }
+          })
+          debug(`📡 Emitted vm:package:installing event for machine ${machineId}`)
+        } catch (eventError) {
+          debug(`Failed to emit WebSocket event: ${eventError}`)
+        }
+      }
+      
       const internalResult = await packageManager.installPackage(machineId, packageName)
+      
+      // Emit installed event if successful
+      if (internalResult.success && ctx.user) {
+        try {
+          const socketService = getSocketService()
+          socketService.sendToUser(machine.userId || ctx.user.id, 'vm', 'package:installed', {
+            data: { machineId, packageName, success: true }
+          })
+          debug(`📡 Emitted vm:package:installed event for machine ${machineId}`)
+        } catch (eventError) {
+          debug(`Failed to emit WebSocket event: ${eventError}`)
+        }
+      }
       
       // Map internal result to GraphQL CommandResult type
       const result = new CommandResult()
@@ -272,7 +346,34 @@ export class PackageResolver {
       }
 
       const packageManager = this.getPackageManager(ctx)
+      
+      // Emit removing event
+      if (ctx.user) {
+        try {
+          const socketService = getSocketService()
+          socketService.sendToUser(machine.userId || ctx.user.id, 'vm', 'package:removing', {
+            data: { machineId, packageName }
+          })
+          debug(`📡 Emitted vm:package:removing event for machine ${machineId}`)
+        } catch (eventError) {
+          debug(`Failed to emit WebSocket event: ${eventError}`)
+        }
+      }
+      
       const internalResult = await packageManager.removePackage(machineId, packageName)
+      
+      // Emit removed event if successful
+      if (internalResult.success && ctx.user) {
+        try {
+          const socketService = getSocketService()
+          socketService.sendToUser(machine.userId || ctx.user.id, 'vm', 'package:removed', {
+            data: { machineId, packageName, success: true }
+          })
+          debug(`📡 Emitted vm:package:removed event for machine ${machineId}`)
+        } catch (eventError) {
+          debug(`Failed to emit WebSocket event: ${eventError}`)
+        }
+      }
       
       // Map internal result to GraphQL CommandResult type
       const result = new CommandResult()
@@ -326,7 +427,34 @@ export class PackageResolver {
       }
 
       const packageManager = this.getPackageManager(ctx)
+      
+      // Emit updating event
+      if (ctx.user) {
+        try {
+          const socketService = getSocketService()
+          socketService.sendToUser(machine.userId || ctx.user.id, 'vm', 'package:updating', {
+            data: { machineId, packageName }
+          })
+          debug(`📡 Emitted vm:package:updating event for machine ${machineId}`)
+        } catch (eventError) {
+          debug(`Failed to emit WebSocket event: ${eventError}`)
+        }
+      }
+      
       const internalResult = await packageManager.updatePackage(machineId, packageName)
+      
+      // Emit updated event if successful
+      if (internalResult.success && ctx.user) {
+        try {
+          const socketService = getSocketService()
+          socketService.sendToUser(machine.userId || ctx.user.id, 'vm', 'package:updated', {
+            data: { machineId, packageName, success: true }
+          })
+          debug(`📡 Emitted vm:package:updated event for machine ${machineId}`)
+        } catch (eventError) {
+          debug(`Failed to emit WebSocket event: ${eventError}`)
+        }
+      }
       
       // Map internal result to GraphQL CommandResult type
       const result = new CommandResult()

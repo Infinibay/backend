@@ -1,4 +1,4 @@
-import { Resolver, Query, Mutation, Arg, Authorized } from 'type-graphql';
+import { Resolver, Query, Mutation, Arg, Authorized, Ctx } from 'type-graphql';
 import { 
   Snapshot, 
   SnapshotResult, 
@@ -13,6 +13,11 @@ import { getLibvirtConnection } from '@utils/libvirt';
 import { Machine, Connection } from '@infinibay/libvirt-node';
 import { Debugger } from '@utils/debug';
 import { UserInputError } from 'apollo-server-express';
+import { getSocketService } from '@services/SocketService';
+import { InfinibayContext } from '@utils/context';
+import Debug from 'debug';
+
+const debug = Debug('infinibay:snapshot-resolver');
 
 @Resolver()
 export class SnapshotResolver {
@@ -43,7 +48,8 @@ export class SnapshotResolver {
   @Mutation(() => SnapshotResult, { description: 'Create a snapshot of a virtual machine' })
   @Authorized()
   async createSnapshot(
-    @Arg('input') input: CreateSnapshotInput
+    @Arg('input') input: CreateSnapshotInput,
+    @Ctx() ctx?: InfinibayContext
   ): Promise<SnapshotResult> {
     try {
       const { snapshotService, libvirt } = await this.ensureServices();
@@ -105,6 +111,29 @@ export class SnapshotResolver {
 
       this.debug.log('info', `Snapshot '${input.name}' created successfully for VM ${input.machineId}`);
 
+      // Emit WebSocket event
+      if (ctx?.user && ctx.prisma) {
+        try {
+          const machine = await ctx.prisma.machine.findUnique({
+            where: { id: input.machineId },
+            select: { userId: true }
+          });
+          
+          if (machine?.userId) {
+            const socketService = getSocketService();
+            socketService.sendToUser(machine.userId, 'vm', 'snapshot:created', {
+              data: {
+                machineId: input.machineId,
+                snapshot: snapshot
+              }
+            });
+            debug(`📡 Emitted vm:snapshot:created event for machine ${input.machineId}`);
+          }
+        } catch (eventError) {
+          debug(`Failed to emit WebSocket event: ${eventError}`);
+        }
+      }
+
       return {
         success: true,
         message: result.message,
@@ -119,7 +148,8 @@ export class SnapshotResolver {
   @Mutation(() => SuccessType, { description: 'Restore a virtual machine to a snapshot' })
   @Authorized()
   async restoreSnapshot(
-    @Arg('input') input: RestoreSnapshotInput
+    @Arg('input') input: RestoreSnapshotInput,
+    @Ctx() ctx?: InfinibayContext
   ): Promise<SuccessType> {
     try {
       const { snapshotService, libvirt } = await this.ensureServices();
@@ -153,6 +183,29 @@ export class SnapshotResolver {
 
       this.debug.log('info', `VM ${input.machineId} restored to snapshot '${input.snapshotName}'`);
 
+      // Emit WebSocket event if successful
+      if (result.success && ctx?.user && ctx.prisma) {
+        try {
+          const machine = await ctx.prisma.machine.findUnique({
+            where: { id: input.machineId },
+            select: { userId: true }
+          });
+          
+          if (machine?.userId) {
+            const socketService = getSocketService();
+            socketService.sendToUser(machine.userId, 'vm', 'snapshot:restored', {
+              data: {
+                machineId: input.machineId,
+                snapshotName: input.snapshotName
+              }
+            });
+            debug(`📡 Emitted vm:snapshot:restored event for machine ${input.machineId}`);
+          }
+        } catch (eventError) {
+          debug(`Failed to emit WebSocket event: ${eventError}`);
+        }
+      }
+
       return {
         success: result.success,
         message: result.message
@@ -166,7 +219,8 @@ export class SnapshotResolver {
   @Mutation(() => SuccessType, { description: 'Delete a snapshot from a virtual machine' })
   @Authorized()
   async deleteSnapshot(
-    @Arg('input') input: DeleteSnapshotInput
+    @Arg('input') input: DeleteSnapshotInput,
+    @Ctx() ctx?: InfinibayContext
   ): Promise<SuccessType> {
     try {
       const { snapshotService, libvirt } = await this.ensureServices();
@@ -199,6 +253,29 @@ export class SnapshotResolver {
       );
 
       this.debug.log('info', `Snapshot '${input.snapshotName}' deleted from VM ${input.machineId}`);
+
+      // Emit WebSocket event if successful
+      if (result.success && ctx?.user && ctx.prisma) {
+        try {
+          const machine = await ctx.prisma.machine.findUnique({
+            where: { id: input.machineId },
+            select: { userId: true }
+          });
+          
+          if (machine?.userId) {
+            const socketService = getSocketService();
+            socketService.sendToUser(machine.userId, 'vm', 'snapshot:deleted', {
+              data: {
+                machineId: input.machineId,
+                snapshotName: input.snapshotName
+              }
+            });
+            debug(`📡 Emitted vm:snapshot:deleted event for machine ${input.machineId}`);
+          }
+        } catch (eventError) {
+          debug(`Failed to emit WebSocket event: ${eventError}`);
+        }
+      }
 
       return {
         success: result.success,

@@ -3,6 +3,8 @@ import { PrismaClient } from '@prisma/client'
 import { ProcessManager, InternalProcessInfo, InternalProcessControlResult, ProcessSortBy as InternalProcessSortBy } from '@services/ProcessManager'
 import { ProcessInfo, ProcessControlResult, ProcessSortBy } from '../types/ProcessType'
 import { VirtioSocketWatcherService } from '@services/VirtioSocketWatcherService'
+import { getEventManager } from '@services/EventManager'
+import { getSocketService } from '@services/SocketService'
 import Debug from 'debug'
 
 const debug = Debug('infinibay:process-resolver')
@@ -10,6 +12,7 @@ const debug = Debug('infinibay:process-resolver')
 interface Context {
   prisma: PrismaClient
   virtioSocketWatcher: VirtioSocketWatcherService
+  user?: { id: string; role: string }
 }
 
 @Resolver()
@@ -108,6 +111,31 @@ export class ProcessResolver {
       const manager = this.getProcessManager(ctx)
       const internalResult = await manager.killProcess(machineId, pid, force)
       
+      // Emit WebSocket event if successful
+      if (internalResult.success && ctx.user) {
+        try {
+          const socketService = getSocketService()
+          const machine = await ctx.prisma.machine.findUnique({ 
+            where: { id: machineId },
+            select: { userId: true }
+          })
+          
+          if (machine?.userId) {
+            socketService.sendToUser(machine.userId, 'vm', 'process:killed', {
+              data: {
+                machineId,
+                pid,
+                processName: internalResult.processName,
+                force
+              }
+            })
+            debug(`📡 Emitted vm:process:killed event for machine ${machineId}`)
+          }
+        } catch (eventError) {
+          debug(`Failed to emit WebSocket event: ${eventError}`)
+        }
+      }
+      
       // Map internal type to GraphQL type
       return this.mapToGraphQLControlResult(internalResult)
     } catch (error) {
@@ -140,6 +168,34 @@ export class ProcessResolver {
       
       const manager = this.getProcessManager(ctx)
       const internalResults = await manager.killProcesses(machineId, pids, force)
+      
+      // Emit WebSocket event for successful kills
+      const successfulKills = internalResults.filter(r => r.success)
+      if (successfulKills.length > 0 && ctx.user) {
+        try {
+          const socketService = getSocketService()
+          const machine = await ctx.prisma.machine.findUnique({ 
+            where: { id: machineId },
+            select: { userId: true }
+          })
+          
+          if (machine?.userId) {
+            socketService.sendToUser(machine.userId, 'vm', 'processes:killed', {
+              data: {
+                machineId,
+                processes: successfulKills.map(r => ({
+                  pid: r.pid,
+                  processName: r.processName
+                })),
+                force
+              }
+            })
+            debug(`📡 Emitted vm:processes:killed event for ${successfulKills.length} processes on machine ${machineId}`)
+          }
+        } catch (eventError) {
+          debug(`Failed to emit WebSocket event: ${eventError}`)
+        }
+      }
       
       // Map internal types to GraphQL types
       return internalResults.map(result => this.mapToGraphQLControlResult(result))

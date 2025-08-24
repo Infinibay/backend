@@ -13,6 +13,10 @@ import {
   ServiceStatus,
   ServiceStartType
 } from '../types/ServiceType'
+import { getSocketService } from '@services/SocketService'
+import Debug from 'debug'
+
+const debug = Debug('infinibay:service-resolver')
 
 @Resolver()
 export class ServiceResolver {
@@ -126,6 +130,26 @@ export class ServiceResolver {
         input.serviceName,
         input.action
       )
+
+      // Emit WebSocket event if successful
+      if (internalResult.success && user) {
+        try {
+          const socketService = getSocketService()
+          const actionName = input.action.toLowerCase()
+          
+          socketService.sendToUser(machine.userId || user.id, 'vm', `service:${actionName}`, {
+            data: {
+              machineId: input.machineId,
+              serviceName: input.serviceName,
+              action: input.action,
+              newStatus: internalResult.service?.status
+            }
+          })
+          debug(`📡 Emitted vm:service:${actionName} event for machine ${input.machineId}`)
+        } catch (eventError) {
+          debug(`Failed to emit WebSocket event: ${eventError}`)
+        }
+      }
 
       // Map internal type to GraphQL type
       return this.mapToGraphQLResult(internalResult)

@@ -1,4 +1,5 @@
-import { Arg, Authorized, Ctx, Query, Resolver, Subscription, Root, PubSub } from 'type-graphql'
+import { Arg, Authorized, Ctx, Query, Resolver } from 'type-graphql'
+// import { Subscription, Root, PubSub } from 'type-graphql' // TODO: Enable when PubSub is configured
 import {
   SystemMetrics,
   ProcessSnapshot,
@@ -10,6 +11,34 @@ import {
   MachineMetricsSummary
 } from './type'
 import { InfinibayContext } from '@main/utils/context'
+
+// Helper function to ensure JSON fields are valid for GraphQLJSONObject
+const ensureValidJSONObject = (value: any, isArrayField: boolean = false): any => {
+  // For fields that should be arrays, wrap them in an object
+  if (isArrayField) {
+    if (Array.isArray(value)) {
+      return { data: value }
+    }
+    if (value && typeof value === 'object' && value.constructor === Object) {
+      // Already an object, check if it has the data property
+      if ('data' in value) {
+        return value
+      }
+      // Wrap the object in a data property
+      return { data: [value] }
+    }
+    // Return empty array wrapped in object
+    return { data: [] }
+  }
+  
+  // For regular object fields
+  if (value && typeof value === 'object' && value.constructor === Object) {
+    return value
+  }
+  
+  // Return empty object for any invalid input
+  return {}
+}
 
 @Resolver()
 export class MetricsResolver {
@@ -51,7 +80,12 @@ export class MetricsResolver {
       availableMemoryKB: Number(r.availableMemoryKB),
       swapTotalKB: r.swapTotalKB ? Number(r.swapTotalKB) : undefined,
       swapUsedKB: r.swapUsedKB ? Number(r.swapUsedKB) : undefined,
-      uptime: Number(r.uptime)
+      uptime: Number(r.uptime),
+      // Ensure JSON fields are valid objects
+      diskUsageStats: ensureValidJSONObject(r.diskUsageStats, true),
+      diskIOStats: ensureValidJSONObject(r.diskIOStats),
+      networkStats: ensureValidJSONObject(r.networkStats),
+      loadAverage: ensureValidJSONObject(r.loadAverage)
     }))
   }
 
@@ -77,7 +111,12 @@ export class MetricsResolver {
       availableMemoryKB: Number(result.availableMemoryKB),
       swapTotalKB: result.swapTotalKB ? Number(result.swapTotalKB) : undefined,
       swapUsedKB: result.swapUsedKB ? Number(result.swapUsedKB) : undefined,
-      uptime: Number(result.uptime)
+      uptime: Number(result.uptime),
+      // Ensure JSON fields are valid objects
+      diskUsageStats: ensureValidJSONObject(result.diskUsageStats, true),
+      diskIOStats: ensureValidJSONObject(result.diskIOStats),
+      networkStats: ensureValidJSONObject(result.networkStats),
+      loadAverage: ensureValidJSONObject(result.loadAverage)
     }
   }
 
@@ -174,8 +213,8 @@ export class MetricsResolver {
   @Query(() => [ApplicationUsage])
   @Authorized(['ADMIN', 'USER'])
   async applicationUsage (
-    @Arg('machineId', { nullable: true }) machineId: string | undefined,
-    @Arg('limit', { nullable: true, defaultValue: 50 }) limit: number,
+    @Arg('machineId', () => String, { nullable: true }) machineId: string | undefined,
+    @Arg('limit', () => Number, { nullable: true, defaultValue: 50 }) limit: number,
     @Ctx() { prisma }: InfinibayContext
   ): Promise<ApplicationUsage[]> {
     const where: any = { isActive: true }
@@ -340,7 +379,12 @@ export class MetricsResolver {
         availableMemoryKB: Number(latestSystemMetrics.availableMemoryKB),
         swapTotalKB: latestSystemMetrics.swapTotalKB ? Number(latestSystemMetrics.swapTotalKB) : undefined,
         swapUsedKB: latestSystemMetrics.swapUsedKB ? Number(latestSystemMetrics.swapUsedKB) : undefined,
-        uptime: Number(latestSystemMetrics.uptime)
+        uptime: Number(latestSystemMetrics.uptime),
+        // Ensure JSON fields are valid objects
+        diskUsageStats: ensureValidJSONObject(latestSystemMetrics.diskUsageStats, true),
+        diskIOStats: ensureValidJSONObject(latestSystemMetrics.diskIOStats),
+        networkStats: ensureValidJSONObject(latestSystemMetrics.networkStats),
+        loadAverage: ensureValidJSONObject(latestSystemMetrics.loadAverage)
       }
       : undefined
 
@@ -398,26 +442,32 @@ export class MetricsResolver {
       availableMemoryKB: Number(r.availableMemoryKB),
       swapTotalKB: r.swapTotalKB ? Number(r.swapTotalKB) : undefined,
       swapUsedKB: r.swapUsedKB ? Number(r.swapUsedKB) : undefined,
-      uptime: Number(r.uptime)
+      uptime: Number(r.uptime),
+      // Ensure JSON fields are valid objects
+      diskUsageStats: ensureValidJSONObject(r.diskUsageStats, true),
+      diskIOStats: ensureValidJSONObject(r.diskIOStats),
+      networkStats: ensureValidJSONObject(r.networkStats),
+      loadAverage: ensureValidJSONObject(r.loadAverage)
     }))
   }
 
   // Subscription for real-time metrics updates
-  @Subscription(() => SystemMetrics, {
-    topics: 'SYSTEM_METRICS_UPDATED'
-  })
-  @Authorized(['ADMIN', 'USER'])
-  async systemMetricsUpdated (
-    @Arg('machineId', { nullable: true }) machineId?: string,
-    @Root() payload?: { machineId: string; metrics: SystemMetrics }
-  ): Promise<SystemMetrics> {
-    // Filter by machineId if specified
-    if (machineId && payload?.machineId !== machineId) {
-      throw new Error('Machine ID filter does not match')
-    }
+  // TODO: Enable when PubSub is configured
+  // @Subscription(() => SystemMetrics, {
+  //   topics: 'SYSTEM_METRICS_UPDATED'
+  // })
+  // @Authorized(['ADMIN', 'USER'])
+  // async systemMetricsUpdated (
+  //   @Arg('machineId', { nullable: true }) machineId?: string,
+  //   @Root() payload?: { machineId: string; metrics: SystemMetrics }
+  // ): Promise<SystemMetrics> {
+  //   // Filter by machineId if specified
+  //   if (machineId && payload?.machineId !== machineId) {
+  //     throw new Error('Machine ID filter does not match')
+  //   }
 
-    return payload!.metrics
-  }
+  //   return payload!.metrics
+  // }
 }
 
 // Helper function to publish metrics updates (to be called from VirtioSocketService)

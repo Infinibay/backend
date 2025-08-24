@@ -20,6 +20,7 @@ import { Debugger } from '@utils/debug'
 import { MachineLifecycleService } from '../../../services/machineLifecycleService'
 import { getEventManager } from '../../../services/EventManager'
 import { VMOperationsService } from '../../../services/VMOperationsService'
+import { getSocketService } from '../../../services/SocketService'
 
 async function transformMachine (prismaMachine: any, prisma: any): Promise<Machine> {
   // TODO: fix n+1 problem
@@ -584,13 +585,25 @@ export class MachineMutations {
       const result = await vmOpsService.restartMachine(id)
       
       if (result.success) {
-        // Trigger real-time event
+        // Emit WebSocket events
         try {
-          const eventManager = getEventManager()
-          await eventManager.dispatchEvent('vms', 'update', { id }, user?.id)
-          console.log(`🎯 Triggered real-time event: vms:restart for machine ${id}`)
+          const socketService = getSocketService()
+          const userId = machine.userId || user?.id
+          if (userId) {
+            // Emit restarting event
+            socketService.sendToUser(userId, 'vm', 'restarting', {
+              data: { machineId: id }
+            })
+            
+            // Emit restarted event (since the operation is complete)
+            socketService.sendToUser(userId, 'vm', 'restarted', {
+              data: { machineId: id, status: 'running' }
+            })
+            
+            console.log(`📡 Emitted vm:restarting and vm:restarted events for machine ${id}`)
+          }
         } catch (eventError) {
-          console.error('Failed to trigger real-time event:', eventError)
+          console.error('Failed to emit WebSocket event:', eventError)
         }
       }
 
@@ -624,6 +637,23 @@ export class MachineMutations {
     try {
       const result = await vmOpsService.forcePowerOff(id)
       
+      // Emit WebSocket event if successful
+      if (result.success) {
+        try {
+          const socketService = getSocketService()
+          const userId = machine.userId || user?.id
+          if (userId) {
+            socketService.sendToUser(userId, 'vm', 'forced:poweroff', {
+              data: { machineId: id, status: 'shutoff' }
+            })
+            
+            console.log(`📡 Emitted vm:forced:poweroff event for machine ${id}`)
+          }
+        } catch (eventError) {
+          console.error('Failed to emit WebSocket event:', eventError)
+        }
+      }
+      
       return { 
         success: result.success, 
         message: result.message || result.error || 'Machine forcefully powered off' 
@@ -655,13 +685,19 @@ export class MachineMutations {
       const result = await vmOpsService.resetMachine(id)
       
       if (result.success) {
-        // Trigger real-time event
+        // Emit WebSocket event
         try {
-          const eventManager = getEventManager()
-          await eventManager.dispatchEvent('vms', 'update', { id }, user?.id)
-          console.log(`🎯 Triggered real-time event: vms:reset for machine ${id}`)
+          const socketService = getSocketService()
+          const userId = machine.userId || user?.id
+          if (userId) {
+            socketService.sendToUser(userId, 'vm', 'reset', {
+              data: { machineId: id, status: 'running' }
+            })
+            
+            console.log(`📡 Emitted vm:reset event for machine ${id}`)
+          }
         } catch (eventError) {
-          console.error('Failed to trigger real-time event:', eventError)
+          console.error('Failed to emit WebSocket event:', eventError)
         }
       }
 

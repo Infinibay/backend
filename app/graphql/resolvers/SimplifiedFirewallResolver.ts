@@ -11,6 +11,10 @@ import {
   ApplyFirewallTemplateInput
 } from '../types/SimplifiedFirewallType'
 import { SimplifiedRule } from '@services/FirewallSimplifierService'
+import { getSocketService } from '@services/SocketService'
+import Debug from 'debug'
+
+const debug = Debug('infinibay:firewall-resolver')
 
 @Resolver()
 export class SimplifiedFirewallResolver {
@@ -110,10 +114,29 @@ export class SimplifiedFirewallResolver {
     }
 
     const service = this.getService(prisma)
-    return await service.applyFirewallTemplate(
+    const result = await service.applyFirewallTemplate(
       input.machineId,
       input.template as ServiceFirewallTemplate
     )
+    
+    // Emit WebSocket event
+    if (user) {
+      try {
+        const socketService = getSocketService()
+        socketService.sendToUser(machine.userId || user.id, 'vm', 'firewall:template:applied', {
+          data: {
+            machineId: input.machineId,
+            template: input.template,
+            state: result
+          }
+        })
+        debug(`📡 Emitted vm:firewall:template:applied event for machine ${input.machineId}`)
+      } catch (eventError) {
+        debug(`Failed to emit WebSocket event: ${eventError}`)
+      }
+    }
+    
+    return result
   }
 
   @Mutation(() => VMFirewallState)
@@ -136,10 +159,29 @@ export class SimplifiedFirewallResolver {
     }
 
     const service = this.getService(prisma)
-    return await service.removeFirewallTemplate(
+    const result = await service.removeFirewallTemplate(
       machineId,
       template as ServiceFirewallTemplate
     )
+    
+    // Emit WebSocket event
+    if (user) {
+      try {
+        const socketService = getSocketService()
+        socketService.sendToUser(machine.userId || user.id, 'vm', 'firewall:template:removed', {
+          data: {
+            machineId,
+            template,
+            state: result
+          }
+        })
+        debug(`📡 Emitted vm:firewall:template:removed event for machine ${machineId}`)
+      } catch (eventError) {
+        debug(`Failed to emit WebSocket event: ${eventError}`)
+      }
+    }
+    
+    return result
   }
 
   @Mutation(() => VMFirewallState)
@@ -195,7 +237,26 @@ export class SimplifiedFirewallResolver {
       description: input.description
     }
 
-    return await service.addCustomRule(input.machineId, rule)
+    const result = await service.addCustomRule(input.machineId, rule)
+    
+    // Emit WebSocket event
+    if (user) {
+      try {
+        const socketService = getSocketService()
+        socketService.sendToUser(machine.userId || user.id, 'vm', 'firewall:rule:created', {
+          data: {
+            machineId: input.machineId,
+            rule,
+            state: result
+          }
+        })
+        debug(`📡 Emitted vm:firewall:rule:created event for machine ${input.machineId}`)
+      } catch (eventError) {
+        debug(`Failed to emit WebSocket event: ${eventError}`)
+      }
+    }
+    
+    return result
   }
 
   @Mutation(() => VMFirewallState)
@@ -237,6 +298,25 @@ export class SimplifiedFirewallResolver {
     })
 
     // Return updated state
-    return await service.getVMFirewallState(machineId)
+    const result = await service.getVMFirewallState(machineId)
+    
+    // Emit WebSocket event
+    if (user) {
+      try {
+        const socketService = getSocketService()
+        socketService.sendToUser(machine.userId || user.id, 'vm', 'firewall:rule:removed', {
+          data: {
+            machineId,
+            ruleId,
+            state: result
+          }
+        })
+        debug(`📡 Emitted vm:firewall:rule:removed event for machine ${machineId}`)
+      } catch (eventError) {
+        debug(`Failed to emit WebSocket event: ${eventError}`)
+      }
+    }
+    
+    return result
   }
 }
