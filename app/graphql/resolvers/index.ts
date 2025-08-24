@@ -15,6 +15,7 @@ import { ISOResolver } from './ISOResolver'
 import { SnapshotResolver } from './SnapshotResolver'
 import { ServiceResolver } from './ServiceResolver'
 import { PackageResolver } from './PackageResolver'
+import { ProcessResolver } from './ProcessResolver'
 
 const resolvers: NonEmptyArray<Function> = [
   UserResolver,
@@ -34,7 +35,8 @@ const resolvers: NonEmptyArray<Function> = [
   ISOResolver,
   SnapshotResolver,
   ServiceResolver,
-  PackageResolver
+  PackageResolver,
+  ProcessResolver
 ]
 
 export default resolvers as NonEmptyArray<Function>

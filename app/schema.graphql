@@ -421,6 +421,8 @@ type Mutation {
 
   """Install a package on a virtual machine (legacy compatibility)"""
   installPackage(machineId: ID!, packageName: String!): CommandResult!
+  killProcess(force: Boolean! = false, machineId: String!, pid: Int!): ProcessControlResult!
+  killProcesses(force: Boolean! = false, machineId: String!, pids: [Int!]!): [ProcessControlResult!]!
 
   """Install, remove, or update a package on a virtual machine"""
   managePackage(input: PackageManagementInput!): PackageManagementResult!
@@ -582,6 +584,33 @@ input PaginationInputType {
   take: Int = 20
 }
 
+type ProcessControlResult {
+  error: String
+  message: String!
+  pid: Int
+  processName: String
+  success: Boolean!
+}
+
+type ProcessInfo {
+  commandLine: String
+  cpuUsage: Float!
+  memoryKb: Int!
+  name: String!
+  pid: Int!
+  startTime: DateTimeISO
+  status: String!
+  user: String
+}
+
+"""Options for sorting processes"""
+enum ProcessSortBy {
+  CPU
+  MEMORY
+  NAME
+  PID
+}
+
 type Query {
   """Get all ISOs (available and unavailable)"""
   allISOs: [ISO!]!
@@ -616,6 +645,7 @@ type Query {
   """Get supported OS types"""
   getSupportedOSTypes: [String!]!
   getSystemResources: SystemResources!
+  getTopProcesses(limit: Int! = 10, machineId: String!, sortBy: ProcessSortBy! = CPU): [ProcessInfo!]!
   getVmServiceStatus(serviceId: ID, vmId: ID!): [VmServiceStatus!]!
   graphicConnection(id: String!): GraphicConfigurationType
   listFilterRules(filterId: ID): [FWRule!]!
@@ -623,6 +653,7 @@ type Query {
 
   """List all installed packages on a virtual machine"""
   listInstalledPackages(machineId: ID!): [PackageInfo!]!
+  listProcesses(limit: Int, machineId: String!): [ProcessInfo!]!
 
   """List all services running on a virtual machine"""
   listServices(machineId: String!): [ServiceInfo!]!

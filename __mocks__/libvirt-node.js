@@ -704,9 +704,69 @@ class MockHypervisor {
   }
 }
 
+// Mock GuestAgent class
+class MockGuestAgent {
+  constructor(domain) {
+    this.domain = domain;
+  }
+
+  exec(command, args, captureOutput) {
+    // Return mock process output
+    return {
+      stdout: '',
+      stderr: '',
+      exitCode: 0
+    };
+  }
+
+  execStatus(pid) {
+    return {
+      exitCode: 0,
+      exited: true
+    };
+  }
+
+  fileRead(path) {
+    return 'mock file content';
+  }
+
+  fileWrite(path, content, append) {
+    return true;
+  }
+
+  getNetworkInterfaces() {
+    return JSON.stringify([]);
+  }
+
+  getOsInfo() {
+    return JSON.stringify({ os: 'linux' });
+  }
+
+  shutdown(mode) {
+    return true;
+  }
+
+  sync() {
+    return true;
+  }
+
+  setTime(time) {
+    return true;
+  }
+
+  getUsers() {
+    return JSON.stringify([]);
+  }
+
+  rawCommand(command, args) {
+    return JSON.stringify({ success: true });
+  }
+}
+
 // Module exports
 module.exports = {
   Hypervisor: MockHypervisor,
+  GuestAgent: MockGuestAgent,
   
   // Export mock state for testing
   __setLibvirtMockState: (state) => {

@@ -863,6 +863,21 @@ export class VirtioSocketWatcherService extends EventEmitter {
     return this.sendSafeCommand(vmId, commandType, timeout)
   }
 
+  // Helper method specifically for process control commands
+  public async sendProcessCommand(
+    vmId: string,
+    action: 'ProcessList' | 'ProcessKill' | 'ProcessTop',
+    params?: { pid?: number; force?: boolean; limit?: number; sort_by?: string },
+    timeout: number = 30000
+  ): Promise<CommandResponse> {
+    const commandType: SafeCommandType = {
+      action,
+      params
+    }
+
+    return this.sendSafeCommand(vmId, commandType, timeout)
+  }
+
   // Monitor connection health (no active pinging, just monitoring)
   private startHealthMonitoring (connection: VmConnection): void {
     // Clear existing timer
