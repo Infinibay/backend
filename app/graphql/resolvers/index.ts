@@ -16,6 +16,7 @@ import { SnapshotResolver } from './SnapshotResolver'
 import { ServiceResolver } from './ServiceResolver'
 import { PackageResolver } from './PackageResolver'
 import { ProcessResolver } from './ProcessResolver'
+import { SimplifiedFirewallResolver } from './SimplifiedFirewallResolver'
 
 const resolvers: NonEmptyArray<Function> = [
   UserResolver,
@@ -36,7 +37,8 @@ const resolvers: NonEmptyArray<Function> = [
   SnapshotResolver,
   ServiceResolver,
   PackageResolver,
-  ProcessResolver
+  ProcessResolver,
+  SimplifiedFirewallResolver
 ]
 
 export default resolvers as NonEmptyArray<Function>

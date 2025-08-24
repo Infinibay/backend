@@ -70,6 +70,8 @@ model Machine {
   ramGB              Int     @default(0) // RAM in MB
   diskSizeGB         Int     @default(0)   // Disk size in GB
   gpuPciAddress      String?                // GPU PCI address (e.g., '0000:01:00.0')
+  // Firewall Templates Configuration
+  firewallTemplates  Json?                  // { appliedTemplates: [], customRules: [], lastSync: Date }
   // System Fields
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt

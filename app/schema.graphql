@@ -14,6 +14,11 @@ type ApplicationType {
   parameters: JSONObject
 }
 
+input ApplyFirewallTemplateInput {
+  machineId: ID!
+  template: FirewallTemplate!
+}
+
 input BridgeNameInput {
   bridgeName: String! = ""
   networkName: String! = ""
@@ -95,6 +100,15 @@ input CreateNetworkInput {
   enabledServices: [String!]
   ipConfig: NetworkIpConfigInput
   name: String! = ""
+}
+
+input CreateSimplifiedFirewallRuleInput {
+  action: String! = "accept"
+  description: String
+  direction: String! = "in"
+  machineId: ID!
+  port: String!
+  protocol: String! = "tcp"
 }
 
 input CreateSnapshotInput {
@@ -192,6 +206,20 @@ enum FilterType {
   DEPARTMENT
   GENERIC
   VM
+}
+
+"""Predefined firewall template configurations"""
+enum FirewallTemplate {
+  DATABASE
+  DESKTOP
+  DEVELOPMENT
+  WEB_SERVER
+}
+
+type FirewallTemplateInfo {
+  description: String!
+  name: String!
+  rules: [SimplifiedFirewallRule!]!
 }
 
 type GPU {
@@ -383,6 +411,8 @@ type MachineTemplateType {
 }
 
 type Mutation {
+  applyFirewallTemplate(input: ApplyFirewallTemplateInput!): VMFirewallState!
+
   """Calculate ISO checksum"""
   calculateISOChecksum(isoId: String!): String!
 
@@ -396,6 +426,7 @@ type Mutation {
   createMachineTemplate(input: MachineTemplateInputType!): MachineTemplateType!
   createMachineTemplateCategory(input: MachineTemplateCategoryInputType!): MachineTemplateCategoryType!
   createNetwork(input: CreateNetworkInput!): Boolean!
+  createSimplifiedFirewallRule(input: CreateSimplifiedFirewallRuleInput!): VMFirewallState!
 
   """Create a snapshot of a virtual machine"""
   createSnapshot(input: CreateSnapshotInput!): SnapshotResult!
@@ -415,6 +446,7 @@ type Mutation {
 
   """Apply a network filter inmediatly"""
   flushFilter(filterId: ID!): Boolean!
+  forcePowerOff(id: String!): SuccessType!
 
   """Force power off and restore snapshot (emergency recovery)"""
   forceRestoreSnapshot(input: RestoreSnapshotInput!): SuccessType!
@@ -432,12 +464,16 @@ type Mutation {
 
   """Register uploaded ISO"""
   registerISO(filename: String!, os: String!, path: String!, size: Float!): ISO!
+  removeFirewallTemplate(machineId: ID!, template: FirewallTemplate!): VMFirewallState!
 
   """Remove ISO file"""
   removeISO(isoId: String!): Boolean!
 
   """Remove a package from a virtual machine (legacy compatibility)"""
   removePackage(machineId: ID!, packageName: String!): CommandResult!
+  removeSimplifiedFirewallRule(machineId: ID!, ruleId: ID!): VMFirewallState!
+  resetMachine(id: String!): SuccessType!
+  restartMachine(id: String!): SuccessType!
 
   """Restore a virtual machine to a snapshot"""
   restoreSnapshot(input: RestoreSnapshotInput!): SuccessType!
@@ -450,6 +486,7 @@ type Mutation {
   """Sync ISOs with filesystem"""
   syncISOs: Boolean!
   toggleDepartmentService(input: ToggleDepartmentServiceInput!): DepartmentServiceStatus!
+  toggleFirewallTemplate(machineId: ID!, template: FirewallTemplate!): VMFirewallState!
   toggleGlobalService(input: ToggleServiceInput!): GlobalServiceStatus!
   toggleVmService(input: ToggleVmServiceInput!): VmServiceStatus!
   updateApplication(id: String!, input: CreateApplicationInputType!): ApplicationType!
@@ -636,16 +673,20 @@ type Query {
   department(id: String!): DepartmentType
   departments: [DepartmentType!]!
   findDepartmentByName(name: String!): DepartmentType
+  getAvailableFirewallTemplates: [FirewallTemplateInfo!]!
   getDepartmentServiceStatus(departmentId: ID!, serviceId: ID): [DepartmentServiceStatus!]!
   getFilter(id: ID!): GenericFilter
+  getFirewallTemplateInfo(template: FirewallTemplate!): FirewallTemplateInfo
   getGlobalServiceStatus(serviceId: ID): [GlobalServiceStatus!]!
   getGraphics: [GPU!]!
   getServiceStatusSummary: [ServiceStatusSummary!]!
+  getSimplifiedFirewallRules(machineId: ID!): [SimplifiedFirewallRule!]!
 
   """Get supported OS types"""
   getSupportedOSTypes: [String!]!
   getSystemResources: SystemResources!
   getTopProcesses(limit: Int! = 10, machineId: String!, sortBy: ProcessSortBy! = CPU): [ProcessInfo!]!
+  getVMFirewallState(machineId: ID!): VMFirewallState!
   getVmServiceStatus(serviceId: ID, vmId: ID!): [VmServiceStatus!]!
   graphicConnection(id: String!): GraphicConfigurationType
   listFilterRules(filterId: ID): [FWRule!]!
@@ -746,6 +787,16 @@ type ServiceStatusType {
   message: String!
   service: ServiceInfo
   success: Boolean!
+}
+
+type SimplifiedFirewallRule {
+  action: String!
+  description: String
+  direction: String!
+  id: ID
+  port: String!
+  protocol: String!
+  sources: [String!]
 }
 
 type Snapshot {
@@ -933,6 +984,13 @@ type UserType {
   """User namespace for real-time events"""
   namespace: String
   role: String!
+}
+
+type VMFirewallState {
+  appliedTemplates: [String!]!
+  customRules: [SimplifiedFirewallRule!]!
+  effectiveRules: [SimplifiedFirewallRule!]!
+  lastSync: DateTimeISO
 }
 
 """Actions that can be performed on a VM service"""

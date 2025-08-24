@@ -19,6 +19,7 @@ import { Connection, Machine as VirtualMachine, Error, NwFilter } from 'libvirt-
 import { Debugger } from '@utils/debug'
 import { MachineLifecycleService } from '../../../services/machineLifecycleService'
 import { getEventManager } from '../../../services/EventManager'
+import { VMOperationsService } from '../../../services/VMOperationsService'
 
 async function transformMachine (prismaMachine: any, prisma: any): Promise<Machine> {
   // TODO: fix n+1 problem
@@ -559,5 +560,117 @@ export class MachineMutations {
     }
 
     return transformMachine(updatedMachine, prisma)
+  }
+
+  @Mutation(() => SuccessType)
+  @Authorized('USER')
+  async restartMachine(
+    @Arg('id') id: string,
+    @Ctx() { prisma, user }: InfinibayContext
+  ): Promise<SuccessType> {
+    // Check if the user is an admin or the owner of the machine
+    const isAdmin = user?.role === 'ADMIN'
+    const whereClause = isAdmin ? { id } : { id, userId: user?.id }
+
+    // Retrieve the machine from the database
+    const machine = await prisma.machine.findFirst({ where: whereClause })
+    if (!machine) {
+      return { success: false, message: 'Machine not found or access denied' }
+    }
+
+    // Use VMOperationsService for robust restart
+    const vmOpsService = new VMOperationsService(prisma)
+    try {
+      const result = await vmOpsService.restartMachine(id)
+      
+      if (result.success) {
+        // Trigger real-time event
+        try {
+          const eventManager = getEventManager()
+          await eventManager.dispatchEvent('vms', 'update', { id }, user?.id)
+          console.log(`🎯 Triggered real-time event: vms:restart for machine ${id}`)
+        } catch (eventError) {
+          console.error('Failed to trigger real-time event:', eventError)
+        }
+      }
+
+      return { 
+        success: result.success, 
+        message: result.message || result.error || 'Machine restart initiated' 
+      }
+    } finally {
+      await vmOpsService.close()
+    }
+  }
+
+  @Mutation(() => SuccessType)
+  @Authorized('USER')
+  async forcePowerOff(
+    @Arg('id') id: string,
+    @Ctx() { prisma, user }: InfinibayContext
+  ): Promise<SuccessType> {
+    // Check if the user is an admin or the owner of the machine
+    const isAdmin = user?.role === 'ADMIN'
+    const whereClause = isAdmin ? { id } : { id, userId: user?.id }
+
+    // Retrieve the machine from the database
+    const machine = await prisma.machine.findFirst({ where: whereClause })
+    if (!machine) {
+      return { success: false, message: 'Machine not found or access denied' }
+    }
+
+    // Use VMOperationsService for immediate force power off
+    const vmOpsService = new VMOperationsService(prisma)
+    try {
+      const result = await vmOpsService.forcePowerOff(id)
+      
+      return { 
+        success: result.success, 
+        message: result.message || result.error || 'Machine forcefully powered off' 
+      }
+    } finally {
+      await vmOpsService.close()
+    }
+  }
+
+  @Mutation(() => SuccessType)
+  @Authorized('USER')
+  async resetMachine(
+    @Arg('id') id: string,
+    @Ctx() { prisma, user }: InfinibayContext
+  ): Promise<SuccessType> {
+    // Check if the user is an admin or the owner of the machine
+    const isAdmin = user?.role === 'ADMIN'
+    const whereClause = isAdmin ? { id } : { id, userId: user?.id }
+
+    // Retrieve the machine from the database
+    const machine = await prisma.machine.findFirst({ where: whereClause })
+    if (!machine) {
+      return { success: false, message: 'Machine not found or access denied' }
+    }
+
+    // Use VMOperationsService for hardware reset
+    const vmOpsService = new VMOperationsService(prisma)
+    try {
+      const result = await vmOpsService.resetMachine(id)
+      
+      if (result.success) {
+        // Trigger real-time event
+        try {
+          const eventManager = getEventManager()
+          await eventManager.dispatchEvent('vms', 'update', { id }, user?.id)
+          console.log(`🎯 Triggered real-time event: vms:reset for machine ${id}`)
+        } catch (eventError) {
+          console.error('Failed to trigger real-time event:', eventError)
+        }
+      }
+
+      return { 
+        success: result.success, 
+        message: result.message || result.error || 'Machine reset completed' 
+      }
+    } finally {
+      await vmOpsService.close()
+    }
   }
 }
