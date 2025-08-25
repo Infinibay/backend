@@ -1,6 +1,7 @@
 import { PrismaClient, Machine } from '@prisma/client'
 import { VirtioSocketWatcherService, SafeCommandType, CommandResponse } from './VirtioSocketWatcherService'
-import libvirtNode from '@infinibay/libvirt-node'
+import { Machine as VirtualMachine } from 'libvirt-node'
+import { getLibvirtConnection } from '@utils/libvirt'
 import Debug from 'debug'
 
 const debug = Debug('infinibay:process-manager')
@@ -59,23 +60,37 @@ export class ProcessManager {
         return null
       }
 
-      if (machine.status !== 'running') {
-        debug(`Machine ${machineId} is not running (status: ${machine.status})`)
+      // Get shared libvirt connection
+      const conn = await getLibvirtConnection()
+      if (!conn) {
+        debug(`Failed to get libvirt connection`)
         return null
       }
 
-      const hypervisor = new (libvirtNode as any).Hypervisor('qemu:///system')
-      const domain = hypervisor.lookupDomainByName(machine.name)
+      // Try to get domain from libvirt regardless of database status
+      const domain = VirtualMachine.lookupByName(conn, machine.internalName)
 
       if (!domain) {
-        debug(`Domain not found for machine ${machine.name}`)
+        debug(`Domain not found for machine ${machine.internalName}`)
         return null
       }
 
-      const [state] = domain.getState()
-      if (state !== (libvirtNode as any).VIR_DOMAIN_RUNNING) {
-        debug(`Domain ${machine.name} is not in running state`)
+      const stateResult = domain.getState()
+      const state = stateResult ? stateResult.result : null
+      // VIR_DOMAIN_RUNNING = 1
+      if (state !== 1) {
+        debug(`Domain ${machine.internalName} is not in running state (state: ${state})`)
         return null
+      }
+
+      // Update machine status in DB if it's different
+      if (machine.status !== 'running') {
+        debug(`Updating machine ${machineId} status from '${machine.status}' to 'running' based on libvirt state`)
+        await this.prisma.machine.update({
+          where: { id: machineId },
+          data: { status: 'running' }
+        })
+        machine.status = 'running'
       }
 
       return { machine, domain }
@@ -97,38 +112,30 @@ export class ProcessManager {
 
       debug(`Listing processes for machine ${machineId} (limit: ${limit || 'none'})`)
 
-      // Try VirtIO socket first (InfiniService)
-      try {
-        const command: SafeCommandType = {
-          action: 'ProcessList',
-          params: limit ? { limit } : undefined
-        }
-
-        const response = await this.virtioSocketWatcher.sendSafeCommand(
-          machineId,
-          command,
-          30000
-        ) as ProcessCommandResponse
-
-        if (response.success && response.data) {
-          const processes = Array.isArray(response.data) 
-            ? response.data 
-            : (response.data.processes || [])
-          
-          debug( `Retrieved ${processes.length} processes via VirtIO`)
-          return this.mapProcesses(processes)
-        }
-      } catch (virtioError) {
-        debug( `VirtIO socket not available for ${machineId}, falling back to QEMU Guest Agent`)
+      // Use VirtIO socket (InfiniService)
+      const command: SafeCommandType = {
+        action: 'ProcessList',
+        params: limit ? { limit } : undefined
       }
 
-      // Fallback to QEMU Guest Agent
-      const agent = new (libvirtNode as any).GuestAgent(domainInfo.domain)
-      const result = await this.listProcessesViaQGA(agent, limit)
-      
-      return result
+      const response = await this.virtioSocketWatcher.sendSafeCommand(
+        machineId,
+        command,
+        30000
+      ) as ProcessCommandResponse
+
+      if (response.success && response.data) {
+        const processes = Array.isArray(response.data)
+          ? response.data
+          : (response.data.processes || [])
+
+        debug(`Retrieved ${processes.length} processes via VirtIO`)
+        return this.mapProcesses(processes)
+      } else {
+        throw new Error(`Failed to get process list: ${response.error || 'InfiniService not available'}`)
+      }
     } catch (error) {
-      debug( `Failed to list processes for machine ${machineId}: ${error}`)
+      debug(`Failed to list processes for machine ${machineId}: ${error}`)
       throw error
     }
   }
@@ -137,8 +144,8 @@ export class ProcessManager {
    * Get top processes by CPU or memory usage
    */
   async getTopProcesses(
-    machineId: string, 
-    limit: number = 10, 
+    machineId: string,
+    limit: number = 10,
     sortBy: ProcessSortBy = ProcessSortBy.CPU
   ): Promise<InternalProcessInfo[]> {
     try {
@@ -147,47 +154,35 @@ export class ProcessManager {
         throw new Error(`Machine ${machineId} is not available`)
       }
 
-      debug( `Getting top ${limit} processes for machine ${machineId} sorted by ${sortBy}`)
+      debug(`Getting top ${limit} processes for machine ${machineId} sorted by ${sortBy}`)
 
-      // Try VirtIO socket first (InfiniService)
-      try {
-        const command: SafeCommandType = {
-          action: 'ProcessTop',
-          params: { 
-            limit,
-            sort_by: sortBy === ProcessSortBy.MEMORY ? 'memory' : 'cpu'
-          }
+      // Use VirtIO socket (InfiniService)
+      const command: SafeCommandType = {
+        action: 'ProcessTop',
+        params: {
+          limit,
+          sort_by: sortBy === ProcessSortBy.MEMORY ? 'memory' : 'cpu'
         }
-
-        const response = await this.virtioSocketWatcher.sendSafeCommand(
-          machineId,
-          command,
-          30000
-        ) as ProcessCommandResponse
-
-        if (response.success && response.data) {
-          const processes = Array.isArray(response.data) 
-            ? response.data 
-            : (response.data.processes || [])
-          
-          debug( `Retrieved top ${processes.length} processes via VirtIO`)
-          return this.mapProcesses(processes)
-        }
-      } catch (virtioError) {
-        debug( `VirtIO socket not available for ${machineId}, falling back to QEMU Guest Agent`)
       }
 
-      // Fallback to QEMU Guest Agent - get all processes and sort locally
-      const agent = new (libvirtNode as any).GuestAgent(domainInfo.domain)
-      const allProcesses = await this.listProcessesViaQGA(agent)
-      
-      // Sort processes based on criteria
-      const sorted = this.sortProcesses(allProcesses, sortBy)
-      
-      // Apply limit
-      return sorted.slice(0, limit)
+      const response = await this.virtioSocketWatcher.sendSafeCommand(
+        machineId,
+        command,
+        30000
+      ) as ProcessCommandResponse
+
+      if (response.success && response.data) {
+        const processes = Array.isArray(response.data)
+          ? response.data
+          : (response.data.processes || [])
+
+        debug(`Retrieved top ${processes.length} processes via VirtIO`)
+        return this.mapProcesses(processes)
+      } else {
+        throw new Error(`Failed to get top processes: ${response.error || 'InfiniService not available'}`)
+      }
     } catch (error) {
-      debug( `Failed to get top processes for machine ${machineId}: ${error}`)
+      debug(`Failed to get top processes for machine ${machineId}: ${error}`)
       throw error
     }
   }
@@ -196,8 +191,8 @@ export class ProcessManager {
    * Kill a process on a VM
    */
   async killProcess(
-    machineId: string, 
-    pid: number, 
+    machineId: string,
+    pid: number,
     force: boolean = false
   ): Promise<InternalProcessControlResult> {
     try {
@@ -206,47 +201,37 @@ export class ProcessManager {
         throw new Error(`Machine ${machineId} is not available`)
       }
 
-      debug( `Killing process ${pid} on machine ${machineId} (force: ${force})`)
+      debug(`Killing process ${pid} on machine ${machineId} (force: ${force})`)
 
-      // Try VirtIO socket first (InfiniService)
-      try {
-        const command: SafeCommandType = {
-          action: 'ProcessKill',
-          params: { pid, force }
-        }
-
-        const response = await this.virtioSocketWatcher.sendSafeCommand(
-          machineId,
-          command,
-          30000
-        )
-
-        if (response.success) {
-          debug( `Successfully killed process ${pid} via VirtIO`)
-          return {
-            success: true,
-            message: `Process ${pid} terminated successfully`,
-            pid
-          }
-        } else {
-          return {
-            success: false,
-            message: response.error || `Failed to kill process ${pid}`,
-            pid,
-            error: response.error
-          }
-        }
-      } catch (virtioError) {
-        debug( `VirtIO socket not available for ${machineId}, falling back to QEMU Guest Agent`)
+      // Use VirtIO socket (InfiniService)
+      const command: SafeCommandType = {
+        action: 'ProcessKill',
+        params: { pid, force }
       }
 
-      // Fallback to QEMU Guest Agent
-      const agent = new (libvirtNode as any).GuestAgent(domainInfo.domain)
-      const result = await this.killProcessViaQGA(agent, domainInfo.machine, pid, force)
-      
-      return result
+      const response = await this.virtioSocketWatcher.sendSafeCommand(
+        machineId,
+        command,
+        30000
+      )
+
+      if (response.success) {
+        debug(`Successfully killed process ${pid} via VirtIO`)
+        return {
+          success: true,
+          message: `Process ${pid} terminated successfully`,
+          pid
+        }
+      } else {
+        return {
+          success: false,
+          message: response.error || `Failed to kill process ${pid}`,
+          pid,
+          error: response.error
+        }
+      }
     } catch (error) {
-      debug( `Failed to kill process ${pid} on machine ${machineId}: ${error}`)
+      debug(`Failed to kill process ${pid} on machine ${machineId}: ${error}`)
       return {
         success: false,
         message: `Failed to kill process: ${error}`,
@@ -265,12 +250,12 @@ export class ProcessManager {
     force: boolean = false
   ): Promise<InternalProcessControlResult[]> {
     const results: InternalProcessControlResult[] = []
-    
+
     for (const pid of pids) {
       const result = await this.killProcess(machineId, pid, force)
       results.push(result)
     }
-    
+
     return results
   }
 
@@ -292,166 +277,6 @@ export class ProcessManager {
     }))
   }
 
-  /**
-   * Sort processes by specified criteria
-   */
-  private sortProcesses(processes: InternalProcessInfo[], sortBy: ProcessSortBy): InternalProcessInfo[] {
-    const sorted = [...processes]
-    
-    switch (sortBy) {
-      case ProcessSortBy.CPU:
-        sorted.sort((a, b) => b.cpuUsage - a.cpuUsage)
-        break
-      case ProcessSortBy.MEMORY:
-        sorted.sort((a, b) => b.memoryKb - a.memoryKb)
-        break
-      case ProcessSortBy.PID:
-        sorted.sort((a, b) => a.pid - b.pid)
-        break
-      case ProcessSortBy.NAME:
-        sorted.sort((a, b) => a.name.localeCompare(b.name))
-        break
-    }
-    
-    return sorted
-  }
-
-  /**
-   * List processes via QEMU Guest Agent (fallback)
-   */
-  private async listProcessesViaQGA(agent: any, limit?: number): Promise<InternalProcessInfo[]> {
-    try {
-      // Note: This is a fallback method, we assume the machine info is already validated
-      const machine = { os: 'linux' } as Machine // Default fallback
-      const os = this.detectOS(machine)
-      
-      let command: string
-      if (os === 'windows') {
-        command = 'powershell.exe -Command "Get-Process | Select-Object Id,ProcessName,CPU,WorkingSet | ConvertTo-Json"'
-      } else {
-        command = 'ps aux --no-headers'
-      }
-      
-      const result = agent.exec(command, [], true)
-      if (!result || !result.stdout) {
-        throw new Error('No output from process list command')
-      }
-      
-      const processes = os === 'windows' 
-        ? this.parseWindowsProcesses(result.stdout)
-        : this.parseLinuxProcesses(result.stdout)
-      
-      if (limit) {
-        return processes.slice(0, limit)
-      }
-      
-      return processes
-    } catch (error) {
-      debug( `Failed to list processes via QGA: ${error}`)
-      throw error
-    }
-  }
-
-  /**
-   * Kill process via QEMU Guest Agent (fallback)
-   */
-  private async killProcessViaQGA(
-    agent: any, 
-    machine: Machine, 
-    pid: number, 
-    force: boolean
-  ): Promise<InternalProcessControlResult> {
-    try {
-      const os = this.detectOS(machine)
-      
-      let command: string
-      if (os === 'windows') {
-        command = force 
-          ? `taskkill /F /PID ${pid}`
-          : `taskkill /PID ${pid}`
-      } else {
-        command = force
-          ? `kill -9 ${pid}`
-          : `kill ${pid}`
-      }
-      
-      const result = agent.exec(command, [], true)
-      
-      if (result && !result.stderr) {
-        return {
-          success: true,
-          message: `Process ${pid} terminated successfully`,
-          pid
-        }
-      } else {
-        return {
-          success: false,
-          message: result?.stderr || `Failed to kill process ${pid}`,
-          pid,
-          error: result?.stderr
-        }
-      }
-    } catch (error) {
-      debug( `Failed to kill process via QGA: ${error}`)
-      throw error
-    }
-  }
-
-  /**
-   * Parse Windows process list output
-   */
-  private parseWindowsProcesses(output: string): InternalProcessInfo[] {
-    try {
-      const processes = JSON.parse(output)
-      return processes.map((p: any) => ({
-        pid: p.Id || 0,
-        name: p.ProcessName || 'unknown',
-        cpuUsage: p.CPU || 0,
-        memoryKb: Math.round((p.WorkingSet || 0) / 1024),
-        status: 'running'
-      }))
-    } catch (error) {
-      debug( `Failed to parse Windows process output: ${error}`)
-      return []
-    }
-  }
-
-  /**
-   * Parse Linux process list output
-   */
-  private parseLinuxProcesses(output: string): InternalProcessInfo[] {
-    const processes: InternalProcessInfo[] = []
-    const lines = output.split('\n').filter(line => line.trim())
-    
-    for (const line of lines) {
-      const parts = line.trim().split(/\s+/)
-      if (parts.length >= 11) {
-        processes.push({
-          pid: parseInt(parts[1]) || 0,
-          name: parts[10] || 'unknown',
-          cpuUsage: parseFloat(parts[2]) || 0,
-          memoryKb: parseInt(parts[5]) || 0,
-          status: 'running',
-          user: parts[0]
-        })
-      }
-    }
-    
-    return processes
-  }
-
-  /**
-   * Detect OS from machine info
-   */
-  private detectOS(machine: Machine): 'windows' | 'linux' | 'unknown' {
-    const os = machine.os?.toLowerCase() || ''
-    if (os.includes('windows') || os.includes('win')) {
-      return 'windows'
-    } else if (os.includes('linux') || os.includes('ubuntu') || os.includes('debian') || os.includes('centos') || os.includes('rhel')) {
-      return 'linux'
-    }
-    return 'unknown'
-  }
 }
 
 // Export internal types for use in resolver

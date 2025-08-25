@@ -1,6 +1,7 @@
 import { Request, Response } from 'express'
 import { PrismaClient, User } from '@prisma/client'
 import { EventManager } from '../services/EventManager'
+import { VirtioSocketWatcherService } from '../services/VirtioSocketWatcherService'
 
 export interface InfinibayContext {
   req: Request
@@ -10,4 +11,5 @@ export interface InfinibayContext {
   prisma: PrismaClient
   setupMode: boolean
   eventManager?: EventManager
+  virtioSocketWatcher?: VirtioSocketWatcherService
 }

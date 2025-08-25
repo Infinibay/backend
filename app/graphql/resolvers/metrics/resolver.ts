@@ -30,12 +30,12 @@ const ensureValidJSONObject = (value: any, isArrayField: boolean = false): any =
     // Return empty array wrapped in object
     return { data: [] }
   }
-  
+
   // For regular object fields
   if (value && typeof value === 'object' && value.constructor === Object) {
     return value
   }
-  
+
   // Return empty object for any invalid input
   return {}
 }
@@ -44,7 +44,7 @@ const ensureValidJSONObject = (value: any, isArrayField: boolean = false): any =
 export class MetricsResolver {
   @Query(() => [SystemMetrics])
   @Authorized(['ADMIN', 'USER'])
-  async systemMetrics (
+  async systemMetrics(
     @Arg('filter', { nullable: true }) filter: MetricsFilterInput,
     @Ctx() { prisma }: InfinibayContext
   ): Promise<SystemMetrics[]> {
@@ -91,7 +91,7 @@ export class MetricsResolver {
 
   @Query(() => SystemMetrics, { nullable: true })
   @Authorized(['ADMIN', 'USER'])
-  async latestSystemMetrics (
+  async latestSystemMetrics(
     @Arg('machineId') machineId: string,
     @Ctx() { prisma }: InfinibayContext
   ): Promise<SystemMetrics | null> {
@@ -122,7 +122,7 @@ export class MetricsResolver {
 
   @Query(() => [ProcessSnapshot])
   @Authorized(['ADMIN', 'USER'])
-  async processSnapshots (
+  async processSnapshots(
     @Arg('filter', { nullable: true }) filter: ProcessFilterInput,
     @Ctx() { prisma }: InfinibayContext
   ): Promise<ProcessSnapshot[]> {
@@ -172,7 +172,7 @@ export class MetricsResolver {
 
   @Query(() => [ProcessSnapshot])
   @Authorized(['ADMIN', 'USER'])
-  async topProcessesByMachine (
+  async topProcessesByMachine(
     @Arg('machineId') machineId: string,
     @Arg('limit', { nullable: true, defaultValue: 10 }) limit: number,
     @Ctx() { prisma }: InfinibayContext
@@ -212,7 +212,7 @@ export class MetricsResolver {
 
   @Query(() => [ApplicationUsage])
   @Authorized(['ADMIN', 'USER'])
-  async applicationUsage (
+  async applicationUsage(
     @Arg('machineId', () => String, { nullable: true }) machineId: string | undefined,
     @Arg('limit', () => Number, { nullable: true, defaultValue: 50 }) limit: number,
     @Ctx() { prisma }: InfinibayContext
@@ -247,7 +247,7 @@ export class MetricsResolver {
 
   @Query(() => [PortUsage])
   @Authorized(['ADMIN', 'USER'])
-  async portUsage (
+  async portUsage(
     @Arg('machineId') machineId: string,
     @Arg('listeningOnly', { nullable: true, defaultValue: false }) listeningOnly: boolean,
     @Ctx() { prisma }: InfinibayContext
@@ -284,7 +284,7 @@ export class MetricsResolver {
 
   @Query(() => [WindowsService])
   @Authorized(['ADMIN', 'USER'])
-  async windowsServices (
+  async windowsServices(
     @Arg('machineId') machineId: string,
     @Arg('runningOnly', { nullable: true, defaultValue: false }) runningOnly: boolean,
     @Ctx() { prisma }: InfinibayContext
@@ -317,7 +317,7 @@ export class MetricsResolver {
 
   @Query(() => MachineMetricsSummary, { nullable: true })
   @Authorized(['ADMIN', 'USER'])
-  async machineMetricsSummary (
+  async machineMetricsSummary(
     @Arg('machineId') machineId: string,
     @Ctx() { prisma }: InfinibayContext
   ): Promise<MachineMetricsSummary | null> {
@@ -402,7 +402,7 @@ export class MetricsResolver {
 
   @Query(() => [SystemMetrics])
   @Authorized(['ADMIN', 'USER'])
-  async systemMetricsHistory (
+  async systemMetricsHistory(
     @Arg('machineId') machineId: string,
     @Arg('hours', { nullable: true, defaultValue: 24 }) hours: number,
     @Arg('maxPoints', { nullable: true, defaultValue: 100 }) maxPoints: number,

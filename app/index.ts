@@ -49,6 +49,9 @@ async function bootstrap (): Promise<void> {
     // Configure routes
     configureRoutes(app)
 
+    // Initialize VirtioSocketWatcher early so it can be used in the context
+    const virtioSocketWatcher = createVirtioSocketWatcherService(prisma)
+
     // Initialize Apollo Server
     const apolloServer = await createApolloServer()
     await apolloServer.start()
@@ -97,7 +100,8 @@ async function bootstrap (): Promise<void> {
             req,
             res,
             user,
-            setupMode: false
+            setupMode: false,
+            virtioSocketWatcher
           }
         }
       })
@@ -128,8 +132,7 @@ async function bootstrap (): Promise<void> {
 
     console.log('🎯 Real-time event system initialized with all resource managers')
 
-    // Initialize and start VirtioSocketWatcherService
-    const virtioSocketWatcher = createVirtioSocketWatcherService(prisma)
+    // Initialize and start VirtioSocketWatcherService (already created earlier for context)
     virtioSocketWatcher.initialize(vmEventManager)
 
     // Forward metrics updates to Socket.io clients

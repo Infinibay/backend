@@ -137,10 +137,13 @@ interface ResponseMessage extends BaseMessage {
   type: 'response'
   id: string
   success: boolean
-  data?: any
-  error?: string
+  exit_code?: number
   stdout?: string
   stderr?: string
+  execution_time_ms?: number
+  command_type?: string
+  data?: any
+  error?: string
 }
 
 // Safe command types matching InfiniService
@@ -160,11 +163,15 @@ export interface UnsafeCommandRequest {
 }
 
 export interface CommandResponse {
+  id?: string // Command ID for tracking
   success: boolean
-  data?: any
-  error?: string
+  exit_code?: number
   stdout?: string
   stderr?: string
+  execution_time_ms?: number
+  command_type?: string // 'safe' or 'unsafe'
+  data?: any
+  error?: string
 }
 
 type IncomingMessage = MetricsMessage | ErrorMessage | ResponseMessage
@@ -445,12 +452,17 @@ export class VirtioSocketWatcherService extends EventEmitter {
   // Process a complete message
   private async processMessage (connection: VmConnection, messageStr: string): Promise<void> {
     try {
-      const message: IncomingMessage = JSON.parse(messageStr)
+      const message = JSON.parse(messageStr) as any
 
-      this.debug.log('debug', `Received ${message.type} message from VM ${connection.vmId}`)
+      // Handle messages without explicit type field (legacy or command responses)
+      if (!message.type && message.id && 'success' in message) {
+        message.type = 'response'
+      }
+
+      this.debug.log('debug', `Received ${message.type || 'unknown'} message from VM ${connection.vmId}`)
 
       // Add detailed logging to debug message structure
-      this.debug.log('debug', `Full message structure: ${JSON.stringify(message, null, 2).slice(0, 100)}`)
+      this.debug.log('debug', `Full message structure: ${JSON.stringify(message, null, 2).slice(0, 500)}`)
 
       switch (message.type) {
       case 'metrics':
@@ -470,15 +482,44 @@ export class VirtioSocketWatcherService extends EventEmitter {
         const pendingCommand = connection.pendingCommands.get(response.id)
         if (pendingCommand) {
           clearTimeout(pendingCommand.timeout)
-          pendingCommand.resolve({
+          
+          // Try to parse stdout as JSON data for certain command types
+          let data = response.data
+          if (!data && response.stdout && response.command_type) {
+            try {
+              // For process-related commands, try to parse stdout as JSON
+              if (['ProcessList', 'ProcessTop', 'ProcessKill'].includes(response.command_type)) {
+                data = JSON.parse(response.stdout)
+              }
+            } catch (parseError) {
+              this.debug.log('debug', `Could not parse stdout as JSON for ${response.command_type}: ${parseError}`)
+            }
+          }
+          
+          // Build complete response object
+          const commandResponse: CommandResponse = {
+            id: response.id,
             success: response.success,
-            data: response.data,
-            error: response.error,
-            stdout: response.stdout,
-            stderr: response.stderr
-          })
+            exit_code: response.exit_code,
+            stdout: response.stdout || '',
+            stderr: response.stderr || '',
+            execution_time_ms: response.execution_time_ms,
+            command_type: response.command_type,
+            data: data || response.data,
+            error: response.error
+          }
+          
+          pendingCommand.resolve(commandResponse)
           connection.pendingCommands.delete(response.id)
-          this.debug.log('debug', `Command ${response.id} completed for VM ${connection.vmId}`)
+          
+          // Log with execution time if available
+          const execTime = response.execution_time_ms ? ` (${response.execution_time_ms}ms)` : ''
+          this.debug.log('debug', `Command ${response.id} completed for VM ${connection.vmId}${execTime}`)
+          
+          // Log error details if command failed
+          if (!response.success) {
+            this.debug.log('warn', `Command ${response.id} failed: ${response.error || response.stderr || 'Unknown error'}`)
+          }
         } else {
           this.debug.log('warn', `Received response for unknown command ${response.id} from VM ${connection.vmId}`)
         }
@@ -524,6 +565,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
       }
 
       // Store system metrics
+      // InfiniService now correctly sends memory values in KB as the field names indicate
       const systemMetrics = await this.prisma.systemMetrics.create({
         data: {
           machineId: vmId,
@@ -557,7 +599,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
             executablePath: proc.exe_path,
             commandLine: proc.cmd_line,
             cpuUsagePercent: proc.cpu_percent,
-            memoryUsageKB: BigInt(proc.memory_kb),
+            memoryUsageKB: BigInt(proc.memory_kb), // Now correctly in KB
             diskReadBytes: proc.disk_read_bytes ? BigInt(proc.disk_read_bytes) : null,
             diskWriteBytes: proc.disk_write_bytes ? BigInt(proc.disk_write_bytes) : null,
             status: proc.status,
@@ -962,13 +1004,15 @@ export class VirtioSocketWatcherService extends EventEmitter {
 
     this.debug.log('debug', `🔌 Closing connection for VM ${vmId}`)
 
-    // Reject all pending commands
+    // Reject all pending commands with detailed error
     for (const [commandId, pending] of connection.pendingCommands) {
       clearTimeout(pending.timeout)
-      pending.reject(new Error('Connection closed'))
-      this.debug.log('debug', `Rejected pending command ${commandId} due to connection close`)
+      const error = new Error(`Connection to VM ${vmId} closed while command ${commandId} was pending`)
+      pending.reject(error)
+      this.debug.log('warn', `Rejected pending command ${commandId} due to connection close for VM ${vmId}`)
     }
     connection.pendingCommands.clear()
+    this.debug.log('debug', `Cleared ${connection.pendingCommands.size} pending commands for VM ${vmId}`)
 
     // Clear timers
     if (connection.pingTimer) {
@@ -1011,6 +1055,98 @@ export class VirtioSocketWatcherService extends EventEmitter {
       activeConnections: connections.filter(c => c.isConnected).length,
       connections
     }
+  }
+
+  // Get pending commands for a VM
+  public getPendingCommands(vmId: string): string[] {
+    const connection = this.connections.get(vmId)
+    if (!connection) {
+      return []
+    }
+    return Array.from(connection.pendingCommands.keys())
+  }
+
+  // Cancel a specific pending command
+  public cancelCommand(vmId: string, commandId: string): boolean {
+    const connection = this.connections.get(vmId)
+    if (!connection) {
+      return false
+    }
+
+    const pendingCommand = connection.pendingCommands.get(commandId)
+    if (!pendingCommand) {
+      return false
+    }
+
+    clearTimeout(pendingCommand.timeout)
+    pendingCommand.reject(new Error(`Command ${commandId} cancelled by user`))
+    connection.pendingCommands.delete(commandId)
+    this.debug.log('info', `Command ${commandId} cancelled for VM ${vmId}`)
+    return true
+  }
+
+  // Cancel all pending commands for a VM
+  public cancelAllCommands(vmId: string): number {
+    const connection = this.connections.get(vmId)
+    if (!connection) {
+      return 0
+    }
+
+    const count = connection.pendingCommands.size
+    for (const [commandId, pending] of connection.pendingCommands) {
+      clearTimeout(pending.timeout)
+      pending.reject(new Error(`Command ${commandId} cancelled`))
+    }
+    connection.pendingCommands.clear()
+    this.debug.log('info', `Cancelled ${count} pending commands for VM ${vmId}`)
+    return count
+  }
+
+  // Execute command with retry logic
+  public async executeCommandWithRetry(
+    vmId: string,
+    commandBuilder: () => Promise<CommandResponse>,
+    maxRetries: number = 3,
+    retryDelay: number = 1000
+  ): Promise<CommandResponse> {
+    let lastError: Error | null = null
+    
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        this.debug.log('debug', `Executing command for VM ${vmId}, attempt ${attempt}/${maxRetries}`)
+        const response = await commandBuilder()
+        
+        // If command succeeded or failed but got a response, return it
+        if (response.success || attempt === maxRetries) {
+          return response
+        }
+        
+        // If command failed but we have retries left, wait and retry
+        this.debug.log('warn', `Command failed for VM ${vmId}, retrying in ${retryDelay}ms...`)
+        await new Promise(resolve => setTimeout(resolve, retryDelay))
+        
+      } catch (error) {
+        lastError = error as Error
+        this.debug.log('warn', `Command attempt ${attempt} failed for VM ${vmId}: ${error}`)
+        
+        if (attempt < maxRetries) {
+          await new Promise(resolve => setTimeout(resolve, retryDelay))
+        }
+      }
+    }
+    
+    throw lastError || new Error(`Command failed after ${maxRetries} attempts`)
+  }
+
+  // Check if VM has active connection
+  public isVmConnected(vmId: string): boolean {
+    const connection = this.connections.get(vmId)
+    return connection?.isConnected || false
+  }
+
+  // Get connection details for a VM
+  public getConnectionDetails(vmId: string): any {
+    return this.connections.get(vmId)
   }
 
   // Clean up connections for a deleted VM
