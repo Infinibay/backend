@@ -5,7 +5,7 @@
   "main": "dist/index.js",
   "scripts": {
     "start": "ts-node -r tsconfig-paths/register app/index.ts",
-    "dev": "DEBUG=infinibay:virtio-socket:error,infinibay:virtio-socket:warn,infinibay:virtio-socket:info npm run start",
+    "dev": "DEBUG=infinibay:virtio-socket npm run start",
     "dev:verbose": "DEBUG=infinibay:virtio-socket:* npm run start",
     "test": "jest",
     "lint": "eslint . --ext .ts,.tsx",

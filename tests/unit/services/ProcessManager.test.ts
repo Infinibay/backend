@@ -1,10 +1,14 @@
 import { ProcessManager } from '@services/ProcessManager'
 import { PrismaClient } from '@prisma/client'
 import { VirtioSocketWatcherService } from '@services/VirtioSocketWatcherService'
-import libvirtNode from '@infinibay/libvirt-node'
 
 // Mock libvirt-node (auto-mocked from __mocks__ directory)
-jest.mock('@infinibay/libvirt-node')
+jest.mock('libvirt-node')
+
+// Mock getLibvirtConnection
+jest.mock('@utils/libvirt', () => ({
+  getLibvirtConnection: jest.fn(() => Promise.resolve({}))
+}))
 
 // Mock Prisma
 const mockPrisma = {
@@ -28,8 +32,15 @@ describe('ProcessManager', () => {
     processManager = new ProcessManager(mockPrisma, mockVirtioSocketWatcher)
     
     // Reset libvirt mock state
-    const mockLibvirt = require('@infinibay/libvirt-node')
-    mockLibvirt.__resetLibvirtMockState()
+    const mockLibvirt = require('libvirt-node')
+    if (mockLibvirt.__resetLibvirtMockState) {
+      mockLibvirt.__resetLibvirtMockState()
+    }
+    // Clear Machine lookups
+    if (mockLibvirt.Machine) {
+      mockLibvirt.Machine.lookupByName.mockClear()
+      mockLibvirt.Machine.lookupByUuidString.mockClear()
+    }
   })
 
   describe('listProcesses', () => {
@@ -38,9 +49,21 @@ describe('ProcessManager', () => {
       const mockMachine = {
         id: machineId,
         name: 'test-vm',
+        internalName: 'test-vm',
         status: 'running',
         os: 'linux'
       }
+      
+      // Setup mock domain
+      const mockDomain = {
+        name: 'test-vm',
+        state: 'running',
+        getState: jest.fn().mockReturnValue({ result: 1 })
+      }
+      
+      // Mock Machine.lookupByName to return the domain
+      const mockLibvirt = require('libvirt-node')
+      mockLibvirt.Machine.lookupByName.mockReturnValue(mockDomain)
 
       const mockProcesses = [
         {
@@ -86,43 +109,38 @@ describe('ProcessManager', () => {
       )
     })
 
-    it('should fall back to QEMU Guest Agent when VirtIO is not available', async () => {
+    it('should throw error when VirtIO is not available', async () => {
       const machineId = 'test-vm-2'
       const mockMachine = {
         id: machineId,
         name: 'test-vm',
+        internalName: 'test-vm',
         status: 'running',
         os: 'linux'
       }
-
-      ;(mockPrisma.machine.findUnique as jest.Mock).mockResolvedValue(mockMachine)
-      ;(mockVirtioSocketWatcher.sendSafeCommand as jest.Mock).mockRejectedValue(new Error('No connection'))
       
-      // Setup mock domain in libvirt
-      const mockLibvirt = require('@infinibay/libvirt-node')
-      const mockDomain = {
+      // Setup mock domain
+      const mockDomain2 = {
         name: 'test-vm',
         state: 'running',
-        getState: jest.fn().mockReturnValue([1, 1])
+        getState: jest.fn().mockReturnValue({ result: 1 })
       }
-      mockLibvirt.__setLibvirtMockState({
-        domains: new Map([['test-vm', mockDomain]])
+
+      ;(mockPrisma.machine.findUnique as jest.Mock).mockResolvedValue(mockMachine)
+      ;(mockVirtioSocketWatcher.sendSafeCommand as jest.Mock).mockResolvedValue({
+        success: false,
+        error: 'InfiniService not available'
       })
       
-      // Mock GuestAgent exec to return process list
-      const GuestAgentMock = mockLibvirt.GuestAgent as jest.MockedClass<any>
-      GuestAgentMock.prototype.exec = jest.fn().mockReturnValue({
-        stdout: 'user    1234  15.5  1.2  102400  51200 ?        S    10:00   0:01 node server.js\n' +
-                'nginx   5678   2.3  0.5   51200  25600 ?        S    10:05   0:00 nginx -g daemon off;',
-        stderr: ''
+      // Setup mock domain in libvirt
+      const mockLibvirt = require('libvirt-node')
+      mockLibvirt.Machine.lookupByName.mockReturnValue(mockDomain2)
+      mockLibvirt.__setLibvirtMockState({
+        domains: new Map([['test-vm', mockDomain2]])
       })
 
-      const result = await processManager.listProcesses(machineId)
-
-      expect(result).toHaveLength(2)
-      expect(result[0].pid).toBe(1234)
-      expect(result[0].name).toBe('node')
-      expect(GuestAgentMock.prototype.exec).toHaveBeenCalled()
+      await expect(processManager.listProcesses(machineId))
+        .rejects.toThrow('Failed to get process list: InfiniService not available')
     })
 
     it('should throw error when machine is not found', async () => {
@@ -157,6 +175,7 @@ describe('ProcessManager', () => {
       const mockMachine = {
         id: machineId,
         name: 'test-vm',
+        internalName: 'test-vm',
         status: 'running',
         os: 'linux'
       }
@@ -187,6 +206,7 @@ describe('ProcessManager', () => {
       const mockMachine = {
         id: machineId,
         name: 'test-vm',
+        internalName: 'test-vm',
         status: 'running',
         os: 'linux'
       }
@@ -207,46 +227,43 @@ describe('ProcessManager', () => {
       })
     })
 
-    it('should fall back to QEMU Guest Agent for kill', async () => {
+    it('should return error when VirtIO is not available for kill', async () => {
       const machineId = 'test-vm-1'
       const pid = 1234
       const mockMachine = {
         id: machineId,
         name: 'test-vm',
+        internalName: 'test-vm',
         status: 'running',
         os: 'linux'
       }
 
       ;(mockPrisma.machine.findUnique as jest.Mock).mockResolvedValue(mockMachine)
-      ;(mockVirtioSocketWatcher.sendSafeCommand as jest.Mock).mockRejectedValue(new Error('No connection'))
-      
-      // Setup mock domain in libvirt
-      const mockLibvirt = require('@infinibay/libvirt-node')
-      const mockDomain = {
-        name: 'test-vm',
-        state: 'running',
-        getState: jest.fn().mockReturnValue([1, 1])
-      }
-      mockLibvirt.__setLibvirtMockState({
-        domains: new Map([['test-vm', mockDomain]])
+      ;(mockVirtioSocketWatcher.sendSafeCommand as jest.Mock).mockResolvedValue({
+        success: false,
+        error: 'InfiniService not available'
       })
       
-      // Mock GuestAgent exec to return success
-      const GuestAgentMock = mockLibvirt.GuestAgent as jest.MockedClass<any>
-      GuestAgentMock.prototype.exec = jest.fn().mockReturnValue({
-        stdout: '',
-        stderr: ''
+      // Setup mock domain in libvirt
+      const mockLibvirt = require('libvirt-node')
+      const mockDomain3 = {
+        name: 'test-vm',
+        state: 'running',
+        getState: jest.fn().mockReturnValue({ result: 1 })
+      }
+      mockLibvirt.Machine.lookupByName.mockReturnValue(mockDomain3)
+      mockLibvirt.__setLibvirtMockState({
+        domains: new Map([['test-vm', mockDomain3]])
       })
 
       const result = await processManager.killProcess(machineId, pid, false)
 
       expect(result).toEqual({
-        success: true,
-        message: `Process ${pid} terminated successfully`,
-        pid
+        success: false,
+        message: 'InfiniService not available',
+        pid,
+        error: 'InfiniService not available'
       })
-
-      expect(GuestAgentMock.prototype.exec).toHaveBeenCalledWith(`kill ${pid}`, [], true)
     })
   })
 
@@ -256,12 +273,13 @@ describe('ProcessManager', () => {
       const mockMachine = {
         id: machineId,
         name: 'test-vm',
+        internalName: 'test-vm',
         status: 'running',
         os: 'linux'
       }
 
+      // Mock VirtIO service returning already sorted and limited processes
       const mockProcesses = [
-        { pid: 1, name: 'low-cpu', cpu_usage: 5, memory_kb: 1000, status: 'running' },
         { pid: 2, name: 'high-cpu', cpu_usage: 50, memory_kb: 2000, status: 'running' },
         { pid: 3, name: 'med-cpu', cpu_usage: 25, memory_kb: 3000, status: 'running' }
       ]
@@ -277,6 +295,13 @@ describe('ProcessManager', () => {
       expect(result).toHaveLength(2)
       expect(result[0].name).toBe('high-cpu')
       expect(result[1].name).toBe('med-cpu')
+      
+      // Verify the command was sent with correct params
+      expect(mockVirtioSocketWatcher.sendSafeCommand).toHaveBeenCalledWith(
+        machineId,
+        { action: 'ProcessTop', params: { limit: 2, sort_by: 'cpu' } },
+        30000
+      )
     })
 
     it('should return top processes sorted by memory', async () => {
@@ -284,12 +309,13 @@ describe('ProcessManager', () => {
       const mockMachine = {
         id: machineId,
         name: 'test-vm',
+        internalName: 'test-vm',
         status: 'running',
         os: 'linux'
       }
 
+      // Mock VirtIO service returning already sorted and limited processes by memory
       const mockProcesses = [
-        { pid: 1, name: 'low-mem', cpu_usage: 50, memory_kb: 1000, status: 'running' },
         { pid: 2, name: 'high-mem', cpu_usage: 5, memory_kb: 5000, status: 'running' },
         { pid: 3, name: 'med-mem', cpu_usage: 25, memory_kb: 3000, status: 'running' }
       ]
@@ -306,6 +332,13 @@ describe('ProcessManager', () => {
       expect(result).toHaveLength(2)
       expect(result[0].name).toBe('high-mem')
       expect(result[1].name).toBe('med-mem')
+      
+      // Verify the command was sent with correct params
+      expect(mockVirtioSocketWatcher.sendSafeCommand).toHaveBeenCalledWith(
+        machineId,
+        { action: 'ProcessTop', params: { limit: 2, sort_by: 'memory' } },
+        30000
+      )
     })
   })
 
@@ -316,6 +349,7 @@ describe('ProcessManager', () => {
       const mockMachine = {
         id: machineId,
         name: 'test-vm',
+        internalName: 'test-vm',
         status: 'running',
         os: 'linux'
       }
@@ -339,6 +373,7 @@ describe('ProcessManager', () => {
       const mockMachine = {
         id: machineId,
         name: 'test-vm',
+        internalName: 'test-vm',
         status: 'running',
         os: 'linux'
       }

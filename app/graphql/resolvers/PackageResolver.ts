@@ -1,10 +1,10 @@
 import { Resolver, Query, Mutation, Arg, Ctx, Authorized, ID } from 'type-graphql'
 import { InfinibayContext } from '@utils/context'
-import { 
-  DirectPackageManager, 
+import {
+  DirectPackageManager,
   getDirectPackageManager,
   InternalPackageInfo,
-  InternalPackageManagementResult 
+  InternalPackageManagementResult
 } from '@services/DirectPackageManager'
 import { getVirtioSocketWatcherService } from '@services/VirtioSocketWatcherService'
 import {
@@ -20,7 +20,7 @@ const debug = Debug('infinibay:package-resolver')
 
 @Resolver()
 export class PackageResolver {
-  private getPackageManager(ctx: InfinibayContext): DirectPackageManager {
+  private getPackageManager (ctx: InfinibayContext): DirectPackageManager {
     // Get the singleton instance of VirtioSocketWatcherService
     const virtioService = getVirtioSocketWatcherService()
     return getDirectPackageManager(ctx.prisma, virtioService)
@@ -29,7 +29,7 @@ export class PackageResolver {
   /**
    * Maps internal package info to GraphQL type
    */
-  private mapToGraphQLPackageInfo(internal: InternalPackageInfo): PackageInfo {
+  private mapToGraphQLPackageInfo (internal: InternalPackageInfo): PackageInfo {
     const packageInfo = new PackageInfo()
     packageInfo.name = internal.name
     packageInfo.version = internal.version
@@ -43,7 +43,7 @@ export class PackageResolver {
   /**
    * Maps internal package management result to GraphQL type
    */
-  private mapToGraphQLResult(internal: InternalPackageManagementResult): PackageManagementResult {
+  private mapToGraphQLResult (internal: InternalPackageManagementResult): PackageManagementResult {
     const result = new PackageManagementResult()
     result.success = internal.success
     result.message = internal.message
@@ -56,11 +56,11 @@ export class PackageResolver {
     return result
   }
 
-  @Query(() => [PackageInfo], { 
-    description: 'List all installed packages on a virtual machine' 
+  @Query(() => [PackageInfo], {
+    description: 'List all installed packages on a virtual machine'
   })
   @Authorized('USER')
-  async listInstalledPackages(
+  async listInstalledPackages (
     @Arg('machineId', () => ID) machineId: string,
     @Ctx() ctx: InfinibayContext
   ): Promise<PackageInfo[]> {
@@ -78,7 +78,7 @@ export class PackageResolver {
       // Check permissions
       const isAdmin = ctx.user?.role === 'ADMIN'
       const isOwner = machine.userId === ctx.user?.id
-      
+
       if (!isAdmin && !isOwner) {
         throw new Error('Access denied to this machine')
       }
@@ -89,15 +89,27 @@ export class PackageResolver {
       return internalPackages.map(pkg => this.mapToGraphQLPackageInfo(pkg))
     } catch (error) {
       console.error('Error listing packages:', error)
+
+      // Provide more informative error messages
+      if (String(error).includes('timeout')) {
+        throw new Error('Package list timed out. The VM may be slow to respond or the package manager is busy. Please try again.')
+      } else if (String(error).includes('not running')) {
+        throw new Error('The virtual machine must be running to list packages')
+      } else if (String(error).includes('not found')) {
+        throw new Error('Virtual machine not found')
+      } else if (String(error).includes('not connected')) {
+        throw new Error('Unable to connect to the virtual machine. Please ensure the VM agent is running.')
+      }
+
       throw error
     }
   }
 
-  @Query(() => [PackageInfo], { 
-    description: 'Search for available packages on a virtual machine' 
+  @Query(() => [PackageInfo], {
+    description: 'Search for available packages on a virtual machine'
   })
   @Authorized('USER')
-  async searchPackages(
+  async searchPackages (
     @Arg('machineId', () => ID) machineId: string,
     @Arg('query', () => String) query: string,
     @Ctx() ctx: InfinibayContext
@@ -116,7 +128,7 @@ export class PackageResolver {
       // Check permissions
       const isAdmin = ctx.user?.role === 'ADMIN'
       const isOwner = machine.userId === ctx.user?.id
-      
+
       if (!isAdmin && !isOwner) {
         throw new Error('Access denied to this machine')
       }
@@ -127,15 +139,27 @@ export class PackageResolver {
       return internalPackages.map(pkg => this.mapToGraphQLPackageInfo(pkg))
     } catch (error) {
       console.error('Error searching packages:', error)
+
+      // Provide more informative error messages
+      if (String(error).includes('timeout')) {
+        throw new Error('Package search timed out. The VM may be slow to respond or the package manager is busy. Please try again.')
+      } else if (String(error).includes('not running')) {
+        throw new Error('The virtual machine must be running to search packages')
+      } else if (String(error).includes('not found')) {
+        throw new Error('Virtual machine not found')
+      } else if (String(error).includes('not connected')) {
+        throw new Error('Unable to connect to the virtual machine. Please ensure the VM agent is running.')
+      }
+
       throw error
     }
   }
 
-  @Mutation(() => PackageManagementResult, { 
-    description: 'Install, remove, or update a package on a virtual machine' 
+  @Mutation(() => PackageManagementResult, {
+    description: 'Install, remove, or update a package on a virtual machine'
   })
   @Authorized('USER')
-  async managePackage(
+  async managePackage (
     @Arg('input') input: PackageManagementInput,
     @Ctx() ctx: InfinibayContext
   ): Promise<PackageManagementResult> {
@@ -157,7 +181,7 @@ export class PackageResolver {
       // Check permissions
       const isAdmin = ctx.user?.role === 'ADMIN'
       const isOwner = machine.userId === ctx.user?.id
-      
+
       if (!isAdmin && !isOwner) {
         return {
           success: false,
@@ -170,14 +194,15 @@ export class PackageResolver {
       console.log(`User ${ctx.user?.email} is performing ${input.action} on package ${input.packageName} for machine ${machine.name}`)
 
       const packageManager = this.getPackageManager(ctx)
-      
+
       // Emit starting event
       if (ctx.user) {
         try {
           const socketService = getSocketService()
-          const eventAction = input.action === 'INSTALL' ? 'installing' : 
-                             input.action === 'REMOVE' ? 'removing' : 'updating'
-          
+          const eventAction = input.action === 'INSTALL'
+            ? 'installing'
+            : input.action === 'REMOVE' ? 'removing' : 'updating'
+
           socketService.sendToUser(machine.userId || ctx.user.id, 'vm', `package:${eventAction}`, {
             data: {
               machineId: input.machineId,
@@ -190,20 +215,21 @@ export class PackageResolver {
           debug(`Failed to emit WebSocket event: ${eventError}`)
         }
       }
-      
+
       const internalResult = await packageManager.managePackage(
         input.machineId,
         input.packageName,
         input.action
       )
-      
+
       // Emit completion event
       if (internalResult.success && ctx.user) {
         try {
           const socketService = getSocketService()
-          const eventAction = input.action === 'INSTALL' ? 'installed' : 
-                             input.action === 'REMOVE' ? 'removed' : 'updated'
-          
+          const eventAction = input.action === 'INSTALL'
+            ? 'installed'
+            : input.action === 'REMOVE' ? 'removed' : 'updated'
+
           socketService.sendToUser(machine.userId || ctx.user.id, 'vm', `package:${eventAction}`, {
             data: {
               machineId: input.machineId,
@@ -217,7 +243,7 @@ export class PackageResolver {
           debug(`Failed to emit WebSocket event: ${eventError}`)
         }
       }
-      
+
       // Map internal type to GraphQL type
       return this.mapToGraphQLResult(internalResult)
     } catch (error) {
@@ -230,11 +256,11 @@ export class PackageResolver {
     }
   }
 
-  @Mutation(() => CommandResult, { 
-    description: 'Install a package on a virtual machine (legacy compatibility)' 
+  @Mutation(() => CommandResult, {
+    description: 'Install a package on a virtual machine (legacy compatibility)'
   })
   @Authorized('USER')
-  async installPackage(
+  async installPackage (
     @Arg('machineId', () => ID) machineId: string,
     @Arg('packageName', () => String) packageName: string,
     @Ctx() ctx: InfinibayContext
@@ -256,7 +282,7 @@ export class PackageResolver {
       // Check permissions
       const isAdmin = ctx.user?.role === 'ADMIN'
       const isOwner = machine.userId === ctx.user?.id
-      
+
       if (!isAdmin && !isOwner) {
         return {
           success: false,
@@ -265,7 +291,7 @@ export class PackageResolver {
       }
 
       const packageManager = this.getPackageManager(ctx)
-      
+
       // Emit installing event
       if (ctx.user) {
         try {
@@ -278,9 +304,9 @@ export class PackageResolver {
           debug(`Failed to emit WebSocket event: ${eventError}`)
         }
       }
-      
+
       const internalResult = await packageManager.installPackage(machineId, packageName)
-      
+
       // Emit installed event if successful
       if (internalResult.success && ctx.user) {
         try {
@@ -293,7 +319,7 @@ export class PackageResolver {
           debug(`Failed to emit WebSocket event: ${eventError}`)
         }
       }
-      
+
       // Map internal result to GraphQL CommandResult type
       const result = new CommandResult()
       result.success = internalResult.success
@@ -311,11 +337,11 @@ export class PackageResolver {
     }
   }
 
-  @Mutation(() => CommandResult, { 
-    description: 'Remove a package from a virtual machine (legacy compatibility)' 
+  @Mutation(() => CommandResult, {
+    description: 'Remove a package from a virtual machine (legacy compatibility)'
   })
   @Authorized('USER')
-  async removePackage(
+  async removePackage (
     @Arg('machineId', () => ID) machineId: string,
     @Arg('packageName', () => String) packageName: string,
     @Ctx() ctx: InfinibayContext
@@ -337,7 +363,7 @@ export class PackageResolver {
       // Check permissions
       const isAdmin = ctx.user?.role === 'ADMIN'
       const isOwner = machine.userId === ctx.user?.id
-      
+
       if (!isAdmin && !isOwner) {
         return {
           success: false,
@@ -346,7 +372,7 @@ export class PackageResolver {
       }
 
       const packageManager = this.getPackageManager(ctx)
-      
+
       // Emit removing event
       if (ctx.user) {
         try {
@@ -359,9 +385,9 @@ export class PackageResolver {
           debug(`Failed to emit WebSocket event: ${eventError}`)
         }
       }
-      
+
       const internalResult = await packageManager.removePackage(machineId, packageName)
-      
+
       // Emit removed event if successful
       if (internalResult.success && ctx.user) {
         try {
@@ -374,7 +400,7 @@ export class PackageResolver {
           debug(`Failed to emit WebSocket event: ${eventError}`)
         }
       }
-      
+
       // Map internal result to GraphQL CommandResult type
       const result = new CommandResult()
       result.success = internalResult.success
@@ -392,11 +418,11 @@ export class PackageResolver {
     }
   }
 
-  @Mutation(() => CommandResult, { 
-    description: 'Update a package on a virtual machine (legacy compatibility)' 
+  @Mutation(() => CommandResult, {
+    description: 'Update a package on a virtual machine (legacy compatibility)'
   })
   @Authorized('USER')
-  async updatePackage(
+  async updatePackage (
     @Arg('machineId', () => ID) machineId: string,
     @Arg('packageName', () => String) packageName: string,
     @Ctx() ctx: InfinibayContext
@@ -418,7 +444,7 @@ export class PackageResolver {
       // Check permissions
       const isAdmin = ctx.user?.role === 'ADMIN'
       const isOwner = machine.userId === ctx.user?.id
-      
+
       if (!isAdmin && !isOwner) {
         return {
           success: false,
@@ -427,7 +453,7 @@ export class PackageResolver {
       }
 
       const packageManager = this.getPackageManager(ctx)
-      
+
       // Emit updating event
       if (ctx.user) {
         try {
@@ -440,9 +466,9 @@ export class PackageResolver {
           debug(`Failed to emit WebSocket event: ${eventError}`)
         }
       }
-      
+
       const internalResult = await packageManager.updatePackage(machineId, packageName)
-      
+
       // Emit updated event if successful
       if (internalResult.success && ctx.user) {
         try {
@@ -455,7 +481,7 @@ export class PackageResolver {
           debug(`Failed to emit WebSocket event: ${eventError}`)
         }
       }
-      
+
       // Map internal result to GraphQL CommandResult type
       const result = new CommandResult()
       result.success = internalResult.success

@@ -764,9 +764,34 @@ class MockGuestAgent {
 }
 
 // Module exports
+// Add static method open to Connection
+MockHypervisor.open = jest.fn((uri) => new MockHypervisor());
+
 module.exports = {
+  Connection: MockHypervisor,
   Hypervisor: MockHypervisor,
   GuestAgent: MockGuestAgent,
+  Network: {
+    defineXml: jest.fn((conn, xml) => {
+      const network = new MockNetwork(xml);
+      mockState.networks.set(network.name, network);
+      return network;
+    })
+  },
+  Machine: {
+    lookupByName: jest.fn((conn, name) => {
+      const domain = mockState.domains.get(name);
+      return domain || null;
+    }),
+    lookupByUuidString: jest.fn((conn, uuid) => {
+      for (const [name, domain] of mockState.domains.entries()) {
+        if (domain.uuid === uuid) {
+          return domain;
+        }
+      }
+      return null;
+    })
+  },
   
   // Export mock state for testing
   __setLibvirtMockState: (state) => {

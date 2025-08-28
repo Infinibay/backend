@@ -16,10 +16,58 @@ import {
   ProcessSnapshot,
   ApplicationUsage,
   PortUsage,
-  WindowsService
+  WindowsService,
+  ServiceStateHistory
 } from '@prisma/client'
 import { randomBytes } from 'crypto'
 import bcrypt from 'bcrypt'
+
+// Input type definitions for mock factories
+interface UserInputOverrides {
+  email?: string
+  password?: string
+  passwordConfirmation?: string
+  firstName?: string
+  lastName?: string
+  role?: string
+  [key: string]: unknown
+}
+
+interface MachineInputOverrides {
+  name?: string
+  templateId?: string
+  departmentId?: string | null
+  userId?: string | null
+  [key: string]: unknown
+}
+
+interface DepartmentInputOverrides {
+  name?: string
+  internetSpeed?: number
+  ipSubnet?: string
+  [key: string]: unknown
+}
+
+interface ApplicationInputOverrides {
+  name?: string
+  description?: string
+  version?: string
+  os?: string[]
+  installCommand?: { command: string }
+  [key: string]: unknown
+}
+
+interface FirewallRuleInputOverrides {
+  action?: string
+  direction?: string
+  priority?: number
+  protocol?: string
+  dstPortStart?: number
+  dstPortEnd?: number
+  srcIpAddress?: string
+  dstIpAddress?: string
+  [key: string]: unknown
+}
 
 // Generate random IDs
 export const generateId = () => randomBytes(16).toString('hex')
@@ -107,6 +155,7 @@ export function createMockMachine (overrides?: Partial<Machine>): Machine {
     ramGB: overrides?.ramGB || 8,
     diskSizeGB: overrides?.diskSizeGB || 100,
     gpuPciAddress: overrides?.gpuPciAddress || null,
+    firewallTemplates: overrides?.firewallTemplates || null,
     createdAt: overrides?.createdAt || new Date(),
     updatedAt: overrides?.updatedAt || new Date(),
     departmentId: overrides?.departmentId || null
@@ -250,13 +299,19 @@ export function createMockSystemMetrics (overrides?: Partial<SystemMetrics>): Sy
   return {
     id,
     machineId: overrides?.machineId || generateId(),
-    cpuUsage: overrides?.cpuUsage || 25.5,
-    memoryUsage: overrides?.memoryUsage || 4096,
-    memoryTotal: overrides?.memoryTotal || 8192,
-    diskUsage: overrides?.diskUsage || 50000,
-    diskTotal: overrides?.diskTotal || 100000,
-    networkRx: overrides?.networkRx || BigInt(1000000),
-    networkTx: overrides?.networkTx || BigInt(500000),
+    cpuUsagePercent: overrides?.cpuUsagePercent || 25.5,
+    cpuCoresUsage: overrides?.cpuCoresUsage || [25.0, 30.0, 20.0, 35.0],
+    cpuTemperature: overrides?.cpuTemperature || 65.0,
+    totalMemoryKB: overrides?.totalMemoryKB || BigInt(8192000),
+    usedMemoryKB: overrides?.usedMemoryKB || BigInt(4096000),
+    availableMemoryKB: overrides?.availableMemoryKB || BigInt(4096000),
+    swapTotalKB: overrides?.swapTotalKB || BigInt(2048000),
+    swapUsedKB: overrides?.swapUsedKB || BigInt(512000),
+    diskUsageStats: overrides?.diskUsageStats || { '/': { total: 100000, used: 50000, free: 50000 } },
+    diskIOStats: overrides?.diskIOStats || { read: 1000000, write: 500000 },
+    networkStats: overrides?.networkStats || { rx: 1000000, tx: 500000 },
+    uptime: overrides?.uptime || BigInt(86400),
+    loadAverage: overrides?.loadAverage || [1.5, 1.2, 0.9],
     timestamp: overrides?.timestamp || new Date()
   }
 }
@@ -267,10 +322,17 @@ export function createMockProcessSnapshot (overrides?: Partial<ProcessSnapshot>)
   return {
     id,
     machineId: overrides?.machineId || generateId(),
-    processName: overrides?.processName || 'test-process.exe',
-    pid: overrides?.pid || 1234,
-    cpuUsage: overrides?.cpuUsage || 10.5,
-    memoryUsage: overrides?.memoryUsage || BigInt(1024000),
+    processId: overrides?.processId || 1234,
+    parentPid: overrides?.parentPid || 1,
+    name: overrides?.name || 'test-process.exe',
+    executablePath: overrides?.executablePath || '/usr/bin/test-process',
+    commandLine: overrides?.commandLine || 'test-process --daemon',
+    cpuUsagePercent: overrides?.cpuUsagePercent || 10.5,
+    memoryUsageKB: overrides?.memoryUsageKB || BigInt(1024000),
+    diskReadBytes: overrides?.diskReadBytes || BigInt(500000),
+    diskWriteBytes: overrides?.diskWriteBytes || BigInt(250000),
+    status: overrides?.status || 'running',
+    startTime: overrides?.startTime || new Date(Date.now() - 3600000),
     timestamp: overrides?.timestamp || new Date()
   }
 }
@@ -283,10 +345,21 @@ export function createMockApplicationUsage (
   return {
     id,
     machineId: overrides?.machineId || generateId(),
+    executablePath: overrides?.executablePath || 'C:\\Program Files\\TestApp\\test.exe',
     applicationName: overrides?.applicationName || 'TestApp',
-    usageMinutes: overrides?.usageMinutes || 120,
-    lastUsed: overrides?.lastUsed || new Date(),
-    timestamp: overrides?.timestamp || new Date()
+    version: overrides?.version || '1.0.0',
+    description: overrides?.description || 'Test application',
+    publisher: overrides?.publisher || 'Test Publisher',
+    lastAccessTime: overrides?.lastAccessTime || new Date(),
+    lastModifiedTime: overrides?.lastModifiedTime || new Date(Date.now() - 86400000),
+    accessCount: overrides?.accessCount || 10,
+    totalUsageMinutes: overrides?.totalUsageMinutes || 120,
+    iconData: overrides?.iconData || null,
+    iconFormat: overrides?.iconFormat || null,
+    fileSize: overrides?.fileSize || BigInt(10485760),
+    firstSeen: overrides?.firstSeen || new Date(Date.now() - 604800000),
+    lastSeen: overrides?.lastSeen || new Date(),
+    isActive: overrides?.isActive || true
   }
 }
 
@@ -298,8 +371,13 @@ export function createMockPortUsage (overrides?: Partial<PortUsage>): PortUsage 
     machineId: overrides?.machineId || generateId(),
     port: overrides?.port || 8080,
     protocol: overrides?.protocol || 'TCP',
-    processName: overrides?.processName || 'node.exe',
     state: overrides?.state || 'LISTENING',
+    processId: overrides?.processId || 1234,
+    processName: overrides?.processName || 'node.exe',
+    executablePath: overrides?.executablePath || '/usr/bin/node',
+    isListening: overrides?.isListening !== undefined ? overrides.isListening : true,
+    connectionCount: overrides?.connectionCount || 5,
+    lastActivity: overrides?.lastActivity || new Date(),
     timestamp: overrides?.timestamp || new Date()
   }
 }
@@ -312,8 +390,31 @@ export function createMockWindowsService (overrides?: Partial<WindowsService>): 
     machineId: overrides?.machineId || generateId(),
     serviceName: overrides?.serviceName || 'TestService',
     displayName: overrides?.displayName || 'Test Service Display',
-    status: overrides?.status || 'Running',
+    description: overrides?.description || 'Test service for testing purposes',
     startType: overrides?.startType || 'Automatic',
+    serviceType: overrides?.serviceType || 'Win32OwnProcess',
+    executablePath: overrides?.executablePath || 'C:\\Windows\\System32\\svchost.exe',
+    dependencies: overrides?.dependencies || null,
+    currentState: overrides?.currentState || 'Running',
+    processId: overrides?.processId || 1234,
+    lastStateChange: overrides?.lastStateChange || new Date(),
+    stateChangeCount: overrides?.stateChangeCount || 0,
+    isDefaultService: overrides?.isDefaultService !== undefined ? overrides.isDefaultService : false,
+    usageScore: overrides?.usageScore || 0.5,
+    firstSeen: overrides?.firstSeen || new Date(),
+    lastSeen: overrides?.lastSeen || new Date()
+  }
+}
+
+// Service State History factory
+export function createMockServiceStateHistory (overrides?: Partial<ServiceStateHistory>): ServiceStateHistory {
+  const id = overrides?.id || generateId()
+  return {
+    id,
+    serviceId: overrides?.serviceId || generateId(),
+    fromState: overrides?.fromState || 'Stopped',
+    toState: overrides?.toState || 'Running',
+    reason: overrides?.reason || 'Manual start',
     timestamp: overrides?.timestamp || new Date()
   }
 }
@@ -398,10 +499,12 @@ export function createMockApplications (count: number = 5): Application[] {
 }
 
 // GraphQL input type factories
-export function createMockUserInput (overrides?: any) {
+export function createMockUserInput (overrides?: UserInputOverrides) {
+  const password = overrides?.password || 'SecurePass123!'
   return {
     email: overrides?.email || `test-${Date.now()}@example.com`,
-    password: overrides?.password || 'SecurePass123!',
+    password,
+    passwordConfirmation: overrides?.passwordConfirmation || password,
     firstName: overrides?.firstName || 'Test',
     lastName: overrides?.lastName || 'User',
     role: overrides?.role || 'USER',
@@ -409,7 +512,7 @@ export function createMockUserInput (overrides?: any) {
   }
 }
 
-export function createMockMachineInput (overrides?: any) {
+export function createMockMachineInput (overrides?: MachineInputOverrides) {
   return {
     name: overrides?.name || `Test Machine ${Date.now()}`,
     templateId: overrides?.templateId || generateId(),
@@ -419,7 +522,7 @@ export function createMockMachineInput (overrides?: any) {
   }
 }
 
-export function createMockDepartmentInput (overrides?: any) {
+export function createMockDepartmentInput (overrides?: DepartmentInputOverrides) {
   return {
     name: overrides?.name || `Test Department ${Date.now()}`,
     internetSpeed: overrides?.internetSpeed || 100,
@@ -428,7 +531,7 @@ export function createMockDepartmentInput (overrides?: any) {
   }
 }
 
-export function createMockApplicationInput (overrides?: any) {
+export function createMockApplicationInput (overrides?: ApplicationInputOverrides) {
   return {
     name: overrides?.name || `Test App ${Date.now()}`,
     description: overrides?.description || 'Test application',
@@ -439,7 +542,7 @@ export function createMockApplicationInput (overrides?: any) {
   }
 }
 
-export function createMockFirewallRuleInput (overrides?: any) {
+export function createMockFirewallRuleInput (overrides?: FirewallRuleInputOverrides) {
   return {
     action: overrides?.action || 'accept',
     direction: overrides?.direction || 'in',
@@ -471,6 +574,26 @@ export function createMockPaginatedResponse<T> (
     totalPages: Math.ceil(actualTotal / pageSize),
     hasNext: start + pageSize < actualTotal,
     hasPrevious: page > 1
+  }
+}
+
+// Network mock
+export function createMockNetwork (overrides?: Partial<{ name: string; active: boolean }>) {
+  return {
+    name: overrides?.name || 'test-network',
+    active: overrides?.active !== undefined ? overrides.active : true,
+    bridgeName: 'br0',
+    ipAddress: '192.168.1.1',
+    ipRange: '192.168.1.100-192.168.1.200',
+    uuid: generateId()
+  }
+}
+
+export function createNetworkInput () {
+  return {
+    name: `test-network-${Date.now()}`,
+    ipRange: '192.168.1.0/24',
+    bridgeName: 'br0'
   }
 }
 

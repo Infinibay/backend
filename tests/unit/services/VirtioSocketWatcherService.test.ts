@@ -6,9 +6,14 @@ import { EventEmitter } from 'events'
 import { VirtioSocketWatcherService, createVirtioSocketWatcherService } from '../../../app/services/VirtioSocketWatcherService'
 import { mockPrisma } from '../../setup/jest.setup'
 import { createMockContext } from '../../setup/test-helpers'
+import { PrismaClient, Machine, SystemMetrics } from '@prisma/client'
 
 // Mock chokidar
-const mockWatcher = new EventEmitter() as any
+interface MockWatcher extends EventEmitter {
+  close: jest.Mock
+}
+
+const mockWatcher = new EventEmitter() as MockWatcher
 mockWatcher.close = jest.fn().mockResolvedValue(undefined)
 
 jest.mock('chokidar', () => ({
@@ -51,14 +56,14 @@ describe('VirtioSocketWatcherService', () => {
     jest.clearAllMocks();
 
     // Reset the singleton
-    (global as any).virtioSocketWatcherService = null
+    (global as typeof globalThis & { virtioSocketWatcherService: VirtioSocketWatcherService | null }).virtioSocketWatcherService = null
 
     // Create service with mock prisma
-    service = createVirtioSocketWatcherService(mockPrisma as any)
+    service = createVirtioSocketWatcherService(mockPrisma as unknown as PrismaClient)
 
     // Get the mock socket instance
     mockSocket = new MockSocket();
-    (net.Socket as any).mockImplementation(() => mockSocket)
+    (net.Socket as jest.MockedClass<typeof net.Socket>).mockImplementation(() => mockSocket as unknown as net.Socket)
   })
 
   afterEach(() => {
@@ -93,14 +98,14 @@ describe('VirtioSocketWatcherService', () => {
         id: 'test-vm',
         name: 'Test VM',
         status: 'running'
-      } as any)
+      } as Machine)
 
       mockWatcher.emit('add', socketPath)
       await new Promise(resolve => setTimeout(resolve, 100))
 
       await service.stop()
 
-      expect((mockWatcher as any).close).toHaveBeenCalled()
+      expect(mockWatcher.close).toHaveBeenCalled()
       expect(mockSocket.destroy).toHaveBeenCalled()
     })
 
@@ -126,7 +131,7 @@ describe('VirtioSocketWatcherService', () => {
         id: vmId,
         name: 'Test VM',
         status: 'running'
-      } as any)
+      } as Machine)
 
       mockWatcher.emit('add', socketPath)
       await new Promise(resolve => setTimeout(resolve, 100))
@@ -168,7 +173,7 @@ describe('VirtioSocketWatcherService', () => {
         id: vmId,
         name: 'Test VM',
         status: 'running'
-      } as any)
+      } as Machine)
 
       mockWatcher.emit('add', socketPath)
       await new Promise(resolve => setTimeout(resolve, 100))
@@ -193,7 +198,7 @@ describe('VirtioSocketWatcherService', () => {
         id: vmId,
         name: 'Test VM',
         status: 'running'
-      } as any)
+      } as Machine)
 
       mockWatcher.emit('add', socketPath)
       await new Promise(resolve => setTimeout(resolve, 100))
@@ -283,7 +288,7 @@ describe('VirtioSocketWatcherService', () => {
         uptime: BigInt(3600),
         loadAverage: metricsMessage.data.system.load_average,
         timestamp: new Date()
-      } as any)
+      } as unknown as SystemMetrics)
 
       mockSocket.emit('data', Buffer.from(JSON.stringify(metricsMessage) + '\n'))
       await new Promise(resolve => setTimeout(resolve, 100))
@@ -340,7 +345,7 @@ describe('VirtioSocketWatcherService', () => {
         id: vmId,
         name: 'Test VM',
         status: 'running'
-      } as any)
+      } as Machine)
 
       mockWatcher.emit('add', socketPath)
       await Promise.resolve()
@@ -352,7 +357,7 @@ describe('VirtioSocketWatcherService', () => {
       jest.advanceTimersByTime(1000)
 
       // Socket file still exists
-      ;(fs.access as any).mockImplementation((path: string, mode: any, cb: any) => cb(null))
+      ;(fs.access as jest.MockedFunction<typeof fs.access>).mockImplementation((_path, cb) => cb(null))
 
       jest.advanceTimersByTime(1000)
       await Promise.resolve()
@@ -380,7 +385,7 @@ describe('VirtioSocketWatcherService', () => {
         id: vmId,
         name: 'Test VM',
         status: 'running'
-      } as any)
+      } as Machine)
 
       mockWatcher.emit('add', socketPath)
       await Promise.resolve()
@@ -403,8 +408,8 @@ describe('VirtioSocketWatcherService', () => {
       await service.start()
 
       // Add two VMs
-      const vm1 = { id: 'vm-1', name: 'VM 1', status: 'running' } as any
-      const vm2 = { id: 'vm-2', name: 'VM 2', status: 'running' } as any
+      const vm1 = { id: 'vm-1', name: 'VM 1', status: 'running' } as Machine
+      const vm2 = { id: 'vm-2', name: 'VM 2', status: 'running' } as Machine
 
       mockPrisma.machine.findUnique
         .mockResolvedValueOnce(vm1)
@@ -413,9 +418,9 @@ describe('VirtioSocketWatcherService', () => {
       // Create two different sockets
       const socket1 = new MockSocket()
       const socket2 = new MockSocket()
-      ;(net.Socket as any)
-        .mockImplementationOnce(() => socket1)
-        .mockImplementationOnce(() => socket2)
+      ;(net.Socket as jest.MockedClass<typeof net.Socket>)
+        .mockImplementationOnce(() => socket1 as unknown as net.Socket)
+        .mockImplementationOnce(() => socket2 as unknown as net.Socket)
 
       mockWatcher.emit('add', path.join(socketsDir, 'vm-1.socket'))
       mockWatcher.emit('add', path.join(socketsDir, 'vm-2.socket'))
@@ -443,7 +448,7 @@ describe('VirtioSocketWatcherService', () => {
         id: vmId,
         name: 'Test VM',
         status: 'running'
-      } as any)
+      } as Machine)
 
       mockWatcher.emit('add', socketPath)
       await new Promise(resolve => setTimeout(resolve, 100))
@@ -462,6 +467,356 @@ describe('VirtioSocketWatcherService', () => {
 
       // Should not throw
       await expect(service.cleanupVmConnection('non-existent-vm')).resolves.not.toThrow()
+    })
+  })
+
+  describe('Command Execution', () => {
+    beforeEach(async () => {
+      await service.start()
+      
+      // Setup VM in database
+      mockPrisma.machine.findUnique.mockResolvedValue({
+        id: 'test-vm',
+        name: 'Test VM',
+        status: 'running'
+      } as Machine)
+      
+      mockWatcher.emit('add', path.join(socketsDir, 'test-vm.socket'))
+      await new Promise(resolve => setTimeout(resolve, 100))
+      mockSocket.emit('connect')
+      await new Promise(resolve => setTimeout(resolve, 100))
+    })
+
+    describe('Safe Command Format Tests', () => {
+      it('should send SafeCommand with correct flattened format structure', async () => {
+        const commandPromise = service.sendSafeCommand('test-vm', {
+          action: 'ServiceList',
+          params: undefined
+        })
+
+        // Wait for command to be sent
+        await new Promise(resolve => setTimeout(resolve, 50))
+        
+        // Verify command was sent with correct structure
+        expect(mockSocket.write).toHaveBeenCalled()
+        
+        // Extract and parse the sent message
+        const sentMessage = mockSocket.write.mock.calls[0][0] as string
+        const commandData = JSON.parse(sentMessage.replace('\n', ''))
+        
+        // Verify the exact structure matches InfiniService serde expectations
+        expect(commandData).toMatchObject({
+          type: 'SafeCommand',
+          id: expect.any(String),
+          command_type: {
+            action: 'ServiceList'
+          },
+          params: null,
+          timeout: expect.any(Number)
+        })
+        
+        // Should NOT have nested SafeCommand property
+        expect(commandData.SafeCommand).toBeUndefined()
+        
+        const commandId = commandData.id
+
+        // Simulate response from VM
+        const response = {
+          type: 'response',
+          id: commandId,
+          success: true,
+          exit_code: 0,
+          stdout: 'Service list output',
+          stderr: '',
+          execution_time_ms: 150,
+          command_type: 'safe',
+          data: [
+            { name: 'nginx', status: 'running' },
+            { name: 'mysql', status: 'stopped' }
+          ]
+        }
+
+        mockSocket.emit('data', Buffer.from(JSON.stringify(response) + '\n'))
+
+        const result = await commandPromise
+        expect(result).toMatchObject({
+          id: commandId,
+          success: true,
+          exit_code: 0,
+          stdout: 'Service list output',
+          execution_time_ms: 150,
+          command_type: 'safe'
+        })
+      })
+
+      it('should send PackageSearch command with correct flattened structure', async () => {
+        const commandPromise = service.sendSafeCommand('test-vm', {
+          action: 'PackageSearch',
+          params: { query: 'slack' }
+        })
+
+        await new Promise(resolve => setTimeout(resolve, 50))
+        
+        const sentMessage = mockSocket.write.mock.calls[0][0] as string
+        const commandData = JSON.parse(sentMessage.replace('\n', ''))
+        
+        expect(commandData).toMatchObject({
+          type: 'SafeCommand',
+          id: expect.any(String),
+          command_type: {
+            action: 'PackageSearch',
+            query: 'slack'
+          },
+          params: null,
+          timeout: expect.any(Number)
+        })
+
+        // Complete the command to prevent hanging
+        const response = {
+          type: 'response',
+          id: commandData.id,
+          success: true,
+          data: []
+        }
+        mockSocket.emit('data', Buffer.from(JSON.stringify(response) + '\n'))
+        await commandPromise
+      })
+
+      it('should send PackageInstall command with package parameter', async () => {
+        const commandPromise = service.sendSafeCommand('test-vm', {
+          action: 'PackageInstall',
+          params: { package: 'vim' }
+        })
+
+        await new Promise(resolve => setTimeout(resolve, 50))
+        
+        const sentMessage = mockSocket.write.mock.calls[0][0] as string
+        const commandData = JSON.parse(sentMessage.replace('\n', ''))
+        
+        expect(commandData).toMatchObject({
+          type: 'SafeCommand',
+          id: expect.any(String),
+          command_type: {
+            action: 'PackageInstall',
+            package: 'vim'
+          },
+          params: null,
+          timeout: expect.any(Number)
+        })
+
+        // Complete the command
+        const response = {
+          type: 'response',
+          id: commandData.id,
+          success: true,
+          data: []
+        }
+        mockSocket.emit('data', Buffer.from(JSON.stringify(response) + '\n'))
+        await commandPromise
+      })
+
+      it('should send ProcessList command with limit parameter', async () => {
+        const commandPromise = service.sendSafeCommand('test-vm', {
+          action: 'ProcessList',
+          params: { limit: 10 }
+        })
+
+        await new Promise(resolve => setTimeout(resolve, 50))
+        
+        const sentMessage = mockSocket.write.mock.calls[0][0] as string
+        const commandData = JSON.parse(sentMessage.replace('\n', ''))
+        
+        expect(commandData).toMatchObject({
+          type: 'SafeCommand',
+          id: expect.any(String),
+          command_type: {
+            action: 'ProcessList',
+            limit: 10
+          },
+          params: null,
+          timeout: expect.any(Number)
+        })
+
+        // Complete the command
+        const response = {
+          type: 'response',
+          id: commandData.id,
+          success: true,
+          data: []
+        }
+        mockSocket.emit('data', Buffer.from(JSON.stringify(response) + '\n'))
+        await commandPromise
+      })
+
+      it('should send ProcessKill command with pid and force parameters', async () => {
+        const commandPromise = service.sendSafeCommand('test-vm', {
+          action: 'ProcessKill',
+          params: { pid: 1234, force: true }
+        })
+
+        await new Promise(resolve => setTimeout(resolve, 50))
+        
+        const sentMessage = mockSocket.write.mock.calls[0][0] as string
+        const commandData = JSON.parse(sentMessage.replace('\n', ''))
+        
+        expect(commandData).toMatchObject({
+          type: 'SafeCommand',
+          id: expect.any(String),
+          command_type: {
+            action: 'ProcessKill',
+            pid: 1234,
+            force: true
+          },
+          params: null,
+          timeout: expect.any(Number)
+        })
+
+        // Complete the command
+        const response = {
+          type: 'response',
+          id: commandData.id,
+          success: true,
+          data: []
+        }
+        mockSocket.emit('data', Buffer.from(JSON.stringify(response) + '\n'))
+        await commandPromise
+      })
+    })
+
+    describe('Unsafe Command Format Tests', () => {
+      it('should send UnsafeCommand with correct flattened format structure', async () => {
+        const commandPromise = service.sendUnsafeCommand(
+          'test-vm',
+          'ls -la /tmp',
+          {
+            shell: 'bash',
+            workingDir: '/home/user',
+            envVars: { TEST_VAR: 'value' }
+          },
+          5000
+        )
+
+        await new Promise(resolve => setTimeout(resolve, 50))
+        
+        const sentMessage = mockSocket.write.mock.calls[0][0] as string
+        const commandData = JSON.parse(sentMessage.replace('\n', ''))
+        
+        // Verify the exact structure matches InfiniService serde expectations
+        expect(commandData).toMatchObject({
+          type: 'UnsafeCommand',
+          id: expect.any(String),
+          raw_command: 'ls -la /tmp',
+          shell: 'bash',
+          timeout: 5, // Should be converted to seconds
+          working_dir: '/home/user',
+          env_vars: { TEST_VAR: 'value' }
+        })
+        
+        // Should NOT have nested UnsafeCommand property
+        expect(commandData.UnsafeCommand).toBeUndefined()
+
+        // Simulate response
+        const response = {
+          type: 'response',
+          id: commandData.id,
+          success: true,
+          exit_code: 0,
+          stdout: 'file1.txt\nfile2.txt',
+          stderr: '',
+          execution_time_ms: 50,
+          command_type: 'unsafe'
+        }
+
+        mockSocket.emit('data', Buffer.from(JSON.stringify(response) + '\n'))
+
+        const result = await commandPromise
+        expect(result.success).toBe(true)
+        expect(result.stdout).toContain('file1.txt')
+      })
+
+      it('should send UnsafeCommand with minimal parameters', async () => {
+        const commandPromise = service.sendUnsafeCommand('test-vm', 'pwd')
+
+        await new Promise(resolve => setTimeout(resolve, 50))
+        
+        const sentMessage = mockSocket.write.mock.calls[0][0] as string
+        const commandData = JSON.parse(sentMessage.replace('\n', ''))
+        
+        // JSON serialization omits undefined values, so they won't be in the message
+        expect(commandData).toMatchObject({
+          type: 'UnsafeCommand',
+          id: expect.any(String),
+          raw_command: 'pwd',
+          timeout: 30 // Default 30 seconds
+          // shell, working_dir, env_vars should be omitted when undefined
+        })
+
+        // Verify that undefined fields are not present in the serialized JSON
+        expect(commandData.shell).toBeUndefined()
+        expect(commandData.working_dir).toBeUndefined()
+        expect(commandData.env_vars).toBeUndefined()
+
+        // Complete the command
+        const response = {
+          type: 'response',
+          id: commandData.id,
+          success: true,
+          stdout: '/home/user',
+          data: []
+        }
+        mockSocket.emit('data', Buffer.from(JSON.stringify(response) + '\n'))
+        await commandPromise
+      })
+
+      it('should convert timeout from milliseconds to seconds', async () => {
+        const commandPromise = service.sendUnsafeCommand('test-vm', 'sleep 1', {}, 45000)
+
+        await new Promise(resolve => setTimeout(resolve, 50))
+        
+        const sentMessage = mockSocket.write.mock.calls[0][0] as string
+        const commandData = JSON.parse(sentMessage.replace('\n', ''))
+        
+        expect(commandData.timeout).toBe(45) // 45000ms = 45s
+
+        // Complete the command
+        const response = {
+          type: 'response',
+          id: commandData.id,
+          success: true,
+          data: []
+        }
+        mockSocket.emit('data', Buffer.from(JSON.stringify(response) + '\n'))
+        await commandPromise
+      })
+    })
+
+    describe('Command Execution Edge Cases', () => {
+      it('should handle command timeout', async () => {
+        const commandPromise = service.sendSafeCommand(
+          'test-vm',
+          { action: 'ServiceList' },
+          1000 // 1 second timeout
+        )
+
+        // Don't send response, let it timeout
+        await expect(commandPromise).rejects.toThrow('Command timeout after 1000ms')
+      })
+
+      it('should handle unknown command response', async () => {
+        // Send response for non-existent command
+        const response = {
+          type: 'response',
+          id: 'non-existent-id',
+          success: true,
+          stdout: 'output'
+        }
+
+        mockSocket.emit('data', Buffer.from(JSON.stringify(response) + '\n'))
+        
+        // Should log warning but not crash
+        await new Promise(resolve => setTimeout(resolve, 100))
+        // No error should be thrown
+      })
     })
   })
 })

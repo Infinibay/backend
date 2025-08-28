@@ -1,5 +1,5 @@
 import 'reflect-metadata'
-import { MachineResolver } from '@resolvers/machine/resolver'
+import { MachineQueries, MachineMutations } from '@resolvers/machine/resolver'
 import { mockPrisma } from '../../setup/jest.setup'
 import {
   createMockMachine,
@@ -51,14 +51,38 @@ jest.mock('@services/EventManager', () => ({
   }))
 }))
 
+// Define the mock VirtManager type
+interface MockVirtManager {
+  createMachine: jest.Mock
+  destroyMachine: jest.Mock
+  powerOn: jest.Mock
+  powerOff: jest.Mock
+  rebootMachine: jest.Mock
+  suspendMachine: jest.Mock
+  resumeMachine: jest.Mock
+  getMachineInfo: jest.Mock
+  getMachineStats: jest.Mock
+  updateMachineResources: jest.Mock
+  attachDevice: jest.Mock
+  detachDevice: jest.Mock
+  takeSnapshot: jest.Mock
+  revertSnapshot: jest.Mock
+  deleteSnapshot: jest.Mock
+  listSnapshots: jest.Mock
+  getMachineXML: jest.Mock
+  setAutostart: jest.Mock
+}
+
 describe('MachineResolver', () => {
-  let resolver: MachineResolver
-  let mockVirtManager: any
+  let queriesResolver: MachineQueries
+  let mutationsResolver: MachineMutations
+  let mockVirtManager: MockVirtManager
 
   beforeEach(() => {
-    resolver = new MachineResolver()
+    queriesResolver = new MachineQueries()
+    mutationsResolver = new MachineMutations()
     const VirtManager = require('@utils/VirtManager').VirtManager
-    mockVirtManager = VirtManager.getInstance()
+    mockVirtManager = VirtManager.getInstance() as MockVirtManager
     jest.clearAllMocks()
   })
 
@@ -80,7 +104,7 @@ describe('MachineResolver', () => {
 
       mockPrisma.machine.findUnique.mockResolvedValue(machineWithRelations)
 
-      const result = await resolver.machine(mockMachine.id)
+      const result = await queriesResolver.machine(mockMachine.id)
 
       expect(mockPrisma.machine.findUnique).toHaveBeenCalledWith({
         where: { id: mockMachine.id },
@@ -105,7 +129,7 @@ describe('MachineResolver', () => {
     it('should return null if machine not found', async () => {
       mockPrisma.machine.findUnique.mockResolvedValue(null)
 
-      const result = await resolver.machine('non-existent-id')
+      const result = await queriesResolver.machine('non-existent-id')
 
       expect(result).toBeNull()
     })
@@ -119,7 +143,7 @@ describe('MachineResolver', () => {
       mockPrisma.machine.findMany.mockResolvedValue(mockMachines)
       mockPrisma.machine.count.mockResolvedValue(total)
 
-      const result = await resolver.machines({ take: 5, skip: 0 })
+      const result = await queriesResolver.machines({ take: 5, skip: 0 })
 
       expect(mockPrisma.machine.findMany).toHaveBeenCalledWith({
         take: 5,
@@ -144,7 +168,7 @@ describe('MachineResolver', () => {
       mockPrisma.machine.findMany.mockResolvedValue(runningMachines)
       mockPrisma.machine.count.mockResolvedValue(3)
 
-      await resolver.machines({ take: 10, skip: 0 }, { status: 'running' })
+      await queriesResolver.machines({ take: 10, skip: 0 }, { status: 'running' })
 
       expect(mockPrisma.machine.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -160,7 +184,7 @@ describe('MachineResolver', () => {
       mockPrisma.machine.findMany.mockResolvedValue(deptMachines)
       mockPrisma.machine.count.mockResolvedValue(3)
 
-      await resolver.machines({ take: 10, skip: 0 }, { departmentId })
+      await queriesResolver.machines({ take: 10, skip: 0 }, { departmentId })
 
       expect(mockPrisma.machine.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -176,7 +200,7 @@ describe('MachineResolver', () => {
       mockPrisma.machine.findMany.mockResolvedValue(userMachines)
       mockPrisma.machine.count.mockResolvedValue(2)
 
-      await resolver.machines({ take: 10, skip: 0 }, { userId })
+      await queriesResolver.machines({ take: 10, skip: 0 }, { userId })
 
       expect(mockPrisma.machine.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -213,7 +237,7 @@ describe('MachineResolver', () => {
       })
 
       const context = createAdminContext()
-      const result = await resolver.createMachine(context, input)
+      const result = await mutationsResolver.createMachine(context, input)
 
       expect(mockPrisma.machineTemplate.findUnique).toHaveBeenCalledWith({
         where: { id: input.templateId }
@@ -228,7 +252,7 @@ describe('MachineResolver', () => {
       mockPrisma.machineTemplate.findUnique.mockResolvedValue(null)
 
       const context = createAdminContext()
-      await expect(resolver.createMachine(context, input)).rejects.toThrow(UserInputError)
+      await expect(mutationsResolver.createMachine(context, input)).rejects.toThrow(UserInputError)
     })
 
     it('should throw error if department not found', async () => {
@@ -242,7 +266,7 @@ describe('MachineResolver', () => {
       mockPrisma.department.findUnique.mockResolvedValue(null)
 
       const context = createAdminContext()
-      await expect(resolver.createMachine(context, input)).rejects.toThrow(UserInputError)
+      await expect(mutationsResolver.createMachine(context, input)).rejects.toThrow(UserInputError)
     })
 
     it('should handle libvirt creation failure', async () => {
@@ -254,7 +278,7 @@ describe('MachineResolver', () => {
       mockVirtManager.createMachine.mockRejectedValue(new Error('Libvirt error'))
 
       const context = createAdminContext()
-      await expect(resolver.createMachine(context, input)).rejects.toThrow('Libvirt error')
+      await expect(mutationsResolver.createMachine(context, input)).rejects.toThrow('Libvirt error')
     })
   })
 
@@ -266,7 +290,7 @@ describe('MachineResolver', () => {
       mockVirtManager.destroyMachine.mockResolvedValue({ success: true })
       mockPrisma.machine.delete.mockResolvedValue(machine)
 
-      const result = await resolver.destroyMachine(machine.id)
+      const result = await mutationsResolver.destroyMachine(machine.id)
 
       expect(mockPrisma.machine.findUnique).toHaveBeenCalledWith({
         where: { id: machine.id }
@@ -288,7 +312,7 @@ describe('MachineResolver', () => {
       mockVirtManager.destroyMachine.mockResolvedValue({ success: true })
       mockPrisma.machine.delete.mockResolvedValue(machine)
 
-      const result = await resolver.destroyMachine(machine.id, true)
+      const result = await mutationsResolver.destroyMachine(machine.id, true)
 
       expect(mockVirtManager.destroyMachine).toHaveBeenCalled()
       expect(result.success).toBe(true)
@@ -299,14 +323,14 @@ describe('MachineResolver', () => {
 
       mockPrisma.machine.findUnique.mockResolvedValue(machine)
 
-      await expect(resolver.destroyMachine(machine.id, false)).rejects.toThrow(UserInputError)
+      await expect(mutationsResolver.destroyMachine(machine.id, false)).rejects.toThrow(UserInputError)
       expect(mockVirtManager.destroyMachine).not.toHaveBeenCalled()
     })
 
     it('should throw error if machine not found', async () => {
       mockPrisma.machine.findUnique.mockResolvedValue(null)
 
-      await expect(resolver.destroyMachine('non-existent')).rejects.toThrow(UserInputError)
+      await expect(mutationsResolver.destroyMachine('non-existent')).rejects.toThrow(UserInputError)
     })
   })
 
@@ -318,7 +342,7 @@ describe('MachineResolver', () => {
       mockVirtManager.powerOn.mockResolvedValue({ success: true })
       mockPrisma.machine.update.mockResolvedValue({ ...machine, status: 'running' })
 
-      const result = await resolver.powerOn(machine.id)
+      const result = await mutationsResolver.powerOn(machine.id)
 
       expect(mockVirtManager.powerOn).toHaveBeenCalledWith(machine.internalName)
       expect(mockPrisma.machine.update).toHaveBeenCalledWith({
@@ -336,7 +360,7 @@ describe('MachineResolver', () => {
 
       mockPrisma.machine.findUnique.mockResolvedValue(machine)
 
-      await expect(resolver.powerOn(machine.id)).rejects.toThrow(UserInputError)
+      await expect(mutationsResolver.powerOn(machine.id)).rejects.toThrow(UserInputError)
       expect(mockVirtManager.powerOn).not.toHaveBeenCalled()
     })
 
@@ -346,7 +370,7 @@ describe('MachineResolver', () => {
       mockPrisma.machine.findUnique.mockResolvedValue(machine)
       mockVirtManager.powerOn.mockRejectedValue(new Error('Failed to start domain'))
 
-      await expect(resolver.powerOn(machine.id)).rejects.toThrow('Failed to start domain')
+      await expect(mutationsResolver.powerOn(machine.id)).rejects.toThrow('Failed to start domain')
     })
   })
 
@@ -358,7 +382,7 @@ describe('MachineResolver', () => {
       mockVirtManager.powerOff.mockResolvedValue({ success: true })
       mockPrisma.machine.update.mockResolvedValue({ ...machine, status: 'stopped' })
 
-      const result = await resolver.powerOff(machine.id)
+      const result = await mutationsResolver.powerOff(machine.id)
 
       expect(mockVirtManager.powerOff).toHaveBeenCalledWith(machine.internalName, false)
       expect(mockPrisma.machine.update).toHaveBeenCalledWith({
@@ -378,7 +402,7 @@ describe('MachineResolver', () => {
       mockVirtManager.powerOff.mockResolvedValue({ success: true })
       mockPrisma.machine.update.mockResolvedValue({ ...machine, status: 'stopped' })
 
-      await resolver.powerOff(machine.id, true)
+      await mutationsResolver.powerOff(machine.id, true)
 
       expect(mockVirtManager.powerOff).toHaveBeenCalledWith(machine.internalName, true)
     })
@@ -388,7 +412,7 @@ describe('MachineResolver', () => {
 
       mockPrisma.machine.findUnique.mockResolvedValue(machine)
 
-      await expect(resolver.powerOff(machine.id)).rejects.toThrow(UserInputError)
+      await expect(mutationsResolver.powerOff(machine.id)).rejects.toThrow(UserInputError)
       expect(mockVirtManager.powerOff).not.toHaveBeenCalled()
     })
   })
@@ -400,7 +424,7 @@ describe('MachineResolver', () => {
       mockPrisma.machine.findUnique.mockResolvedValue(machine)
       mockVirtManager.rebootMachine.mockResolvedValue({ success: true })
 
-      const result = await resolver.rebootMachine(machine.id)
+      const result = await mutationsResolver.rebootMachine(machine.id)
 
       expect(mockVirtManager.rebootMachine).toHaveBeenCalledWith(machine.internalName, false)
       expect(result).toEqual({
@@ -415,7 +439,7 @@ describe('MachineResolver', () => {
       mockPrisma.machine.findUnique.mockResolvedValue(machine)
       mockVirtManager.rebootMachine.mockResolvedValue({ success: true })
 
-      await resolver.rebootMachine(machine.id, true)
+      await mutationsResolver.rebootMachine(machine.id, true)
 
       expect(mockVirtManager.rebootMachine).toHaveBeenCalledWith(machine.internalName, true)
     })
@@ -425,7 +449,7 @@ describe('MachineResolver', () => {
 
       mockPrisma.machine.findUnique.mockResolvedValue(machine)
 
-      await expect(resolver.rebootMachine(machine.id)).rejects.toThrow(UserInputError)
+      await expect(mutationsResolver.rebootMachine(machine.id)).rejects.toThrow(UserInputError)
     })
   })
 
@@ -437,7 +461,7 @@ describe('MachineResolver', () => {
       mockVirtManager.suspendMachine.mockResolvedValue({ success: true })
       mockPrisma.machine.update.mockResolvedValue({ ...machine, status: 'paused' })
 
-      const result = await resolver.suspendMachine(machine.id)
+      const result = await mutationsResolver.suspendMachine(machine.id)
 
       expect(mockVirtManager.suspendMachine).toHaveBeenCalledWith(machine.internalName)
       expect(mockPrisma.machine.update).toHaveBeenCalledWith({
@@ -455,7 +479,7 @@ describe('MachineResolver', () => {
 
       mockPrisma.machine.findUnique.mockResolvedValue(machine)
 
-      await expect(resolver.suspendMachine(machine.id)).rejects.toThrow(UserInputError)
+      await expect(mutationsResolver.suspendMachine(machine.id)).rejects.toThrow(UserInputError)
     })
   })
 
@@ -467,7 +491,7 @@ describe('MachineResolver', () => {
       mockVirtManager.resumeMachine.mockResolvedValue({ success: true })
       mockPrisma.machine.update.mockResolvedValue({ ...machine, status: 'running' })
 
-      const result = await resolver.resumeMachine(machine.id)
+      const result = await mutationsResolver.resumeMachine(machine.id)
 
       expect(mockVirtManager.resumeMachine).toHaveBeenCalledWith(machine.internalName)
       expect(mockPrisma.machine.update).toHaveBeenCalledWith({
@@ -485,7 +509,7 @@ describe('MachineResolver', () => {
 
       mockPrisma.machine.findUnique.mockResolvedValue(machine)
 
-      await expect(resolver.resumeMachine(machine.id)).rejects.toThrow(UserInputError)
+      await expect(mutationsResolver.resumeMachine(machine.id)).rejects.toThrow(UserInputError)
     })
   })
 
@@ -498,7 +522,7 @@ describe('MachineResolver', () => {
       mockVirtManager.updateMachineResources.mockResolvedValue({ success: true })
       mockPrisma.machine.update.mockResolvedValue({ ...machine, cpuCores: newCores })
 
-      const result = await resolver.updateMachineResources(machine.id, { cpuCores: newCores })
+      const result = await mutationsResolver.updateMachineResources(machine.id, { cpuCores: newCores })
 
       expect(mockVirtManager.updateMachineResources).toHaveBeenCalledWith(
         machine.internalName,
@@ -519,7 +543,7 @@ describe('MachineResolver', () => {
       mockVirtManager.updateMachineResources.mockResolvedValue({ success: true })
       mockPrisma.machine.update.mockResolvedValue({ ...machine, ramGB: newRam })
 
-      const result = await resolver.updateMachineResources(machine.id, { ramGB: newRam })
+      const result = await mutationsResolver.updateMachineResources(machine.id, { ramGB: newRam })
 
       expect(mockVirtManager.updateMachineResources).toHaveBeenCalledWith(
         machine.internalName,
@@ -536,7 +560,7 @@ describe('MachineResolver', () => {
       mockVirtManager.updateMachineResources.mockResolvedValue({ success: true })
       mockPrisma.machine.update.mockResolvedValue({ ...machine, diskSizeGB: newDiskSize })
 
-      const result = await resolver.updateMachineResources(machine.id, { diskSizeGB: newDiskSize })
+      const result = await mutationsResolver.updateMachineResources(machine.id, { diskSizeGB: newDiskSize })
 
       expect(mockVirtManager.updateMachineResources).toHaveBeenCalledWith(
         machine.internalName,
@@ -551,17 +575,17 @@ describe('MachineResolver', () => {
 
       // Test invalid CPU cores
       await expect(
-        resolver.updateMachineResources(machine.id, { cpuCores: 0 })
+        mutationsResolver.updateMachineResources(machine.id, { cpuCores: 0 })
       ).rejects.toThrow(UserInputError)
 
       // Test invalid RAM
       await expect(
-        resolver.updateMachineResources(machine.id, { ramGB: -1 })
+        mutationsResolver.updateMachineResources(machine.id, { ramGB: -1 })
       ).rejects.toThrow(UserInputError)
 
       // Test invalid disk size (can't shrink)
       await expect(
-        resolver.updateMachineResources(machine.id, { diskSizeGB: machine.diskSizeGB - 10 })
+        mutationsResolver.updateMachineResources(machine.id, { diskSizeGB: machine.diskSizeGB - 10 })
       ).rejects.toThrow(UserInputError)
     })
   })
@@ -582,7 +606,7 @@ describe('MachineResolver', () => {
       mockPrisma.machine.findUnique.mockResolvedValue(machine)
       mockVirtManager.getMachineStats.mockResolvedValue(stats)
 
-      const result = await resolver.getMachineStats(machine.id)
+      const result = await mutationsResolver.getMachineStats(machine.id)
 
       expect(mockVirtManager.getMachineStats).toHaveBeenCalledWith(machine.internalName)
       expect(result).toEqual(stats)
@@ -593,7 +617,7 @@ describe('MachineResolver', () => {
 
       mockPrisma.machine.findUnique.mockResolvedValue(machine)
 
-      const result = await resolver.getMachineStats(machine.id)
+      const result = await mutationsResolver.getMachineStats(machine.id)
 
       expect(mockVirtManager.getMachineStats).not.toHaveBeenCalled()
       expect(result).toBeNull()
@@ -607,7 +631,7 @@ describe('MachineResolver', () => {
       mockPrisma.machine.findUnique.mockResolvedValue(machine)
       mockVirtManager.setAutostart.mockResolvedValue({ success: true })
 
-      const result = await resolver.setMachineAutostart(machine.id, true)
+      const result = await mutationsResolver.setMachineAutostart(machine.id, true)
 
       expect(mockVirtManager.setAutostart).toHaveBeenCalledWith(machine.internalName, true)
       expect(result).toEqual({
@@ -622,7 +646,7 @@ describe('MachineResolver', () => {
       mockPrisma.machine.findUnique.mockResolvedValue(machine)
       mockVirtManager.setAutostart.mockResolvedValue({ success: true })
 
-      const result = await resolver.setMachineAutostart(machine.id, false)
+      const result = await mutationsResolver.setMachineAutostart(machine.id, false)
 
       expect(mockVirtManager.setAutostart).toHaveBeenCalledWith(machine.internalName, false)
       expect(result).toEqual({
@@ -640,7 +664,7 @@ describe('MachineResolver', () => {
 
       mockPrisma.machine.findUnique.mockResolvedValue(userMachine)
 
-      const result = await resolver.machine(userMachine.id)
+      const result = await queriesResolver.machine(userMachine.id)
       expect(result).toEqual(userMachine)
     })
 

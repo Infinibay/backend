@@ -1,12 +1,13 @@
 import { GraphQLSchema, graphql } from 'graphql'
 import { buildSchema } from 'type-graphql'
 import * as jwt from 'jsonwebtoken'
-import { User } from '@prisma/client'
+import { User, PrismaClient } from '@prisma/client'
+import { Request, Response } from 'express'
+import { InfinibayContext } from '@utils/context'
+import { mockPrisma } from './jest.setup'
 
 // Authentication context builder
-export interface TestContext {
-  user?: User;
-  prisma?: any;
+export interface TestContext extends InfinibayContext {
   token?: string;
 }
 
@@ -25,7 +26,13 @@ export function createMockContext (overrides?: Partial<TestContext>): TestContex
   }
 
   return {
+    req: {} as Request,
+    res: {} as Response,
     user: defaultUser,
+    prisma: mockPrisma as unknown as PrismaClient,
+    setupMode: false,
+    eventManager: undefined,
+    virtioSocketWatcher: undefined,
     ...overrides
   }
 }
@@ -60,8 +67,8 @@ export function generateTestToken (userId: string, role: string = 'USER'): strin
 export async function executeGraphQL (
   schema: GraphQLSchema,
   query: string,
-  variables?: any,
-  context?: any
+  variables?: Record<string, unknown>,
+  context?: unknown
 ) {
   const result = await graphql({
     schema,
@@ -270,10 +277,11 @@ export const ErrorMatchers = {
 }
 
 // Test data cleanup utilities
-export async function cleanupTestData (prisma: any, tables: string[]) {
+export async function cleanupTestData (prisma: unknown, tables: string[]) {
+  const prismaClient = prisma as Record<string, { deleteMany: (args?: unknown) => Promise<unknown> }>
   for (const table of tables.reverse()) {
     try {
-      await prisma[table].deleteMany({})
+      await prismaClient[table].deleteMany({})
     } catch (error) {
       // Ignore errors for non-existent tables
     }
@@ -286,25 +294,33 @@ export function waitFor (ms: number): Promise<void> {
 }
 
 // Mock libvirt state helper
-export function setupLibvirtMockState (state: any) {
+export function setupLibvirtMockState (state: unknown) {
   const libvirt = require('libvirt-node')
   if (libvirt.__setLibvirtMockState) {
     libvirt.__setLibvirtMockState(state)
   }
 }
 
-// Response assertion helpers
-export function assertGraphQLSuccess (result: any) {
-  expect(result.errors).toBeUndefined()
-  expect(result.data).toBeDefined()
+// GraphQL response type
+interface GraphQLResponse {
+  errors?: Array<{ message: string }>;
+  data?: unknown;
 }
 
-export function assertGraphQLError (result: any, expectedError?: string) {
-  expect(result.errors).toBeDefined()
-  expect(result.errors.length).toBeGreaterThan(0)
+// Response assertion helpers
+export function assertGraphQLSuccess (result: unknown) {
+  const response = result as GraphQLResponse
+  expect(response.errors).toBeUndefined()
+  expect(response.data).toBeDefined()
+}
 
-  if (expectedError) {
-    expect(result.errors[0].message).toContain(expectedError)
+export function assertGraphQLError (result: unknown, expectedError?: string) {
+  const response = result as GraphQLResponse
+  expect(response.errors).toBeDefined()
+  expect(response.errors?.length).toBeGreaterThan(0)
+
+  if (expectedError && response.errors) {
+    expect(response.errors[0].message).toContain(expectedError)
   }
 }
 

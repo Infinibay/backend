@@ -9,147 +9,141 @@ datasource db {
 }
 
 model User {
-  id        String  @id @default(uuid())
-  email     String  @unique
+  id        String    @id @default(uuid())
+  email     String    @unique
   password  String
   deleted   Boolean
-  token     String  @default("null")
+  token     String    @default("null")
   firstName String
   lastName  String
-  userImage String? @unique
+  userImage String?   @unique
   role      String
-  createdAt DateTime @default(now())
-  VM Machine[]
+  createdAt DateTime  @default(now())
+  VM        Machine[]
 }
 
 model Node {
-  id              String @id @default(uuid())
-  name            String
-  currentRaid     String
-  nextRaid        String?
-  cpuFlags        Json
-  ram             Int
-  cores           Int
-  disks           Disk[]
+  id          String  @id @default(uuid())
+  name        String
+  currentRaid String
+  nextRaid    String?
+  cpuFlags    Json
+  ram         Int
+  cores       Int
+  disks       Disk[]
 }
 
 model Disk {
-  id              String @id @default(uuid())
-  path            String
-  nodeId          String
-  node            Node @relation(fields: [nodeId], references: [id])
-  status          String
+  id     String @id @default(uuid())
+  path   String
+  nodeId String
+  status String
+  node   Node   @relation(fields: [nodeId], references: [id])
 }
 
 model ISO {
-  id            String   @id @default(uuid())
-  filename      String   @unique
-  os            String   // windows10, windows11, ubuntu, fedora
-  version       String?
-  size          BigInt
-  uploadedAt    DateTime @default(now())
-  lastVerified  DateTime?
-  isAvailable   Boolean  @default(true)
-  checksum      String?
-  downloadUrl   String?  // For remote ISOs
-  path          String   // Local filesystem path
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id           String    @id @default(uuid())
+  filename     String    @unique
+  os           String
+  version      String?
+  size         BigInt
+  uploadedAt   DateTime  @default(now())
+  lastVerified DateTime?
+  isAvailable  Boolean   @default(true)
+  checksum     String?
+  downloadUrl  String?
+  path         String
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 }
 
 model Machine {
-  id                 String  @id @default(uuid())
-  name               String
-  internalName       String
-  status             String
-  userId             String?
-  templateId         String?
-  os                 String
-  // Hardware Configuration
-  cpuCores           Int     @default(0)    // Number of CPU cores
-  ramGB              Int     @default(0) // RAM in MB
-  diskSizeGB         Int     @default(0)   // Disk size in GB
-  gpuPciAddress      String?                // GPU PCI address (e.g., '0000:01:00.0')
-  // Firewall Templates Configuration
-  firewallTemplates  Json?                  // { appliedTemplates: [], customRules: [], lastSync: Date }
-  // System Fields
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
-  // Relations
-  template           MachineTemplate? @relation(fields: [templateId], references: [id])
-  user               User?           @relation(fields: [userId], references: [id])
-  applications       MachineApplication[]
-  configuration      MachineConfiguration?
-  departmentId       String?
-  department         Department?     @relation(fields: [departmentId], references: [id])
-  pendingCommands    PendingCommand[]
-  ports              VmPort[]
-  nwFilters          VMNWFilter[]
-  serviceConfigs     VMServiceConfig[]
-
-  // Infiniservice Relations
-  systemMetrics      SystemMetrics[]
-  processSnapshots   ProcessSnapshot[]
-  applicationUsage   ApplicationUsage[]
-  portUsage          PortUsage[]
-  windowsServices    WindowsService[]
+  id                String                @id @default(uuid())
+  name              String
+  internalName      String
+  status            String
+  userId            String?
+  templateId        String?
+  os                String
+  cpuCores          Int                   @default(0)
+  ramGB             Int                   @default(0)
+  diskSizeGB        Int                   @default(0)
+  gpuPciAddress     String?
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+  departmentId      String?
+  firewallTemplates Json?
+  applicationUsage  ApplicationUsage[]
+  department        Department?           @relation(fields: [departmentId], references: [id])
+  template          MachineTemplate?      @relation(fields: [templateId], references: [id])
+  user              User?                 @relation(fields: [userId], references: [id])
+  applications      MachineApplication[]
+  configuration     MachineConfiguration?
+  pendingCommands   PendingCommand[]
+  portUsage         PortUsage[]
+  processSnapshots  ProcessSnapshot[]
+  systemMetrics     SystemMetrics[]
+  nwFilters         VMNWFilter[]
+  serviceConfigs    VMServiceConfig[]
+  ports             VmPort[]
+  windowsServices   WindowsService[]
 }
 
 model MachineConfiguration {
-  id              String   @id @default(uuid())
+  id              String  @id @default(uuid())
   xml             Json?
   graphicProtocol String?
   graphicPort     Int?
   graphicPassword String?
   graphicHost     String?
-  assignedGpuBus  String?  // Assigned GPU PCI bus
-  machineId       String   @unique
-  machine         Machine  @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  assignedGpuBus  String?
+  machineId       String  @unique
+  machine         Machine @relation(fields: [machineId], references: [id], onDelete: Cascade)
 }
 
 model MachineTemplate {
-  id            String @id @default(uuid())
-  name          String
-  description   String?
-  cores         Int
+  id          String                   @id @default(uuid())
+  name        String
+  description String?
+  cores       Int
   /// In GB
-  ram           Int
+  ram         Int
   /// In GB
-  storage       Int
-  createdAt     DateTime @default(now())
-  machines      Machine[]
-  categoryId    String?
-  category      MachineTemplateCategory? @relation(fields: [categoryId], references: [id])
+  storage     Int
+  createdAt   DateTime                 @default(now())
+  categoryId  String?
+  machines    Machine[]
+  category    MachineTemplateCategory? @relation(fields: [categoryId], references: [id])
 }
 
 model MachineTemplateCategory {
-  id          String @id @default(uuid())
+  id          String            @id @default(uuid())
   name        String
   description String?
+  createdAt   DateTime          @default(now())
   templates   MachineTemplate[]
-  createdAt   DateTime @default(now())
 }
 
 model Application {
-  id              String    @id @default(uuid())
-  name            String
-  description     String?
-  version         String?
-  url             String?
-  icon            String?
-  os              String[]
-  installCommand  Json
-  parameters      Json
-  createdAt       DateTime  @default(now())
-  machines        MachineApplication[]
+  id             String               @id @default(uuid())
+  name           String
+  description    String?
+  version        String?
+  url            String?
+  icon           String?
+  os             String[]
+  installCommand Json
+  parameters     Json
+  createdAt      DateTime             @default(now())
+  machines       MachineApplication[]
 }
 
 model MachineApplication {
   machineId     String
   applicationId String
-  machine       Machine     @relation(fields: [machineId], references: [id])
-  application   Application @relation(fields: [applicationId], references: [id])
   parameters    Json
+  application   Application @relation(fields: [applicationId], references: [id])
+  machine       Machine     @relation(fields: [machineId], references: [id])
 
   @@id([machineId, applicationId])
 }
@@ -166,253 +160,224 @@ model PendingCommand {
 }
 
 model Notification {
-  id      String          @id @default(uuid())
+  id      String  @id @default(uuid())
   message String?
 }
 
 model Department {
-  id            String   @id @default(uuid())
-  name          String
-  createdAt     DateTime @default(now())
-  internetSpeed Int?     // in Mbps
-  ipSubnet      String?
-  machines      Machine[]
-  nwFilters     DepartmentNWFilter[]
-  configuration DepartmentConfiguration?
+  id             String                    @id @default(uuid())
+  name           String
+  createdAt      DateTime                  @default(now())
+  internetSpeed  Int?
+  ipSubnet       String?
+  configuration  DepartmentConfiguration?
+  nwFilters      DepartmentNWFilter[]
   serviceConfigs DepartmentServiceConfig[]
+  machines       Machine[]
 }
 
 model NWFilter {
-  id            String   @id @default(uuid())
-  name          String   @unique
-  internalName  String   @unique
-  uuid          String   @unique
-  description   String?
-  chain         String?  // ipv4, arp, etc.
-  type          String   @default("generic") // generic, department, vm
-  priority      Int      @default(500)       // Added: filter priority
-  stateMatch    Boolean  @default(true)      // Added: state matching
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  flushedAt     DateTime?
-  rules         FWRule[]
-  departments   DepartmentNWFilter[]
+  id           String               @id @default(uuid())
+  name         String               @unique
+  internalName String               @unique
+  uuid         String               @unique
+  description  String?
+  chain        String?
+  type         String               @default("generic")
+  priority     Int                  @default(500)
+  stateMatch   Boolean              @default(true)
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+  flushedAt    DateTime?
+  departments  DepartmentNWFilter[]
+  rules        FWRule[]
+  referencedBy FilterReference[]    @relation("ReferencingFilters")
+  references   FilterReference[]    @relation("ReferencedFilters")
   vms          VMNWFilter[]
-  
-  // Self-referential many-to-many relationship for filter references
-  referencedBy    FilterReference[] @relation("ReferencingFilters")
-  references      FilterReference[] @relation("ReferencedFilters")
 }
 
 model FilterReference {
-  id              String   @id @default(uuid())
-  sourceFilter    NWFilter @relation("ReferencingFilters", fields: [sourceFilterId], references: [id], onDelete: Cascade)
-  sourceFilterId  String
-  targetFilter    NWFilter @relation("ReferencedFilters", fields: [targetFilterId], references: [id], onDelete: Cascade)
-  targetFilterId  String
+  id             String   @id @default(uuid())
+  sourceFilterId String
+  targetFilterId String
   createdAt      DateTime @default(now())
+  sourceFilter   NWFilter @relation("ReferencingFilters", fields: [sourceFilterId], references: [id], onDelete: Cascade)
+  targetFilter   NWFilter @relation("ReferencedFilters", fields: [targetFilterId], references: [id], onDelete: Cascade)
 
   @@unique([sourceFilterId, targetFilterId])
 }
 
 model DepartmentNWFilter {
   id           String     @id @default(uuid())
-  department   Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
   departmentId String
-  nwFilter     NWFilter   @relation(fields: [nwFilterId], references: [id], onDelete: Cascade)
   nwFilterId   String
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
+  department   Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  nwFilter     NWFilter   @relation(fields: [nwFilterId], references: [id], onDelete: Cascade)
 
   @@unique([departmentId, nwFilterId])
 }
 
 model FWRule {
-  id          String    @id @default(uuid())
-  nwFilter    NWFilter  @relation(fields: [nwFilterId], references: [id], onDelete: Cascade)
-  nwFilterId  String
-  action      String    @default("accept") // accept, reject, drop, return, continue
-  direction   String    @default("inout")  // in, out, inout
-  priority    Int
-  protocol    String    @default("all")    // tcp, udp, icmp, arp, ipv4, ipv6, all
-  ipVersion   String?   // ipv4, ipv6
-  srcMacAddr  String?   // MAC address format
-  srcIpAddr   String?   // IP address format
-  srcIpMask   String?   // IP mask format
-  dstIpAddr   String?   // IP address format
-  dstIpMask   String?   // IP mask format
-  srcPortStart Int?     // 0-65535
-  srcPortEnd   Int?     // 0-65535
-  dstPortStart Int?     // 0-65535
-  dstPortEnd   Int?     // 0-65535
-  state       Json?     // NEW, ESTABLISHED, RELATED, etc.
-  comment     String?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id           String   @id @default(uuid())
+  nwFilterId   String
+  action       String   @default("accept")
+  direction    String   @default("inout")
+  priority     Int
+  protocol     String   @default("all")
+  ipVersion    String?
+  srcMacAddr   String?
+  srcIpAddr    String?
+  srcIpMask    String?
+  dstIpAddr    String?
+  dstIpMask    String?
+  srcPortStart Int?
+  srcPortEnd   Int?
+  dstPortStart Int?
+  dstPortEnd   Int?
+  state        Json?
+  comment      String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  nwFilter     NWFilter @relation(fields: [nwFilterId], references: [id], onDelete: Cascade)
 }
 
 model DepartmentConfiguration {
-  id          String    @id @default(uuid())
-  department  Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
-  departmentId String   @unique
-  cleanTraffic Boolean  @default(false)
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id           String     @id @default(uuid())
+  departmentId String     @unique
+  cleanTraffic Boolean    @default(false)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  department   Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
 }
 
 model VMNWFilter {
-  id           String     @id @default(uuid())
-  vm           Machine    @relation(fields: [vmId], references: [id], onDelete: Cascade)
-  vmId         String
-  nwFilter     NWFilter   @relation(fields: [nwFilterId], references: [id], onDelete: Cascade)
-  nwFilterId   String
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
+  id         String   @id @default(uuid())
+  vmId       String
+  nwFilterId String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  nwFilter   NWFilter @relation(fields: [nwFilterId], references: [id], onDelete: Cascade)
+  vm         Machine  @relation(fields: [vmId], references: [id], onDelete: Cascade)
 
   @@unique([vmId, nwFilterId])
 }
 
 model VmPort {
-  id          String    @id @default(uuid())
-  portStart   Int       // Start of port range
-  portEnd     Int       // End of port range (same as portStart for single port)
-  protocol    String    // tcp or udp
-  running     Boolean   // if the port is currently in use
-  enabled     Boolean   // if firewall allows inbound connections
-  toEnable    Boolean   // if it will be enabled in next firewall update
-  vmId        String
-  vm          Machine   @relation(fields: [vmId], references: [id])
-  lastSeen    DateTime  @default(now())
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id        String   @id @default(uuid())
+  portStart Int
+  portEnd   Int
+  protocol  String
+  running   Boolean
+  enabled   Boolean
+  toEnable  Boolean
+  vmId      String
+  lastSeen  DateTime @default(now())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  vm        Machine  @relation(fields: [vmId], references: [id])
+
   @@unique([vmId, portStart, protocol])
 }
 
 model DepartmentServiceConfig {
   id             String     @id @default(uuid())
-  department     Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
   departmentId   String
-  serviceId      String     // Reference to a known service
-  useEnabled     Boolean    @default(false)  // Can VMs in department use this service
-  provideEnabled Boolean    @default(false)  // Can VMs in department provide this service
+  serviceId      String
+  useEnabled     Boolean    @default(false)
+  provideEnabled Boolean    @default(false)
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
-  
+  department     Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+
   @@unique([departmentId, serviceId])
 }
 
 model VMServiceConfig {
-  id             String     @id @default(uuid())
-  vm             Machine    @relation(fields: [vmId], references: [id], onDelete: Cascade)
+  id             String   @id @default(uuid())
   vmId           String
-  serviceId      String     // Reference to a known service
-  useEnabled     Boolean    @default(false)  // Can this VM use this service
-  provideEnabled Boolean    @default(false)  // Can this VM provide this service
-  createdAt      DateTime   @default(now())
-  updatedAt      DateTime   @updatedAt
-  
+  serviceId      String
+  useEnabled     Boolean  @default(false)
+  provideEnabled Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  vm             Machine  @relation(fields: [vmId], references: [id], onDelete: Cascade)
+
   @@unique([vmId, serviceId])
 }
 
 model GlobalServiceConfig {
-  id             String     @id @default(uuid())
-  serviceId      String     @unique // Reference to a known service
-  useEnabled     Boolean    @default(true)   // Global default for using this service
-  provideEnabled Boolean    @default(false)  // Global default for providing this service
-  createdAt      DateTime   @default(now())
-  updatedAt      DateTime   @updatedAt
+  id             String   @id @default(uuid())
+  serviceId      String   @unique
+  useEnabled     Boolean  @default(true)
+  provideEnabled Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 }
 
-// ============================================================================
-// INFINISERVICE DATA COLLECTION MODELS
-// ============================================================================
-
 model SystemMetrics {
-  id          String   @id @default(uuid())
-  machineId   String
-  machine     Machine  @relation(fields: [machineId], references: [id], onDelete: Cascade)
-
-  // CPU Metrics
-  cpuUsagePercent     Float
-  cpuCoresUsage       Json    // Array of per-core usage percentages
-  cpuTemperature      Float?  // CPU temperature if available
-
-  // Memory Metrics
-  totalMemoryKB       BigInt
-  usedMemoryKB        BigInt
-  availableMemoryKB   BigInt
-  swapTotalKB         BigInt?
-  swapUsedKB          BigInt?
-
-  // Disk Metrics
-  diskUsageStats      Json    // Array of {mountPoint, totalGB, usedGB, availableGB}
-  diskIOStats         Json    // {readBytesPerSec, writeBytesPerSec, readOpsPerSec, writeOpsPerSec}
-
-  // Network Metrics (summary only)
-  networkStats        Json    // Array of {interface, bytesReceived, bytesSent, packetsReceived, packetsSent}
-
-  // System Information
-  uptime              BigInt  // System uptime in seconds
-  loadAverage         Json?   // {load1min, load5min, load15min} - Linux only
-
-  timestamp           DateTime @default(now())
+  id                String   @id @default(uuid())
+  machineId         String
+  cpuUsagePercent   Float
+  cpuCoresUsage     Json
+  cpuTemperature    Float?
+  totalMemoryKB     BigInt
+  usedMemoryKB      BigInt
+  availableMemoryKB BigInt
+  swapTotalKB       BigInt?
+  swapUsedKB        BigInt?
+  diskUsageStats    Json
+  diskIOStats       Json
+  networkStats      Json
+  uptime            BigInt
+  loadAverage       Json?
+  timestamp         DateTime @default(now())
+  machine           Machine  @relation(fields: [machineId], references: [id], onDelete: Cascade)
 
   @@index([machineId, timestamp])
 }
 
 model ProcessSnapshot {
-  id          String   @id @default(uuid())
-  machineId   String
-  machine     Machine  @relation(fields: [machineId], references: [id], onDelete: Cascade)
-
-  processId   Int      // OS process ID
-  parentPid   Int?     // Parent process ID
-  name        String   // Process name
-  executablePath String? // Full path to executable
-  commandLine    String? // Command line arguments (truncated if too long)
-
-  // Resource Usage
-  cpuUsagePercent Float   // CPU usage percentage
-  memoryUsageKB   BigInt  // Memory usage in KB
-  diskReadBytes   BigInt? // Disk read bytes (if available)
-  diskWriteBytes  BigInt? // Disk write bytes (if available)
-
-  // Process State
-  status          String   // running, sleeping, zombie, stopped, etc.
-  startTime       DateTime? // Process start time
-
-  timestamp       DateTime @default(now())
+  id              String    @id @default(uuid())
+  machineId       String
+  processId       Int
+  parentPid       Int?
+  name            String
+  executablePath  String?
+  commandLine     String?
+  cpuUsagePercent Float
+  memoryUsageKB   BigInt
+  diskReadBytes   BigInt?
+  diskWriteBytes  BigInt?
+  status          String
+  startTime       DateTime?
+  timestamp       DateTime  @default(now())
+  machine         Machine   @relation(fields: [machineId], references: [id], onDelete: Cascade)
 
   @@index([machineId, timestamp])
   @@index([machineId, processId, timestamp])
 }
 
 model ApplicationUsage {
-  id              String   @id @default(uuid())
-  machineId       String
-  machine         Machine  @relation(fields: [machineId], references: [id], onDelete: Cascade)
-
-  executablePath  String   // Full path to the application executable
-  applicationName String   // Friendly application name (extracted from metadata)
-  version         String?  // Application version
-  description     String?  // Application description
-  publisher       String?  // Application publisher/company
-
-  // Usage Statistics
-  lastAccessTime     DateTime? // Last time application was accessed
-  lastModifiedTime   DateTime? // Last time executable was modified
-  accessCount        Int      @default(0) // Number of times accessed
-  totalUsageMinutes  Int      @default(0) // Total usage time in minutes
-
-  // Application Metadata
-  iconData           Bytes?   // Processed icon data (PNG format, 64x64)
-  iconFormat         String?  // Original icon format (ico, png, etc.)
-  fileSize           BigInt?  // Executable file size in bytes
-
-  // Tracking Information
-  firstSeen          DateTime @default(now())
-  lastSeen           DateTime @default(now())
-  isActive           Boolean  @default(true) // Still present on system
+  id                String    @id @default(uuid())
+  machineId         String
+  executablePath    String
+  applicationName   String
+  version           String?
+  description       String?
+  publisher         String?
+  lastAccessTime    DateTime?
+  lastModifiedTime  DateTime?
+  accessCount       Int       @default(0)
+  totalUsageMinutes Int       @default(0)
+  iconData          Bytes?
+  iconFormat        String?
+  fileSize          BigInt?
+  firstSeen         DateTime  @default(now())
+  lastSeen          DateTime  @default(now())
+  isActive          Boolean   @default(true)
+  machine           Machine   @relation(fields: [machineId], references: [id], onDelete: Cascade)
 
   @@unique([machineId, executablePath])
   @@index([machineId, lastAccessTime])
@@ -420,25 +385,19 @@ model ApplicationUsage {
 }
 
 model PortUsage {
-  id          String   @id @default(uuid())
-  machineId   String
-  machine     Machine  @relation(fields: [machineId], references: [id], onDelete: Cascade)
-
+  id              String   @id @default(uuid())
+  machineId       String
   port            Int
-  protocol        String   // TCP, UDP
-  state           String   // LISTEN, ESTABLISHED, CLOSE_WAIT, etc.
-
-  // Process Association
+  protocol        String
+  state           String
   processId       Int?
   processName     String?
   executablePath  String?
-
-  // Usage Tracking
-  isListening     Boolean  @default(false) // Is this port in LISTEN state
-  connectionCount Int      @default(0)     // Number of active connections
-  lastActivity    DateTime @default(now()) // Last time port was active
-
+  isListening     Boolean  @default(false)
+  connectionCount Int      @default(0)
+  lastActivity    DateTime @default(now())
   timestamp       DateTime @default(now())
+  machine         Machine  @relation(fields: [machineId], references: [id], onDelete: Cascade)
 
   @@index([machineId, port, protocol])
   @@index([machineId, timestamp])
@@ -446,36 +405,25 @@ model PortUsage {
 }
 
 model WindowsService {
-  id              String   @id @default(uuid())
-  machineId       String
-  machine         Machine  @relation(fields: [machineId], references: [id], onDelete: Cascade)
-
-  serviceName     String   // Internal service name (e.g., "Spooler")
-  displayName     String   // User-friendly display name (e.g., "Print Spooler")
-  description     String?  // Service description
-
-  // Service Configuration
-  startType       String   // automatic, manual, disabled, delayed-auto
-  serviceType     String   // win32, driver, kernel-driver, etc.
-  executablePath  String?  // Path to service executable
-  dependencies    Json?    // Array of service dependencies
-
-  // Current State
-  currentState    String   // running, stopped, paused, start-pending, etc.
-  processId       Int?     // Process ID if running
-
-  // Usage Tracking
-  lastStateChange DateTime? // Last time service state changed
-  stateChangeCount Int     @default(0) // Number of state changes
-  isDefaultService Boolean @default(false) // Is this a default Windows service
-  usageScore      Float?   @default(0)     // Calculated usage score (0-100)
-
-  // Timestamps
-  firstSeen       DateTime @default(now())
-  lastSeen        DateTime @default(now())
-
-  // Relations
-  stateHistory    ServiceStateHistory[]
+  id               String                @id @default(uuid())
+  machineId        String
+  serviceName      String
+  displayName      String
+  description      String?
+  startType        String
+  serviceType      String
+  executablePath   String?
+  dependencies     Json?
+  currentState     String
+  processId        Int?
+  lastStateChange  DateTime?
+  stateChangeCount Int                   @default(0)
+  isDefaultService Boolean               @default(false)
+  usageScore       Float?                @default(0)
+  firstSeen        DateTime              @default(now())
+  lastSeen         DateTime              @default(now())
+  stateHistory     ServiceStateHistory[]
+  machine          Machine               @relation(fields: [machineId], references: [id], onDelete: Cascade)
 
   @@unique([machineId, serviceName])
   @@index([machineId, currentState])
@@ -483,15 +431,13 @@ model WindowsService {
 }
 
 model ServiceStateHistory {
-  id          String   @id @default(uuid())
-  serviceId   String
-  service     WindowsService @relation(fields: [serviceId], references: [id], onDelete: Cascade)
-
-  fromState   String?  // Previous state (null for first record)
-  toState     String   // New state
-  reason      String?  // Reason for change (manual, automatic, dependency, error)
-
-  timestamp   DateTime @default(now())
+  id        String         @id @default(uuid())
+  serviceId String
+  fromState String?
+  toState   String
+  reason    String?
+  timestamp DateTime       @default(now())
+  service   WindowsService @relation(fields: [serviceId], references: [id], onDelete: Cascade)
 
   @@index([serviceId, timestamp])
 }

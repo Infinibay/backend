@@ -2,494 +2,395 @@ import 'reflect-metadata'
 import { SecurityResolver } from '@resolvers/security/resolver'
 import { mockPrisma } from '../../setup/jest.setup'
 import { createMockContext, createAdminContext } from '../../setup/test-helpers'
-import { ForbiddenError, UserInputError } from 'apollo-server-errors'
-import { SecurityService } from '@services/securityService'
-import { PubSub } from 'graphql-subscriptions'
+import { UserInputError } from 'apollo-server-errors'
+import { FirewallService } from '@services/firewallService'
 
-// Mock SecurityService
-jest.mock('@services/securityService')
-
-// Mock PubSub
-jest.mock('graphql-subscriptions')
+// Mock the FirewallService
+jest.mock('@services/firewallService')
 
 describe('SecurityResolver', () => {
   let resolver: SecurityResolver
-  let mockSecurityService: jest.Mocked<SecurityService>
-  let mockPubSub: jest.Mocked<PubSub>
+  let mockFirewallService: jest.Mocked<FirewallService>
   const ctx = createAdminContext()
 
   beforeEach(() => {
     jest.clearAllMocks()
-    mockSecurityService = new SecurityService() as jest.Mocked<SecurityService>
-    mockPubSub = new PubSub() as jest.Mocked<PubSub>
-    resolver = new SecurityResolver();
-    (resolver as any).securityService = mockSecurityService;
-    (resolver as any).pubSub = mockPubSub
+    resolver = new SecurityResolver()
+    
+    // Create a mock FirewallService
+    mockFirewallService = {
+      getServices: jest.fn(),
+      getVmServiceStatus: jest.fn(),
+      getDepartmentServiceStatus: jest.fn(),
+      getGlobalServiceStatus: jest.fn(),
+      toggleVmService: jest.fn(),
+      toggleDepartmentService: jest.fn(),
+      toggleGlobalService: jest.fn(),
+      getServiceStatusSummary: jest.fn()
+    } as unknown as jest.Mocked<FirewallService>
+    
+    // Mock the private getFirewallService method
+    // @ts-ignore - accessing private method for testing
+    resolver.getFirewallService = jest.fn().mockReturnValue(mockFirewallService)
   })
 
-  describe('Query: securitySettings', () => {
-    it('should return current security settings', async () => {
+  describe('Query: listServices', () => {
+    it('should return list of available services', async () => {
       // Arrange
-      const mockSettings = {
-        id: 'settings-1',
-        enableFirewall: true,
-        enableIDS: true,
-        enableAntivirus: false,
-        enableEncryption: true,
-        maxFailedLoginAttempts: 5,
-        sessionTimeout: 3600,
-        passwordPolicy: {
-          minLength: 12,
-          requireUppercase: true,
-          requireLowercase: true,
-          requireNumbers: true,
-          requireSpecialChars: true,
-          expirationDays: 90
-        },
-        twoFactorEnabled: true,
-        allowedIpRanges: ['192.168.1.0/24', '10.0.0.0/8'],
-        blockedIpAddresses: ['192.168.1.100', '192.168.1.101'],
-        sslEnabled: true,
-        sslCertificate: '/etc/ssl/certs/infinibay.crt',
-        auditLogging: true,
-        updatedAt: new Date()
-      }
-      mockSecurityService.getSettings.mockResolvedValue(mockSettings)
-
-      // Act
-      const result = await resolver.securitySettings(ctx)
-
-      // Assert
-      expect(mockSecurityService.getSettings).toHaveBeenCalledTimes(1)
-      expect(result).toEqual(mockSettings)
-      expect(result.enableFirewall).toBe(true)
-      expect(result.passwordPolicy.minLength).toBe(12)
-    })
-
-    it('should handle missing security settings', async () => {
-      // Arrange
-      mockSecurityService.getSettings.mockResolvedValue(null)
-
-      // Act
-      const result = await resolver.securitySettings(ctx)
-
-      // Assert
-      expect(result).toBeNull()
-    })
-  })
-
-  describe('Query: securityAuditLog', () => {
-    it('should return security audit logs with filtering', async () => {
-      // Arrange
-      const filter = {
-        startDate: new Date('2024-01-01'),
-        endDate: new Date('2024-01-31'),
-        eventType: 'LOGIN_ATTEMPT',
-        userId: 'user-1',
-        severity: 'HIGH'
-      }
-      const mockLogs = [
+      const mockServices = [
         {
-          id: 'log-1',
-          timestamp: new Date('2024-01-15'),
-          eventType: 'LOGIN_ATTEMPT',
-          userId: 'user-1',
-          ipAddress: '192.168.1.100',
-          userAgent: 'Mozilla/5.0',
-          severity: 'HIGH',
-          message: 'Failed login attempt',
-          details: { attempts: 3 }
+          id: 'http',
+          name: 'HTTP',
+          description: 'Web Server',
+          port: 80,
+          protocol: 'TCP',
+          category: 'Web'
         },
         {
-          id: 'log-2',
-          timestamp: new Date('2024-01-16'),
-          eventType: 'LOGIN_ATTEMPT',
-          userId: 'user-1',
-          ipAddress: '192.168.1.101',
-          userAgent: 'Mozilla/5.0',
-          severity: 'HIGH',
-          message: 'Account locked due to multiple failed attempts',
-          details: { attempts: 5 }
+          id: 'https',
+          name: 'HTTPS',
+          description: 'Secure Web Server',
+          port: 443,
+          protocol: 'TCP',
+          category: 'Web'
         }
       ]
-      mockSecurityService.getAuditLogs.mockResolvedValue(mockLogs)
+      mockFirewallService.getServices.mockReturnValue(mockServices)
 
       // Act
-      const result = await resolver.securityAuditLog(filter, ctx)
+      const result = await resolver.listServices(ctx)
 
       // Assert
-      expect(mockSecurityService.getAuditLogs).toHaveBeenCalledWith(filter)
+      expect(mockFirewallService.getServices).toHaveBeenCalledTimes(1)
+      expect(result).toEqual(mockServices)
       expect(result).toHaveLength(2)
-      expect(result[0].eventType).toBe('LOGIN_ATTEMPT')
-    })
-
-    it('should return all logs when no filter provided', async () => {
-      // Arrange
-      const mockLogs = [
-        {
-          id: 'log-1',
-          timestamp: new Date(),
-          eventType: 'ACCESS_GRANTED',
-          severity: 'LOW'
-        }
-      ]
-      mockSecurityService.getAuditLogs.mockResolvedValue(mockLogs)
-
-      // Act
-      const result = await resolver.securityAuditLog({}, ctx)
-
-      // Assert
-      expect(mockSecurityService.getAuditLogs).toHaveBeenCalledWith({})
-      expect(result).toEqual(mockLogs)
     })
   })
 
-  describe('Query: securityThreats', () => {
-    it('should return active security threats', async () => {
+  describe('Query: getVmServiceStatus', () => {
+    it('should return service status for a VM', async () => {
       // Arrange
-      const mockThreats = [
+      const vmId = 'vm-123'
+      const mockVm = { id: vmId }
+      const mockStatus = [
         {
-          id: 'threat-1',
-          type: 'BRUTE_FORCE',
-          severity: 'HIGH',
-          source: '192.168.1.100',
-          target: 'SSH Service',
-          detectedAt: new Date(),
-          status: 'ACTIVE',
-          description: 'Multiple failed SSH login attempts detected',
-          mitigationActions: ['Block IP', 'Increase monitoring']
-        },
-        {
-          id: 'threat-2',
-          type: 'PORT_SCAN',
-          severity: 'MEDIUM',
-          source: '10.0.0.50',
-          target: 'System',
-          detectedAt: new Date(),
-          status: 'MITIGATED',
-          description: 'Port scanning activity detected',
-          mitigationActions: ['Firewall rule applied']
+          serviceId: 'http',
+          vmId: vmId,
+          useEnabled: true,
+          provideEnabled: false,
+          status: 'active'
         }
       ]
-      mockSecurityService.getActiveThreats.mockResolvedValue(mockThreats)
+      
+      mockPrisma.machine.findUnique.mockResolvedValue(mockVm)
+      mockFirewallService.getVmServiceStatus.mockResolvedValue(mockStatus)
 
       // Act
-      const result = await resolver.securityThreats(ctx)
+      const result = await resolver.getVmServiceStatus(ctx, vmId)
 
       // Assert
-      expect(mockSecurityService.getActiveThreats).toHaveBeenCalledTimes(1)
-      expect(result).toHaveLength(2)
-      expect(result[0].type).toBe('BRUTE_FORCE')
-      expect(result[0].severity).toBe('HIGH')
+      expect(mockPrisma.machine.findUnique).toHaveBeenCalledWith({
+        where: { id: vmId },
+        select: { id: true }
+      })
+      expect(mockFirewallService.getVmServiceStatus).toHaveBeenCalledWith(vmId, undefined)
+      expect(result).toEqual(mockStatus)
     })
-  })
 
-  describe('Mutation: updateSecuritySettings', () => {
-    it('should update security settings', async () => {
+    it('should filter by service ID when provided', async () => {
       // Arrange
-      const input = {
-        enableFirewall: true,
-        enableIDS: true,
-        maxFailedLoginAttempts: 3,
-        sessionTimeout: 1800,
-        passwordPolicy: {
-          minLength: 16,
-          requireUppercase: true,
-          requireLowercase: true,
-          requireNumbers: true,
-          requireSpecialChars: true,
-          expirationDays: 60
-        },
-        twoFactorEnabled: true
-      }
-      const mockUpdated = {
-        id: 'settings-1',
-        ...input,
-        updatedAt: new Date()
-      }
-      mockSecurityService.updateSettings.mockResolvedValue(mockUpdated)
+      const vmId = 'vm-123'
+      const serviceId = 'http'
+      const mockVm = { id: vmId }
+      const mockStatus = [
+        {
+          serviceId: 'http',
+          vmId: vmId,
+          useEnabled: true,
+          provideEnabled: false,
+          status: 'active'
+        }
+      ]
+      
+      mockPrisma.machine.findUnique.mockResolvedValue(mockVm)
+      mockFirewallService.getVmServiceStatus.mockResolvedValue(mockStatus)
 
       // Act
-      const result = await resolver.updateSecuritySettings(input, ctx)
+      const result = await resolver.getVmServiceStatus(ctx, vmId, serviceId)
 
       // Assert
-      expect(mockSecurityService.updateSettings).toHaveBeenCalledWith(input)
-      expect(result).toEqual(mockUpdated)
-      expect(result.passwordPolicy.minLength).toBe(16)
+      expect(mockFirewallService.getVmServiceStatus).toHaveBeenCalledWith(vmId, serviceId)
+      expect(result).toEqual(mockStatus)
     })
 
-    it('should validate security settings input', async () => {
+    it('should throw error when VM not found', async () => {
       // Arrange
-      const invalidInput = {
-        maxFailedLoginAttempts: -1,
-        sessionTimeout: 0
-      }
-      mockSecurityService.updateSettings.mockRejectedValue(
-        new UserInputError('Invalid security settings')
-      )
+      const vmId = 'non-existent'
+      mockPrisma.machine.findUnique.mockResolvedValue(null)
 
       // Act & Assert
-      await expect(resolver.updateSecuritySettings(invalidInput, ctx)).rejects.toThrow(
-        UserInputError
-      )
+      await expect(resolver.getVmServiceStatus(ctx, vmId)).rejects.toThrow(UserInputError)
+      expect(mockFirewallService.getVmServiceStatus).not.toHaveBeenCalled()
     })
   })
 
-  describe('Mutation: addIpToWhitelist', () => {
-    it('should add IP address to whitelist', async () => {
+  describe('Query: getDepartmentServiceStatus', () => {
+    it('should return service status for a department', async () => {
       // Arrange
-      const input = {
-        ipAddress: '192.168.1.200',
-        description: 'Admin workstation'
-      }
-      mockSecurityService.addToWhitelist.mockResolvedValue(true)
+      const departmentId = 'dept-123'
+      const mockDepartment = { id: departmentId }
+      const mockStatus = [
+        {
+          serviceId: 'ssh',
+          departmentId: departmentId,
+          useEnabled: true,
+          provideEnabled: false,
+          status: 'active'
+        }
+      ]
+      
+      mockPrisma.department.findUnique.mockResolvedValue(mockDepartment)
+      mockFirewallService.getDepartmentServiceStatus.mockResolvedValue(mockStatus)
 
       // Act
-      const result = await resolver.addIpToWhitelist(input, ctx)
+      const result = await resolver.getDepartmentServiceStatus(ctx, departmentId)
 
       // Assert
-      expect(mockSecurityService.addToWhitelist).toHaveBeenCalledWith(
-        '192.168.1.200',
-        'Admin workstation'
-      )
-      expect(result).toBe(true)
+      expect(mockPrisma.department.findUnique).toHaveBeenCalledWith({
+        where: { id: departmentId },
+        select: { id: true }
+      })
+      expect(mockFirewallService.getDepartmentServiceStatus).toHaveBeenCalledWith(departmentId, undefined)
+      expect(result).toEqual(mockStatus)
     })
 
-    it('should validate IP address format', async () => {
+    it('should throw error when department not found', async () => {
       // Arrange
-      const input = {
-        ipAddress: 'invalid-ip',
-        description: 'Test'
-      }
-      mockSecurityService.addToWhitelist.mockRejectedValue(
-        new UserInputError('Invalid IP address format')
-      )
+      const departmentId = 'non-existent'
+      mockPrisma.department.findUnique.mockResolvedValue(null)
 
       // Act & Assert
-      await expect(resolver.addIpToWhitelist(input, ctx)).rejects.toThrow(
-        UserInputError
+      await expect(resolver.getDepartmentServiceStatus(ctx, departmentId)).rejects.toThrow(UserInputError)
+      expect(mockFirewallService.getDepartmentServiceStatus).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('Query: getGlobalServiceStatus', () => {
+    it('should return global service status', async () => {
+      // Arrange
+      const mockStatus = [
+        {
+          serviceId: 'rdp',
+          useEnabled: false,
+          provideEnabled: false,
+          status: 'disabled'
+        }
+      ]
+      
+      mockFirewallService.getGlobalServiceStatus.mockResolvedValue(mockStatus)
+
+      // Act
+      const result = await resolver.getGlobalServiceStatus(ctx)
+
+      // Assert
+      expect(mockFirewallService.getGlobalServiceStatus).toHaveBeenCalledWith(undefined)
+      expect(result).toEqual(mockStatus)
+    })
+
+    it('should filter by service ID when provided', async () => {
+      // Arrange
+      const serviceId = 'rdp'
+      const mockStatus = [
+        {
+          serviceId: 'rdp',
+          useEnabled: false,
+          provideEnabled: false,
+          status: 'disabled'
+        }
+      ]
+      
+      mockFirewallService.getGlobalServiceStatus.mockResolvedValue(mockStatus)
+
+      // Act
+      const result = await resolver.getGlobalServiceStatus(ctx, serviceId)
+
+      // Assert
+      expect(mockFirewallService.getGlobalServiceStatus).toHaveBeenCalledWith(serviceId)
+      expect(result).toEqual(mockStatus)
+    })
+  })
+
+  describe('Mutation: toggleVmService', () => {
+    it('should toggle VM service status', async () => {
+      // Arrange
+      const input = {
+        vmId: 'vm-123',
+        serviceId: 'http',
+        useEnabled: true,
+        provideEnabled: false
+      }
+      const mockVm = { id: input.vmId }
+      const mockResult = {
+        serviceId: input.serviceId,
+        vmId: input.vmId,
+        useEnabled: input.useEnabled,
+        provideEnabled: input.provideEnabled,
+        status: 'updated'
+      }
+      
+      mockPrisma.machine.findUnique.mockResolvedValue(mockVm)
+      mockFirewallService.toggleVmService.mockResolvedValue(mockResult)
+
+      // Act
+      const result = await resolver.toggleVmService(input, ctx)
+
+      // Assert
+      expect(mockPrisma.machine.findUnique).toHaveBeenCalledWith({
+        where: { id: input.vmId }
+      })
+      expect(mockFirewallService.toggleVmService).toHaveBeenCalledWith(
+        input.vmId,
+        input.serviceId,
+        input.useEnabled,
+        input.provideEnabled
       )
+      expect(result).toEqual(mockResult)
     })
-  })
 
-  describe('Mutation: removeIpFromWhitelist', () => {
-    it('should remove IP address from whitelist', async () => {
-      // Arrange
-      const ipAddress = '192.168.1.200'
-      mockSecurityService.removeFromWhitelist.mockResolvedValue(true)
-
-      // Act
-      const result = await resolver.removeIpFromWhitelist(ipAddress, ctx)
-
-      // Assert
-      expect(mockSecurityService.removeFromWhitelist).toHaveBeenCalledWith(ipAddress)
-      expect(result).toBe(true)
-    })
-  })
-
-  describe('Mutation: blockIpAddress', () => {
-    it('should block an IP address', async () => {
+    it('should throw error when VM not found', async () => {
       // Arrange
       const input = {
-        ipAddress: '10.0.0.100',
-        reason: 'Suspicious activity detected',
-        duration: 86400 // 24 hours
+        vmId: 'non-existent',
+        serviceId: 'http',
+        useEnabled: true,
+        provideEnabled: false
       }
-      mockSecurityService.blockIpAddress.mockResolvedValue(true)
+      mockPrisma.machine.findUnique.mockResolvedValue(null)
 
-      // Act
-      const result = await resolver.blockIpAddress(input, ctx)
-
-      // Assert
-      expect(mockSecurityService.blockIpAddress).toHaveBeenCalledWith(input)
-      expect(result).toBe(true)
+      // Act & Assert
+      await expect(resolver.toggleVmService(input, ctx)).rejects.toThrow(UserInputError)
+      expect(mockFirewallService.toggleVmService).not.toHaveBeenCalled()
     })
   })
 
-  describe('Mutation: unblockIpAddress', () => {
-    it('should unblock an IP address', async () => {
-      // Arrange
-      const ipAddress = '10.0.0.100'
-      mockSecurityService.unblockIpAddress.mockResolvedValue(true)
-
-      // Act
-      const result = await resolver.unblockIpAddress(ipAddress, ctx)
-
-      // Assert
-      expect(mockSecurityService.unblockIpAddress).toHaveBeenCalledWith(ipAddress)
-      expect(result).toBe(true)
-    })
-  })
-
-  describe('Mutation: runSecurityScan', () => {
-    it('should initiate a security scan', async () => {
+  describe('Mutation: toggleDepartmentService', () => {
+    it('should toggle department service status', async () => {
       // Arrange
       const input = {
-        scanType: 'FULL',
-        targets: ['vm-1', 'vm-2'],
-        deepScan: true
+        departmentId: 'dept-123',
+        serviceId: 'ssh',
+        useEnabled: true,
+        provideEnabled: false
       }
-      const mockScanResult = {
-        id: 'scan-1',
-        startedAt: new Date(),
-        status: 'IN_PROGRESS',
-        scanType: 'FULL',
-        targets: ['vm-1', 'vm-2'],
-        findings: []
+      const mockDepartment = { id: input.departmentId }
+      const mockResult = {
+        serviceId: input.serviceId,
+        departmentId: input.departmentId,
+        useEnabled: input.useEnabled,
+        provideEnabled: input.provideEnabled,
+        status: 'updated'
       }
-      mockSecurityService.runSecurityScan.mockResolvedValue(mockScanResult)
+      
+      mockPrisma.department.findUnique.mockResolvedValue(mockDepartment)
+      mockFirewallService.toggleDepartmentService.mockResolvedValue(mockResult)
 
       // Act
-      const result = await resolver.runSecurityScan(input, ctx)
+      const result = await resolver.toggleDepartmentService(input, ctx)
 
       // Assert
-      expect(mockSecurityService.runSecurityScan).toHaveBeenCalledWith(input)
-      expect(result).toEqual(mockScanResult)
-      expect(result.status).toBe('IN_PROGRESS')
+      expect(mockPrisma.department.findUnique).toHaveBeenCalledWith({
+        where: { id: input.departmentId }
+      })
+      expect(mockFirewallService.toggleDepartmentService).toHaveBeenCalledWith(
+        input.departmentId,
+        input.serviceId,
+        input.useEnabled,
+        input.provideEnabled
+      )
+      expect(result).toEqual(mockResult)
     })
-  })
 
-  describe('Mutation: mitigateThreat', () => {
-    it('should mitigate a security threat', async () => {
+    it('should throw error when department not found', async () => {
       // Arrange
       const input = {
-        threatId: 'threat-1',
-        action: 'BLOCK_SOURCE',
-        notes: 'Blocked malicious IP address'
+        departmentId: 'non-existent',
+        serviceId: 'ssh',
+        useEnabled: true,
+        provideEnabled: false
       }
-      const mockMitigated = {
-        id: 'threat-1',
-        status: 'MITIGATED',
-        mitigatedAt: new Date(),
-        mitigationAction: 'BLOCK_SOURCE',
-        notes: 'Blocked malicious IP address'
-      }
-      mockSecurityService.mitigateThreat.mockResolvedValue(mockMitigated)
+      mockPrisma.department.findUnique.mockResolvedValue(null)
 
-      // Act
-      const result = await resolver.mitigateThreat(input, ctx)
-
-      // Assert
-      expect(mockSecurityService.mitigateThreat).toHaveBeenCalledWith(input)
-      expect(result.status).toBe('MITIGATED')
+      // Act & Assert
+      await expect(resolver.toggleDepartmentService(input, ctx)).rejects.toThrow(UserInputError)
+      expect(mockFirewallService.toggleDepartmentService).not.toHaveBeenCalled()
     })
   })
 
-  describe('Mutation: updatePasswordPolicy', () => {
-    it('should update password policy', async () => {
+  describe('Mutation: toggleGlobalService', () => {
+    it('should toggle global service status', async () => {
       // Arrange
       const input = {
-        minLength: 20,
-        requireUppercase: true,
-        requireLowercase: true,
-        requireNumbers: true,
-        requireSpecialChars: true,
-        expirationDays: 30,
-        preventReuse: 10
+        serviceId: 'rdp',
+        useEnabled: false,
+        provideEnabled: false
       }
-      mockSecurityService.updatePasswordPolicy.mockResolvedValue(input)
+      const mockResult = {
+        serviceId: input.serviceId,
+        useEnabled: input.useEnabled,
+        provideEnabled: input.provideEnabled,
+        status: 'updated'
+      }
+      
+      mockFirewallService.toggleGlobalService.mockResolvedValue(mockResult)
 
       // Act
-      const result = await resolver.updatePasswordPolicy(input, ctx)
+      const result = await resolver.toggleGlobalService(input, ctx)
 
       // Assert
-      expect(mockSecurityService.updatePasswordPolicy).toHaveBeenCalledWith(input)
-      expect(result.minLength).toBe(20)
+      expect(mockFirewallService.toggleGlobalService).toHaveBeenCalledWith(
+        input.serviceId,
+        input.useEnabled,
+        input.provideEnabled
+      )
+      expect(result).toEqual(mockResult)
     })
   })
 
-  describe('Subscription: securityAlert', () => {
-    it('should subscribe to security alerts', async () => {
+  describe('Query: serviceStatusSummary', () => {
+    it('should return service status summary', async () => {
       // Arrange
-      const mockIterator = {
-        next: jest.fn(),
-        return: jest.fn(),
-        throw: jest.fn(),
-        [Symbol.asyncIterator]: jest.fn()
+      const vmId = 'vm-123'
+      const mockVm = { id: vmId, departmentId: 'dept-456' }
+      const mockSummary = {
+        globalStatus: [],
+        departmentStatus: [],
+        vmStatus: [],
+        effectiveStatus: []
       }
-      mockPubSub.asyncIterator.mockReturnValue(mockIterator)
+      
+      mockPrisma.machine.findUnique.mockResolvedValue(mockVm)
+      mockFirewallService.getServiceStatusSummary.mockResolvedValue(mockSummary)
 
       // Act
-      const result = await resolver.securityAlert()
+      const result = await resolver.serviceStatusSummary(ctx, vmId)
 
       // Assert
-      expect(mockPubSub.asyncIterator).toHaveBeenCalledWith('SECURITY_ALERT')
-      expect(result).toBe(mockIterator)
+      expect(mockPrisma.machine.findUnique).toHaveBeenCalledWith({
+        where: { id: vmId },
+        select: { id: true, departmentId: true }
+      })
+      expect(mockFirewallService.getServiceStatusSummary).toHaveBeenCalledWith(vmId, 'dept-456')
+      expect(result).toEqual(mockSummary)
     })
-  })
 
-  describe('Subscription: threatDetected', () => {
-    it('should subscribe to threat detection events', async () => {
+    it('should throw error when VM not found', async () => {
       // Arrange
-      const mockIterator = {
-        next: jest.fn(),
-        return: jest.fn(),
-        throw: jest.fn(),
-        [Symbol.asyncIterator]: jest.fn()
-      }
-      mockPubSub.asyncIterator.mockReturnValue(mockIterator)
+      const vmId = 'non-existent'
+      mockPrisma.machine.findUnique.mockResolvedValue(null)
 
-      // Act
-      const result = await resolver.threatDetected()
-
-      // Assert
-      expect(mockPubSub.asyncIterator).toHaveBeenCalledWith('THREAT_DETECTED')
-      expect(result).toBe(mockIterator)
-    })
-  })
-
-  describe('Query: securityCompliance', () => {
-    it('should return security compliance status', async () => {
-      // Arrange
-      const mockCompliance = {
-        overallScore: 85,
-        standards: {
-          ISO_27001: {
-            score: 90,
-            compliant: true,
-            findings: []
-          },
-          PCI_DSS: {
-            score: 80,
-            compliant: true,
-            findings: ['Minor issue with log retention']
-          },
-          HIPAA: {
-            score: 85,
-            compliant: true,
-            findings: []
-          }
-        },
-        lastAssessment: new Date(),
-        nextAssessment: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
-      }
-      mockSecurityService.getComplianceStatus.mockResolvedValue(mockCompliance)
-
-      // Act
-      const result = await resolver.securityCompliance(ctx)
-
-      // Assert
-      expect(mockSecurityService.getComplianceStatus).toHaveBeenCalledTimes(1)
-      expect(result.overallScore).toBe(85)
-      expect(result.standards.ISO_27001.score).toBe(90)
-    })
-  })
-
-  describe('Authorization', () => {
-    it('should require ADMIN role for security mutations', async () => {
-      // Assert resolver methods exist
-      expect(resolver.updateSecuritySettings).toBeDefined()
-      expect(resolver.addIpToWhitelist).toBeDefined()
-      expect(resolver.blockIpAddress).toBeDefined()
-      expect(resolver.runSecurityScan).toBeDefined()
-      expect(resolver.mitigateThreat).toBeDefined()
-    })
-
-    it('should allow USER role for security queries', async () => {
-      // Assert resolver methods exist
-      expect(resolver.securitySettings).toBeDefined()
-      expect(resolver.securityAuditLog).toBeDefined()
-      expect(resolver.securityThreats).toBeDefined()
+      // Act & Assert
+      await expect(resolver.serviceStatusSummary(ctx, vmId)).rejects.toThrow(UserInputError)
+      expect(mockFirewallService.getServiceStatusSummary).not.toHaveBeenCalled()
     })
   })
 })

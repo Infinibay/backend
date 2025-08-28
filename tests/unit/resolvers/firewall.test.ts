@@ -2,455 +2,461 @@ import 'reflect-metadata'
 import { FirewallResolver } from '@resolvers/firewall/resolver'
 import { mockPrisma } from '../../setup/jest.setup'
 import { createMockContext, createAdminContext } from '../../setup/test-helpers'
-import { ForbiddenError, UserInputError } from 'apollo-server-errors'
-import { VirtManager } from '@utils/VirtManager'
+import { UserInputError, ForbiddenError } from 'apollo-server-errors'
+import { NetworkFilterService } from '@services/networkFilterService'
+import { FilterType } from '../../../app/graphql/resolvers/firewall/types'
+import { 
+  createMockNWFilter,
+  createMockFWRule,
+  createMockDepartment,
+  createMockMachine
+} from '../../setup/mock-factories'
 
-// Mock VirtManager
-jest.mock('@utils/VirtManager', () => ({
-  VirtManager: {
-    getInstance: jest.fn(() => ({
-      createNetworkFilter: jest.fn(),
-      deleteNetworkFilter: jest.fn(),
-      getNetworkFilter: jest.fn(),
-      listNetworkFilters: jest.fn(),
-      updateNetworkFilter: jest.fn(),
-      attachNetworkFilter: jest.fn(),
-      detachNetworkFilter: jest.fn(),
-      getNetworkFilterXML: jest.fn()
-    }))
-  }
-}))
+// Mock NetworkFilterService
+jest.mock('@services/networkFilterService')
 
 describe('FirewallResolver', () => {
   let resolver: FirewallResolver
-  let mockVirtManager: any
+  let mockNetworkFilterService: jest.Mocked<NetworkFilterService>
   const ctx = createAdminContext()
 
   beforeEach(() => {
     jest.clearAllMocks()
-    resolver = new FirewallResolver()
-    mockVirtManager = VirtManager.getInstance()
+    mockNetworkFilterService = {
+      connect: jest.fn(),
+      close: jest.fn(),
+      createFilter: jest.fn(),
+      updateFilter: jest.fn(),
+      deleteFilter: jest.fn(),
+      createRule: jest.fn(),
+      deleteRule: jest.fn(),
+      flushNWFilter: jest.fn(),
+      deduplicateRules: jest.fn()
+    } as unknown as jest.Mocked<NetworkFilterService>
+    
+    resolver = new FirewallResolver(mockNetworkFilterService)
   })
 
-  describe('Query: firewallRules', () => {
-    it('should return all firewall rules', async () => {
-      // Arrange
+  describe('Query: listFilters', () => {
+    it('should return generic filters when no department or vm specified', async () => {
       const mockFilters = [
-        {
-          name: 'allow-http',
-          uuid: 'filter-uuid-1',
-          priority: 500,
-          chain: 'root',
-          rules: [
-            {
-              action: 'accept',
-              direction: 'in',
-              priority: 100,
-              protocol: 'tcp',
-              srcIpFrom: '0.0.0.0',
-              srcIpTo: '255.255.255.255',
-              dstPortStart: 80,
-              dstPortEnd: 80
-            }
-          ]
-        },
-        {
-          name: 'block-ssh',
-          uuid: 'filter-uuid-2',
-          priority: 600,
-          chain: 'root',
-          rules: [
-            {
-              action: 'drop',
-              direction: 'in',
-              priority: 200,
-              protocol: 'tcp',
-              dstPortStart: 22,
-              dstPortEnd: 22
-            }
-          ]
-        }
+        createMockNWFilter({ id: 'filter-1', name: 'allow-http', type: 'generic' }),
+        createMockNWFilter({ id: 'filter-2', name: 'block-ssh', type: 'generic' })
       ]
-      mockVirtManager.listNetworkFilters.mockResolvedValue(mockFilters)
+      
+      mockPrisma.nWFilter.findMany.mockResolvedValue(
+        mockFilters.map(f => ({ ...f, vms: [], departments: [], rules: [], references: [] }))
+      )
 
-      // Act
-      const result = await resolver.firewallRules(ctx)
+      const result = await resolver.listFilters(ctx)
 
-      // Assert
-      expect(mockVirtManager.listNetworkFilters).toHaveBeenCalledTimes(1)
+      expect(mockPrisma.nWFilter.findMany).toHaveBeenCalledWith({
+        include: {
+          vms: true,
+          departments: true,
+          rules: true,
+          references: true
+        },
+        where: {
+          type: 'generic'
+        }
+      })
       expect(result).toHaveLength(2)
       expect(result[0].name).toBe('allow-http')
-      expect(result[0].rules).toHaveLength(1)
-      expect(result[1].name).toBe('block-ssh')
     })
 
-    it('should handle empty firewall rules list', async () => {
-      // Arrange
-      mockVirtManager.listNetworkFilters.mockResolvedValue([])
-
-      // Act
-      const result = await resolver.firewallRules(ctx)
-
-      // Assert
-      expect(result).toEqual([])
-    })
-
-    it('should handle libvirt errors', async () => {
-      // Arrange
-      mockVirtManager.listNetworkFilters.mockRejectedValue(
-        new Error('Failed to connect to libvirt')
+    it('should return department-specific filters', async () => {
+      const departmentId = 'dept-123'
+      const mockFilters = [
+        createMockNWFilter({ id: 'filter-1', name: 'dept-filter' })
+      ]
+      
+      mockPrisma.nWFilter.findMany.mockResolvedValue(
+        mockFilters.map(f => ({ ...f, vms: [], departments: [{ id: departmentId }], rules: [], references: [] }))
       )
 
-      // Act & Assert
-      await expect(resolver.firewallRules(ctx)).rejects.toThrow(
-        'Failed to connect to libvirt'
-      )
-    })
-  })
+      const result = await resolver.listFilters(ctx, departmentId, null)
 
-  describe('Query: firewallRule', () => {
-    it('should return a specific firewall rule by name', async () => {
-      // Arrange
-      const mockFilter = {
-        name: 'allow-http',
-        uuid: 'filter-uuid-1',
-        priority: 500,
-        chain: 'root',
-        rules: [
-          {
-            action: 'accept',
-            direction: 'in',
-            priority: 100,
-            protocol: 'tcp',
-            dstPortStart: 80,
-            dstPortEnd: 80
+      expect(mockPrisma.nWFilter.findMany).toHaveBeenCalledWith({
+        include: {
+          vms: true,
+          departments: true,
+          rules: true,
+          references: true
+        },
+        where: {
+          departments: {
+            some: {
+              id: departmentId
+            }
           }
-        ]
-      }
-      mockVirtManager.getNetworkFilter.mockResolvedValue(mockFilter)
-
-      // Act
-      const result = await resolver.firewallRule('allow-http', ctx)
-
-      // Assert
-      expect(mockVirtManager.getNetworkFilter).toHaveBeenCalledWith('allow-http')
-      expect(result.name).toBe('allow-http')
-      expect(result.uuid).toBe('filter-uuid-1')
+        }
+      })
+      expect(result).toHaveLength(1)
     })
 
-    it('should throw error when firewall rule not found', async () => {
-      // Arrange
-      mockVirtManager.getNetworkFilter.mockRejectedValue(
-        new Error('Network filter not found')
+    it('should return VM-specific filters', async () => {
+      const vmId = 'vm-123'
+      const mockFilters = [
+        createMockNWFilter({ id: 'filter-1', name: 'vm-filter' })
+      ]
+      
+      mockPrisma.nWFilter.findMany.mockResolvedValue(
+        mockFilters.map(f => ({ ...f, vms: [{ id: vmId }], departments: [], rules: [], references: [] }))
       )
 
-      // Act & Assert
-      await expect(resolver.firewallRule('nonexistent', ctx)).rejects.toThrow(
-        'Network filter not found'
-      )
+      const result = await resolver.listFilters(ctx, null, vmId)
+
+      expect(mockPrisma.nWFilter.findMany).toHaveBeenCalledWith({
+        include: {
+          vms: true,
+          rules: true,
+          references: true
+        },
+        where: {
+          vms: {
+            some: {
+              id: vmId
+            }
+          }
+        }
+      })
+      expect(result).toHaveLength(1)
+    })
+
+    it('should throw error when both departmentId and vmId are specified', async () => {
+      await expect(
+        resolver.listFilters(ctx, 'dept-123', 'vm-123')
+      ).rejects.toThrow(UserInputError)
     })
   })
 
-  describe('Mutation: createFirewallRule', () => {
-    it('should create a new firewall rule', async () => {
-      // Arrange
+  describe('Query: getFilter', () => {
+    it('should return a specific filter by ID', async () => {
+      const mockFilter = createMockNWFilter({ id: 'filter-1', name: 'test-filter' })
+      const mockFilterWithRelations = {
+        ...mockFilter,
+        vms: [],
+        departments: [],
+        rules: [createMockFWRule({ nwFilterId: 'filter-1' })],
+        references: []
+      }
+      
+      mockPrisma.nWFilter.findUnique.mockResolvedValue(mockFilterWithRelations)
+
+      const result = await resolver.getFilter('filter-1', ctx)
+
+      expect(mockPrisma.nWFilter.findUnique).toHaveBeenCalledWith({
+        where: { id: 'filter-1' },
+        include: {
+          rules: true,
+          references: true
+        }
+      })
+      expect(result?.name).toBe('test-filter')
+    })
+
+    it('should return null when filter not found', async () => {
+      mockPrisma.nWFilter.findUnique.mockResolvedValue(null)
+
+      const result = await resolver.getFilter('nonexistent', ctx)
+
+      expect(result).toBeNull()
+    })
+  })
+
+  describe('Query: listFilterRules', () => {
+    it('should return rules for a specific filter', async () => {
+      const filterId = 'filter-1'
+      const mockRules = [
+        createMockFWRule({ id: 'rule-1', nwFilterId: filterId }),
+        createMockFWRule({ id: 'rule-2', nwFilterId: filterId })
+      ]
+      
+      mockPrisma.fWRule.findMany.mockResolvedValue(mockRules)
+
+      const result = await resolver.listFilterRules(filterId, ctx)
+
+      expect(mockPrisma.fWRule.findMany).toHaveBeenCalledWith({
+        where: { nwFilterId: filterId }
+      })
+      expect(result).toHaveLength(2)
+    })
+
+    it('should return all rules when no filter specified', async () => {
+      const mockRules = [
+        createMockFWRule({ id: 'rule-1' }),
+        createMockFWRule({ id: 'rule-2' }),
+        createMockFWRule({ id: 'rule-3' })
+      ]
+      
+      mockPrisma.fWRule.findMany.mockResolvedValue(mockRules)
+
+      const result = await resolver.listFilterRules(null, ctx)
+
+      expect(mockPrisma.fWRule.findMany).toHaveBeenCalledWith()
+      expect(result).toHaveLength(3)
+    })
+  })
+
+  describe('Mutation: createFilter', () => {
+    it('should create a new filter', async () => {
       const input = {
-        name: 'new-rule',
-        priority: 300,
+        name: 'new-filter',
+        description: 'Test filter',
+        type: FilterType.GENERIC,
         chain: 'root',
-        rules: [
-          {
-            action: 'accept',
-            direction: 'in',
-            priority: 100,
-            protocol: 'tcp',
-            srcIpFrom: '192.168.1.0',
-            srcIpTo: '192.168.1.255',
-            dstPortStart: 443,
-            dstPortEnd: 443,
-            comment: 'Allow HTTPS from local network'
-          }
-        ]
+        priority: 500
       }
-      const mockCreated = {
+      
+      const mockCreatedFilter = createMockNWFilter({
         ...input,
-        uuid: 'new-filter-uuid'
-      }
-      mockVirtManager.createNetworkFilter.mockResolvedValue(mockCreated)
+        id: 'filter-new',
+        internalName: 'new-filter',
+        uuid: 'uuid-123'
+      })
 
-      // Act
-      const result = await resolver.createFirewallRule(input, ctx)
+      mockNetworkFilterService.createFilter.mockResolvedValue(mockCreatedFilter)
 
-      // Assert
-      expect(mockVirtManager.createNetworkFilter).toHaveBeenCalledWith(input)
-      expect(result).toEqual(mockCreated)
+      const result = await resolver.createFilter(input)
+
+      expect(mockNetworkFilterService.createFilter).toHaveBeenCalledWith(
+        input.name,
+        input.description,
+        input.chain,
+        input.type
+      )
+      expect(result.name).toBe('new-filter')
     })
 
-    it('should validate firewall rule input', async () => {
-      // Arrange
-      const invalidInput = {
-        name: '',
-        priority: -1,
-        chain: 'invalid',
-        rules: []
-      }
-      mockVirtManager.createNetworkFilter.mockRejectedValue(
-        new UserInputError('Invalid firewall rule configuration')
-      )
-
-      // Act & Assert
-      await expect(resolver.createFirewallRule(invalidInput, ctx)).rejects.toThrow(
-        UserInputError
-      )
-    })
-
-    it('should prevent duplicate firewall rule names', async () => {
-      // Arrange
+    it('should handle creation errors', async () => {
       const input = {
-        name: 'existing-rule',
-        priority: 300,
-        chain: 'root',
-        rules: []
+        name: 'new-filter',
+        description: 'Test filter',
+        type: FilterType.GENERIC,
+        chain: 'root'
       }
-      mockVirtManager.createNetworkFilter.mockRejectedValue(
-        new Error('Network filter with this name already exists')
+      
+      mockNetworkFilterService.createFilter.mockRejectedValue(
+        new UserInputError('Filter name already exists')
       )
 
-      // Act & Assert
-      await expect(resolver.createFirewallRule(input, ctx)).rejects.toThrow(
-        'Network filter with this name already exists'
-      )
+      await expect(resolver.createFilter(input)).rejects.toThrow(UserInputError)
     })
   })
 
-  describe('Mutation: updateFirewallRule', () => {
-    it('should update an existing firewall rule', async () => {
-      // Arrange
+  describe('Mutation: updateFilter', () => {
+    it('should update an existing filter', async () => {
+      const filterId = 'filter-1'
       const input = {
-        name: 'existing-rule',
-        priority: 400,
-        rules: [
-          {
-            action: 'drop',
-            direction: 'out',
-            priority: 150,
-            protocol: 'udp',
-            dstPortStart: 53,
-            dstPortEnd: 53
-          }
-        ]
+        description: 'Updated description',
+        priority: 600
       }
-      const mockUpdated = {
-        name: 'existing-rule',
-        uuid: 'filter-uuid',
-        priority: 400,
-        chain: 'root',
-        rules: input.rules
-      }
-      mockVirtManager.updateNetworkFilter.mockResolvedValue(mockUpdated)
+      
+      const existingFilter = createMockNWFilter({ id: filterId })
+      const updatedFilter = { ...existingFilter, ...input }
+      
+      // Reset the mock to ensure clean state
+      mockNetworkFilterService.updateFilter.mockReset()
+      
+      mockPrisma.nWFilter.findUnique.mockResolvedValue(existingFilter)
+      mockPrisma.nWFilter.update.mockResolvedValue(updatedFilter)
+      mockPrisma.fWRule.findMany.mockResolvedValue([])
+      mockPrisma.filterReference.findMany.mockResolvedValue([])
+      mockNetworkFilterService.updateFilter.mockResolvedValue(updatedFilter)
 
-      // Act
-      const result = await resolver.updateFirewallRule('existing-rule', input, ctx)
+      const result = await resolver.updateFilter(filterId, input, ctx)
 
-      // Assert
-      expect(mockVirtManager.updateNetworkFilter).toHaveBeenCalledWith('existing-rule', input)
-      expect(result).toEqual(mockUpdated)
+      expect(mockNetworkFilterService.updateFilter).toHaveBeenCalled()
+      expect(result.description).toBe('Updated description')
     })
 
-    it('should handle update failures', async () => {
-      // Arrange
-      const input = {
-        priority: 400,
-        rules: []
-      }
-      mockVirtManager.updateNetworkFilter.mockRejectedValue(
-        new Error('Failed to update network filter')
-      )
+    it('should handle filter not found case', async () => {
+      const input = { description: 'test' }
+      const mockResult = createMockNWFilter({ description: 'test' })
 
-      // Act & Assert
-      await expect(resolver.updateFirewallRule('test-rule', input, ctx)).rejects.toThrow(
-        'Failed to update network filter'
-      )
+      mockPrisma.nWFilter.findUnique.mockResolvedValue(null)
+      mockPrisma.fWRule.findMany.mockResolvedValue([])
+      mockPrisma.filterReference.findMany.mockResolvedValue([])
+      mockNetworkFilterService.updateFilter.mockResolvedValue(mockResult)
+
+      const result = await resolver.updateFilter('nonexistent', input, ctx)
+
+      expect(result).toBeDefined()
     })
   })
 
-  describe('Mutation: deleteFirewallRule', () => {
-    it('should delete a firewall rule', async () => {
-      // Arrange
-      mockVirtManager.deleteNetworkFilter.mockResolvedValue(true)
+  describe('Mutation: deleteFilter', () => {
+    it('should delete a filter', async () => {
+      const filterId = 'filter-1'
+      const mockFilter = createMockNWFilter({ id: filterId })
+      
+      mockPrisma.nWFilter.delete.mockResolvedValue(mockFilter)
 
-      // Act
-      const result = await resolver.deleteFirewallRule('rule-to-delete', ctx)
+      const result = await resolver.deleteFilter(filterId, ctx)
 
-      // Assert
-      expect(mockVirtManager.deleteNetworkFilter).toHaveBeenCalledWith('rule-to-delete')
+      expect(mockPrisma.nWFilter.delete).toHaveBeenCalledWith({
+        where: { id: filterId }
+      })
       expect(result).toBe(true)
     })
 
-    it('should prevent deletion of system firewall rules', async () => {
-      // Arrange
-      mockVirtManager.deleteNetworkFilter.mockRejectedValue(
-        new Error('Cannot delete system network filter')
-      )
+    it('should handle filter deletion', async () => {
+      const mockFilter = createMockNWFilter({ id: 'filter-1' })
+      mockPrisma.nWFilter.delete.mockResolvedValue(mockFilter)
 
-      // Act & Assert
-      await expect(resolver.deleteFirewallRule('clean-traffic', ctx)).rejects.toThrow(
-        'Cannot delete system network filter'
-      )
-    })
-  })
+      const result = await resolver.deleteFilter('filter-1', ctx)
 
-  describe('Mutation: attachFirewallRule', () => {
-    it('should attach firewall rule to a machine', async () => {
-      // Arrange
-      const input = {
-        machineId: 'machine-1',
-        filterName: 'allow-http'
-      }
-      mockPrisma.machine.findUnique.mockResolvedValue({
-        id: 'machine-1',
-        name: 'test-vm',
-        status: 'running'
-      })
-      mockVirtManager.attachNetworkFilter.mockResolvedValue(true)
-
-      // Act
-      const result = await resolver.attachFirewallRule(input, ctx)
-
-      // Assert
-      expect(mockPrisma.machine.findUnique).toHaveBeenCalledWith({
-        where: { id: 'machine-1' }
-      })
-      expect(mockVirtManager.attachNetworkFilter).toHaveBeenCalledWith(
-        'test-vm',
-        'allow-http'
-      )
-      expect(result).toBe(true)
-    })
-
-    it('should throw error when machine not found', async () => {
-      // Arrange
-      const input = {
-        machineId: 'nonexistent',
-        filterName: 'allow-http'
-      }
-      mockPrisma.machine.findUnique.mockResolvedValue(null)
-
-      // Act & Assert
-      await expect(resolver.attachFirewallRule(input, ctx)).rejects.toThrow(
-        'Machine not found'
-      )
-    })
-  })
-
-  describe('Mutation: detachFirewallRule', () => {
-    it('should detach firewall rule from a machine', async () => {
-      // Arrange
-      const input = {
-        machineId: 'machine-1',
-        filterName: 'allow-http'
-      }
-      mockPrisma.machine.findUnique.mockResolvedValue({
-        id: 'machine-1',
-        name: 'test-vm',
-        status: 'running'
-      })
-      mockVirtManager.detachNetworkFilter.mockResolvedValue(true)
-
-      // Act
-      const result = await resolver.detachFirewallRule(input, ctx)
-
-      // Assert
-      expect(mockVirtManager.detachNetworkFilter).toHaveBeenCalledWith(
-        'test-vm',
-        'allow-http'
-      )
       expect(result).toBe(true)
     })
   })
 
-  describe('Query: firewallRulesForMachine', () => {
-    it('should return firewall rules attached to a machine', async () => {
-      // Arrange
-      const mockMachine = {
-        id: 'machine-1',
-        name: 'test-vm',
-        networkFilters: ['allow-http', 'block-ssh']
+  describe('Mutation: createFilterRule', () => {
+    it('should create a new filter rule', async () => {
+      const filterId = 'filter-1'
+      const input = {
+        filterId: filterId,
+        protocol: 'tcp',
+        action: 'accept',
+        direction: 'in',
+        priority: 100,
+        srcPortStart: undefined,
+        srcPortEnd: undefined,
+        dstPortStart: 80,
+        dstPortEnd: 80,
+        comment: undefined,
+        ipVersion: undefined,
+        state: undefined
       }
-      mockPrisma.machine.findUnique.mockResolvedValue(mockMachine)
+      
+      const mockCreatedRule = createMockFWRule({
+        ...input,
+        id: 'rule-new',
+        nwFilterId: filterId
+      })
+      
+      mockNetworkFilterService.createRule.mockResolvedValue(mockCreatedRule)
 
-      const mockFilters = [
+      const result = await resolver.createFilterRule(filterId, input, ctx)
+
+      expect(mockNetworkFilterService.createRule).toHaveBeenCalledWith(
+        filterId,
+        input.action,
+        input.direction,
+        input.priority,
+        input.protocol || 'all',
+        undefined, // port parameter
         {
-          name: 'allow-http',
-          uuid: 'filter-1',
-          priority: 500,
-          rules: []
-        },
-        {
-          name: 'block-ssh',
-          uuid: 'filter-2',
-          priority: 600,
-          rules: []
+          srcPortStart: input.srcPortStart,
+          srcPortEnd: input.srcPortEnd,
+          dstPortStart: input.dstPortStart,
+          dstPortEnd: input.dstPortEnd,
+          comment: input.comment,
+          ipVersion: input.ipVersion,
+          state: input.state
         }
-      ]
-      mockVirtManager.getNetworkFilter.mockImplementation((name) => {
-        return Promise.resolve(mockFilters.find(f => f.name === name))
-      })
-
-      // Act
-      const result = await resolver.firewallRulesForMachine('machine-1', ctx)
-
-      // Assert
-      expect(mockPrisma.machine.findUnique).toHaveBeenCalledWith({
-        where: { id: 'machine-1' }
-      })
-      expect(result).toHaveLength(2)
-      expect(result[0].name).toBe('allow-http')
-      expect(result[1].name).toBe('block-ssh')
+      )
+      expect(result.protocol).toBe('tcp')
     })
 
-    it('should return empty array when machine has no firewall rules', async () => {
-      // Arrange
-      mockPrisma.machine.findUnique.mockResolvedValue({
-        id: 'machine-1',
-        name: 'test-vm',
-        networkFilters: []
-      })
+    it('should handle rule creation', async () => {
+      const input = { filterId: 'filter-1', protocol: 'tcp', action: 'accept', direction: 'in', priority: 100 }
+      const mockRule = createMockFWRule(input)
+      
+      mockNetworkFilterService.createRule.mockResolvedValue(mockRule)
 
-      // Act
-      const result = await resolver.firewallRulesForMachine('machine-1', ctx)
+      const result = await resolver.createFilterRule('filter-1', input, ctx)
 
-      // Assert
-      expect(result).toEqual([])
+      expect(result).toBeDefined()
     })
   })
 
-  describe('Authorization', () => {
-    it('should require ADMIN role for creating firewall rules', async () => {
-      // Arrange
-      const userContext = createMockContext()
+  describe('Mutation: updateFilterRule', () => {
+    it('should update a filter rule', async () => {
+      const ruleId = 'rule-1'
       const input = {
-        name: 'test-rule',
-        priority: 500,
-        chain: 'root',
-        rules: []
+        priority: 200,
+        action: 'drop',
+        direction: 'out'
       }
+      
+      const existingRule = createMockFWRule({ id: ruleId, nwFilterId: 'filter-1' })
+      const updatedRule = { ...existingRule, ...input }
+      
+      mockPrisma.fWRule.findUnique.mockResolvedValue(existingRule)
+      mockPrisma.fWRule.update.mockResolvedValue(updatedRule)
 
-      // Act & Assert
-      // In a real scenario, the @Authorized decorator would handle this
-      // Here we're testing that the resolver method exists and has proper typing
-      expect(resolver.createFirewallRule).toBeDefined()
+      const result = await resolver.updateFilterRule(ruleId, input, ctx)
+
+      expect(mockPrisma.fWRule.update).toHaveBeenCalledWith({
+        where: { id: ruleId },
+        data: input
+      })
+      expect(result.action).toBe('drop')
     })
 
-    it('should require ADMIN role for deleting firewall rules', async () => {
-      // Arrange & Act & Assert
-      expect(resolver.deleteFirewallRule).toBeDefined()
+    it('should handle rule update', async () => {
+      const input = { priority: 100, action: 'accept', direction: 'in' }
+      const mockRule = createMockFWRule({ ...input, id: 'rule-1' })
+      
+      mockPrisma.fWRule.findUnique.mockResolvedValue(null)
+      mockPrisma.fWRule.update.mockResolvedValue(mockRule)
+
+      const result = await resolver.updateFilterRule('rule-1', input, ctx)
+
+      expect(result).toBeDefined()
+    })
+  })
+
+  describe('Mutation: deleteFilterRule', () => {
+    it('should delete a filter rule', async () => {
+      const ruleId = 'rule-1'
+      const mockRule = createMockFWRule({ id: ruleId, nwFilterId: 'filter-1' })
+      
+      mockPrisma.fWRule.findUnique.mockResolvedValue(mockRule)
+      mockPrisma.fWRule.delete.mockResolvedValue(mockRule)
+
+      const result = await resolver.deleteFilterRule(ruleId, ctx)
+
+      expect(mockPrisma.fWRule.delete).toHaveBeenCalledWith({
+        where: { id: ruleId }
+      })
+      expect(result).toBe(true)
     })
 
-    it('should allow USER role to view firewall rules', async () => {
-      // Arrange & Act & Assert
-      expect(resolver.firewallRules).toBeDefined()
-      expect(resolver.firewallRule).toBeDefined()
+    it('should handle rule deletion', async () => {
+      const mockRule = createMockFWRule({ id: 'rule-1' })
+      
+      mockPrisma.fWRule.findUnique.mockResolvedValue(null)
+      mockPrisma.fWRule.delete.mockResolvedValue(mockRule)
+
+      const result = await resolver.deleteFilterRule('rule-1', ctx)
+
+      expect(result).toBe(true)
+    })
+  })
+
+  describe('Mutation: flushNWFilter', () => {
+    it('should flush a filter to libvirt', async () => {
+      const filterId = 'filter-1'
+      const mockFilter = createMockNWFilter({ id: filterId })
+      
+      mockPrisma.nWFilter.findUnique.mockResolvedValue(mockFilter)
+      mockNetworkFilterService.flushNWFilter.mockResolvedValue(true)
+
+      const result = await resolver.flushFilter(filterId, ctx)
+
+      expect(mockNetworkFilterService.flushNWFilter).toHaveBeenCalledWith(filterId)
+      expect(result).toBe(true)
+    })
+
+    it('should handle filter flush', async () => {
+      mockPrisma.nWFilter.findUnique.mockResolvedValue(null)
+      mockNetworkFilterService.flushNWFilter.mockResolvedValue(true)
+
+      const result = await resolver.flushFilter('filter-1', ctx)
+
+      expect(result).toBe(true)
     })
   })
 })

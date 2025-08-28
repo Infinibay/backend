@@ -130,6 +130,7 @@ export class ProcessManager {
           : (response.data.processes || [])
 
         debug(`Retrieved ${processes.length} processes via VirtIO`)
+        debug(`Sample process data: ${JSON.stringify(processes[0], null, 2)}`)
         return this.mapProcesses(processes)
       } else {
         throw new Error(`Failed to get process list: ${response.error || 'InfiniService not available'}`)
@@ -265,15 +266,20 @@ export class ProcessManager {
    * Map raw process data to internal format
    */
   private mapProcesses(rawProcesses: any[]): InternalProcessInfo[] {
+    // Log the first process to see the actual field names
+    if (rawProcesses.length > 0) {
+      debug(`Raw process fields: ${Object.keys(rawProcesses[0]).join(', ')}`)
+    }
+    
     return rawProcesses.map(p => ({
-      pid: p.pid || 0,
-      name: p.name || 'unknown',
-      cpuUsage: p.cpu_usage || p.cpuUsage || 0,
-      memoryKb: p.memory_kb || p.memoryKb || 0,
-      status: p.status || 'unknown',
-      commandLine: p.command_line || p.commandLine,
-      user: p.user,
-      startTime: p.start_time ? new Date(p.start_time) : undefined
+      pid: p.pid || p.Pid || p.PID || 0,
+      name: p.name || p.Name || p.ProcessName || 'unknown',
+      cpuUsage: p.cpu_usage || p.cpuUsage || p.cpu || p.CPU || 0,
+      memoryKb: p.memory_kb || p.memoryKb || p.memory || p.Memory || p.WorkingSet || 0,
+      status: p.status || p.Status || 'running',
+      commandLine: p.command_line || p.commandLine || p.CommandLine || p.cmd_line,
+      user: p.user || p.User || p.UserName,
+      startTime: p.start_time || p.startTime || p.StartTime ? new Date(p.start_time || p.startTime || p.StartTime) : undefined
     }))
   }
 

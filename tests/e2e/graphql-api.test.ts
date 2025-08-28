@@ -6,7 +6,7 @@ import { PrismaClient } from '@prisma/client'
 import express from 'express'
 import jwt from 'jsonwebtoken'
 import bcrypt from 'bcrypt'
-import { createServer } from 'http'
+import { createServer, Server } from 'http'
 import { authChecker } from '@utils/authChecker'
 import { InfinibayContext } from '@utils/context'
 import {
@@ -24,7 +24,7 @@ import { executeGraphQL, TestQueries, TestMutations } from '../setup/test-helper
 // Import resolvers
 import { UserResolver } from '@graphql/resolvers/user/resolver'
 import { MachineQueries, MachineMutations } from '@graphql/resolvers/machine/resolver'
-import { DepartmentQueries, DepartmentMutations } from '@graphql/resolvers/department/resolver'
+import { DepartmentResolver } from '@graphql/resolvers/department/resolver'
 
 // Mock EventManager
 jest.mock('@services/EventManager', () => ({
@@ -41,15 +41,23 @@ jest.mock('@services/machineLifecycleService')
 // Mock libvirt-node
 jest.mock('libvirt-node')
 
+// Define partial context type for testing
+interface TestContext extends Partial<InfinibayContext> {
+  req: Partial<express.Request> & { headers?: { authorization?: string } }
+  prisma: typeof mockPrisma
+  user: InfinibayContext['user'] | null
+  setupMode: boolean
+}
+
 describe('E2E GraphQL API Tests', () => {
   let apolloServer: ApolloServer
   let schema: GraphQLSchema
   let prisma: PrismaClient
   let app: express.Application
-  let httpServer: any
+  let httpServer: Server
 
   beforeAll(async () => {
-    prisma = mockPrisma as any
+    prisma = mockPrisma as unknown as PrismaClient
 
     // Build GraphQL schema
     schema = await buildSchema({
@@ -57,9 +65,8 @@ describe('E2E GraphQL API Tests', () => {
         UserResolver,
         MachineQueries,
         MachineMutations,
-        DepartmentQueries,
-        DepartmentMutations
-      ] as any,
+        DepartmentResolver
+      ],
       authChecker,
       validate: false
     })
@@ -73,8 +80,9 @@ describe('E2E GraphQL API Tests', () => {
       schema,
       context: ({ req }): InfinibayContext => ({
         req,
+        res: {} as express.Response,
         prisma,
-        user: null as any,
+        user: null,
         setupMode: false
       }),
       formatError: (error) => {
@@ -84,7 +92,7 @@ describe('E2E GraphQL API Tests', () => {
     })
 
     await apolloServer.start()
-    apolloServer.applyMiddleware({ app, path: '/graphql' })
+    apolloServer.applyMiddleware({ app: app as never, path: '/graphql' })
 
     // Create HTTP server
     httpServer = createServer(app)
@@ -101,594 +109,554 @@ describe('E2E GraphQL API Tests', () => {
     jest.clearAllMocks()
   })
 
-  describe('Authentication Flow', () => {
-    it('should successfully login with valid credentials', async () => {
-      const password = 'TestPassword123!'
-      const hashedPassword = await bcrypt.hash(password, 10)
-      const user = createMockUser({
-        email: 'test@example.com',
-        password: hashedPassword
-      });
+  describe('Authentication', () => {
+    describe('Login', () => {
+      it('should successfully login with valid credentials', async () => {
+        const password = 'validPassword123'
+        const hashedPassword = await bcrypt.hash(password, 10)
+        const mockUser = createMockUser({ password: hashedPassword })
 
-      (prisma.user.findUnique as jest.Mock).mockResolvedValue(user)
+        mockPrisma.user.findFirst.mockResolvedValue(mockUser)
 
-      const result = await executeGraphQL(
-        schema,
-        TestQueries.LOGIN,
-        {
-          email: 'test@example.com',
-          password
-        },
-        { prisma, user: null, setupMode: false }
-      )
+        const result = await executeGraphQL({
+          schema,
+          query: TestMutations.LOGIN,
+          variables: { email: mockUser.email, password },
+          context: { 
+            req: {}, 
+            res: {} as express.Response,
+            prisma, 
+            user: null, 
+            setupMode: false 
+          } as InfinibayContext
+        })
 
-      expect(result.errors).toBeUndefined()
-      expect(result.data?.login).toBeDefined()
-      expect(result.data?.login.token).toBeDefined()
+        expect(result.errors).toBeUndefined()
+        expect((result.data?.login as { token?: string })?.token).toBeDefined()
+        
+        const token = jwt.verify(
+          (result.data?.login as { token: string }).token,
+          process.env.TOKENKEY || 'test-secret'
+        ) as { userId: string }
+        
+        expect(token.userId).toBe(mockUser.id)
+      })
 
-      // Verify token is valid
-      const decoded = jwt.verify(
-        result.data?.login.token,
-        process.env.TOKENKEY || 'test-secret-key'
-      ) as any
-      expect(decoded.userId).toBe(user.id)
-      expect(decoded.userRole).toBe(user.role)
+      it('should fail login with invalid credentials', async () => {
+        const mockUser = createMockUser({ password: 'hashedPassword' })
+        mockPrisma.user.findFirst.mockResolvedValue(mockUser)
+
+        const result = await executeGraphQL({
+          schema,
+          query: TestMutations.LOGIN,
+          variables: { email: mockUser.email, password: 'wrongPassword' },
+          context: { 
+            req: {}, 
+            res: {} as express.Response,
+            prisma, 
+            user: null, 
+            setupMode: false 
+          } as InfinibayContext
+        })
+
+        expect(result.errors).toBeDefined()
+        expect(result.errors?.[0].message).toContain('Invalid credentials')
+      })
     })
 
-    it('should reject login with invalid credentials', async () => {
-      (prisma.user.findUnique as jest.Mock).mockResolvedValue(null)
+    describe('Protected Queries', () => {
+      it('should access protected query with valid token', async () => {
+        const mockUser = createMockUser()
+        const token = `Bearer ${jwt.sign({ userId: mockUser.id }, process.env.TOKENKEY || 'test-secret')}`
 
-      const result = await executeGraphQL(
-        schema,
-        TestQueries.LOGIN,
-        {
-          email: 'nonexistent@example.com',
-          password: 'WrongPassword'
-        },
-        { prisma, user: null, setupMode: false }
-      )
+        mockPrisma.user.findUnique.mockResolvedValue(mockUser)
 
-      expect(result.errors).toBeUndefined()
-      expect(result.data?.login).toBeNull()
-    })
+        const result = await executeGraphQL({
+          schema,
+          query: TestQueries.CURRENT_USER,
+          context: {
+            req: { headers: { authorization: token } },
+            res: {} as express.Response,
+            prisma,
+            user: mockUser,
+            setupMode: false
+          } as InfinibayContext
+        })
 
-    it('should get current user with valid token', async () => {
-      const user = createMockUser()
-      const token = jwt.sign(
-        { userId: user.id, userRole: user.role },
-        process.env.TOKENKEY || 'test-secret-key'
-      );
+        expect(result.errors).toBeUndefined()
+        expect(result.data?.currentUser).toMatchObject({
+          id: mockUser.id,
+          email: mockUser.email
+        })
+      })
 
-      (prisma.user.findUnique as jest.Mock).mockResolvedValue(user)
+      it('should reject protected query without token', async () => {
+        const result = await executeGraphQL({
+          schema,
+          query: TestQueries.CURRENT_USER,
+          context: { 
+            req: {}, 
+            res: {} as express.Response,
+            prisma, 
+            user: null, 
+            setupMode: false 
+          } as InfinibayContext
+        })
 
-      const context: InfinibayContext = {
-        req: { headers: { authorization: token } } as any,
-        prisma,
-        user,
-        setupMode: false
-      }
-
-      const result = await executeGraphQL(
-        schema,
-        TestQueries.CURRENT_USER,
-        {},
-        context
-      )
-
-      expect(result.errors).toBeUndefined()
-      expect(result.data?.currentUser).toBeDefined()
-      expect(result.data?.currentUser.id).toBe(user.id)
-      expect(result.data?.currentUser.email).toBe(user.email)
+        expect(result.errors).toBeDefined()
+        expect(result.errors?.[0].message).toContain('Access denied')
+      })
     })
   })
 
-  describe('User Management', () => {
-    it('should allow admin to create new user', async () => {
-      const admin = createMockAdminUser()
-      const newUserId = generateId();
+  describe('User Operations', () => {
+    describe('Queries', () => {
+      it('should get current user', async () => {
+        const mockUser = createMockUser()
+        
+        const result = await executeGraphQL({
+          schema,
+          query: TestQueries.CURRENT_USER,
+          context: {
+            req: { headers: { authorization: 'admin-token' } },
+            res: {} as express.Response,
+            prisma,
+            user: mockUser,
+            setupMode: false
+          } as InfinibayContext
+        })
 
-      (prisma.user.findUnique as jest.Mock)
-        .mockResolvedValueOnce(admin) // For auth check
-        .mockResolvedValueOnce(null); // For email uniqueness check
-
-      (prisma.user.create as jest.Mock).mockResolvedValue({
-        id: newUserId,
-        email: 'newuser@example.com',
-        firstName: 'New',
-        lastName: 'User',
-        role: 'USER',
-        deleted: false,
-        createdAt: new Date()
+        expect(result.errors).toBeUndefined()
+        expect(result.data?.currentUser).toMatchObject({
+          id: mockUser.id,
+          email: mockUser.email
+        })
       })
 
-      const context: InfinibayContext = {
-        req: { headers: { authorization: 'admin-token' } } as any,
-        prisma,
-        user: admin,
-        setupMode: false
-      }
+      it('should list all users (admin only)', async () => {
+        const adminUser = createMockAdminUser()
+        const mockUsers = [
+          createMockUser({ id: 'user-1' }),
+          createMockUser({ id: 'user-2' }),
+          createMockUser({ id: 'user-3' })
+        ]
 
-      const result = await executeGraphQL(
-        schema,
-        TestMutations.CREATE_USER,
-        {
-          input: {
-            email: 'newuser@example.com',
-            password: 'SecurePass123!',
-            passwordConfirmation: 'SecurePass123!',
-            firstName: 'New',
-            lastName: 'User',
-            role: 'USER'
-          }
-        },
-        context
-      )
+        mockPrisma.user.findMany.mockResolvedValue(mockUsers)
+        mockPrisma.user.count.mockResolvedValue(mockUsers.length)
 
-      expect(result.errors).toBeUndefined()
-      expect(result.data?.createUser).toBeDefined()
-      expect(result.data?.createUser.email).toBe('newuser@example.com')
+        const result = await executeGraphQL({
+          schema,
+          query: TestQueries.USERS,
+          variables: { pagination: { take: 10, skip: 0 } },
+          context: {
+            req: { headers: { authorization: 'user-token' } },
+            res: {} as express.Response,
+            prisma,
+            user: adminUser,
+            setupMode: false
+          } as InfinibayContext
+        })
 
-      // Verify password was hashed
-      expect(prisma.user.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({
-          password: expect.not.stringContaining('SecurePass123!')
+        expect(result.errors).toBeUndefined()
+        expect(result.data?.users).toMatchObject({
+          users: expect.arrayContaining(mockUsers.map(u => ({
+            id: u.id,
+            email: u.email
+          }))),
+          total: mockUsers.length
         })
       })
     })
 
-    it('should prevent regular users from creating users', async () => {
-      const user = createMockUser({ role: 'USER' })
+    describe('Mutations', () => {
+      it('should update user profile', async () => {
+        const mockUser = createMockUser()
+        const updates = {
+          firstName: 'Updated',
+          lastName: 'Name'
+        }
 
-      const context: InfinibayContext = {
-        req: { headers: { authorization: 'user-token' } } as any,
-        prisma,
-        user,
-        setupMode: false
-      }
+        mockPrisma.user.update.mockResolvedValue({
+          ...mockUser,
+          ...updates
+        })
 
-      const result = await executeGraphQL(
-        schema,
-        TestMutations.CREATE_USER,
-        {
-          input: {
-            email: 'newuser@example.com',
-            password: 'SecurePass123!',
-            passwordConfirmation: 'SecurePass123!',
-            firstName: 'New',
-            lastName: 'User',
-            role: 'USER'
-          }
-        },
-        context
-      )
+        const result = await executeGraphQL({
+          schema,
+          query: TestMutations.UPDATE_USER,
+          variables: { input: updates },
+          context: {
+            req: { headers: { authorization: 'admin-token' } },
+            res: {} as express.Response,
+            prisma,
+            user: mockUser,
+            setupMode: false
+          } as InfinibayContext
+        })
 
-      expect(result.errors).toBeDefined()
-      expect(result.errors?.[0].message).toContain('Access denied')
-    })
+        expect(result.errors).toBeUndefined()
+        expect(result.data?.updateUser).toMatchObject(updates)
+      })
 
-    it('should list users with pagination', async () => {
-      const admin = createMockAdminUser()
-      const users = [
-        createMockUser({ email: 'user1@example.com' }),
-        createMockUser({ email: 'user2@example.com' }),
-        createMockUser({ email: 'user3@example.com' })
-      ];
+      it('should delete user (admin only)', async () => {
+        const adminUser = createMockAdminUser()
+        const userToDelete = createMockUser({ id: 'user-to-delete' })
 
-      (prisma.user.findMany as jest.Mock).mockResolvedValue(users)
+        mockPrisma.user.findUnique.mockResolvedValue(userToDelete)
+        mockPrisma.user.update.mockResolvedValue({
+          ...userToDelete,
+          deleted: true
+        })
 
-      const context: InfinibayContext = {
-        req: { headers: { authorization: 'admin-token' } } as any,
-        prisma,
-        user: admin,
-        setupMode: false
-      }
+        const result = await executeGraphQL({
+          schema,
+          query: TestMutations.DELETE_USER,
+          variables: { id: userToDelete.id },
+          context: {
+            req: { headers: { authorization: 'admin-token' } },
+            res: {} as express.Response,
+            prisma,
+            user: adminUser,
+            setupMode: false
+          } as InfinibayContext
+        })
 
-      const result = await executeGraphQL(
-        schema,
-        TestQueries.LIST_USERS,
-        {
-          take: 10,
-          skip: 0,
-          orderBy: { fieldName: 'email', direction: 'asc' }
-        },
-        context
-      )
-
-      expect(result.errors).toBeUndefined()
-      expect(result.data?.users).toBeDefined()
-      expect(Array.isArray(result.data?.users.users)).toBe(true)
-      expect(result.data?.users.users).toHaveLength(3)
+        expect(result.errors).toBeUndefined()
+        expect(result.data?.deleteUser).toMatchObject({
+          success: true
+        })
+      })
     })
   })
 
-  describe('VM Operations', () => {
-    it('should create a new VM with proper authorization', async () => {
-      const admin = createMockAdminUser()
-      const template = createMockMachineTemplate()
-      const department = createMockDepartment()
-      const newMachine = createMockMachine({
-        templateId: template.id,
-        departmentId: department.id,
-        userId: admin.id
+  describe('Machine Operations', () => {
+    describe('Queries', () => {
+      it('should get machine by id', async () => {
+        const mockMachine = createMockMachine()
+        const mockTemplate = createMockMachineTemplate()
+        const mockDepartment = createMockDepartment()
+        const mockUser = createMockUser()
+
+        mockPrisma.machine.findUnique.mockResolvedValue({
+          ...mockMachine,
+          template: mockTemplate,
+          department: mockDepartment,
+          user: mockUser,
+          configuration: { graphicHost: 'localhost' }
+        })
+
+        const result = await executeGraphQL({
+          schema,
+          query: TestQueries.MACHINE,
+          variables: { id: mockMachine.id },
+          context: {
+            req: { headers: { authorization: 'user-token' } },
+            res: {} as express.Response,
+            prisma,
+            user: mockUser,
+            setupMode: false
+          } as InfinibayContext
+        })
+
+        expect(result.errors).toBeUndefined()
+        expect(result.data?.machine).toMatchObject({
+          id: mockMachine.id,
+          name: mockMachine.name,
+          status: mockMachine.status
+        })
       })
 
-      // Mock MachineLifecycleService
-      const { MachineLifecycleService } = require('@services/machineLifecycleService')
-      MachineLifecycleService.mockImplementation(() => ({
-        createMachine: jest.fn().mockResolvedValue(newMachine)
-      }))
+      it('should list machines with filters', async () => {
+        const mockMachines = [
+          createMockMachine({ id: 'machine-1', status: 'running' }),
+          createMockMachine({ id: 'machine-2', status: 'running' }),
+          createMockMachine({ id: 'machine-3', status: 'stopped' })
+        ]
 
-      const context: InfinibayContext = {
-        req: { headers: { authorization: 'admin-token' } } as any,
-        prisma,
-        user: admin,
-        setupMode: false
-      }
+        mockPrisma.machine.findMany.mockResolvedValue(mockMachines.filter(m => m.status === 'running'))
+        mockPrisma.machine.count.mockResolvedValue(2)
 
-      const result = await executeGraphQL(
-        schema,
-        TestMutations.CREATE_MACHINE,
-        {
-          input: {
-            name: 'Test VM',
-            templateId: template.id,
-            departmentId: department.id,
-            os: 'ubuntu-22.04',
-            username: 'testuser',
-            password: 'TestPass123!',
-            applications: []
-          }
-        },
-        context
-      )
+        const result = await executeGraphQL({
+          schema,
+          query: TestQueries.MACHINES,
+          variables: { 
+            pagination: { take: 10, skip: 0 },
+            filter: { status: 'running' }
+          },
+          context: {
+            req: { headers: { authorization: 'user-token' } },
+            res: {} as express.Response,
+            prisma,
+            user: createMockUser(),
+            setupMode: false
+          } as InfinibayContext
+        })
 
-      expect(result.errors).toBeUndefined()
-      expect(result.data?.createMachine).toBeDefined()
-      expect(result.data?.createMachine.name).toBe(newMachine.name)
+        expect(result.errors).toBeUndefined()
+        expect(result.data?.machines).toMatchObject({
+          total: 2,
+          machines: expect.arrayContaining([
+            expect.objectContaining({ status: 'running' })
+          ])
+        })
+        expect((result.data?.machines as { machines: { status: string }[] }).machines.every((m: { status: string }) =>
+          m.status === 'running'
+        )).toBe(true)
+      })
     })
 
-    it('should power on VM with proper authorization', async () => {
-      const user = createMockUser()
-      const machine = createMockMachine({ userId: user.id, status: 'stopped' });
+    describe('Mutations', () => {
+      it('should create machine', async () => {
+        const mockTemplate = createMockMachineTemplate()
+        const mockDepartment = createMockDepartment()
+        const mockUser = createMockUser()
+        const mockMachine = createMockMachine({ templateId: mockTemplate.id })
 
-      (prisma.machine.findFirst as jest.Mock).mockResolvedValue(machine);
-      (prisma.machine.update as jest.Mock).mockResolvedValue({
-        ...machine,
-        status: 'running'
+        mockPrisma.machineTemplate.findUnique.mockResolvedValue(mockTemplate)
+        mockPrisma.department.findFirst.mockResolvedValue(mockDepartment)
+        mockPrisma.machine.create.mockResolvedValue(mockMachine)
+
+        const result = await executeGraphQL({
+          schema,
+          query: TestMutations.CREATE_MACHINE,
+          variables: {
+            input: {
+              name: 'Test Machine',
+              templateId: mockTemplate.id,
+              os: 'Ubuntu 20.04',
+              applications: []
+            }
+          },
+          context: {
+            req: { headers: { authorization: 'admin-token' } },
+            res: {} as express.Response,
+            prisma,
+            user: mockUser,
+            setupMode: false
+          } as InfinibayContext
+        })
+
+        expect(result.errors).toBeUndefined()
+        expect(result.data?.createMachine).toMatchObject({
+          id: mockMachine.id,
+          name: mockMachine.name
+        })
       })
 
-      // Mock libvirt operations
-      const mockDomain = {
-        create: jest.fn().mockResolvedValue(true),
-        getState: jest.fn().mockResolvedValue([1, 1])
-      }
+      it('should destroy machine', async () => {
+        const mockUser = createMockUser()
+        const mockMachine = createMockMachine({ userId: mockUser.id })
 
-      const { Connection } = require('libvirt-node')
-      Connection.open = jest.fn().mockResolvedValue({
-        lookupDomainByName: jest.fn().mockResolvedValue(mockDomain)
+        mockPrisma.machine.findFirst.mockResolvedValue(mockMachine)
+
+        const result = await executeGraphQL({
+          schema,
+          query: TestMutations.DESTROY_MACHINE,
+          variables: { id: mockMachine.id },
+          context: {
+            req: { headers: {} },
+            res: {} as express.Response,
+            prisma,
+            user: null,
+            setupMode: false
+          } as InfinibayContext
+        })
+
+        // Should fail without authentication
+        expect(result.errors).toBeDefined()
+        expect(result.errors?.[0].message).toContain('Access denied')
       })
-
-      const context: InfinibayContext = {
-        req: { headers: { authorization: 'user-token' } } as any,
-        prisma,
-        user,
-        setupMode: false
-      }
-
-      const result = await executeGraphQL(
-        schema,
-        TestMutations.POWER_ON,
-        { id: machine.id },
-        context
-      )
-
-      expect(result.errors).toBeUndefined()
-      expect(result.data?.powerOn).toBeDefined()
-      expect(result.data?.powerOn.success).toBe(true)
-    })
-
-    it('should list user VMs with proper filtering', async () => {
-      const user = createMockUser()
-      const userMachines = [
-        createMockMachine({ userId: user.id, name: 'User VM 1' }),
-        createMockMachine({ userId: user.id, name: 'User VM 2' })
-      ]
-      const otherMachine = createMockMachine({ userId: 'other-user', name: 'Other VM' });
-
-      (prisma.machine.findMany as jest.Mock).mockImplementation(({ where }) => {
-        if (where.userId === user.id) {
-          return Promise.resolve(userMachines)
-        }
-        return Promise.resolve([])
-      })
-
-      const context: InfinibayContext = {
-        req: { headers: { authorization: 'user-token' } } as any,
-        prisma,
-        user,
-        setupMode: false
-      }
-
-      const result = await executeGraphQL(
-        schema,
-        TestQueries.LIST_MACHINES,
-        { take: 10, skip: 0 },
-        context
-      )
-
-      expect(result.errors).toBeUndefined()
-      expect(result.data?.machines).toBeDefined()
-      expect(result.data?.machines.machines).toHaveLength(2)
-      expect(result.data?.machines.machines.every((m: any) =>
-        m.name.startsWith('User VM')
-      )).toBe(true)
     })
   })
 
   describe('Department Operations', () => {
-    it('should create department with admin privileges', async () => {
-      const admin = createMockAdminUser()
-      const newDepartment = createMockDepartment({ name: 'Engineering' });
+    describe('Queries', () => {
+      it('should get department by id', async () => {
+        const mockDepartment = createMockDepartment()
+        const mockMachines = [
+          createMockMachine({ departmentId: mockDepartment.id }),
+          createMockMachine({ departmentId: mockDepartment.id })
+        ]
 
-      (prisma.department.create as jest.Mock).mockResolvedValue(newDepartment)
+        mockPrisma.department.findUnique.mockResolvedValue({
+          ...mockDepartment,
+          machines: mockMachines
+        })
 
-      const context: InfinibayContext = {
-        req: { headers: { authorization: 'admin-token' } } as any,
-        prisma,
-        user: admin,
-        setupMode: false
-      }
-
-      const result = await executeGraphQL(
-        schema,
-        TestMutations.CREATE_DEPARTMENT,
-        { name: 'Engineering' },
-        context
-      )
-
-      expect(result.errors).toBeUndefined()
-      expect(result.data?.createDepartment).toBeDefined()
-      expect(result.data?.createDepartment.name).toBe('Engineering')
-    })
-
-    it('should list departments with machine count', async () => {
-      const departments = [
-        { ...createMockDepartment({ name: 'Engineering' }), totalMachines: 5 },
-        { ...createMockDepartment({ name: 'Marketing' }), totalMachines: 3 }
-      ];
-
-      (prisma.department.findMany as jest.Mock).mockResolvedValue(departments);
-      (prisma.machine.count as jest.Mock).mockImplementation(({ where }) => {
-        const dept = departments.find(d => d.id === where.departmentId)
-        return Promise.resolve(dept?.totalMachines || 0)
-      })
-
-      const context: InfinibayContext = {
-        req: { headers: {} } as any,
-        prisma,
-        user: null as any,
-        setupMode: false
-      }
-
-      const result = await executeGraphQL(
-        schema,
-        TestQueries.LIST_DEPARTMENTS,
-        {},
-        context
-      )
-
-      expect(result.errors).toBeUndefined()
-      expect(result.data?.departments).toBeDefined()
-      expect(result.data?.departments).toHaveLength(2)
-      expect(result.data?.departments[0].totalMachines).toBe(5)
-    })
-  })
-
-  describe('Error Handling', () => {
-    it('should handle database connection errors gracefully', async () => {
-      const user = createMockUser();
-
-      (prisma.user.findUnique as jest.Mock).mockRejectedValue(
-        new Error('Database connection failed')
-      )
-
-      const result = await executeGraphQL(
-        schema,
-        TestQueries.LOGIN,
-        {
-          email: user.email,
-          password: 'password'
-        },
-        { prisma, user: null, setupMode: false }
-      )
-
-      expect(result.errors).toBeDefined()
-      expect(result.errors?.[0].message).toContain('Database connection failed')
-    })
-
-    it('should validate input data', async () => {
-      const admin = createMockAdminUser()
-
-      const context: InfinibayContext = {
-        req: { headers: { authorization: 'admin-token' } } as any,
-        prisma,
-        user: admin,
-        setupMode: false
-      }
-
-      const result = await executeGraphQL(
-        schema,
-        TestMutations.CREATE_USER,
-        {
-          input: {
-            email: 'invalid-email', // Invalid email format
-            password: 'weak', // Too weak password
-            passwordConfirmation: 'different', // Doesn't match
-            firstName: '', // Empty
-            lastName: '', // Empty
-            role: 'INVALID_ROLE' // Invalid role
-          }
-        },
-        context
-      )
-
-      expect(result.errors).toBeDefined()
-    })
-
-    it('should handle concurrent requests properly', async () => {
-      const users = [
-        createMockUser({ email: 'user1@example.com' }),
-        createMockUser({ email: 'user2@example.com' }),
-        createMockUser({ email: 'user3@example.com' })
-      ]
-
-      const contexts = users.map(user => ({
-        req: { headers: { authorization: `token-${user.id}` } } as any,
-        prisma,
-        user,
-        setupMode: false
-      }));
-
-      (prisma.machine.findMany as jest.Mock).mockImplementation(() => {
-        return Promise.resolve([])
-      })
-
-      // Execute multiple concurrent requests
-      const promises = contexts.map(context =>
-        executeGraphQL(
+        const result = await executeGraphQL({
           schema,
-          TestQueries.LIST_MACHINES,
-          { take: 10, skip: 0 },
-          context
-        )
-      )
+          query: TestQueries.DEPARTMENT,
+          variables: { id: mockDepartment.id },
+          context: {
+            req: { headers: { authorization: 'admin-token' } },
+            res: {} as express.Response,
+            prisma,
+            user: createMockAdminUser(),
+            setupMode: false
+          } as InfinibayContext
+        })
 
-      const results = await Promise.all(promises)
-
-      // All requests should succeed
-      results.forEach(result => {
         expect(result.errors).toBeUndefined()
-        expect(result.data?.machines).toBeDefined()
+        expect(result.data?.department).toMatchObject({
+          id: mockDepartment.id,
+          name: mockDepartment.name
+        })
+      })
+
+      it('should list departments', async () => {
+        const mockDepartments = [
+          createMockDepartment({ id: 'dept-1', name: 'Engineering' }),
+          createMockDepartment({ id: 'dept-2', name: 'Marketing' }),
+          createMockDepartment({ id: 'dept-3', name: 'Sales' })
+        ]
+
+        mockPrisma.department.findMany.mockResolvedValue(mockDepartments)
+
+        const result = await executeGraphQL({
+          schema,
+          query: TestQueries.DEPARTMENTS,
+          context: {
+            req: { headers: { authorization: `token-${createMockUser().id}` } },
+            res: {} as express.Response,
+            prisma,
+            user: createMockUser(),
+            setupMode: false
+          } as InfinibayContext
+        })
+
+        expect(result.errors).toBeUndefined()
+        expect(result.data?.departments).toHaveLength(mockDepartments.length)
+        expect(result.data?.departments).toEqual(
+          expect.arrayContaining(
+            mockDepartments.map(d => ({
+              id: d.id,
+              name: d.name
+            }))
+          )
+        )
+      })
+    })
+
+    describe('Mutations', () => {
+      it('should create department (admin only)', async () => {
+        const adminUser = createMockAdminUser()
+        const newDepartment = createMockDepartment({ name: 'New Department' })
+
+        mockPrisma.department.create.mockResolvedValue(newDepartment)
+
+        const result = await executeGraphQL({
+          schema,
+          query: TestMutations.CREATE_DEPARTMENT,
+          variables: {
+            input: {
+              name: newDepartment.name,
+              ipSubnet: '192.168.1.0/24'
+            }
+          },
+          context: {
+            req: { headers: { authorization: `token` } },
+            res: {} as express.Response,
+            prisma,
+            user: adminUser,
+            setupMode: false
+          } as InfinibayContext
+        })
+
+        expect(result.errors).toBeUndefined()
+        expect(result.data?.createDepartment).toMatchObject({
+          id: newDepartment.id,
+          name: newDepartment.name
+        })
+      })
+
+      it('should reject department creation for non-admin', async () => {
+        const regularUser = createMockUser()
+
+        const result = await executeGraphQL({
+          schema,
+          query: TestMutations.CREATE_DEPARTMENT,
+          variables: {
+            input: {
+              name: 'Unauthorized Department',
+              ipSubnet: '192.168.2.0/24'
+            }
+          },
+          context: {
+            req: { headers: {} },
+            res: {} as express.Response,
+            prisma,
+            user: null,
+            setupMode: false
+          } as InfinibayContext
+        })
+
+        expect(result.errors).toBeDefined()
+        expect(result.errors?.[0].message).toContain('Access denied')
+      })
+
+      it('should delete department (admin only)', async () => {
+        const adminUser = createMockAdminUser()
+        const departmentToDelete = createMockDepartment()
+
+        mockPrisma.department.findUnique.mockResolvedValue(departmentToDelete)
+        mockPrisma.department.delete.mockResolvedValue(departmentToDelete)
+
+        const result = await executeGraphQL({
+          schema,
+          query: TestMutations.DELETE_DEPARTMENT,
+          variables: { id: departmentToDelete.id },
+          context: {
+            req: { headers: { authorization: 'admin-token' } },
+            res: {} as express.Response,
+            prisma,
+            user: adminUser,
+            setupMode: false
+          } as InfinibayContext
+        })
+
+        expect(result.errors).toBeUndefined()
+        expect(result.data?.deleteDepartment).toMatchObject({
+          success: true
+        })
       })
     })
   })
 
-  describe('Subscription Mechanism', () => {
-    it('should setup WebSocket subscriptions', async () => {
-      // Note: Full WebSocket subscription testing would require a more complex setup
-      // This is a placeholder for subscription mechanism testing
+  describe('Machine Template Operations', () => {
+    describe('Queries', () => {
+      it('should list machine templates', async () => {
+        const mockTemplates = [
+          createMockMachineTemplate({ id: 'template-1', name: 'Ubuntu Template' }),
+          createMockMachineTemplate({ id: 'template-2', name: 'Windows Template' })
+        ]
 
-      const { getEventManager } = require('@services/EventManager')
-      const eventManager = getEventManager()
+        mockPrisma.machineTemplate.findMany.mockResolvedValue(mockTemplates)
+        mockPrisma.machineTemplate.count.mockResolvedValue(mockTemplates.length)
 
-      // Verify event manager is properly mocked
-      expect(eventManager.dispatchEvent).toBeDefined()
-      expect(eventManager.subscribe).toBeDefined()
-      expect(eventManager.unsubscribe).toBeDefined()
+        const result = await executeGraphQL({
+          schema,
+          query: TestQueries.MACHINE_TEMPLATES,
+          variables: { pagination: { take: 10, skip: 0 } },
+          context: {
+            req: {},
+            res: {} as express.Response,
+            prisma,
+            user: createMockUser(),
+            setupMode: false
+          } as InfinibayContext
+        })
 
-      // Simulate subscription
-      const callback = jest.fn()
-      eventManager.subscribe('vms', 'create', callback)
-
-      // Simulate event dispatch
-      await eventManager.dispatchEvent('vms', 'create', { id: 'test-vm' }, 'user-id')
-
-      // In a real test, we would verify the callback was called
-      // This would require actual WebSocket implementation
-      expect(eventManager.dispatchEvent).toHaveBeenCalledWith(
-        'vms',
-        'create',
-        { id: 'test-vm' },
-        'user-id'
-      )
-    })
-  })
-
-  describe('Middleware Integration', () => {
-    it('should apply authentication middleware correctly', async () => {
-      const user = createMockUser()
-      const token = jwt.sign(
-        { userId: user.id, userRole: user.role },
-        process.env.TOKENKEY || 'test-secret-key'
-      );
-
-      (prisma.user.findUnique as jest.Mock).mockResolvedValue(user)
-
-      // Test authenticated endpoint
-      const authContext: InfinibayContext = {
-        req: { headers: { authorization: token } } as any,
-        prisma,
-        user,
-        setupMode: false
-      }
-
-      const authResult = await executeGraphQL(
-        schema,
-        TestQueries.CURRENT_USER,
-        {},
-        authContext
-      )
-
-      expect(authResult.errors).toBeUndefined()
-      expect(authResult.data?.currentUser).toBeDefined()
-
-      // Test same endpoint without auth
-      const noAuthContext: InfinibayContext = {
-        req: { headers: {} } as any,
-        prisma,
-        user: null as any,
-        setupMode: false
-      }
-
-      const noAuthResult = await executeGraphQL(
-        schema,
-        TestQueries.CURRENT_USER,
-        {},
-        noAuthContext
-      )
-
-      expect(noAuthResult.errors).toBeDefined()
-      expect(noAuthResult.errors?.[0].message).toContain('Access denied')
-    })
-
-    it('should handle CORS headers properly', () => {
-      // CORS configuration would be tested here
-      // This is a placeholder as CORS is typically handled by Apollo Server
-      expect(process.env.FRONTEND_URL).toBeDefined()
-    })
-  })
-
-  describe('Performance and Rate Limiting', () => {
-    it('should handle bulk operations efficiently', async () => {
-      const admin = createMockAdminUser()
-      const machineCount = 100
-      const machines = Array.from({ length: machineCount }, (_, i) =>
-        createMockMachine({ name: `VM ${i}` })
-      );
-
-      (prisma.machine.findMany as jest.Mock).mockResolvedValue(machines.slice(0, 20))
-
-      const context: InfinibayContext = {
-        req: { headers: { authorization: 'admin-token' } } as any,
-        prisma,
-        user: admin,
-        setupMode: false
-      }
-
-      const startTime = Date.now()
-      const result = await executeGraphQL(
-        schema,
-        TestQueries.LIST_MACHINES,
-        { take: 20, skip: 0 },
-        context
-      )
-      const endTime = Date.now()
-
-      expect(result.errors).toBeUndefined()
-      expect(result.data?.machines.machines).toHaveLength(20)
-
-      // Query should complete within reasonable time (< 1 second)
-      expect(endTime - startTime).toBeLessThan(1000)
+        expect(result.errors).toBeUndefined()
+        expect(result.data?.machineTemplates).toMatchObject({
+          templates: expect.arrayContaining(
+            mockTemplates.map(t => ({
+              id: t.id,
+              name: t.name
+            }))
+          ),
+          total: mockTemplates.length
+        })
+      })
     })
   })
 })

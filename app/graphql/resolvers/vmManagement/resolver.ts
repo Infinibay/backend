@@ -14,12 +14,48 @@ import {
   CommandResult
 } from './types'
 import { NetworkFilterService } from '@services/networkFilterService'
+import { VirtioSocketWatcherService } from '@services/VirtioSocketWatcherService'
+
+// Interface for service data returned from InfiniService
+interface InfiniServiceData {
+  // Common fields
+  name?: string
+  Name?: string
+  display_name?: string
+  DisplayName?: string
+  description?: string
+  Description?: string
+  status?: string
+  Status?: string
+  startup_type?: string
+  StartType?: string
+  // Capability flags
+  can_start?: boolean
+  can_stop?: boolean
+  can_restart?: boolean
+}
+
+// Interface for package data returned from InfiniService
+interface InfiniPackageData {
+  name?: string
+  Name?: string
+  version?: string
+  Version?: string
+  description?: string
+  Description?: string
+  publisher?: string
+  Publisher?: string
+  source?: string
+  install_date?: string
+  size?: number
+}
 
 @Resolver()
 export class VMManagementResolver {
   constructor(
     private networkFilterService: NetworkFilterService,
-    private virtManager: VirtManager
+    private virtManager: VirtManager,
+    private virtioSocketWatcher: VirtioSocketWatcherService
   ) {}
 
   @Query(() => [ServiceInfo])
@@ -36,50 +72,31 @@ export class VMManagementResolver {
       throw new UserInputError('VM not found')
     }
 
-    const osType = vm.os?.toLowerCase() || ''
-    let command = ''
-
-    if (osType.includes('windows')) {
-      // PowerShell command to get Windows services
-      command = `powershell -Command "Get-Service | Select-Object Name, DisplayName, Status, StartType | ConvertTo-Json"`
-    } else {
-      // Linux command to get systemd services
-      command = `systemctl list-units --type=service --all --no-pager --output=json`
-    }
-
     try {
-      const result = await this.virtManager.executeGuestCommand(vm.name, command)
+      // Use InfiniService to get service list
+      const result = await this.virtioSocketWatcher.sendSafeCommand(
+        vm.id,
+        { action: 'ServiceList' },
+        30000
+      )
       
       if (!result.success) {
         throw new Error(result.error || 'Failed to list services')
       }
 
-      const services = JSON.parse(result.output || '[]')
+      // Parse the service data from InfiniService response
+      const services = (Array.isArray(result.data) ? result.data : []) as InfiniServiceData[]
       
-      if (osType.includes('windows')) {
-        return services.map((svc: any) => ({
-          name: svc.Name,
-          displayName: svc.DisplayName || svc.Name,
-          status: svc.Status === 4 ? 'running' : svc.Status === 1 ? 'stopped' : 'unknown',
-          description: '',
-          canStart: svc.Status !== 4,
-          canStop: svc.Status === 4,
-          canRestart: svc.Status === 4,
-          startupType: svc.StartType === 2 ? 'automatic' : svc.StartType === 3 ? 'manual' : 'disabled'
-        }))
-      } else {
-        // Parse systemctl JSON output
-        return services.map((svc: any) => ({
-          name: svc.unit,
-          displayName: svc.description || svc.unit,
-          status: svc.active_state,
-          description: svc.description,
-          canStart: svc.active_state !== 'active',
-          canStop: svc.active_state === 'active',
-          canRestart: svc.active_state === 'active',
-          startupType: svc.unit_file_state
-        }))
-      }
+      return services.map((svc: InfiniServiceData) => ({
+        name: svc.name || svc.Name || '',
+        displayName: svc.display_name || svc.DisplayName || svc.name || svc.Name || '',
+        status: svc.status || svc.Status || '',
+        description: svc.description || svc.Description || '',
+        canStart: svc.can_start !== undefined ? svc.can_start : (svc.status || svc.Status) !== 'running',
+        canStop: svc.can_stop !== undefined ? svc.can_stop : (svc.status || svc.Status) === 'running',
+        canRestart: svc.can_restart !== undefined ? svc.can_restart : (svc.status || svc.Status) === 'running',
+        startupType: svc.startup_type || svc.StartType || 'unknown'
+      }))
     } catch (error) {
       console.error('Error listing VM services:', error)
       throw new UserInputError('Failed to list VM services')
@@ -100,86 +117,31 @@ export class VMManagementResolver {
       throw new UserInputError('VM not found')
     }
 
-    const osType = vm.os?.toLowerCase() || ''
-    let command = ''
-
-    if (osType.includes('windows')) {
-      // Use winget to list installed packages
-      command = `powershell -Command "winget list --accept-source-agreements | ConvertTo-Json"`
-    } else if (osType.includes('ubuntu') || osType.includes('debian')) {
-      // Use apt for Debian-based systems
-      command = `apt list --installed 2>/dev/null | grep -E "^[^/]+" | head -100`
-    } else if (osType.includes('rhel') || osType.includes('centos') || osType.includes('fedora')) {
-      // Use yum/dnf for RedHat-based systems
-      command = `rpm -qa --queryformat '%{NAME}|%{VERSION}|%{SUMMARY}|%{VENDOR}|%{INSTALLTIME}|%{SIZE}\n' | head -100`
-    } else {
-      // Generic fallback
-      command = `which apt >/dev/null 2>&1 && apt list --installed 2>/dev/null | head -100 || rpm -qa 2>/dev/null | head -100`
-    }
-
     try {
-      const result = await this.virtManager.executeGuestCommand(vm.name, command)
+      // Use InfiniService to get package list
+      const result = await this.virtioSocketWatcher.sendPackageCommand(
+        vm.id,
+        'PackageList',
+        undefined,
+        45000
+      )
       
       if (!result.success) {
         throw new Error(result.error || 'Failed to list packages')
       }
 
-      const output = result.output || ''
-      const packages: PackageInfo[] = []
-
-      if (osType.includes('windows')) {
-        // Parse winget output
-        try {
-          const wingetPackages = JSON.parse(output)
-          wingetPackages.forEach((pkg: any) => {
-            packages.push({
-              name: pkg.Name || pkg.Id,
-              version: pkg.Version || 'unknown',
-              description: pkg.Description || '',
-              publisher: pkg.Publisher || '',
-              installDate: '',
-              size: 0,
-              source: 'winget'
-            })
-          })
-        } catch {
-          // Fallback parsing if JSON fails
-        }
-      } else if (output.includes('|')) {
-        // Parse RPM output
-        output.split('\n').forEach(line => {
-          const parts = line.split('|')
-          if (parts.length >= 3) {
-            packages.push({
-              name: parts[0],
-              version: parts[1],
-              description: parts[2] || '',
-              publisher: parts[3] || '',
-              installDate: parts[4] ? new Date(parseInt(parts[4]) * 1000).toISOString() : '',
-              size: parseInt(parts[5]) || 0,
-              source: 'rpm'
-            })
-          }
-        })
-      } else {
-        // Parse apt output
-        output.split('\n').forEach(line => {
-          const match = line.match(/^([^\/]+)\/[^\s]+\s+([^\s]+)/)
-          if (match) {
-            packages.push({
-              name: match[1],
-              version: match[2],
-              description: '',
-              publisher: '',
-              installDate: '',
-              size: 0,
-              source: 'apt'
-            })
-          }
-        })
-      }
-
-      return packages
+      // Parse the package data from InfiniService response
+      const packages = (Array.isArray(result.data) ? result.data : []) as InfiniPackageData[]
+      
+      return packages.map((pkg: InfiniPackageData) => ({
+        name: pkg.name || pkg.Name || '',
+        version: pkg.version || pkg.Version || 'unknown',
+        description: pkg.description || pkg.Description || '',
+        publisher: pkg.publisher || pkg.Publisher || '',
+        installDate: pkg.install_date || '',
+        size: pkg.size || 0,
+        source: pkg.source || 'unknown'
+      }))
     } catch (error) {
       console.error('Error listing VM packages:', error)
       throw new UserInputError('Failed to list VM packages')
@@ -201,8 +163,11 @@ export class VMManagementResolver {
     }
 
     try {
+      // TODO: Implement listSnapshots in VirtManager
+      throw new Error('Snapshot listing not implemented')
+      /* Original code - needs implementation
       const snapshots = await this.virtManager.listSnapshots(vm.name)
-      return snapshots.map(snapshot => ({
+      return snapshots.map((snapshot: {name: string, description?: string, createdAt: Date, state: string, current: boolean, parent?: string}) => ({
         name: snapshot.name,
         description: snapshot.description || '',
         createdAt: snapshot.createdAt,
@@ -210,6 +175,7 @@ export class VMManagementResolver {
         current: snapshot.current,
         parent: snapshot.parent || undefined
       }))
+      */
     } catch (error) {
       console.error('Error listing VM snapshots:', error)
       throw new UserInputError('Failed to list VM snapshots')
@@ -230,66 +196,31 @@ export class VMManagementResolver {
       throw new UserInputError('VM not found')
     }
 
-    const osType = vm.os?.toLowerCase() || ''
-    let command = ''
-
-    if (osType.includes('windows')) {
-      // Windows service control using sc.exe or PowerShell
-      switch (input.action) {
-        case 'start':
-          command = `sc start "${input.serviceName}"`
-          break
-        case 'stop':
-          command = `sc stop "${input.serviceName}"`
-          break
-        case 'restart':
-          command = `powershell -Command "Restart-Service -Name '${input.serviceName}' -Force"`
-          break
-        case 'enable':
-          command = `sc config "${input.serviceName}" start=auto`
-          break
-        case 'disable':
-          command = `sc config "${input.serviceName}" start=disabled`
-          break
-        default:
-          throw new UserInputError('Invalid service action')
-      }
-    } else {
-      // Linux service control using systemctl
-      switch (input.action) {
-        case 'start':
-          command = `systemctl start ${input.serviceName}`
-          break
-        case 'stop':
-          command = `systemctl stop ${input.serviceName}`
-          break
-        case 'restart':
-          command = `systemctl restart ${input.serviceName}`
-          break
-        case 'enable':
-          command = `systemctl enable ${input.serviceName}`
-          break
-        case 'disable':
-          command = `systemctl disable ${input.serviceName}`
-          break
-        default:
-          throw new UserInputError('Invalid service action')
-      }
-    }
-
     try {
-      const result = await this.virtManager.executeGuestCommand(vm.name, command)
+      // Use InfiniService to control service
+      const result = await this.virtioSocketWatcher.sendSafeCommand(
+        vm.id,
+        { 
+          action: 'ServiceControl', 
+          params: { 
+            service_name: input.serviceName, 
+            action: input.action 
+          } 
+        },
+        30000
+      )
+      
       return {
         success: result.success,
-        output: result.output || '',
-        error: result.error || '',
-        exitCode: result.exitCode || 0
+        output: result.stdout || '',
+        error: result.error || result.stderr || '',
+        exitCode: result.exit_code || 0
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       return {
         success: false,
         output: '',
-        error: error.message || 'Failed to control service',
+        error: error instanceof Error ? error.message : 'Failed to control service',
         exitCode: 1
       }
     }
@@ -309,81 +240,43 @@ export class VMManagementResolver {
       throw new UserInputError('VM not found')
     }
 
-    const osType = vm.os?.toLowerCase() || ''
-    let command = ''
-
-    if (osType.includes('windows')) {
-      // Windows package management using winget
-      switch (input.action) {
-        case 'install':
-          command = `winget install --id ${input.packageName} --accept-package-agreements --accept-source-agreements`
-          if (input.version) {
-            command += ` --version ${input.version}`
-          }
-          break
-        case 'remove':
-          command = `winget uninstall --id ${input.packageName} --silent`
-          break
-        case 'update':
-          command = `winget upgrade --id ${input.packageName} --accept-package-agreements --accept-source-agreements`
-          break
-        default:
-          throw new UserInputError('Invalid package action')
-      }
-    } else if (osType.includes('ubuntu') || osType.includes('debian')) {
-      // Debian-based package management using apt
-      switch (input.action) {
-        case 'install':
-          command = `apt-get install -y ${input.packageName}`
-          if (input.version) {
-            command = `apt-get install -y ${input.packageName}=${input.version}`
-          }
-          break
-        case 'remove':
-          command = `apt-get remove -y ${input.packageName}`
-          break
-        case 'update':
-          command = `apt-get install --only-upgrade -y ${input.packageName}`
-          break
-        default:
-          throw new UserInputError('Invalid package action')
-      }
-    } else if (osType.includes('rhel') || osType.includes('centos') || osType.includes('fedora')) {
-      // RedHat-based package management using yum/dnf
-      const pkgManager = osType.includes('fedora') || parseInt(osType.match(/\d+/)?.[0] || '0') >= 8 ? 'dnf' : 'yum'
-      switch (input.action) {
-        case 'install':
-          command = `${pkgManager} install -y ${input.packageName}`
-          if (input.version) {
-            command = `${pkgManager} install -y ${input.packageName}-${input.version}`
-          }
-          break
-        case 'remove':
-          command = `${pkgManager} remove -y ${input.packageName}`
-          break
-        case 'update':
-          command = `${pkgManager} update -y ${input.packageName}`
-          break
-        default:
-          throw new UserInputError('Invalid package action')
-      }
-    } else {
-      throw new UserInputError('Unsupported operating system for package management')
-    }
-
     try {
-      const result = await this.virtManager.executeGuestCommand(vm.name, command)
+      // Map action to InfiniService package command
+      let packageAction: 'PackageInstall' | 'PackageRemove' | 'PackageUpdate'
+      
+      switch (input.action) {
+        case 'install':
+          packageAction = 'PackageInstall'
+          break
+        case 'remove':
+          packageAction = 'PackageRemove'
+          break
+        case 'update':
+          packageAction = 'PackageUpdate'
+          break
+        default:
+          throw new UserInputError('Invalid package action')
+      }
+
+      // Use InfiniService to manage package
+      const result = await this.virtioSocketWatcher.sendPackageCommand(
+        vm.id,
+        packageAction,
+        input.packageName,
+        60000 // 60 seconds timeout for package operations
+      )
+      
       return {
         success: result.success,
-        output: result.output || '',
-        error: result.error || '',
-        exitCode: result.exitCode || 0
+        output: result.stdout || '',
+        error: result.error || result.stderr || '',
+        exitCode: result.exit_code || 0
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       return {
         success: false,
         output: '',
-        error: error.message || 'Failed to manage package',
+        error: error instanceof Error ? error.message : 'Failed to manage package',
         exitCode: 1
       }
     }
@@ -404,6 +297,9 @@ export class VMManagementResolver {
     }
 
     try {
+      // TODO: Implement createSnapshot in VirtManager
+      throw new Error('Snapshot creation not implemented')
+      /* Original code - needs implementation
       const snapshot = await this.virtManager.createSnapshot(
         vm.name,
         input.name,
@@ -418,9 +314,10 @@ export class VMManagementResolver {
         current: true,
         parent: undefined
       }
-    } catch (error: any) {
+      */
+    } catch (error: unknown) {
       console.error('Error creating VM snapshot:', error)
-      throw new UserInputError(error.message || 'Failed to create snapshot')
+      throw new UserInputError(error instanceof Error ? error.message : 'Failed to create snapshot')
     }
   }
 
@@ -440,11 +337,15 @@ export class VMManagementResolver {
     }
 
     try {
+      // TODO: Implement revertSnapshot in VirtManager
+      throw new Error('Snapshot revert not implemented')
+      /* Original code - needs implementation
       await this.virtManager.revertSnapshot(vm.name, snapshotName)
       return true
-    } catch (error: any) {
+      */
+    } catch (error: unknown) {
       console.error('Error reverting VM snapshot:', error)
-      throw new UserInputError(error.message || 'Failed to revert snapshot')
+      throw new UserInputError(error instanceof Error ? error.message : 'Failed to revert snapshot')
     }
   }
 
@@ -464,11 +365,15 @@ export class VMManagementResolver {
     }
 
     try {
+      // TODO: Implement deleteSnapshot in VirtManager
+      throw new Error('Snapshot deletion not implemented')
+      /* Original code - needs implementation
       await this.virtManager.deleteSnapshot(vm.name, snapshotName)
       return true
-    } catch (error: any) {
+      */
+    } catch (error: unknown) {
       console.error('Error deleting VM snapshot:', error)
-      throw new UserInputError(error.message || 'Failed to delete snapshot')
+      throw new UserInputError(error instanceof Error ? error.message : 'Failed to delete snapshot')
     }
   }
 
@@ -503,19 +408,19 @@ export class VMManagementResolver {
     // Convert complex NWFilter rules to simplified format
     vm.nwFilters.forEach(vmFilter => {
       if (vmFilter.nwFilter?.rules) {
-        vmFilter.nwFilter.rules.forEach((rule: any) => {
+        vmFilter.nwFilter.rules.forEach((rule) => {
           simplifiedRules.push({
             id: rule.id,
             name: `${rule.protocol || 'all'}_${rule.direction}_${rule.action}`,
             direction: rule.direction || 'inbound',
             action: rule.action || 'accept',
             protocol: rule.protocol,
-            port: rule.dstPortStart,
+            port: rule.dstPortStart ?? undefined,
             portRange: rule.dstPortStart && rule.dstPortEnd 
               ? `${rule.dstPortStart}-${rule.dstPortEnd}` 
               : undefined,
-            sourceIp: rule.srcIpAddr,
-            destinationIp: rule.dstIpAddr,
+            sourceIp: rule.srcIpAddr ?? undefined,
+            destinationIp: rule.dstIpAddr ?? undefined,
             application: undefined,
             priority: rule.priority || 1000,
             enabled: true

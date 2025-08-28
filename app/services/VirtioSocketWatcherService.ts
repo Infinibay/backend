@@ -26,7 +26,7 @@ interface BaseMessage {
 interface ErrorMessage extends BaseMessage {
   type: 'error'
   error: string
-  details?: any
+  details?: unknown
 }
 
 interface MetricsMessage extends BaseMessage {
@@ -142,16 +142,76 @@ interface ResponseMessage extends BaseMessage {
   stderr?: string
   execution_time_ms?: number
   command_type?: string
-  data?: any
+  data?: ResponseData
   error?: string
 }
 
+// Define types for different response data structures
+interface PackageInfo {
+  name: string
+  version?: string
+  description?: string
+  installed?: boolean
+  available?: boolean
+}
+
+interface ServiceInfo {
+  name: string
+  display_name?: string
+  status: string
+  start_type?: string
+}
+
+interface ProcessInfo {
+  pid: number
+  name: string
+  cpu_percent: number
+  memory_kb: number
+  status?: string
+}
+
+interface SystemInfo {
+  hostname?: string
+  os?: string
+  kernel?: string
+  arch?: string
+  cpu_count?: number
+  total_memory?: number
+}
+
+interface OsInfo {
+  name?: string
+  version?: string
+  build?: string
+  platform?: string
+}
+
+// Response data can be different types depending on the command
+// For compatibility with GraphQL resolver expectations, ensure arrays are properly typed
+type ResponseData = PackageInfo[] | ServiceInfo[] | ProcessInfo[] | SystemInfo | OsInfo | unknown[] | Record<string, unknown>
+
 // Safe command types matching InfiniService
 export interface SafeCommandType {
-  action: 'ServiceList' | 'ServiceControl' | 'PackageList' | 'PackageInstall' | 
-          'PackageRemove' | 'PackageUpdate' | 'PackageSearch' | 'ProcessList' | 
-          'ProcessKill' | 'ProcessTop' | 'SystemInfo' | 'OsInfo'
-  params?: any
+  action: 'ServiceList' | 'ServiceControl' | 'PackageList' | 'PackageInstall' |
+  'PackageRemove' | 'PackageUpdate' | 'PackageSearch' | 'ProcessList' |
+  'ProcessKill' | 'ProcessTop' | 'SystemInfo' | 'OsInfo'
+  params?: SafeCommandParams
+}
+
+// Parameters for safe commands
+interface SafeCommandParams {
+  // Package operations
+  query?: string
+  package?: string
+  // Process operations
+  pid?: number
+  force?: boolean
+  limit?: number
+  sort_by?: string
+  // Service operations
+  service?: string
+  service_name?: string // Alternative service name field
+  action?: string
 }
 
 export interface UnsafeCommandRequest {
@@ -170,11 +230,9 @@ export interface CommandResponse {
   stderr?: string
   execution_time_ms?: number
   command_type?: string // 'safe' or 'unsafe'
-  data?: any
+  data?: ResponseData
   error?: string
 }
-
-type IncomingMessage = MetricsMessage | ErrorMessage | ResponseMessage
 
 // Connection state for each VM
 interface VmConnection {
@@ -196,6 +254,38 @@ interface VmConnection {
   }> // Track pending commands awaiting responses
 }
 
+// Define message structure types for outgoing messages
+interface OutgoingMessage {
+  type: string
+  SafeCommand?: {
+    id: string
+    command_type: Record<string, unknown>
+    params: null
+    timeout: number
+  }
+  UnsafeCommand?: {
+    id: string
+    raw_command: string
+    shell?: string
+    timeout: number
+    working_dir?: string
+    env_vars?: Record<string, string>
+  }
+  [key: string]: unknown
+}
+
+// Define the formatted command type structure
+interface FormattedCommandType {
+  action: string
+  query?: string
+  package?: string
+  limit?: number | null
+  pid?: number
+  force?: boolean | null
+  sort_by?: string | null
+  [key: string]: unknown // Allow additional properties for Record compatibility
+}
+
 export class VirtioSocketWatcherService extends EventEmitter {
   private prisma: PrismaClient
   private vmEventManager?: VmEventManager
@@ -209,7 +299,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   private readonly messageTimeout = 60000 // Consider connection dead after 60 seconds
   private debug: Debugger
 
-  constructor (prisma: PrismaClient) {
+  constructor(prisma: PrismaClient) {
     super()
     this.prisma = prisma
     this.socketDir = path.join(process.env.INFINIBAY_BASE_DIR || '/opt/infinibay', 'sockets')
@@ -217,12 +307,12 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Initialize the service with optional dependencies
-  initialize (vmEventManager?: VmEventManager): void {
+  initialize(vmEventManager?: VmEventManager): void {
     this.vmEventManager = vmEventManager
   }
 
   // Start watching for socket files
-  async start (): Promise<void> {
+  async start(): Promise<void> {
     if (this.isRunning) {
       this.debug.log('info', 'VirtioSocketWatcherService is already running')
       return
@@ -258,7 +348,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Stop the service and clean up
-  async stop (): Promise<void> {
+  async stop(): Promise<void> {
     if (!this.isRunning) {
       return
     }
@@ -274,14 +364,14 @@ export class VirtioSocketWatcherService extends EventEmitter {
 
     // Close all connections
     for (const connection of this.connections.values()) {
-      this.closeConnection(connection.vmId)
+      this.closeConnection(connection.vmId, 'cleanup or error')
     }
 
     this.debug.log('info', 'VirtioSocketWatcherService stopped')
   }
 
   // Handle new socket file detected
-  private async handleSocketFileAdded (socketPath: string): Promise<void> {
+  private async handleSocketFileAdded(socketPath: string): Promise<void> {
     const filename = path.basename(socketPath)
     const match = filename.match(/^(.+)\.socket$/)
 
@@ -313,7 +403,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Handle socket file removal
-  private handleSocketFileRemoved (socketPath: string): void {
+  private handleSocketFileRemoved(socketPath: string): void {
     const filename = path.basename(socketPath)
     const match = filename.match(/^(.+)\.socket$/)
 
@@ -325,15 +415,15 @@ export class VirtioSocketWatcherService extends EventEmitter {
     this.debug.log('debug', `Socket file removed for VM ${vmId}`)
 
     // Close connection if exists
-    this.closeConnection(vmId)
+    this.closeConnection(vmId, 'socket file removed')
   }
 
   // Connect to a VM's Unix domain socket
-  private async connectToVm (vmId: string, socketPath: string): Promise<void> {
+  private async connectToVm(vmId: string, socketPath: string): Promise<void> {
     // Close existing connection if any
     if (this.connections.has(vmId)) {
       this.debug.log('debug', `🔌 Closing existing connection for VM ${vmId}`)
-      this.closeConnection(vmId)
+      this.closeConnection(vmId, 'reconnecting')
     }
 
     const socket = new net.Socket()
@@ -433,7 +523,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Handle incoming data from socket
-  private handleSocketData (connection: VmConnection, data: Buffer): void {
+  private handleSocketData(connection: VmConnection, data: Buffer): void {
     connection.buffer += data.toString()
     connection.lastMessageTime = new Date()
 
@@ -450,83 +540,89 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Process a complete message
-  private async processMessage (connection: VmConnection, messageStr: string): Promise<void> {
+  private async processMessage(connection: VmConnection, messageStr: string): Promise<void> {
     try {
-      const message = JSON.parse(messageStr) as any
+      const message = JSON.parse(messageStr) as BaseMessage | MetricsMessage | ErrorMessage | ResponseMessage | Record<string, unknown>
 
       // Handle messages without explicit type field (legacy or command responses)
-      if (!message.type && message.id && 'success' in message) {
-        message.type = 'response'
+      if (!('type' in message) && 'id' in message && 'success' in message) {
+        (message as unknown as ResponseMessage).type = 'response'
       }
 
-      this.debug.log('debug', `Received ${message.type || 'unknown'} message from VM ${connection.vmId}`)
+      this.debug.log('debug', `📥 Received ${('type' in message ? message.type : 'unknown')} message from VM ${connection.vmId}`)
 
       // Add detailed logging to debug message structure
-      this.debug.log('debug', `Full message structure: ${JSON.stringify(message, null, 2).slice(0, 500)}`)
+      this.debug.log('debug', `📋 Full message: ${JSON.stringify(message, null, 2).slice(0, 1000)}`)
 
-      switch (message.type) {
-      case 'metrics':
-        // Store metrics in database
-        await this.storeMetrics(connection.vmId, message as MetricsMessage)
-        break
+      const msgType = 'type' in message ? message.type : undefined
+      console.log(`Processing ${messageStr}`)
+      switch (msgType) {
+        case 'metrics':
+          // Store metrics in database
+          await this.storeMetrics(connection.vmId, message as MetricsMessage)
+          break
 
-      case 'error':
-        // Log error from VM
-        const errorMsg = message as ErrorMessage
-        this.debug.log('error', `Error from VM ${connection.vmId}: ${errorMsg.error} ${errorMsg.details ? JSON.stringify(errorMsg.details) : ''}`)
-        break
+        case 'error':
+          // Log error from VM
+          const errorMsg = message as ErrorMessage
+          this.debug.log('error', `Error from VM ${connection.vmId}: ${errorMsg.error} ${errorMsg.details ? JSON.stringify(errorMsg.details) : ''}`)
+          break
 
-      case 'response':
-        // Handle command response
-        const response = message as ResponseMessage
-        const pendingCommand = connection.pendingCommands.get(response.id)
-        if (pendingCommand) {
-          clearTimeout(pendingCommand.timeout)
-          
-          // Try to parse stdout as JSON data for certain command types
-          let data = response.data
-          if (!data && response.stdout && response.command_type) {
-            try {
-              // For process-related commands, try to parse stdout as JSON
-              if (['ProcessList', 'ProcessTop', 'ProcessKill'].includes(response.command_type)) {
-                data = JSON.parse(response.stdout)
+        case 'response':
+          // Handle command response
+          const response = message as ResponseMessage
+          const pendingCommand = connection.pendingCommands.get(response.id)
+          if (pendingCommand) {
+            clearTimeout(pendingCommand.timeout)
+
+            // Try to parse stdout as JSON data for certain command types
+            let data = response.data
+            if (!data && response.stdout && response.command_type) {
+              try {
+                // For process-related commands, try to parse stdout as JSON
+                if (['ProcessList', 'ProcessTop', 'ProcessKill'].includes(response.command_type)) {
+                  data = JSON.parse(response.stdout)
+                  this.debug.log('debug', `Parsed stdout for ${response.command_type}, got ${Array.isArray(data) ? data.length : 0} items`)
+                  if (Array.isArray(data) && data.length > 0) {
+                    this.debug.log('debug', `First item structure: ${JSON.stringify(data[0], null, 2)}`)
+                  }
+                }
+              } catch (parseError) {
+                this.debug.log('debug', `Could not parse stdout as JSON for ${response.command_type}: ${parseError}`)
               }
-            } catch (parseError) {
-              this.debug.log('debug', `Could not parse stdout as JSON for ${response.command_type}: ${parseError}`)
             }
-          }
-          
-          // Build complete response object
-          const commandResponse: CommandResponse = {
-            id: response.id,
-            success: response.success,
-            exit_code: response.exit_code,
-            stdout: response.stdout || '',
-            stderr: response.stderr || '',
-            execution_time_ms: response.execution_time_ms,
-            command_type: response.command_type,
-            data: data || response.data,
-            error: response.error
-          }
-          
-          pendingCommand.resolve(commandResponse)
-          connection.pendingCommands.delete(response.id)
-          
-          // Log with execution time if available
-          const execTime = response.execution_time_ms ? ` (${response.execution_time_ms}ms)` : ''
-          this.debug.log('debug', `Command ${response.id} completed for VM ${connection.vmId}${execTime}`)
-          
-          // Log error details if command failed
-          if (!response.success) {
-            this.debug.log('warn', `Command ${response.id} failed: ${response.error || response.stderr || 'Unknown error'}`)
-          }
-        } else {
-          this.debug.log('warn', `Received response for unknown command ${response.id} from VM ${connection.vmId}`)
-        }
-        break
 
-      default:
-        this.debug.log('warn', `Unknown message type from VM ${connection.vmId}: ${(message as any).type}`)
+            // Build complete response object
+            const commandResponse: CommandResponse = {
+              id: response.id,
+              success: response.success,
+              exit_code: response.exit_code,
+              stdout: response.stdout || '',
+              stderr: response.stderr || '',
+              execution_time_ms: response.execution_time_ms,
+              command_type: response.command_type,
+              data: data || response.data,
+              error: response.error
+            }
+
+            pendingCommand.resolve(commandResponse)
+            connection.pendingCommands.delete(response.id)
+
+            // Log with execution time if available
+            const execTime = response.execution_time_ms ? ` (${response.execution_time_ms}ms)` : ''
+            this.debug.log('debug', `Command ${response.id} completed for VM ${connection.vmId}${execTime}`)
+
+            // Log error details if command failed
+            if (!response.success) {
+              this.debug.log('warn', `Command ${response.id} failed: ${response.error || response.stderr || 'Unknown error'}`)
+            }
+          } else {
+            this.debug.log('warn', `Received response for unknown command ${response.id} from VM ${connection.vmId}`)
+          }
+          break
+
+        default:
+          this.debug.log('warn', `Unknown message type from VM ${connection.vmId}: ${(message as any).type}`)
       }
     } catch (error) {
       this.debug.log('error', `Failed to process message from VM ${connection.vmId}: ${error}`)
@@ -541,7 +637,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Store metrics in database
-  private async storeMetrics (vmId: string, message: MetricsMessage): Promise<void> {
+  private async storeMetrics(vmId: string, message: MetricsMessage): Promise<void> {
     try {
       const { data } = message
 
@@ -779,7 +875,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Send message to VM
-  private sendMessage (connection: VmConnection, message: any): void {
+  private sendMessage(connection: VmConnection, message: OutgoingMessage): void {
     if (!connection.isConnected) {
       this.debug.log('warn', `Cannot send message to disconnected VM ${connection.vmId}`)
       return
@@ -787,6 +883,8 @@ export class VirtioSocketWatcherService extends EventEmitter {
 
     try {
       const messageStr = JSON.stringify(message) + '\n'
+      this.debug.log('debug', `📤 Sending message to VM ${connection.vmId}: ${messageStr.trim()}`)
+      console.log(`Sending ${messageStr}`)
       connection.socket.write(messageStr)
     } catch (error) {
       this.debug.log('error', `Failed to send message to VM ${connection.vmId}: ${error}`)
@@ -805,11 +903,28 @@ export class VirtioSocketWatcherService extends EventEmitter {
     }
 
     if (!connection.isConnected) {
-      throw new Error(`VM ${vmId} is not connected`)
+      // Try to reconnect once before failing
+      this.debug.log('warn', `VM ${vmId} is not connected, attempting reconnection...`)
+
+      // Check if socket file still exists
+      const socketPath = connection.socketPath
+      if (socketPath && require('fs').existsSync(socketPath)) {
+        await this.connectToVm(vmId, socketPath)
+        // Wait a moment for connection to establish
+        await new Promise(resolve => setTimeout(resolve, 1000))
+
+        // Check again
+        const updatedConnection = this.connections.get(vmId)
+        if (!updatedConnection || !updatedConnection.isConnected) {
+          throw new Error(`VM ${vmId} is not connected and reconnection failed`)
+        }
+      } else {
+        throw new Error(`VM ${vmId} is not connected and socket file not found`)
+      }
     }
 
     const commandId = uuidv4()
-    
+
     return new Promise<CommandResponse>((resolve, reject) => {
       // Set up timeout
       const timeoutHandle = setTimeout(() => {
@@ -824,16 +939,83 @@ export class VirtioSocketWatcherService extends EventEmitter {
         timeout: timeoutHandle
       })
 
-      // Send command
+      // Build the command_type object with proper serde tag format
+      // InfiniService expects SafeCommandType with #[serde(tag = "action")]
+      let commandTypeFormatted: FormattedCommandType
+
+      switch (commandType.action) {
+        case 'PackageSearch':
+          commandTypeFormatted = {
+            action: 'PackageSearch',
+            query: commandType.params?.query || ''
+          }
+          break
+        case 'PackageInstall':
+          commandTypeFormatted = {
+            action: 'PackageInstall',
+            package: commandType.params?.package || ''
+          }
+          break
+        case 'PackageRemove':
+          commandTypeFormatted = {
+            action: 'PackageRemove',
+            package: commandType.params?.package || ''
+          }
+          break
+        case 'PackageUpdate':
+          commandTypeFormatted = {
+            action: 'PackageUpdate',
+            package: commandType.params?.package || ''
+          }
+          break
+        case 'PackageList':
+          commandTypeFormatted = { action: 'PackageList' }
+          break
+        case 'ServiceList':
+          commandTypeFormatted = { action: 'ServiceList' }
+          break
+        case 'SystemInfo':
+          commandTypeFormatted = { action: 'SystemInfo' }
+          break
+        case 'OsInfo':
+          commandTypeFormatted = { action: 'OsInfo' }
+          break
+        case 'ProcessList':
+          commandTypeFormatted = {
+            action: 'ProcessList',
+            limit: commandType.params?.limit || null
+          }
+          break
+        case 'ProcessKill':
+          commandTypeFormatted = {
+            action: 'ProcessKill',
+            pid: commandType.params?.pid,
+            force: commandType.params?.force || null
+          }
+          break
+        case 'ProcessTop':
+          commandTypeFormatted = {
+            action: 'ProcessTop',
+            limit: commandType.params?.limit || null,
+            sort_by: commandType.params?.sort_by || null
+          }
+          break
+        default:
+          commandTypeFormatted = { action: commandType.action }
+      }
+
+      // Build the complete message with IncomingMessage structure
+      // IncomingMessage has #[serde(tag = "type")] internally-tagged enum
+      // With internally-tagged enums, the variant's fields are flattened into the same object
       const message = {
         type: 'SafeCommand',
         id: commandId,
-        command_type: commandType,
-        params: commandType.params,
+        command_type: commandTypeFormatted,
+        params: null, // Not used, params are in command_type
         timeout: Math.floor(timeout / 1000) // Convert to seconds for InfiniService
       }
 
-      this.debug.log('debug', `Sending safe command ${commandId} to VM ${vmId}: ${JSON.stringify(commandType)}`)
+      this.debug.log('debug', `Sending safe command ${commandId} to VM ${vmId}: ${JSON.stringify(message)}`)
       this.sendMessage(connection, message)
     })
   }
@@ -851,11 +1033,28 @@ export class VirtioSocketWatcherService extends EventEmitter {
     }
 
     if (!connection.isConnected) {
-      throw new Error(`VM ${vmId} is not connected`)
+      // Try to reconnect once before failing
+      this.debug.log('warn', `VM ${vmId} is not connected, attempting reconnection...`)
+
+      // Check if socket file still exists
+      const socketPath = connection.socketPath
+      if (socketPath && require('fs').existsSync(socketPath)) {
+        await this.connectToVm(vmId, socketPath)
+        // Wait a moment for connection to establish
+        await new Promise(resolve => setTimeout(resolve, 1000))
+
+        // Check again
+        const updatedConnection = this.connections.get(vmId)
+        if (!updatedConnection || !updatedConnection.isConnected) {
+          throw new Error(`VM ${vmId} is not connected and reconnection failed`)
+        }
+      } else {
+        throw new Error(`VM ${vmId} is not connected and socket file not found`)
+      }
     }
 
     const commandId = uuidv4()
-    
+
     return new Promise<CommandResponse>((resolve, reject) => {
       // Set up timeout
       const timeoutHandle = setTimeout(() => {
@@ -870,7 +1069,8 @@ export class VirtioSocketWatcherService extends EventEmitter {
         timeout: timeoutHandle
       })
 
-      // Send command
+      // Send command with proper serde-tagged format
+      // With internally-tagged enums, the variant's fields are flattened into the same object
       const message = {
         type: 'UnsafeCommand',
         id: commandId,
@@ -891,7 +1091,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
     vmId: string,
     action: 'PackageList' | 'PackageInstall' | 'PackageRemove' | 'PackageUpdate' | 'PackageSearch',
     packageName?: string,
-    timeout: number = 60000 // Higher timeout for package operations
+    timeout: number = 45000 // 45 second default timeout for package operations
   ): Promise<CommandResponse> {
     const commandType: SafeCommandType = {
       action,
@@ -921,7 +1121,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Monitor connection health (no active pinging, just monitoring)
-  private startHealthMonitoring (connection: VmConnection): void {
+  private startHealthMonitoring(connection: VmConnection): void {
     // Clear existing timer
     if (connection.pingTimer) {
       clearInterval(connection.pingTimer)
@@ -938,7 +1138,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Handle connection error
-  private handleConnectionError (connection: VmConnection): void {
+  private handleConnectionError(connection: VmConnection): void {
     connection.isConnected = false
 
     // Clear ping timer
@@ -956,7 +1156,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
     // Check if we should attempt reconnection
     if (connection.reconnectAttempts >= this.maxReconnectAttempts) {
       this.debug.log('warn', `Max reconnection attempts (${this.maxReconnectAttempts}) reached for VM ${connection.vmId}, giving up`)
-      this.closeConnection(connection.vmId)
+      this.closeConnection(connection.vmId, 'cleanup or error')
       return
     }
 
@@ -974,7 +1174,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
       fs.access(connection.socketPath, fs.constants.F_OK, (err) => {
         if (err) {
           this.debug.log('debug', `Socket file no longer exists for VM ${connection.vmId}, stopping reconnection`)
-          this.closeConnection(connection.vmId)
+          this.closeConnection(connection.vmId, 'cleanup or error')
         } else {
           this.debug.log('debug', `🔄 Attempting reconnection for VM ${connection.vmId}`)
           this.connectToVm(connection.vmId, connection.socketPath)
@@ -984,10 +1184,10 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Handle connection closed
-  private handleConnectionClosed (connection: VmConnection): void {
+  private handleConnectionClosed(connection: VmConnection): void {
     // If this was an intentional close, don't reconnect
     if (!this.isRunning) {
-      this.closeConnection(connection.vmId)
+      this.closeConnection(connection.vmId, 'cleanup or error')
       return
     }
 
@@ -996,23 +1196,27 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Close and clean up a connection
-  private closeConnection (vmId: string): void {
+  private closeConnection(vmId: string, reason: string = 'unknown'): void {
     const connection = this.connections.get(vmId)
     if (!connection) {
       return
     }
 
-    this.debug.log('debug', `🔌 Closing connection for VM ${vmId}`)
+    this.debug.log('debug', `🔌 Closing connection for VM ${vmId} (reason: ${reason})`)
 
-    // Reject all pending commands with detailed error
-    for (const [commandId, pending] of connection.pendingCommands) {
-      clearTimeout(pending.timeout)
-      const error = new Error(`Connection to VM ${vmId} closed while command ${commandId} was pending`)
-      pending.reject(error)
-      this.debug.log('warn', `Rejected pending command ${commandId} due to connection close for VM ${vmId}`)
+    // Only reject pending commands if this is unexpected
+    const pendingCount = connection.pendingCommands.size
+    if (pendingCount > 0) {
+      this.debug.log('warn', `Found ${pendingCount} pending commands for VM ${vmId}`)
+
+      for (const [commandId, pending] of connection.pendingCommands) {
+        clearTimeout(pending.timeout)
+        const error = new Error(`Connection to VM ${vmId} closed (${reason}) while command ${commandId} was pending`)
+        pending.reject(error)
+        this.debug.log('warn', `Rejected pending command ${commandId} due to connection close for VM ${vmId}`)
+      }
+      connection.pendingCommands.clear()
     }
-    connection.pendingCommands.clear()
-    this.debug.log('debug', `Cleared ${connection.pendingCommands.size} pending commands for VM ${vmId}`)
 
     // Clear timers
     if (connection.pingTimer) {
@@ -1033,7 +1237,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Get connection statistics
-  getConnectionStats (): {
+  getConnectionStats(): {
     totalConnections: number
     activeConnections: number
     connections: Array<{
@@ -1042,7 +1246,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
       reconnectAttempts: number
       lastMessageTime: Date
     }>
-    } {
+  } {
     const connections = Array.from(this.connections.values()).map(conn => ({
       vmId: conn.vmId,
       isConnected: conn.isConnected,
@@ -1110,31 +1314,30 @@ export class VirtioSocketWatcherService extends EventEmitter {
     retryDelay: number = 1000
   ): Promise<CommandResponse> {
     let lastError: Error | null = null
-    
+
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         this.debug.log('debug', `Executing command for VM ${vmId}, attempt ${attempt}/${maxRetries}`)
         const response = await commandBuilder()
-        
+
         // If command succeeded or failed but got a response, return it
         if (response.success || attempt === maxRetries) {
           return response
         }
-        
+
         // If command failed but we have retries left, wait and retry
         this.debug.log('warn', `Command failed for VM ${vmId}, retrying in ${retryDelay}ms...`)
         await new Promise(resolve => setTimeout(resolve, retryDelay))
-        
       } catch (error) {
         lastError = error as Error
         this.debug.log('warn', `Command attempt ${attempt} failed for VM ${vmId}: ${error}`)
-        
+
         if (attempt < maxRetries) {
           await new Promise(resolve => setTimeout(resolve, retryDelay))
         }
       }
     }
-    
+
     throw lastError || new Error(`Command failed after ${maxRetries} attempts`)
   }
 
@@ -1145,14 +1348,23 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Get connection details for a VM
-  public getConnectionDetails(vmId: string): any {
-    return this.connections.get(vmId)
+  public getConnectionDetails(vmId: string): { isConnected: boolean; socketPath?: string; lastMessageTime?: Date; errorCount?: number } | null {
+    const connection = this.connections.get(vmId)
+    if (!connection) {
+      return null
+    }
+    return {
+      isConnected: connection.isConnected,
+      socketPath: connection.socketPath,
+      lastMessageTime: connection.lastMessageTime,
+      errorCount: connection.errorCount
+    }
   }
 
   // Clean up connections for a deleted VM
-  async cleanupVmConnection (vmId: string): Promise<void> {
+  async cleanupVmConnection(vmId: string): Promise<void> {
     this.debug.log('debug', `Cleaning up connection for deleted VM ${vmId}`)
-    this.closeConnection(vmId)
+    this.closeConnection(vmId, 'manual cleanup')
 
     // Also try to remove the socket file if it exists
     const socketPath = path.join(this.socketDir, `${vmId}.socket`)
@@ -1161,7 +1373,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
       this.debug.log('debug', `Removed socket file for VM ${vmId}`)
     } catch (error) {
       // Socket file might not exist, which is fine
-      if ((error as any).code !== 'ENOENT') {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
         this.debug.log('warn', `Failed to remove socket file for VM ${vmId}: ${error}`)
       }
     }
