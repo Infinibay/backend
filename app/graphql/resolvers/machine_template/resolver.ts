@@ -13,7 +13,7 @@ import { MachineTemplateType, MachineTemplateOrderBy, MachineTemplateInputType }
 import { PaginationInputType } from '@utils/pagination'
 
 export interface MachineTemplateResolverInterface {
-  machineTemplates(pagination: PaginationInputType, orderBy: MachineTemplateOrderBy, ctx: InfinibayContext): Promise<MachineTemplateType[]>
+  machineTemplates(pagination: PaginationInputType | undefined, orderBy: MachineTemplateOrderBy | undefined, ctx: InfinibayContext): Promise<MachineTemplateType[]>
   createMachineTemplate(input: MachineTemplateInputType, ctx: InfinibayContext): Promise<MachineTemplateType>
   updateMachineTemplate(id: string, input: MachineTemplateInputType, ctx: InfinibayContext): Promise<MachineTemplateType>
   destroyMachineTemplate(id: string, ctx: InfinibayContext): Promise<boolean>
@@ -102,7 +102,7 @@ export class MachineTemplateResolver implements MachineTemplateResolverInterface
     return templatesWithCount
   }
 
-  private resolveOrder (orderBy: MachineTemplateOrderBy) {
+  private resolveOrder (orderBy: MachineTemplateOrderBy | undefined) {
     if (orderBy && orderBy.fieldName && orderBy.direction) {
       return {
         [orderBy.fieldName as keyof MachineTemplateType]: orderBy.direction
@@ -111,11 +111,11 @@ export class MachineTemplateResolver implements MachineTemplateResolverInterface
     return undefined
   }
 
-  private resolveSkip (pagination: PaginationInputType) {
+  private resolveSkip (pagination: PaginationInputType | undefined) {
     return pagination && pagination.skip ? pagination.skip : 0
   }
 
-  private resolveTake (pagination: PaginationInputType) {
+  private resolveTake (pagination: PaginationInputType | undefined) {
     return pagination && pagination.take ? pagination.take : 10
   }
 

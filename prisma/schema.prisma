@@ -441,3 +441,76 @@ model ServiceStateHistory {
 
   @@index([serviceId, timestamp])
 }
+
+model ErrorLog {
+  id        String   @id @default(uuid())
+  message   String
+  stack     String?
+  code      String
+  severity  String   // LOW, MEDIUM, HIGH, CRITICAL
+  context   Json?
+  timestamp DateTime @default(now())
+  resolved  Boolean  @default(false)
+  
+  @@index([timestamp])
+  @@index([severity, timestamp])
+  @@index([code, timestamp])
+}
+
+model PerformanceMetric {
+  id        String   @id @default(uuid())
+  name      String
+  value     Float
+  tags      Json?
+  timestamp DateTime @default(now())
+  
+  @@index([name, timestamp])
+  @@index([timestamp])
+}
+
+model PerformanceAggregate {
+  id        String   @id @default(uuid())
+  name      String
+  period    String   // hourly, daily, weekly
+  count     Int
+  sum       Float
+  min       Float
+  max       Float
+  avg       Float
+  timestamp DateTime @default(now())
+  
+  @@index([name, period, timestamp])
+  @@index([timestamp])
+}
+
+model HealthCheck {
+  id           String   @id @default(uuid())
+  service      String
+  status       String   // healthy, degraded, unhealthy
+  message      String?
+  details      Json?
+  responseTime Int?     // in milliseconds
+  timestamp    DateTime @default(now())
+  
+  @@index([service, timestamp])
+  @@index([status, timestamp])
+  @@index([timestamp])
+}
+
+model BackgroundTaskLog {
+  id         String    @id @default(uuid())
+  taskId     String    @unique
+  taskName   String
+  status     String    // pending, running, completed, failed, cancelled
+  startTime  DateTime
+  endTime    DateTime?
+  retryCount Int       @default(0)
+  error      String?
+  result     Json?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  
+  @@index([status, createdAt])
+  @@index([taskName, createdAt])
+  @@index([createdAt])
+}

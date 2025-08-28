@@ -2,8 +2,11 @@ import 'reflect-metadata'
 import { SecurityResolver } from '@resolvers/security/resolver'
 import { mockPrisma } from '../../setup/jest.setup'
 import { createMockContext, createAdminContext } from '../../setup/test-helpers'
+import { createMockMachine, createMockDepartment } from '../../setup/mock-factories'
 import { UserInputError } from 'apollo-server-errors'
 import { FirewallService } from '@services/firewallService'
+import { ServiceRiskLevel } from '@main/config/knownServices'
+import { ServiceAction } from '@resolvers/security/types'
 
 // Mock the FirewallService
 jest.mock('@services/firewallService')
@@ -25,8 +28,7 @@ describe('SecurityResolver', () => {
       getGlobalServiceStatus: jest.fn(),
       toggleVmService: jest.fn(),
       toggleDepartmentService: jest.fn(),
-      toggleGlobalService: jest.fn(),
-      getServiceStatusSummary: jest.fn()
+      toggleGlobalService: jest.fn()
     } as unknown as jest.Mocked<FirewallService>
     
     // Mock the private getFirewallService method
@@ -41,21 +43,23 @@ describe('SecurityResolver', () => {
         {
           id: 'http',
           name: 'HTTP',
+          displayName: 'Web (HTTP)',
           description: 'Web Server',
-          port: 80,
-          protocol: 'TCP',
-          category: 'Web'
+          ports: [{ protocol: 'tcp', portStart: 80, portEnd: 80 }],
+          riskLevel: ServiceRiskLevel.MEDIUM,
+          riskDescription: 'Unencrypted web traffic'
         },
         {
           id: 'https',
           name: 'HTTPS',
+          displayName: 'Secure Web (HTTPS)',
           description: 'Secure Web Server',
-          port: 443,
-          protocol: 'TCP',
-          category: 'Web'
+          ports: [{ protocol: 'tcp', portStart: 443, portEnd: 443 }],
+          riskLevel: ServiceRiskLevel.LOW,
+          riskDescription: 'Encrypted web traffic'
         }
       ]
-      mockFirewallService.getServices.mockReturnValue(mockServices)
+      mockFirewallService.getServices.mockResolvedValue(mockServices)
 
       // Act
       const result = await resolver.listServices(ctx)
@@ -71,14 +75,16 @@ describe('SecurityResolver', () => {
     it('should return service status for a VM', async () => {
       // Arrange
       const vmId = 'vm-123'
-      const mockVm = { id: vmId }
+      const mockVm = createMockMachine({ id: vmId })
       const mockStatus = [
         {
           serviceId: 'http',
           vmId: vmId,
+          vmName: mockVm.name,
+          serviceName: 'HTTP',
           useEnabled: true,
           provideEnabled: false,
-          status: 'active'
+          running: true
         }
       ]
       
@@ -101,14 +107,16 @@ describe('SecurityResolver', () => {
       // Arrange
       const vmId = 'vm-123'
       const serviceId = 'http'
-      const mockVm = { id: vmId }
+      const mockVm = createMockMachine({ id: vmId })
       const mockStatus = [
         {
           serviceId: 'http',
           vmId: vmId,
+          vmName: mockVm.name,
+          serviceName: 'HTTP',
           useEnabled: true,
           provideEnabled: false,
-          status: 'active'
+          running: true
         }
       ]
       
@@ -138,14 +146,17 @@ describe('SecurityResolver', () => {
     it('should return service status for a department', async () => {
       // Arrange
       const departmentId = 'dept-123'
-      const mockDepartment = { id: departmentId }
+      const mockDepartment = createMockDepartment({ id: departmentId })
       const mockStatus = [
         {
           serviceId: 'ssh',
           departmentId: departmentId,
+          departmentName: mockDepartment.name,
+          serviceName: 'SSH',
           useEnabled: true,
           provideEnabled: false,
-          status: 'active'
+          vmCount: 5,
+          enabledVmCount: 3
         }
       ]
       
@@ -181,9 +192,9 @@ describe('SecurityResolver', () => {
       const mockStatus = [
         {
           serviceId: 'rdp',
+          serviceName: 'RDP',
           useEnabled: false,
-          provideEnabled: false,
-          status: 'disabled'
+          provideEnabled: false
         }
       ]
       
@@ -203,9 +214,9 @@ describe('SecurityResolver', () => {
       const mockStatus = [
         {
           serviceId: 'rdp',
+          serviceName: 'Remote Desktop',
           useEnabled: false,
-          provideEnabled: false,
-          status: 'disabled'
+          provideEnabled: false
         }
       ]
       
@@ -226,33 +237,36 @@ describe('SecurityResolver', () => {
       const input = {
         vmId: 'vm-123',
         serviceId: 'http',
-        useEnabled: true,
-        provideEnabled: false
+        action: ServiceAction.USE,
+        enabled: true
       }
-      const mockVm = { id: input.vmId }
+      const mockVm = createMockMachine({ id: input.vmId })
       const mockResult = {
         serviceId: input.serviceId,
         vmId: input.vmId,
-        useEnabled: input.useEnabled,
-        provideEnabled: input.provideEnabled,
-        status: 'updated'
+        vmName: mockVm.name,
+        serviceName: 'HTTP',
+        useEnabled: input.enabled,
+        provideEnabled: false,
+        running: true
       }
       
       mockPrisma.machine.findUnique.mockResolvedValue(mockVm)
       mockFirewallService.toggleVmService.mockResolvedValue(mockResult)
 
       // Act
-      const result = await resolver.toggleVmService(input, ctx)
+      const result = await resolver.toggleVmService(ctx, input)
 
       // Assert
       expect(mockPrisma.machine.findUnique).toHaveBeenCalledWith({
-        where: { id: input.vmId }
+        where: { id: input.vmId },
+        select: { id: true }
       })
       expect(mockFirewallService.toggleVmService).toHaveBeenCalledWith(
         input.vmId,
         input.serviceId,
-        input.useEnabled,
-        input.provideEnabled
+        input.action,
+        input.enabled
       )
       expect(result).toEqual(mockResult)
     })
@@ -262,13 +276,13 @@ describe('SecurityResolver', () => {
       const input = {
         vmId: 'non-existent',
         serviceId: 'http',
-        useEnabled: true,
-        provideEnabled: false
+        action: ServiceAction.USE,
+        enabled: true
       }
       mockPrisma.machine.findUnique.mockResolvedValue(null)
 
       // Act & Assert
-      await expect(resolver.toggleVmService(input, ctx)).rejects.toThrow(UserInputError)
+      await expect(resolver.toggleVmService(ctx, input)).rejects.toThrow(UserInputError)
       expect(mockFirewallService.toggleVmService).not.toHaveBeenCalled()
     })
   })
@@ -279,33 +293,37 @@ describe('SecurityResolver', () => {
       const input = {
         departmentId: 'dept-123',
         serviceId: 'ssh',
-        useEnabled: true,
-        provideEnabled: false
+        action: ServiceAction.USE,
+        enabled: true
       }
-      const mockDepartment = { id: input.departmentId }
+      const mockDepartment = createMockDepartment({ id: input.departmentId })
       const mockResult = {
         serviceId: input.serviceId,
         departmentId: input.departmentId,
-        useEnabled: input.useEnabled,
-        provideEnabled: input.provideEnabled,
-        status: 'updated'
+        departmentName: mockDepartment.name,
+        serviceName: 'SSH',
+        useEnabled: input.enabled,
+        provideEnabled: false,
+        vmCount: 5,
+        enabledVmCount: 3
       }
       
       mockPrisma.department.findUnique.mockResolvedValue(mockDepartment)
       mockFirewallService.toggleDepartmentService.mockResolvedValue(mockResult)
 
       // Act
-      const result = await resolver.toggleDepartmentService(input, ctx)
+      const result = await resolver.toggleDepartmentService(ctx, input)
 
       // Assert
       expect(mockPrisma.department.findUnique).toHaveBeenCalledWith({
-        where: { id: input.departmentId }
+        where: { id: input.departmentId },
+        select: { id: true }
       })
       expect(mockFirewallService.toggleDepartmentService).toHaveBeenCalledWith(
         input.departmentId,
         input.serviceId,
-        input.useEnabled,
-        input.provideEnabled
+        input.action,
+        input.enabled
       )
       expect(result).toEqual(mockResult)
     })
@@ -315,13 +333,13 @@ describe('SecurityResolver', () => {
       const input = {
         departmentId: 'non-existent',
         serviceId: 'ssh',
-        useEnabled: true,
-        provideEnabled: false
+        action: ServiceAction.USE,
+        enabled: true
       }
       mockPrisma.department.findUnique.mockResolvedValue(null)
 
       // Act & Assert
-      await expect(resolver.toggleDepartmentService(input, ctx)).rejects.toThrow(UserInputError)
+      await expect(resolver.toggleDepartmentService(ctx, input)).rejects.toThrow(UserInputError)
       expect(mockFirewallService.toggleDepartmentService).not.toHaveBeenCalled()
     })
   })
@@ -331,66 +349,71 @@ describe('SecurityResolver', () => {
       // Arrange
       const input = {
         serviceId: 'rdp',
-        useEnabled: false,
-        provideEnabled: false
+        action: ServiceAction.USE,
+        enabled: false
       }
       const mockResult = {
         serviceId: input.serviceId,
-        useEnabled: input.useEnabled,
-        provideEnabled: input.provideEnabled,
-        status: 'updated'
+        serviceName: 'Remote Desktop',
+        useEnabled: false,
+        provideEnabled: false
       }
       
       mockFirewallService.toggleGlobalService.mockResolvedValue(mockResult)
 
       // Act
-      const result = await resolver.toggleGlobalService(input, ctx)
+      const result = await resolver.toggleGlobalService(ctx, input)
 
       // Assert
       expect(mockFirewallService.toggleGlobalService).toHaveBeenCalledWith(
         input.serviceId,
-        input.useEnabled,
-        input.provideEnabled
+        input.action,
+        input.enabled
       )
       expect(result).toEqual(mockResult)
     })
   })
 
-  describe('Query: serviceStatusSummary', () => {
+  describe('Query: getServiceStatusSummary', () => {
     it('should return service status summary', async () => {
       // Arrange
-      const vmId = 'vm-123'
-      const mockVm = { id: vmId, departmentId: 'dept-456' }
-      const mockSummary = {
-        globalStatus: [],
-        departmentStatus: [],
-        vmStatus: [],
-        effectiveStatus: []
-      }
+      const mockSummary = [
+        {
+          serviceId: 'http',
+          serviceName: 'Web (HTTP)',
+          totalVms: 5,
+          runningVms: 2,
+          enabledVms: 3
+        },
+        {
+          serviceId: 'ssh',
+          serviceName: 'Secure Shell',
+          totalVms: 5,
+          runningVms: 1,
+          enabledVms: 4
+        }
+      ]
       
-      mockPrisma.machine.findUnique.mockResolvedValue(mockVm)
-      mockFirewallService.getServiceStatusSummary.mockResolvedValue(mockSummary)
+      mockFirewallService.getServices.mockResolvedValue([
+        {
+          id: 'http',
+          name: 'HTTP',
+          displayName: 'Web (HTTP)',
+          description: 'Web Server',
+          ports: [{ protocol: 'tcp', portStart: 80, portEnd: 80 }],
+          riskLevel: ServiceRiskLevel.MEDIUM,
+          riskDescription: 'Unencrypted web traffic'
+        }
+      ])
+
+      mockPrisma.machine.findMany.mockResolvedValue([])
 
       // Act
-      const result = await resolver.serviceStatusSummary(ctx, vmId)
+      const result = await resolver.getServiceStatusSummary(ctx)
 
       // Assert
-      expect(mockPrisma.machine.findUnique).toHaveBeenCalledWith({
-        where: { id: vmId },
-        select: { id: true, departmentId: true }
-      })
-      expect(mockFirewallService.getServiceStatusSummary).toHaveBeenCalledWith(vmId, 'dept-456')
-      expect(result).toEqual(mockSummary)
-    })
-
-    it('should throw error when VM not found', async () => {
-      // Arrange
-      const vmId = 'non-existent'
-      mockPrisma.machine.findUnique.mockResolvedValue(null)
-
-      // Act & Assert
-      await expect(resolver.serviceStatusSummary(ctx, vmId)).rejects.toThrow(UserInputError)
-      expect(mockFirewallService.getServiceStatusSummary).not.toHaveBeenCalled()
+      expect(mockFirewallService.getServices).toHaveBeenCalledTimes(1)
+      expect(result).toHaveLength(1)
     })
   })
 })

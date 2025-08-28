@@ -21,6 +21,7 @@ import {
 } from '@prisma/client'
 import { randomBytes } from 'crypto'
 import bcrypt from 'bcrypt'
+import { OsEnum, MachineApplicationInputType } from '@resolvers/machine/type'
 
 // Input type definitions for mock factories
 interface UserInputOverrides {
@@ -36,8 +37,12 @@ interface UserInputOverrides {
 interface MachineInputOverrides {
   name?: string
   templateId?: string
-  departmentId?: string | null
-  userId?: string | null
+  departmentId?: string
+  os?: OsEnum
+  username?: string
+  password?: string
+  pciBus?: string | null
+  applications?: MachineApplicationInputType[]
   [key: string]: unknown
 }
 
@@ -516,8 +521,12 @@ export function createMockMachineInput (overrides?: MachineInputOverrides) {
   return {
     name: overrides?.name || `Test Machine ${Date.now()}`,
     templateId: overrides?.templateId || generateId(),
-    departmentId: overrides?.departmentId || null,
-    userId: overrides?.userId || null,
+    departmentId: overrides?.departmentId || generateId(),
+    os: overrides?.os || OsEnum.WINDOWS10,
+    username: overrides?.username || 'testuser',
+    password: overrides?.password || 'testpassword123',
+    pciBus: overrides?.pciBus || null,
+    applications: overrides?.applications || [],
     ...overrides
   }
 }

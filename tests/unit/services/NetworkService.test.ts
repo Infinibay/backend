@@ -71,7 +71,9 @@ describe('NetworkService', () => {
 
   describe('validateNetworkName', () => {
     it('should pass validation when network name is unique', async () => {
-      ;(mockConnection.listAllNetworks as jest.Mock).mockResolvedValue([])
+      ;(mockConnection.listAllNetworks as jest.Mock).mockImplementation(
+        () => Promise.resolve([]) as Promise<Network[]>
+      )
 
       await expect(networkService.validateNetworkName('unique-network')).resolves.toBeUndefined()
 
@@ -80,14 +82,18 @@ describe('NetworkService', () => {
 
     it('should throw error when network name already exists', async () => {
       const existingNetwork = { getName: () => 'existing-network' }
-      ;(mockConnection.listAllNetworks as jest.Mock).mockResolvedValue([existingNetwork as Network])
+      ;(mockConnection.listAllNetworks as jest.Mock).mockImplementation(
+        () => Promise.resolve([existingNetwork as Network]) as Promise<Network[]>
+      )
 
       await expect(networkService.validateNetworkName('existing-network'))
         .rejects.toThrow('Network with name existing-network already exists')
     })
 
     it('should throw error when listing networks fails', async () => {
-      ;(mockConnection.listAllNetworks as jest.Mock).mockResolvedValue(null)
+      ;(mockConnection.listAllNetworks as jest.Mock).mockImplementation(
+        () => Promise.resolve(null) as Promise<Network[] | null>
+      )
 
       await expect(networkService.validateNetworkName('test-network'))
         .rejects.toThrow('Failed to list networks')
@@ -97,7 +103,9 @@ describe('NetworkService', () => {
   describe('getAllNetworks', () => {
     it('should return all networks with parsed XML', async () => {
       const mockNetworks = [mockNetwork]
-      ;(mockConnection.listAllNetworks as jest.Mock).mockResolvedValue(mockNetworks)
+      ;(mockConnection.listAllNetworks as jest.Mock).mockImplementation(
+        () => Promise.resolve(mockNetworks) as Promise<Network[]>
+      )
       mockParseStringPromise.mockResolvedValue({ network: { name: 'test-network' } })
 
       const result = await networkService.getAllNetworks()
@@ -109,7 +117,9 @@ describe('NetworkService', () => {
     })
 
     it('should throw error when listing networks fails', async () => {
-      ;(mockConnection.listAllNetworks as jest.Mock).mockResolvedValue(null)
+      ;(mockConnection.listAllNetworks as jest.Mock).mockImplementation(
+        () => Promise.resolve(null) as Promise<Network[] | null>
+      )
 
       await expect(networkService.getAllNetworks())
         .rejects.toThrow('Failed to list networks')
@@ -119,7 +129,9 @@ describe('NetworkService', () => {
   describe('getNetwork', () => {
     it('should return specific network by name', async () => {
       const mockNetworks = [mockNetwork]
-      ;(mockConnection.listAllNetworks as jest.Mock).mockResolvedValue(mockNetworks)
+      ;(mockConnection.listAllNetworks as jest.Mock).mockImplementation(
+        () => Promise.resolve(mockNetworks) as Promise<Network[]>
+      )
       mockParseStringPromise.mockResolvedValue({ network: { name: 'test-network' } })
 
       const result = await networkService.getNetwork('test-network')
@@ -129,7 +141,9 @@ describe('NetworkService', () => {
     })
 
     it('should throw error when network not found', async () => {
-      ;(mockConnection.listAllNetworks as jest.Mock).mockResolvedValue([])
+      ;(mockConnection.listAllNetworks as jest.Mock).mockImplementation(
+        () => Promise.resolve([]) as Promise<Network[]>
+      )
 
       await expect(networkService.getNetwork('nonexistent-network'))
         .rejects.toThrow('Network nonexistent-network not found')
@@ -139,8 +153,12 @@ describe('NetworkService', () => {
   describe('deleteNetwork', () => {
     it('should delete network when not in use', async () => {
       const mockNetworks = [mockNetwork]
-      ;(mockConnection.listAllNetworks as jest.Mock).mockResolvedValue(mockNetworks)
-      ;(mockConnection.listAllDomains as jest.Mock).mockResolvedValue([])
+      ;(mockConnection.listAllNetworks as jest.Mock).mockImplementation(
+        () => Promise.resolve(mockNetworks) as Promise<Network[]>
+      )
+      ;(mockConnection.listAllDomains as jest.Mock).mockImplementation(
+        () => Promise.resolve([]) as Promise<MockDomain[]>
+      )
       
       mockParseStringPromise.mockResolvedValue({
         network: { bridge: [{ $: { name: 'test-bridge' } }] }
@@ -160,8 +178,12 @@ describe('NetworkService', () => {
       }
       
       const mockNetworks = [mockNetwork]
-      ;(mockConnection.listAllNetworks as jest.Mock).mockResolvedValue(mockNetworks)
-      ;(mockConnection.listAllDomains as jest.Mock).mockResolvedValue([mockDomain as MockDomain])
+      ;(mockConnection.listAllNetworks as jest.Mock).mockImplementation(
+        () => Promise.resolve(mockNetworks) as Promise<Network[]>
+      )
+      ;(mockConnection.listAllDomains as jest.Mock).mockImplementation(
+        () => Promise.resolve([mockDomain as MockDomain]) as Promise<MockDomain[]>
+      )
       
       mockParseStringPromise
         .mockResolvedValueOnce({ network: { bridge: [{ $: { name: 'test-bridge' } }] } })

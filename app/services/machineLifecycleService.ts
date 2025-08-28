@@ -1,4 +1,4 @@
-import { PrismaClient, Department } from '@prisma/client'
+import { PrismaClient, Department, Machine, User, Prisma } from '@prisma/client'
 import { v4 as uuidv4 } from 'uuid'
 import { Debugger } from '../utils/debug'
 import VirtManager from '../utils/VirtManager'
@@ -7,19 +7,21 @@ import si from 'systeminformation'
 import { MachineCleanupService } from './cleanup/machineCleanupService'
 import { HardwareUpdateService } from './vm/hardwareUpdateService'
 import { getEventManager } from '../services/EventManager'
+import { CreateMachineInputType, UpdateMachineHardwareInput } from '../graphql/resolvers/machine/type'
+import { SuccessType } from '../graphql/resolvers/machine/type'
 
 export class MachineLifecycleService {
   private prisma: PrismaClient
-  private user: any
+  private user: User | null
   private debug: Debugger
 
-  constructor(prisma: PrismaClient, user: any) {
+  constructor(prisma: PrismaClient, user: User | null) {
     this.prisma = prisma
     this.user = user
     this.debug = new Debugger('machine-lifecycle-service')
   }
 
-  async createMachine(input: any): Promise<any> {
+  async createMachine(input: CreateMachineInputType): Promise<Machine> {
     let cpuCores: number
     let ramGB: number
     let diskSizeGB: number
@@ -49,7 +51,7 @@ export class MachineLifecycleService {
     }
 
     const internalName = uuidv4()
-    const machine = await this.prisma.$transaction(async (tx: any) => {
+    const machine = await this.prisma.$transaction(async (tx) => {
       let department: Department | null = null
       if (input.departmentId) {
         department = await tx.department.findUnique({
@@ -117,7 +119,7 @@ export class MachineLifecycleService {
     return machine
   }
 
-  async destroyMachine(id: string): Promise<any> {
+  async destroyMachine(id: string): Promise<SuccessType> {
     const isAdmin = this.user?.role === 'ADMIN'
     const whereClause = isAdmin ? { id } : { id, userId: this.user?.id }
     const machine = await this.prisma.machine.findFirst({
@@ -140,14 +142,14 @@ export class MachineLifecycleService {
       const cleanup = new MachineCleanupService(this.prisma)
       await cleanup.cleanupVM(machine.id)
       return { success: true, message: 'Machine destroyed' }
-    } catch (error: any) {
+    } catch (error: unknown) {
       this.debug.log(`Error destroying machine: ${String(error)}`)
       const message = error instanceof Error ? error.message : String(error)
       return { success: false, message: `Error destroying machine: ${message}` }
     }
   }
 
-  async updateMachineHardware(input: any): Promise<any> {
+  async updateMachineHardware(input: UpdateMachineHardwareInput): Promise<Machine> {
     const { id, cpuCores, ramGB, gpuPciAddress } = input
 
     const machine = await this.prisma.machine.findUnique({
@@ -159,7 +161,7 @@ export class MachineLifecycleService {
       throw new ApolloError(`Machine with ID ${id} not found`)
     }
 
-    const updateData: any = {}
+    const updateData: Prisma.MachineUpdateInput = {}
     if (cpuCores !== undefined) {
       if (cpuCores <= 0) throw new ApolloError('CPU cores must be positive.')
       updateData.cpuCores = cpuCores
@@ -227,9 +229,15 @@ export class MachineLifecycleService {
           id
         }
       })
+      
+      if (!machine) {
+        console.error(`Machine with ID ${id} not found in background process`)
+        return
+      }
+      
       const virtManager = new VirtManager()
       virtManager.setPrisma(this.prisma)
-      await virtManager.createMachine(machine as any, username, password, productKey, pciBus)
+      await virtManager.createMachine(machine, username, password, productKey, pciBus)
       
       // Update machine status to running
       const updatedMachine = await this.prisma.machine.update({

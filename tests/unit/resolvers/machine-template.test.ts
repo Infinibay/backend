@@ -8,6 +8,9 @@ import {
 } from '../../setup/mock-factories'
 import { createAdminContext } from '../../setup/test-helpers'
 import { UserInputError } from 'apollo-server-errors'
+import { MachineTemplateInputType, MachineTemplateOrderBy, MachineTemplateOrderByEnum } from '@graphql/resolvers/machine_template/type'
+import { PaginationInputType } from '@utils/pagination'
+import { OrderByDirection } from '@utils/pagination'
 
 describe('MachineTemplateResolver', () => {
   let resolver: MachineTemplateResolver
@@ -19,33 +22,38 @@ describe('MachineTemplateResolver', () => {
   })
 
   describe('Query: machineTemplate', () => {
-    it('should return template by id with relations', async () => {
+    it('should return template by id with totalMachines count', async () => {
       const category = createMockMachineTemplateCategory()
       const template = createMockMachineTemplate({ categoryId: category.id })
-      const machines = createMockMachines(2).map(m => ({ ...m, templateId: template.id }))
-
-      const templateWithRelations = {
+      
+      const templateWithCategory = {
         ...template,
-        category,
-        machines
+        category
       }
 
-      mockPrisma.machineTemplate.findUnique.mockResolvedValue(templateWithRelations)
+      mockPrisma.machineTemplate.findUnique.mockResolvedValue(templateWithCategory)
+      mockPrisma.machine.count.mockResolvedValue(5)
 
       const result = await resolver.machineTemplate(template.id, ctx)
 
       expect(mockPrisma.machineTemplate.findUnique).toHaveBeenCalledWith({
         where: { id: template.id },
         include: {
-          category: true,
-          machines: true
+          category: true
         }
       })
-      expect(result).toEqual(templateWithRelations)
+      expect(mockPrisma.machine.count).toHaveBeenCalledWith({
+        where: { templateId: template.id }
+      })
+      expect(result).toEqual({
+        ...templateWithCategory,
+        totalMachines: 5
+      })
     })
 
     it('should return null if template not found', async () => {
       mockPrisma.machineTemplate.findUnique.mockResolvedValue(null)
+      mockPrisma.machine.count.mockResolvedValue(0)
 
       const result = await resolver.machineTemplate('non-existent-id', ctx)
 
@@ -56,105 +64,80 @@ describe('MachineTemplateResolver', () => {
   describe('Query: machineTemplates', () => {
     it('should return all templates with default pagination', async () => {
       const templates = Array.from({ length: 5 }, () => createMockMachineTemplate())
-      const total = 5
-
+      
       mockPrisma.machineTemplate.findMany.mockResolvedValue(templates)
-      mockPrisma.machineTemplate.count.mockResolvedValue(total)
+      templates.forEach(() => {
+        mockPrisma.machine.count.mockResolvedValueOnce(3)
+      })
 
-      const result = await resolver.machineTemplates(undefined, undefined, ctx)
+      const result = await resolver.machineTemplates(undefined as unknown as PaginationInputType, undefined as unknown as MachineTemplateOrderBy, ctx)
 
       expect(mockPrisma.machineTemplate.findMany).toHaveBeenCalledWith({
         skip: 0,
-        take: 20,
+        take: 10,
         include: {
-          category: true,
-          machines: true
+          category: true
         },
-        orderBy: { name: 'asc' }
+        orderBy: undefined
       })
-      expect(result).toEqual({
-        data: templates,
-        total
+      
+      expect(result).toHaveLength(5)
+      result.forEach(template => {
+        expect(template).toHaveProperty('totalMachines', 3)
       })
     })
 
     it('should apply pagination parameters', async () => {
       const templates = Array.from({ length: 3 }, () => createMockMachineTemplate())
-      const total = 10
-      const pagination = { skip: 5, take: 3 }
+      const pagination: PaginationInputType = { skip: 5, take: 3 }
 
       mockPrisma.machineTemplate.findMany.mockResolvedValue(templates)
-      mockPrisma.machineTemplate.count.mockResolvedValue(total)
+      templates.forEach(() => {
+        mockPrisma.machine.count.mockResolvedValueOnce(2)
+      })
 
-      const result = await resolver.machineTemplates(pagination, undefined, ctx)
+      const result = await resolver.machineTemplates(pagination, undefined as unknown as MachineTemplateOrderBy, ctx)
 
       expect(mockPrisma.machineTemplate.findMany).toHaveBeenCalledWith({
         skip: pagination.skip,
         take: pagination.take,
         include: {
-          category: true,
-          machines: true
+          category: true
         },
-        orderBy: { name: 'asc' }
+        orderBy: undefined
       })
-      expect(result.data).toEqual(templates)
-      expect(result.total).toBe(total)
+      expect(result).toHaveLength(3)
     })
 
     it('should apply custom ordering', async () => {
       const templates = Array.from({ length: 5 }, () => createMockMachineTemplate())
-      const total = 5
-      const orderBy = { field: 'cores', direction: 'desc' }
+      const orderBy: MachineTemplateOrderBy = { 
+        fieldName: MachineTemplateOrderByEnum.CORES, 
+        direction: OrderByDirection.DESC 
+      }
 
       mockPrisma.machineTemplate.findMany.mockResolvedValue(templates)
-      mockPrisma.machineTemplate.count.mockResolvedValue(total)
+      templates.forEach(() => {
+        mockPrisma.machine.count.mockResolvedValueOnce(1)
+      })
 
-      const result = await resolver.machineTemplates(undefined, orderBy, ctx)
+      const result = await resolver.machineTemplates(undefined as unknown as PaginationInputType, orderBy, ctx)
 
       expect(mockPrisma.machineTemplate.findMany).toHaveBeenCalledWith({
         skip: 0,
-        take: 20,
+        take: 10,
         include: {
-          category: true,
-          machines: true
+          category: true
         },
-        orderBy: { cores: 'desc' }
+        orderBy: { cores: OrderByDirection.DESC }
       })
-      expect(result.data).toEqual(templates)
+      expect(result).toHaveLength(5)
     })
 
     it('should return empty array when no templates exist', async () => {
       mockPrisma.machineTemplate.findMany.mockResolvedValue([])
-      mockPrisma.machineTemplate.count.mockResolvedValue(0)
 
-      const result = await resolver.machineTemplates(undefined, undefined, ctx)
-
-      expect(result.data).toEqual([])
-      expect(result.total).toBe(0)
-    })
-  })
-
-  describe('Query: machineTemplateCategories', () => {
-    it('should return all categories', async () => {
-      const categories = Array.from({ length: 3 }, () => createMockMachineTemplateCategory())
-
-      mockPrisma.machineTemplateCategory.findMany.mockResolvedValue(categories)
-
-      const result = await resolver.machineTemplateCategories(ctx)
-
-      expect(mockPrisma.machineTemplateCategory.findMany).toHaveBeenCalledWith({
-        include: {
-          templates: true
-        },
-        orderBy: { name: 'asc' }
-      })
-      expect(result).toEqual(categories)
-    })
-
-    it('should return empty array when no categories exist', async () => {
-      mockPrisma.machineTemplateCategory.findMany.mockResolvedValue([])
-
-      const result = await resolver.machineTemplateCategories(ctx)
+      const result = await resolver.machineTemplates(undefined as unknown as PaginationInputType, undefined as unknown as MachineTemplateOrderBy, ctx)
 
       expect(result).toEqual([])
     })
@@ -162,7 +145,7 @@ describe('MachineTemplateResolver', () => {
 
   describe('Mutation: createMachineTemplate', () => {
     it('should create a new template', async () => {
-      const input = {
+      const input: MachineTemplateInputType = {
         name: 'New Template',
         description: 'Test template',
         cores: 4,
@@ -188,11 +171,10 @@ describe('MachineTemplateResolver', () => {
           cores: input.cores,
           ram: input.ram,
           storage: input.storage,
-          category: input.categoryId ? { connect: { id: input.categoryId } } : undefined
+          categoryId: input.categoryId
         },
         include: {
-          category: true,
-          machines: true
+          category: true
         }
       })
       expect(result).toEqual(createdTemplate)
@@ -200,11 +182,13 @@ describe('MachineTemplateResolver', () => {
 
     it('should throw error if template name already exists', async () => {
       const existingTemplate = createMockMachineTemplate({ name: 'Existing Template' })
-      const input = {
+      const input: MachineTemplateInputType = {
         name: 'Existing Template',
+        description: 'Test',
         cores: 2,
         ram: 4,
-        storage: 50
+        storage: 50,
+        categoryId: null
       }
 
       mockPrisma.machineTemplate.findFirst.mockResolvedValue(existingTemplate)
@@ -214,36 +198,55 @@ describe('MachineTemplateResolver', () => {
       ).rejects.toThrow(UserInputError)
     })
 
-    it('should create template without category', async () => {
-      const input = {
-        name: 'Basic Template',
-        cores: 1,
-        ram: 2,
-        storage: 25
+    it('should throw error if cores out of range', async () => {
+      const input: MachineTemplateInputType = {
+        name: 'Invalid Template',
+        description: 'Test',
+        cores: 100, // Max is 64
+        ram: 8,
+        storage: 100,
+        categoryId: null
       }
 
-      const createdTemplate = createMockMachineTemplate(input)
+      mockPrisma.machineTemplate.findFirst.mockResolvedValue(null)
+
+      await expect(
+        resolver.createMachineTemplate(input, ctx)
+      ).rejects.toThrow(UserInputError)
+    })
+
+    it('should throw error if RAM out of range', async () => {
+      const input: MachineTemplateInputType = {
+        name: 'Invalid Template',
+        description: 'Test',
+        cores: 4,
+        ram: 600, // Max is 512
+        storage: 100,
+        categoryId: null
+      }
 
       mockPrisma.machineTemplate.findFirst.mockResolvedValue(null)
-      mockPrisma.machineTemplate.create.mockResolvedValue(createdTemplate)
 
-      const result = await resolver.createMachineTemplate(input, ctx)
+      await expect(
+        resolver.createMachineTemplate(input, ctx)
+      ).rejects.toThrow(UserInputError)
+    })
 
-      expect(mockPrisma.machineTemplate.create).toHaveBeenCalledWith({
-        data: {
-          name: input.name,
-          description: undefined,
-          cores: input.cores,
-          ram: input.ram,
-          storage: input.storage,
-          category: undefined
-        },
-        include: {
-          category: true,
-          machines: true
-        }
-      })
-      expect(result).toEqual(createdTemplate)
+    it('should throw error if storage out of range', async () => {
+      const input: MachineTemplateInputType = {
+        name: 'Invalid Template',
+        description: 'Test',
+        cores: 4,
+        ram: 8,
+        storage: 2000, // Max is 1024
+        categoryId: null
+      }
+
+      mockPrisma.machineTemplate.findFirst.mockResolvedValue(null)
+
+      await expect(
+        resolver.createMachineTemplate(input, ctx)
+      ).rejects.toThrow(UserInputError)
     })
   })
 
@@ -251,10 +254,13 @@ describe('MachineTemplateResolver', () => {
     it('should update an existing template', async () => {
       const templateId = 'template-123'
       const existingTemplate = createMockMachineTemplate({ id: templateId })
-      const updateInput = {
+      const updateInput: MachineTemplateInputType = {
         name: 'Updated Template',
+        description: 'Updated description',
         cores: 8,
-        ram: 16
+        ram: 16,
+        storage: 200,
+        categoryId: null
       }
 
       const updatedTemplate = { ...existingTemplate, ...updateInput }
@@ -266,10 +272,16 @@ describe('MachineTemplateResolver', () => {
 
       expect(mockPrisma.machineTemplate.update).toHaveBeenCalledWith({
         where: { id: templateId },
-        data: updateInput,
+        data: {
+          name: updateInput.name,
+          description: updateInput.description,
+          cores: updateInput.cores,
+          ram: updateInput.ram,
+          storage: updateInput.storage,
+          categoryId: updateInput.categoryId
+        },
         include: {
-          category: true,
-          machines: true
+          category: true
         }
       })
       expect(result).toEqual(updatedTemplate)
@@ -278,39 +290,31 @@ describe('MachineTemplateResolver', () => {
     it('should throw error if template not found', async () => {
       mockPrisma.machineTemplate.findUnique.mockResolvedValue(null)
 
-      await expect(
-        resolver.updateMachineTemplate('non-existent', { name: 'Test' }, ctx)
-      ).rejects.toThrow(UserInputError)
-    })
-
-    it('should throw error if updating to duplicate name', async () => {
-      const templateId = 'template-123'
-      const existingTemplate = createMockMachineTemplate({ id: templateId })
-      const duplicateTemplate = createMockMachineTemplate({ name: 'Duplicate Name' })
-      const updateInput = { name: 'Duplicate Name' }
-
-      mockPrisma.machineTemplate.findUnique.mockResolvedValue(existingTemplate)
-      mockPrisma.machineTemplate.findFirst.mockResolvedValue(duplicateTemplate)
+      const updateInput: MachineTemplateInputType = {
+        name: 'Test',
+        description: 'Test',
+        cores: 4,
+        ram: 8,
+        storage: 100,
+        categoryId: null
+      }
 
       await expect(
-        resolver.updateMachineTemplate(templateId, updateInput, ctx)
+        resolver.updateMachineTemplate('non-existent', updateInput, ctx)
       ).rejects.toThrow(UserInputError)
     })
   })
 
-  describe('Mutation: deleteMachineTemplate', () => {
-    it('should delete a template', async () => {
+  describe('Mutation: destroyMachineTemplate', () => {
+    it('should delete a template without machines', async () => {
       const templateId = 'template-123'
       const template = createMockMachineTemplate({ id: templateId })
-      const templateWithRelations = {
-        ...template,
-        machines: []
-      }
 
-      mockPrisma.machineTemplate.findUnique.mockResolvedValue(templateWithRelations)
+      mockPrisma.machineTemplate.findUnique.mockResolvedValue(template)
+      mockPrisma.machine.count.mockResolvedValue(0) // No machines using this template
       mockPrisma.machineTemplate.delete.mockResolvedValue(template)
 
-      const result = await resolver.deleteMachineTemplate(templateId, ctx)
+      const result = await resolver.destroyMachineTemplate(templateId, ctx)
 
       expect(mockPrisma.machineTemplate.delete).toHaveBeenCalledWith({
         where: { id: templateId }
@@ -322,93 +326,19 @@ describe('MachineTemplateResolver', () => {
       mockPrisma.machineTemplate.findUnique.mockResolvedValue(null)
 
       await expect(
-        resolver.deleteMachineTemplate('non-existent', ctx)
+        resolver.destroyMachineTemplate('non-existent', ctx)
       ).rejects.toThrow(UserInputError)
     })
 
     it('should throw error if template has machines', async () => {
       const templateId = 'template-123'
       const template = createMockMachineTemplate({ id: templateId })
-      const templateWithMachines = {
-        ...template,
-        machines: createMockMachines(2)
-      }
 
-      mockPrisma.machineTemplate.findUnique.mockResolvedValue(templateWithMachines)
+      mockPrisma.machineTemplate.findUnique.mockResolvedValue(template)
+      mockPrisma.machine.count.mockResolvedValue(2) // Has machines using this template
 
       await expect(
-        resolver.deleteMachineTemplate(templateId, ctx)
-      ).rejects.toThrow(UserInputError)
-    })
-  })
-
-  describe('Mutation: createMachineTemplateCategory', () => {
-    it('should create a new category', async () => {
-      const input = {
-        name: 'New Category',
-        description: 'Category description'
-      }
-
-      const createdCategory = createMockMachineTemplateCategory(input)
-
-      mockPrisma.machineTemplateCategory.findFirst.mockResolvedValue(null)
-      mockPrisma.machineTemplateCategory.create.mockResolvedValue(createdCategory)
-
-      const result = await resolver.createMachineTemplateCategory(input, ctx)
-
-      expect(mockPrisma.machineTemplateCategory.create).toHaveBeenCalledWith({
-        data: input,
-        include: {
-          templates: true
-        }
-      })
-      expect(result).toEqual(createdCategory)
-    })
-
-    it('should throw error if category name already exists', async () => {
-      const existingCategory = createMockMachineTemplateCategory({ name: 'Existing' })
-      const input = { name: 'Existing' }
-
-      mockPrisma.machineTemplateCategory.findFirst.mockResolvedValue(existingCategory)
-
-      await expect(
-        resolver.createMachineTemplateCategory(input, ctx)
-      ).rejects.toThrow(UserInputError)
-    })
-  })
-
-  describe('Mutation: deleteMachineTemplateCategory', () => {
-    it('should delete a category', async () => {
-      const categoryId = 'category-123'
-      const category = createMockMachineTemplateCategory({ id: categoryId })
-      const categoryWithRelations = {
-        ...category,
-        templates: []
-      }
-
-      mockPrisma.machineTemplateCategory.findUnique.mockResolvedValue(categoryWithRelations)
-      mockPrisma.machineTemplateCategory.delete.mockResolvedValue(category)
-
-      const result = await resolver.deleteMachineTemplateCategory(categoryId, ctx)
-
-      expect(mockPrisma.machineTemplateCategory.delete).toHaveBeenCalledWith({
-        where: { id: categoryId }
-      })
-      expect(result).toBe(true)
-    })
-
-    it('should throw error if category has templates', async () => {
-      const categoryId = 'category-123'
-      const category = createMockMachineTemplateCategory({ id: categoryId })
-      const categoryWithTemplates = {
-        ...category,
-        templates: [createMockMachineTemplate()]
-      }
-
-      mockPrisma.machineTemplateCategory.findUnique.mockResolvedValue(categoryWithTemplates)
-
-      await expect(
-        resolver.deleteMachineTemplateCategory(categoryId, ctx)
+        resolver.destroyMachineTemplate(templateId, ctx)
       ).rejects.toThrow(UserInputError)
     })
   })
