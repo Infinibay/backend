@@ -9,12 +9,12 @@ import {
   assertGraphQLError,
   setupLibvirtMockState
 } from '../../setup/test-helpers'
-import type { 
-  CreateNetworkInput, 
-  DeleteNetworkInput, 
-  IpRangeInput, 
-  NetworkIpInput, 
-  BridgeNameInput 
+import type {
+  CreateNetworkInput,
+  DeleteNetworkInput,
+  IpRangeInput,
+  NetworkIpInput,
+  BridgeNameInput
 } from '@graphql/resolvers/networks/types'
 
 // Mock NetworkService
@@ -28,7 +28,7 @@ describe('NetworkResolver', () => {
   beforeEach(() => {
     jest.clearAllMocks()
     resolver = new NetworkResolver()
-    
+
     // Create a proper mock instance
     mockNetworkService = {
       getAllNetworks: jest.fn(),
@@ -39,7 +39,7 @@ describe('NetworkResolver', () => {
       setIpRange: jest.fn(),
       setBridgeName: jest.fn()
     } as unknown as jest.Mocked<NetworkService>
-    
+
     // Replace the service in the resolver
     (resolver as unknown as { networkService: jest.Mocked<NetworkService> }).networkService = mockNetworkService
 
@@ -79,13 +79,13 @@ describe('NetworkResolver', () => {
 
   describe('Query: network', () => {
     it('should return network by name', async () => {
-      const mockNetwork = { 
-        name: 'default', 
-        xml: { 
+      const mockNetwork = {
+        name: 'default',
+        xml: {
           uuid: ['test-uuid'],
           bridge: [{ $: { name: 'br0', stp: 'on', delay: '0' } }],
           ip: [{ $: { address: '192.168.1.1', netmask: '255.255.255.0' } }]
-        } 
+        }
       }
       mockNetworkService.getNetwork.mockResolvedValue(mockNetwork)
 
@@ -119,7 +119,7 @@ describe('NetworkResolver', () => {
         bridgeName: 'br0',
         description: 'Duplicate network'
       }
-      
+
       mockNetworkService.createNetwork.mockRejectedValue(
         new Error('Network with name default already exists')
       )
@@ -206,5 +206,4 @@ describe('NetworkResolver', () => {
         .rejects.toThrow('Failed to delete network: Cannot delete default network')
     })
   })
-
 })

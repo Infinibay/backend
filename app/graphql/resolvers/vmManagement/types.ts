@@ -4,206 +4,206 @@ import { GraphQLJSONObject } from 'graphql-type-json'
 @ObjectType()
 export class ServiceInfo {
   @Field(() => String)
-  name: string = ''
+    name: string = ''
 
   @Field(() => String)
-  displayName: string = ''
+    displayName: string = ''
 
   @Field(() => String)
-  status: string = ''
+    status: string = ''
 
   @Field(() => String, { nullable: true })
-  description?: string
+    description?: string
 
   @Field(() => Boolean)
-  canStart: boolean = false
+    canStart: boolean = false
 
   @Field(() => Boolean)
-  canStop: boolean = false
+    canStop: boolean = false
 
   @Field(() => Boolean)
-  canRestart: boolean = false
+    canRestart: boolean = false
 
   @Field(() => String, { nullable: true })
-  startupType?: string
+    startupType?: string
 }
 
 @ObjectType()
 export class PackageInfo {
   @Field(() => String)
-  name: string = ''
+    name: string = ''
 
   @Field(() => String)
-  version: string = ''
+    version: string = ''
 
   @Field(() => String, { nullable: true })
-  description?: string
+    description?: string
 
   @Field(() => String, { nullable: true })
-  publisher?: string
+    publisher?: string
 
   @Field(() => String, { nullable: true })
-  installDate?: string
+    installDate?: string
 
   @Field(() => Number, { nullable: true })
-  size?: number
+    size?: number
 
   @Field(() => String)
-  source: string = '' // winget, apt, yum, dnf, snap, etc
+    source: string = '' // winget, apt, yum, dnf, snap, etc
 }
 
 @ObjectType()
 export class VMSnapshot {
   @Field(() => String)
-  name: string = ''
+    name: string = ''
 
   @Field(() => String, { nullable: true })
-  description?: string
+    description?: string
 
   @Field(() => Date)
-  createdAt: Date = new Date()
+    createdAt: Date = new Date()
 
   @Field(() => String)
-  state: string = ''
+    state: string = ''
 
   @Field(() => Boolean)
-  current: boolean = false
+    current: boolean = false
 
   @Field(() => String, { nullable: true })
-  parent?: string
+    parent?: string
 }
 
 @ObjectType()
 export class SimplifiedFirewallRule {
   @Field(() => ID)
-  id: string = ''
+    id: string = ''
 
   @Field(() => String)
-  name: string = ''
+    name: string = ''
 
   @Field(() => String)
-  direction: string = '' // inbound/outbound
+    direction: string = '' // inbound/outbound
 
   @Field(() => String)
-  action: string = '' // allow/deny
+    action: string = '' // allow/deny
 
   @Field(() => String, { nullable: true })
-  protocol?: string
+    protocol?: string
 
   @Field(() => Number, { nullable: true })
-  port?: number
+    port?: number
 
   @Field(() => String, { nullable: true })
-  portRange?: string
+    portRange?: string
 
   @Field(() => String, { nullable: true })
-  sourceIp?: string
+    sourceIp?: string
 
   @Field(() => String, { nullable: true })
-  destinationIp?: string
+    destinationIp?: string
 
   @Field(() => String, { nullable: true })
-  application?: string
+    application?: string
 
   @Field(() => Number)
-  priority: number = 1000
+    priority: number = 1000
 
   @Field(() => Boolean)
-  enabled: boolean = true
+    enabled: boolean = true
 }
 
 @InputType()
 export class ServiceActionInput {
   @Field(() => String)
-  vmId: string = ''
+    vmId: string = ''
 
   @Field(() => String)
-  serviceName: string = ''
+    serviceName: string = ''
 
   @Field(() => String)
-  action: string = '' // start, stop, restart, enable, disable
+    action: string = '' // start, stop, restart, enable, disable
 }
 
 @InputType()
 export class PackageActionInput {
   @Field(() => String)
-  vmId: string = ''
+    vmId: string = ''
 
   @Field(() => String)
-  packageName: string = ''
+    packageName: string = ''
 
   @Field(() => String)
-  action: string = '' // install, remove, update
+    action: string = '' // install, remove, update
 
   @Field(() => String, { nullable: true })
-  version?: string
+    version?: string
 
   @Field(() => String, { nullable: true })
-  source?: string // winget, apt, etc
+    source?: string // winget, apt, etc
 }
 
 @InputType()
 export class CreateSnapshotInput {
   @Field(() => String)
-  vmId: string = ''
+    vmId: string = ''
 
   @Field(() => String)
-  name: string = ''
+    name: string = ''
 
   @Field(() => String, { nullable: true })
-  description?: string
+    description?: string
 }
 
 @InputType()
 export class CreateSimplifiedFirewallRuleInput {
   @Field(() => String)
-  vmId: string = ''
+    vmId: string = ''
 
   @Field(() => String)
-  name: string = ''
+    name: string = ''
 
   @Field(() => String)
-  direction: string = ''
+    direction: string = ''
 
   @Field(() => String)
-  action: string = ''
+    action: string = ''
 
   @Field(() => String, { nullable: true })
-  protocol?: string
+    protocol?: string
 
   @Field(() => Number, { nullable: true })
-  port?: number
+    port?: number
 
   @Field(() => String, { nullable: true })
-  portRange?: string
+    portRange?: string
 
   @Field(() => String, { nullable: true })
-  sourceIp?: string
+    sourceIp?: string
 
   @Field(() => String, { nullable: true })
-  destinationIp?: string
+    destinationIp?: string
 
   @Field(() => String, { nullable: true })
-  application?: string
+    application?: string
 
   @Field(() => Number, { nullable: true })
-  priority?: number
+    priority?: number
 
   @Field(() => Boolean, { nullable: true })
-  enabled?: boolean
+    enabled?: boolean
 }
 
 @ObjectType()
 export class CommandResult {
   @Field(() => Boolean)
-  success: boolean = false
+    success: boolean = false
 
   @Field(() => String, { nullable: true })
-  output?: string
+    output?: string
 
   @Field(() => String, { nullable: true })
-  error?: string
+    error?: string
 
   @Field(() => Number)
-  exitCode: number = 0
+    exitCode: number = 0
 }

@@ -68,7 +68,7 @@ describe.skip('VirtioSocketWatcherService', () => {
 
   afterEach(async () => {
     // Stop the service if running
-    if (service && service['isRunning']) {
+    if (service && service.isRunning) {
       await service.stop()
     }
     jest.clearAllMocks()
@@ -362,12 +362,8 @@ describe.skip('VirtioSocketWatcherService', () => {
       jest.advanceTimersByTime(1000)
 
       // Socket file still exists
-      ;(fs.access as jest.MockedFunction<typeof fs.access>).mockImplementation((_path, _mode, cb) => {
-        if (typeof _mode === 'function') {
-          _mode(null)
-        } else if (typeof cb === 'function') {
-          cb(null)
-        }
+      ;(fs.access as jest.MockedFunction<typeof fs.access>).mockImplementation((path: fs.PathLike, callback: (err: NodeJS.ErrnoException | null) => void) => {
+        callback(null)
       })
 
       jest.advanceTimersByTime(1000)
@@ -484,14 +480,14 @@ describe.skip('VirtioSocketWatcherService', () => {
   describe('Command Execution', () => {
     beforeEach(async () => {
       await service.start()
-      
+
       // Setup VM in database
       mockPrisma.machine.findUnique.mockResolvedValue({
         id: 'test-vm',
         name: 'Test VM',
         status: 'running'
       } as Machine)
-      
+
       mockWatcher.emit('add', path.join(socketsDir, 'test-vm.socket'))
       await new Promise(resolve => setTimeout(resolve, 100))
       mockSocket.emit('connect')
@@ -507,14 +503,14 @@ describe.skip('VirtioSocketWatcherService', () => {
 
         // Wait for command to be sent
         await new Promise(resolve => setTimeout(resolve, 50))
-        
+
         // Verify command was sent with correct structure
         expect(mockSocket.write).toHaveBeenCalled()
-        
+
         // Extract and parse the sent message
         const sentMessage = mockSocket.write.mock.calls[0][0] as string
         const commandData = JSON.parse(sentMessage.replace('\n', ''))
-        
+
         // Verify the exact structure matches InfiniService serde expectations
         expect(commandData).toMatchObject({
           type: 'SafeCommand',
@@ -525,10 +521,10 @@ describe.skip('VirtioSocketWatcherService', () => {
           params: null,
           timeout: expect.any(Number)
         })
-        
+
         // Should NOT have nested SafeCommand property
         expect(commandData.SafeCommand).toBeUndefined()
-        
+
         const commandId = commandData.id
 
         // Simulate response from VM
@@ -567,10 +563,10 @@ describe.skip('VirtioSocketWatcherService', () => {
         })
 
         await new Promise(resolve => setTimeout(resolve, 50))
-        
+
         const sentMessage = mockSocket.write.mock.calls[0][0] as string
         const commandData = JSON.parse(sentMessage.replace('\n', ''))
-        
+
         expect(commandData).toMatchObject({
           type: 'SafeCommand',
           id: expect.any(String),
@@ -600,10 +596,10 @@ describe.skip('VirtioSocketWatcherService', () => {
         })
 
         await new Promise(resolve => setTimeout(resolve, 50))
-        
+
         const sentMessage = mockSocket.write.mock.calls[0][0] as string
         const commandData = JSON.parse(sentMessage.replace('\n', ''))
-        
+
         expect(commandData).toMatchObject({
           type: 'SafeCommand',
           id: expect.any(String),
@@ -633,10 +629,10 @@ describe.skip('VirtioSocketWatcherService', () => {
         })
 
         await new Promise(resolve => setTimeout(resolve, 50))
-        
+
         const sentMessage = mockSocket.write.mock.calls[0][0] as string
         const commandData = JSON.parse(sentMessage.replace('\n', ''))
-        
+
         expect(commandData).toMatchObject({
           type: 'SafeCommand',
           id: expect.any(String),
@@ -666,10 +662,10 @@ describe.skip('VirtioSocketWatcherService', () => {
         })
 
         await new Promise(resolve => setTimeout(resolve, 50))
-        
+
         const sentMessage = mockSocket.write.mock.calls[0][0] as string
         const commandData = JSON.parse(sentMessage.replace('\n', ''))
-        
+
         expect(commandData).toMatchObject({
           type: 'SafeCommand',
           id: expect.any(String),
@@ -708,10 +704,10 @@ describe.skip('VirtioSocketWatcherService', () => {
         )
 
         await new Promise(resolve => setTimeout(resolve, 50))
-        
+
         const sentMessage = mockSocket.write.mock.calls[0][0] as string
         const commandData = JSON.parse(sentMessage.replace('\n', ''))
-        
+
         // Verify the exact structure matches InfiniService serde expectations
         expect(commandData).toMatchObject({
           type: 'UnsafeCommand',
@@ -722,7 +718,7 @@ describe.skip('VirtioSocketWatcherService', () => {
           working_dir: '/home/user',
           env_vars: { TEST_VAR: 'value' }
         })
-        
+
         // Should NOT have nested UnsafeCommand property
         expect(commandData.UnsafeCommand).toBeUndefined()
 
@@ -749,10 +745,10 @@ describe.skip('VirtioSocketWatcherService', () => {
         const commandPromise = service.sendUnsafeCommand('test-vm', 'pwd')
 
         await new Promise(resolve => setTimeout(resolve, 50))
-        
+
         const sentMessage = mockSocket.write.mock.calls[0][0] as string
         const commandData = JSON.parse(sentMessage.replace('\n', ''))
-        
+
         // JSON serialization omits undefined values, so they won't be in the message
         expect(commandData).toMatchObject({
           type: 'UnsafeCommand',
@@ -783,10 +779,10 @@ describe.skip('VirtioSocketWatcherService', () => {
         const commandPromise = service.sendUnsafeCommand('test-vm', 'sleep 1', {}, 45000)
 
         await new Promise(resolve => setTimeout(resolve, 50))
-        
+
         const sentMessage = mockSocket.write.mock.calls[0][0] as string
         const commandData = JSON.parse(sentMessage.replace('\n', ''))
-        
+
         expect(commandData.timeout).toBe(45) // 45000ms = 45s
 
         // Complete the command
@@ -823,7 +819,7 @@ describe.skip('VirtioSocketWatcherService', () => {
         }
 
         mockSocket.emit('data', Buffer.from(JSON.stringify(response) + '\n'))
-        
+
         // Should log warning but not crash
         await new Promise(resolve => setTimeout(resolve, 100))
         // No error should be thrown

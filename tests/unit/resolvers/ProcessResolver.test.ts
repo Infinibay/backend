@@ -14,9 +14,9 @@ describe('ProcessResolver', () => {
 
   beforeEach(() => {
     jest.clearAllMocks()
-    
+
     processResolver = new ProcessResolver()
-    
+
     // Create mock context
     mockContext = {
       prisma: {} as PrismaClient,

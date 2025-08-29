@@ -172,7 +172,7 @@ describe('UserResolver', () => {
       mockPrisma.user.findUnique.mockResolvedValue(null)
 
       const result = await resolver.login('invalid@example.com', 'password')
-      
+
       expect(result).toBeNull()
     })
 
@@ -181,7 +181,7 @@ describe('UserResolver', () => {
       mockPrisma.user.findUnique.mockResolvedValue(mockUser)
 
       const result = await resolver.login(mockUser.email, 'wrong-password')
-      
+
       expect(result).toBeNull()
     })
 
@@ -193,7 +193,7 @@ describe('UserResolver', () => {
       mockPrisma.user.findUnique.mockResolvedValue(mockUser)
 
       const result = await resolver.login(mockUser.email, 'password')
-      
+
       // Deleted users can still login - the resolver doesn't check deleted flag
       expect(result).toBeTruthy()
       expect(result?.token).toBeTruthy()
@@ -256,7 +256,7 @@ describe('UserResolver', () => {
       // Email format validation doesn't happen in resolver
       mockPrisma.user.findUnique.mockResolvedValue(null) // User doesn't exist yet
       mockPrisma.user.create.mockResolvedValue(mockUser)
-      
+
       const result = await resolver.createUser(input)
       // The resolver doesn't validate email format, so it creates the user
       expect(mockPrisma.user.create).toHaveBeenCalled()
@@ -355,7 +355,7 @@ describe('UserResolver', () => {
 
     it('should throw error if user not found', async () => {
       mockPrisma.user.findUnique.mockResolvedValue(null)
-      
+
       const updateInput: UpdateUserInputType = {
         firstName: 'Test',
         lastName: undefined,
@@ -371,7 +371,7 @@ describe('UserResolver', () => {
 
     it('should handle password mismatch', async () => {
       const existingUser = createMockUser()
-      
+
       const updateInput: UpdateUserInputType = {
         firstName: undefined,
         lastName: undefined,

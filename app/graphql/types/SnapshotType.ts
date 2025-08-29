@@ -1,88 +1,88 @@
-import { ObjectType, Field, ID, InputType } from 'type-graphql';
+import { ObjectType, Field, ID, InputType } from 'type-graphql'
 
 @ObjectType()
 export class Snapshot {
   @Field(() => ID)
-  id!: string;
+    id!: string
 
   @Field()
-  name!: string;
+    name!: string
 
   @Field({ nullable: true })
-  description?: string;
+    description?: string
 
   @Field()
-  vmId!: string;
+    vmId!: string
 
   @Field()
-  vmName!: string;
+    vmName!: string
 
   @Field()
-  createdAt!: Date;
+    createdAt!: Date
 
   @Field()
-  isCurrent!: boolean;
+    isCurrent!: boolean
 
   @Field({ nullable: true })
-  parentId?: string;
+    parentId?: string
 
   @Field()
-  hasMetadata!: boolean;
+    hasMetadata!: boolean
 
   @Field(() => String)
-  state!: string;
+    state!: string
 }
 
 @InputType()
 export class CreateSnapshotInput {
   @Field()
-  machineId!: string;
+    machineId!: string
 
   @Field()
-  name!: string;
+    name!: string
 
   @Field({ nullable: true })
-  description?: string;
+    description?: string
 }
 
 @InputType()
 export class RestoreSnapshotInput {
   @Field()
-  machineId!: string;
+    machineId!: string
 
   @Field()
-  snapshotName!: string;
+    snapshotName!: string
 }
 
 @InputType()
 export class DeleteSnapshotInput {
   @Field()
-  machineId!: string;
+    machineId!: string
 
   @Field()
-  snapshotName!: string;
+    snapshotName!: string
 }
 
 @ObjectType()
 export class SnapshotResult {
   @Field()
-  success!: boolean;
+    success!: boolean
 
   @Field()
-  message!: string;
+    message!: string
 
   @Field(() => Snapshot, { nullable: true })
-  snapshot?: Snapshot;
+    snapshot?: Snapshot
 }
 
 @ObjectType()
 export class SnapshotListResult {
   @Field()
-  success!: boolean;
+    success!: boolean
 
   @Field()
-  message!: string;
+    message!: string
 
   @Field(() => [Snapshot])
-  snapshots!: Snapshot[];
+    snapshots!: Snapshot[]
 }

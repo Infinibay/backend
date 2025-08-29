@@ -1,5 +1,5 @@
-import { getSocketService } from '../SocketService';
-import { ISO } from '@prisma/client';
+import { getSocketService } from '../SocketService'
+import { ISO } from '@prisma/client'
 
 export interface ISOEvent {
   action: 'registered' | 'removed' | 'validated' | 'progress' | 'status_changed';
@@ -18,75 +18,75 @@ export interface ISOEvent {
 }
 
 export class ISOEventManager {
-  private static instance: ISOEventManager;
+  private static instance: ISOEventManager
 
-  private constructor() {}
+  private constructor () {}
 
-  public static getInstance(): ISOEventManager {
+  public static getInstance (): ISOEventManager {
     if (!ISOEventManager.instance) {
-      ISOEventManager.instance = new ISOEventManager();
+      ISOEventManager.instance = new ISOEventManager()
     }
-    return ISOEventManager.instance;
+    return ISOEventManager.instance
   }
 
   /**
    * Get socket service when needed
    */
-  private getSocket() {
+  private getSocket () {
     try {
-      return getSocketService();
+      return getSocketService()
     } catch (error) {
-      console.warn('Socket service not initialized yet');
-      return null;
+      console.warn('Socket service not initialized yet')
+      return null
     }
   }
 
   /**
    * Emit ISO registered event
    */
-  public emitISORegistered(iso: ISO): void {
-    const socketService = this.getSocket();
-    if (!socketService) return;
+  public emitISORegistered (iso: ISO): void {
+    const socketService = this.getSocket()
+    if (!socketService) return
 
     const event: ISOEvent = {
       action: 'registered',
       iso
-    };
-    
+    }
+
     // Emit to all connected clients
-    const io = socketService.getIO();
+    const io = socketService.getIO()
     if (io) {
-      io.emit('iso:registered', event);
-      console.log(`ISO registered event emitted for: ${iso.filename}`);
+      io.emit('iso:registered', event)
+      console.log(`ISO registered event emitted for: ${iso.filename}`)
     }
   }
 
   /**
    * Emit ISO removed event
    */
-  public emitISORemoved(isoId: string, filename: string): void {
-    const socketService = this.getSocket();
-    if (!socketService) return;
+  public emitISORemoved (isoId: string, filename: string): void {
+    const socketService = this.getSocket()
+    if (!socketService) return
 
     const event: ISOEvent = {
       action: 'removed',
       isoId,
       filename
-    };
-    
-    const io = socketService.getIO();
+    }
+
+    const io = socketService.getIO()
     if (io) {
-      io.emit('iso:removed', event);
-      console.log(`ISO removed event emitted for: ${filename}`);
+      io.emit('iso:removed', event)
+      console.log(`ISO removed event emitted for: ${filename}`)
     }
   }
 
   /**
    * Emit ISO validation event
    */
-  public emitISOValidated(iso: ISO, isValid: boolean): void {
-    const socketService = this.getSocket();
-    if (!socketService) return;
+  public emitISOValidated (iso: ISO, isValid: boolean): void {
+    const socketService = this.getSocket()
+    if (!socketService) return
 
     const event: ISOEvent = {
       action: 'validated',
@@ -95,25 +95,25 @@ export class ISOEventManager {
         available: isValid,
         message: isValid ? 'ISO validation successful' : 'ISO validation failed'
       }
-    };
-    
-    const io = socketService.getIO();
+    }
+
+    const io = socketService.getIO()
     if (io) {
-      io.emit('iso:validated', event);
+      io.emit('iso:validated', event)
     }
   }
 
   /**
    * Emit ISO upload progress event
    */
-  public emitUploadProgress(
+  public emitUploadProgress (
     filename: string,
     current: number,
     total: number,
     userId?: string
   ): void {
-    const socketService = this.getSocket();
-    if (!socketService) return;
+    const socketService = this.getSocket()
+    if (!socketService) return
 
     const event: ISOEvent = {
       action: 'progress',
@@ -123,16 +123,16 @@ export class ISOEventManager {
         total,
         message: `Uploading ${filename}: ${Math.round((current / total) * 100)}%`
       }
-    };
-    
+    }
+
     if (userId) {
       // Send to specific user
-      socketService.sendToUser(userId, 'iso', 'upload:progress', event);
+      socketService.sendToUser(userId, 'iso', 'upload:progress', event)
     } else {
       // Broadcast to all
-      const io = socketService.getIO();
+      const io = socketService.getIO()
       if (io) {
-        io.emit('iso:upload:progress', event);
+        io.emit('iso:upload:progress', event)
       }
     }
   }
@@ -140,14 +140,14 @@ export class ISOEventManager {
   /**
    * Emit ISO download progress event
    */
-  public emitDownloadProgress(
+  public emitDownloadProgress (
     filename: string,
     current: number,
     total: number,
     userId?: string
   ): void {
-    const socketService = this.getSocket();
-    if (!socketService) return;
+    const socketService = this.getSocket()
+    if (!socketService) return
 
     const event: ISOEvent = {
       action: 'progress',
@@ -157,16 +157,16 @@ export class ISOEventManager {
         total,
         message: `Downloading ${filename}: ${Math.round((current / total) * 100)}%`
       }
-    };
-    
+    }
+
     if (userId) {
       // Send to specific user
-      socketService.sendToUser(userId, 'iso', 'download:progress', event);
+      socketService.sendToUser(userId, 'iso', 'download:progress', event)
     } else {
       // Broadcast to all
-      const io = socketService.getIO();
+      const io = socketService.getIO()
       if (io) {
-        io.emit('iso:download:progress', event);
+        io.emit('iso:download:progress', event)
       }
     }
   }
@@ -174,9 +174,9 @@ export class ISOEventManager {
   /**
    * Emit ISO status changed event
    */
-  public emitStatusChanged(iso: ISO): void {
-    const socketService = this.getSocket();
-    if (!socketService) return;
+  public emitStatusChanged (iso: ISO): void {
+    const socketService = this.getSocket()
+    if (!socketService) return
 
     const event: ISOEvent = {
       action: 'status_changed',
@@ -185,26 +185,26 @@ export class ISOEventManager {
         available: iso.isAvailable,
         message: iso.isAvailable ? 'ISO is now available' : 'ISO is no longer available'
       }
-    };
-    
-    const io = socketService.getIO();
+    }
+
+    const io = socketService.getIO()
     if (io) {
-      io.emit('iso:status:changed', event);
+      io.emit('iso:status:changed', event)
     }
   }
 
   /**
    * Emit batch ISO status update
    */
-  public emitBatchStatusUpdate(isos: ISO[]): void {
-    const socketService = this.getSocket();
-    if (!socketService) return;
+  public emitBatchStatusUpdate (isos: ISO[]): void {
+    const socketService = this.getSocket()
+    if (!socketService) return
 
     const availableOS = isos
       .filter(iso => iso.isAvailable)
-      .map(iso => iso.os);
-    
-    const io = socketService.getIO();
+      .map(iso => iso.os)
+
+    const io = socketService.getIO()
     if (io) {
       io.emit('iso:batch:update', {
         availableOS,
@@ -214,31 +214,31 @@ export class ISOEventManager {
           filename: iso.filename,
           available: iso.isAvailable
         }))
-      });
+      })
     }
   }
 
   /**
    * Emit system readiness update
    */
-  public emitSystemReadinessUpdate(
+  public emitSystemReadinessUpdate (
     ready: boolean,
     availableOS: string[],
     missingOS: string[]
   ): void {
-    const socketService = this.getSocket();
-    if (!socketService) return;
+    const socketService = this.getSocket()
+    if (!socketService) return
 
-    const io = socketService.getIO();
+    const io = socketService.getIO()
     if (io) {
       io.emit('system:readiness:update', {
         ready,
         availableOS,
         missingOS,
         timestamp: new Date().toISOString()
-      });
+      })
     }
   }
 }
 
-export default ISOEventManager;
+export default ISOEventManager

@@ -42,41 +42,41 @@ registerEnumType(VMServiceAction, {
 @ObjectType()
 export class ServiceInfo {
   @Field()
-  name!: string
+    name!: string
 
   @Field({ nullable: true })
-  displayName?: string
+    displayName?: string
 
   @Field(() => ServiceStatus)
-  status!: ServiceStatus
+    status!: ServiceStatus
 
   @Field(() => ServiceStartType, { nullable: true })
-  startType?: ServiceStartType
+    startType?: ServiceStartType
 
   @Field({ nullable: true })
-  description?: string
+    description?: string
 
   @Field({ nullable: true })
-  pid?: number
+    pid?: number
 }
 
 @InputType()
 export class ServiceControlInput {
   @Field()
-  machineId!: string
+    machineId!: string
 
   @Field()
-  serviceName!: string
+    serviceName!: string
 
   @Field(() => VMServiceAction)
-  action!: VMServiceAction
+    action!: VMServiceAction
 }
 
 @ObjectType()
 export class ServiceStatusType extends SuccessType {
   @Field(() => ServiceInfo, { nullable: true })
-  service?: ServiceInfo
+    service?: ServiceInfo
 
   @Field({ nullable: true })
-  error?: string
+    error?: string
 }

@@ -5,7 +5,7 @@ import { createMockContext, createAdminContext } from '../../setup/test-helpers'
 import { UserInputError, ForbiddenError } from 'apollo-server-errors'
 import { NetworkFilterService } from '@services/networkFilterService'
 import { FilterType } from '../../../app/graphql/resolvers/firewall/types'
-import { 
+import {
   createMockNWFilter,
   createMockFWRule,
   createMockDepartment,
@@ -33,7 +33,7 @@ describe('FirewallResolver', () => {
       flushNWFilter: jest.fn(),
       deduplicateRules: jest.fn()
     } as unknown as jest.Mocked<NetworkFilterService>
-    
+
     resolver = new FirewallResolver(mockNetworkFilterService)
   })
 
@@ -43,7 +43,7 @@ describe('FirewallResolver', () => {
         createMockNWFilter({ id: 'filter-1', name: 'allow-http', type: 'generic' }),
         createMockNWFilter({ id: 'filter-2', name: 'block-ssh', type: 'generic' })
       ]
-      
+
       mockPrisma.nWFilter.findMany.mockResolvedValue(
         mockFilters.map(f => ({ ...f, vms: [], departments: [], rules: [], references: [] }))
       )
@@ -70,7 +70,7 @@ describe('FirewallResolver', () => {
       const mockFilters = [
         createMockNWFilter({ id: 'filter-1', name: 'dept-filter' })
       ]
-      
+
       mockPrisma.nWFilter.findMany.mockResolvedValue(
         mockFilters.map(f => ({ ...f, vms: [], departments: [{ id: departmentId }], rules: [], references: [] }))
       )
@@ -100,7 +100,7 @@ describe('FirewallResolver', () => {
       const mockFilters = [
         createMockNWFilter({ id: 'filter-1', name: 'vm-filter' })
       ]
-      
+
       mockPrisma.nWFilter.findMany.mockResolvedValue(
         mockFilters.map(f => ({ ...f, vms: [{ id: vmId }], departments: [], rules: [], references: [] }))
       )
@@ -141,7 +141,7 @@ describe('FirewallResolver', () => {
         rules: [createMockFWRule({ nwFilterId: 'filter-1' })],
         references: []
       }
-      
+
       mockPrisma.nWFilter.findUnique.mockResolvedValue(mockFilterWithRelations)
 
       const result = await resolver.getFilter('filter-1', ctx)
@@ -172,7 +172,7 @@ describe('FirewallResolver', () => {
         createMockFWRule({ id: 'rule-1', nwFilterId: filterId }),
         createMockFWRule({ id: 'rule-2', nwFilterId: filterId })
       ]
-      
+
       mockPrisma.fWRule.findMany.mockResolvedValue(mockRules)
 
       const result = await resolver.listFilterRules(filterId, ctx)
@@ -189,7 +189,7 @@ describe('FirewallResolver', () => {
         createMockFWRule({ id: 'rule-2' }),
         createMockFWRule({ id: 'rule-3' })
       ]
-      
+
       mockPrisma.fWRule.findMany.mockResolvedValue(mockRules)
 
       const result = await resolver.listFilterRules(null, ctx)
@@ -208,7 +208,7 @@ describe('FirewallResolver', () => {
         chain: 'root',
         priority: 500
       }
-      
+
       const mockCreatedFilter = createMockNWFilter({
         ...input,
         id: 'filter-new',
@@ -236,7 +236,7 @@ describe('FirewallResolver', () => {
         type: FilterType.GENERIC,
         chain: 'root'
       }
-      
+
       mockNetworkFilterService.createFilter.mockRejectedValue(
         new UserInputError('Filter name already exists')
       )
@@ -252,13 +252,13 @@ describe('FirewallResolver', () => {
         description: 'Updated description',
         priority: 600
       }
-      
+
       const existingFilter = createMockNWFilter({ id: filterId })
       const updatedFilter = { ...existingFilter, ...input }
-      
+
       // Reset the mock to ensure clean state
       mockNetworkFilterService.updateFilter.mockReset()
-      
+
       mockPrisma.nWFilter.findUnique.mockResolvedValue(existingFilter)
       mockPrisma.nWFilter.update.mockResolvedValue(updatedFilter)
       mockPrisma.fWRule.findMany.mockResolvedValue([])
@@ -290,7 +290,7 @@ describe('FirewallResolver', () => {
     it('should delete a filter', async () => {
       const filterId = 'filter-1'
       const mockFilter = createMockNWFilter({ id: filterId })
-      
+
       mockPrisma.nWFilter.delete.mockResolvedValue(mockFilter)
 
       const result = await resolver.deleteFilter(filterId, ctx)
@@ -315,7 +315,7 @@ describe('FirewallResolver', () => {
     it('should create a new filter rule', async () => {
       const filterId = 'filter-1'
       const input = {
-        filterId: filterId,
+        filterId,
         protocol: 'tcp',
         action: 'accept',
         direction: 'in',
@@ -328,13 +328,13 @@ describe('FirewallResolver', () => {
         ipVersion: undefined,
         state: undefined
       }
-      
+
       const mockCreatedRule = createMockFWRule({
         ...input,
         id: 'rule-new',
         nwFilterId: filterId
       })
-      
+
       mockNetworkFilterService.createRule.mockResolvedValue(mockCreatedRule)
 
       const result = await resolver.createFilterRule(filterId, input, ctx)
@@ -362,7 +362,7 @@ describe('FirewallResolver', () => {
     it('should handle rule creation', async () => {
       const input = { filterId: 'filter-1', protocol: 'tcp', action: 'accept', direction: 'in', priority: 100 }
       const mockRule = createMockFWRule(input)
-      
+
       mockNetworkFilterService.createRule.mockResolvedValue(mockRule)
 
       const result = await resolver.createFilterRule('filter-1', input, ctx)
@@ -379,10 +379,10 @@ describe('FirewallResolver', () => {
         action: 'drop',
         direction: 'out'
       }
-      
+
       const existingRule = createMockFWRule({ id: ruleId, nwFilterId: 'filter-1' })
       const updatedRule = { ...existingRule, ...input }
-      
+
       mockPrisma.fWRule.findUnique.mockResolvedValue(existingRule)
       mockPrisma.fWRule.update.mockResolvedValue(updatedRule)
 
@@ -398,7 +398,7 @@ describe('FirewallResolver', () => {
     it('should handle rule update', async () => {
       const input = { priority: 100, action: 'accept', direction: 'in' }
       const mockRule = createMockFWRule({ ...input, id: 'rule-1' })
-      
+
       mockPrisma.fWRule.findUnique.mockResolvedValue(null)
       mockPrisma.fWRule.update.mockResolvedValue(mockRule)
 
@@ -412,7 +412,7 @@ describe('FirewallResolver', () => {
     it('should delete a filter rule', async () => {
       const ruleId = 'rule-1'
       const mockRule = createMockFWRule({ id: ruleId, nwFilterId: 'filter-1' })
-      
+
       mockPrisma.fWRule.findUnique.mockResolvedValue(mockRule)
       mockPrisma.fWRule.delete.mockResolvedValue(mockRule)
 
@@ -426,7 +426,7 @@ describe('FirewallResolver', () => {
 
     it('should handle rule deletion', async () => {
       const mockRule = createMockFWRule({ id: 'rule-1' })
-      
+
       mockPrisma.fWRule.findUnique.mockResolvedValue(null)
       mockPrisma.fWRule.delete.mockResolvedValue(mockRule)
 
@@ -440,7 +440,7 @@ describe('FirewallResolver', () => {
     it('should flush a filter to libvirt', async () => {
       const filterId = 'filter-1'
       const mockFilter = createMockNWFilter({ id: filterId })
-      
+
       mockPrisma.nWFilter.findUnique.mockResolvedValue(mockFilter)
       mockNetworkFilterService.flushNWFilter.mockResolvedValue(true)
 

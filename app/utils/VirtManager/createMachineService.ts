@@ -311,7 +311,7 @@ export class CreateMachineService {
     const ram = template ? template.ram : machine.ramGB
     const storage = template ? template.storage : machine.diskSizeGB
     const cores = template ? template.cores : machine.cpuCores
-    
+
     xmlGenerator.setMemory(ram)
     xmlGenerator.enableTPM('2.0')
     xmlGenerator.setStorage(storage)

@@ -1,7 +1,7 @@
 import { Debugger } from '../utils/debug'
 import { getLibvirtConnection } from '../utils/libvirt'
-const libvirtNode = require('../../lib/libvirt-node')
 import { Builder, Parser } from 'xml2js'
+const libvirtNode = require('../../lib/libvirt-node')
 
 // Type aliases for libvirt-node types
 type Connection = typeof libvirtNode.Connection
@@ -26,13 +26,13 @@ export class SnapshotService {
   private xmlBuilder: Builder
   private xmlParser: Parser
 
-  constructor() {
+  constructor () {
     this.debug = new Debugger('snapshot-service')
     this.xmlBuilder = new Builder()
     this.xmlParser = new Parser()
   }
 
-  async initialize(): Promise<void> {
+  async initialize (): Promise<void> {
     try {
       this.libvirt = await getLibvirtConnection()
       this.debug.log('info', 'Snapshot Service initialized')
@@ -42,14 +42,14 @@ export class SnapshotService {
     }
   }
 
-  private async ensureConnection(): Promise<Connection> {
+  private async ensureConnection (): Promise<Connection> {
     if (!this.libvirt) {
       await this.initialize()
     }
     return this.libvirt!
   }
 
-  async createSnapshot(
+  async createSnapshot (
     vmId: string,
     name: string,
     description?: string
@@ -57,7 +57,7 @@ export class SnapshotService {
     try {
       const conn = await this.ensureConnection()
       const domain = libvirtNode.Machine.lookupByUuidString(conn, vmId)
-      
+
       if (!domain) {
         return { success: false, message: `VM ${vmId} not found` }
       }
@@ -65,7 +65,7 @@ export class SnapshotService {
       // Create snapshot XML using xml2js Builder for safe XML generation
       const snapshotObj: any = {
         domainsnapshot: {
-          name: name,
+          name,
           memory: {
             $: {
               snapshot: 'internal'
@@ -83,7 +83,7 @@ export class SnapshotService {
 
       // Create snapshot using libvirt-node API
       const snapshot = domain.snapshotCreateXml(xml, 0)
-      
+
       if (!snapshot) {
         throw new Error('Failed to create snapshot')
       }
@@ -107,18 +107,18 @@ export class SnapshotService {
     }
   }
 
-  async listSnapshots(vmId: string): Promise<{ success: boolean; snapshots: SnapshotInfo[] }> {
+  async listSnapshots (vmId: string): Promise<{ success: boolean; snapshots: SnapshotInfo[] }> {
     try {
       const conn = await this.ensureConnection()
       const domain = libvirtNode.Machine.lookupByUuidString(conn, vmId)
-      
+
       if (!domain) {
         return { success: false, snapshots: [] }
       }
 
       // List snapshots using libvirt-node API
       const libvirtSnapshots = domain.listAllSnapshots(0)
-      
+
       if (!libvirtSnapshots || libvirtSnapshots.length === 0) {
         return { success: true, snapshots: [] }
       }
@@ -128,12 +128,12 @@ export class SnapshotService {
       const currentName = currentSnapshot?.getName()
 
       const snapshots: SnapshotInfo[] = []
-      
+
       for (const snapshot of libvirtSnapshots) {
         const snapshotName = snapshot.getName()
         const xmlDesc = snapshot.getXmlDesc(0)
-        
-        let info: SnapshotInfo = {
+
+        const info: SnapshotInfo = {
           name: snapshotName || 'unknown',
           createdAt: new Date(),
           state: 'unknown',
@@ -162,7 +162,7 @@ export class SnapshotService {
             this.debug.log('warning', `Failed to parse snapshot XML: ${parseErr}`)
           }
         }
-        
+
         snapshots.push(info)
       }
 
@@ -174,28 +174,28 @@ export class SnapshotService {
     }
   }
 
-  async restoreSnapshot(
+  async restoreSnapshot (
     vmId: string,
     snapshotName: string
   ): Promise<{ success: boolean; message: string }> {
     try {
       const conn = await this.ensureConnection()
       const domain = libvirtNode.Machine.lookupByUuidString(conn, vmId)
-      
+
       if (!domain) {
         return { success: false, message: `VM ${vmId} not found` }
       }
 
       // Lookup snapshot by name
       const snapshot = domain.snapshotLookupByName(snapshotName, 0)
-      
+
       if (!snapshot) {
         return { success: false, message: `Snapshot '${snapshotName}' not found` }
       }
 
       // Restore snapshot using libvirt-node API
       const success = domain.revertToSnapshot(snapshot, 0)
-      
+
       if (!success) {
         throw new Error('Failed to revert to snapshot')
       }
@@ -208,28 +208,28 @@ export class SnapshotService {
     }
   }
 
-  async deleteSnapshot(
+  async deleteSnapshot (
     vmId: string,
     snapshotName: string
   ): Promise<{ success: boolean; message: string }> {
     try {
       const conn = await this.ensureConnection()
       const domain = libvirtNode.Machine.lookupByUuidString(conn, vmId)
-      
+
       if (!domain) {
         return { success: false, message: `VM ${vmId} not found` }
       }
 
       // Lookup snapshot by name
       const snapshot = domain.snapshotLookupByName(snapshotName, 0)
-      
+
       if (!snapshot) {
         return { success: false, message: `Snapshot '${snapshotName}' not found` }
       }
 
       // Delete snapshot using libvirt-node API
       const success = snapshot.delete(0)
-      
+
       if (!success) {
         throw new Error('Failed to delete snapshot')
       }
@@ -242,26 +242,26 @@ export class SnapshotService {
     }
   }
 
-  async getCurrentSnapshot(vmId: string): Promise<SnapshotInfo | null> {
+  async getCurrentSnapshot (vmId: string): Promise<SnapshotInfo | null> {
     try {
       const conn = await this.ensureConnection()
       const domain = libvirtNode.Machine.lookupByUuidString(conn, vmId)
-      
+
       if (!domain) {
         return null
       }
 
       // Get current snapshot using libvirt-node API
       const currentSnapshot = domain.snapshotCurrent(0)
-      
+
       if (!currentSnapshot) {
         return null
       }
 
       const name = currentSnapshot.getName() || 'unknown'
       const xmlDesc = currentSnapshot.getXmlDesc(0)
-      
-      let info: SnapshotInfo = {
+
+      const info: SnapshotInfo = {
         name,
         createdAt: new Date(),
         state: 'active',
@@ -290,7 +290,7 @@ export class SnapshotService {
           this.debug.log('warning', `Failed to parse snapshot XML: ${parseErr}`)
         }
       }
-      
+
       return info
     } catch (error: any) {
       this.debug.log('error', `Failed to get current snapshot: ${error}`)

@@ -430,7 +430,6 @@ describe.skip('MachineResolver', () => {
     })
   })
 
-
   describe('Authorization Tests', () => {
     it('should allow USER to view their own machines', async () => {
       const user = createMockUser()

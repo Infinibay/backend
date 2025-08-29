@@ -4,22 +4,22 @@ import { ObjectType, Field, InputType, registerEnumType, ID } from 'type-graphql
 @ObjectType({ description: 'Information about a software package' })
 export class PackageInfo {
   @Field(() => String, { description: 'Package name' })
-  name: string = ''
+    name: string = ''
 
   @Field(() => String, { description: 'Package version' })
-  version: string = ''
+    version: string = ''
 
   @Field(() => String, { nullable: true, description: 'Package description' })
-  description?: string
+    description?: string
 
   @Field(() => Boolean, { description: 'Whether the package is installed' })
-  installed: boolean = false
+    installed: boolean = false
 
   @Field(() => String, { nullable: true, description: 'Package publisher or vendor' })
-  publisher?: string
+    publisher?: string
 
   @Field(() => String, { nullable: true, description: 'Package source or repository' })
-  source?: string
+    source?: string
 }
 
 // Package action enum
@@ -39,52 +39,52 @@ registerEnumType(PackageAction, {
 @InputType({ description: 'Input for package management operations' })
 export class PackageManagementInput {
   @Field(() => ID, { description: 'ID of the target machine' })
-  machineId: string = ''
+    machineId: string = ''
 
   @Field(() => String, { description: 'Name of the package to manage' })
-  packageName: string = ''
+    packageName: string = ''
 
   @Field(() => PackageAction, { description: 'Action to perform on the package' })
-  action: PackageAction = PackageAction.INSTALL
+    action: PackageAction = PackageAction.INSTALL
 }
 
 // Result type for package management operations
 @ObjectType({ description: 'Result of a package management operation' })
 export class PackageManagementResult {
   @Field(() => Boolean, { description: 'Whether the operation was successful' })
-  success: boolean = false
+    success: boolean = false
 
   @Field(() => String, { description: 'Human-readable message about the operation' })
-  message: string = ''
+    message: string = ''
 
   @Field(() => String, { nullable: true, description: 'Standard output from the command' })
-  stdout?: string
+    stdout?: string
 
   @Field(() => String, { nullable: true, description: 'Standard error from the command' })
-  stderr?: string
+    stderr?: string
 
   @Field(() => String, { nullable: true, description: 'Error message if operation failed' })
-  error?: string
+    error?: string
 
   @Field(() => [PackageInfo], { nullable: true, description: 'List of packages (for list operations)' })
-  packages?: PackageInfo[]
+    packages?: PackageInfo[]
 }
 
 // Generic command result type (for compatibility with existing resolvers)
 @ObjectType({ description: 'Generic command execution result' })
 export class CommandResult {
   @Field(() => Boolean, { description: 'Whether the command was successful' })
-  success: boolean = false
+    success: boolean = false
 
   @Field(() => String, { nullable: true, description: 'Command output' })
-  output?: string
+    output?: string
 
   @Field(() => String, { nullable: true, description: 'Error message if command failed' })
-  error?: string
+    error?: string
 
   @Field(() => String, { nullable: true, description: 'Standard output' })
-  stdout?: string
+    stdout?: string
 
   @Field(() => String, { nullable: true, description: 'Standard error' })
-  stderr?: string
+    stderr?: string
 }

@@ -71,7 +71,7 @@ describe('NetworkService', () => {
 
   describe('validateNetworkName', () => {
     it('should pass validation when network name is unique', async () => {
-      ;(mockConnection.listAllNetworks as jest.Mock).mockImplementation(
+      (mockConnection.listAllNetworks as jest.Mock).mockImplementation(
         () => Promise.resolve([]) as Promise<Network[]>
       )
 
@@ -91,7 +91,7 @@ describe('NetworkService', () => {
     })
 
     it('should throw error when listing networks fails', async () => {
-      ;(mockConnection.listAllNetworks as jest.Mock).mockImplementation(
+      (mockConnection.listAllNetworks as jest.Mock).mockImplementation(
         () => Promise.resolve(null) as Promise<Network[] | null>
       )
 
@@ -117,7 +117,7 @@ describe('NetworkService', () => {
     })
 
     it('should throw error when listing networks fails', async () => {
-      ;(mockConnection.listAllNetworks as jest.Mock).mockImplementation(
+      (mockConnection.listAllNetworks as jest.Mock).mockImplementation(
         () => Promise.resolve(null) as Promise<Network[] | null>
       )
 
@@ -141,7 +141,7 @@ describe('NetworkService', () => {
     })
 
     it('should throw error when network not found', async () => {
-      ;(mockConnection.listAllNetworks as jest.Mock).mockImplementation(
+      (mockConnection.listAllNetworks as jest.Mock).mockImplementation(
         () => Promise.resolve([]) as Promise<Network[]>
       )
 
@@ -159,7 +159,7 @@ describe('NetworkService', () => {
       ;(mockConnection.listAllDomains as jest.Mock).mockImplementation(
         () => Promise.resolve([]) as Promise<MockDomain[]>
       )
-      
+
       mockParseStringPromise.mockResolvedValue({
         network: { bridge: [{ $: { name: 'test-bridge' } }] }
       })
@@ -176,7 +176,7 @@ describe('NetworkService', () => {
         getName: () => 'test-vm',
         getXmlDesc: () => Promise.resolve('<domain><devices><interface type="network"><source network="test-network"/></interface></devices></domain>')
       }
-      
+
       const mockNetworks = [mockNetwork]
       ;(mockConnection.listAllNetworks as jest.Mock).mockImplementation(
         () => Promise.resolve(mockNetworks) as Promise<Network[]>
@@ -184,7 +184,7 @@ describe('NetworkService', () => {
       ;(mockConnection.listAllDomains as jest.Mock).mockImplementation(
         () => Promise.resolve([mockDomain as MockDomain]) as Promise<MockDomain[]>
       )
-      
+
       mockParseStringPromise
         .mockResolvedValueOnce({ network: { bridge: [{ $: { name: 'test-bridge' } }] } })
         .mockResolvedValueOnce({

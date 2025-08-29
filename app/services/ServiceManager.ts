@@ -1,7 +1,7 @@
 import { PrismaClient, Machine } from '@prisma/client'
-const libvirtNode = require('../../lib/libvirt-node')
 import { getLibvirtConnection } from '../utils/libvirt'
 import { Debugger } from '../utils/debug'
+const libvirtNode = require('../../lib/libvirt-node')
 
 // Type aliases for libvirt-node types
 type Connection = typeof libvirtNode.Connection
@@ -32,29 +32,29 @@ export class ServiceManager {
   private prisma: PrismaClient
   private libvirt: Connection | null = null
 
-  constructor(prisma: PrismaClient) {
+  constructor (prisma: PrismaClient) {
     this.prisma = prisma
     this.debug = new Debugger('service-manager')
   }
 
-  private async initialize(): Promise<void> {
+  private async initialize (): Promise<void> {
     if (!this.libvirt) {
       this.libvirt = await getLibvirtConnection()
       this.debug.log('info', 'ServiceManager initialized with libvirt connection')
     }
   }
 
-  private detectOS(machine: Machine): 'windows' | 'linux' | 'unknown' {
+  private detectOS (machine: Machine): 'windows' | 'linux' | 'unknown' {
     const os = machine.os?.toLowerCase() || ''
     if (os.includes('windows')) return 'windows'
-    if (os.includes('linux') || os.includes('ubuntu') || os.includes('debian') || 
+    if (os.includes('linux') || os.includes('ubuntu') || os.includes('debian') ||
         os.includes('centos') || os.includes('rhel') || os.includes('fedora')) return 'linux'
     return 'unknown'
   }
 
-  private async getDomain(machineId: string): Promise<{ machine: Machine; domain: LibvirtMachine } | null> {
+  private async getDomain (machineId: string): Promise<{ machine: Machine; domain: LibvirtMachine } | null> {
     await this.initialize()
-    
+
     const machine = await this.prisma.machine.findUnique({ where: { id: machineId } })
     if (!machine) {
       this.debug.log('error', `Machine ${machineId} not found in database`)
@@ -81,7 +81,7 @@ export class ServiceManager {
     return { machine, domain }
   }
 
-  async listServices(machineId: string): Promise<InternalServiceInfo[]> {
+  async listServices (machineId: string): Promise<InternalServiceInfo[]> {
     try {
       const domainInfo = await this.getDomain(machineId)
       if (!domainInfo) {
@@ -111,7 +111,7 @@ export class ServiceManager {
     }
   }
 
-  private async listWindowsServices(agent: GuestAgent): Promise<InternalServiceInfo[]> {
+  private async listWindowsServices (agent: GuestAgent): Promise<InternalServiceInfo[]> {
     try {
       const result = agent.exec(
         'powershell.exe',
@@ -119,7 +119,7 @@ export class ServiceManager {
           '-NoProfile',
           '-NonInteractive',
           '-Command',
-          `Get-Service | Select-Object Name, DisplayName, Status, StartType | ConvertTo-Json -Compress`
+          'Get-Service | Select-Object Name, DisplayName, Status, StartType | ConvertTo-Json -Compress'
         ],
         true
       )
@@ -130,7 +130,7 @@ export class ServiceManager {
       }
 
       const services = JSON.parse(result.stdout)
-      
+
       return (Array.isArray(services) ? services : [services]).map((svc: any) => ({
         name: svc.Name,
         displayName: svc.DisplayName,
@@ -143,7 +143,7 @@ export class ServiceManager {
     }
   }
 
-  private async listLinuxServices(agent: GuestAgent): Promise<InternalServiceInfo[]> {
+  private async listLinuxServices (agent: GuestAgent): Promise<InternalServiceInfo[]> {
     try {
       // Try systemctl first (systemd)
       let result = agent.exec(
@@ -169,7 +169,7 @@ export class ServiceManager {
 
       // Fallback to service command (SysV init)
       result = agent.exec('service', ['--status-all'], true)
-      
+
       if (result && result.stdout) {
         return this.parseSysVServices(result.stdout)
       }
@@ -181,7 +181,7 @@ export class ServiceManager {
     }
   }
 
-  private parseSystemdServices(output: string): InternalServiceInfo[] {
+  private parseSystemdServices (output: string): InternalServiceInfo[] {
     try {
       const units = JSON.parse(output)
       return units.map((unit: any) => ({
@@ -195,10 +195,10 @@ export class ServiceManager {
     }
   }
 
-  private parseSystemdServicesText(output: string): InternalServiceInfo[] {
+  private parseSystemdServicesText (output: string): InternalServiceInfo[] {
     const services: InternalServiceInfo[] = []
     const lines = output.split('\n')
-    
+
     for (const line of lines) {
       if (line.includes('.service')) {
         const parts = line.trim().split(/\s+/)
@@ -213,14 +213,14 @@ export class ServiceManager {
         }
       }
     }
-    
+
     return services
   }
 
-  private parseSysVServices(output: string): InternalServiceInfo[] {
+  private parseSysVServices (output: string): InternalServiceInfo[] {
     const services: InternalServiceInfo[] = []
     const lines = output.split('\n')
-    
+
     for (const line of lines) {
       const match = line.match(/\[\s*([+-])\s*\]\s+(.+)/)
       if (match) {
@@ -230,11 +230,11 @@ export class ServiceManager {
         })
       }
     }
-    
+
     return services
   }
 
-  async controlService(
+  async controlService (
     machineId: string,
     serviceName: string,
     action: VMServiceAction
@@ -276,7 +276,7 @@ export class ServiceManager {
     }
   }
 
-  private async controlWindowsService(
+  private async controlWindowsService (
     agent: GuestAgent,
     serviceName: string,
     action: VMServiceAction
@@ -285,40 +285,40 @@ export class ServiceManager {
     let args: string[]
 
     switch (action) {
-      case 'START':
-        command = 'net'
-        args = ['start', serviceName]
-        break
-      case 'STOP':
-        command = 'net'
-        args = ['stop', serviceName]
-        break
-      case 'RESTART':
-        command = 'powershell.exe'
-        args = ['-NoProfile', '-Command', `Restart-Service -Name "${serviceName}" -Force`]
-        break
-      case 'ENABLE':
-        command = 'sc.exe'
-        args = ['config', serviceName, 'start=', 'auto']
-        break
-      case 'DISABLE':
-        command = 'sc.exe'
-        args = ['config', serviceName, 'start=', 'disabled']
-        break
-      case 'STATUS':
-        command = 'sc.exe'
-        args = ['query', serviceName]
-        break
-      default:
-        return {
-          success: false,
-          message: `Unknown action: ${action}`,
-          error: 'Invalid action'
-        }
+    case 'START':
+      command = 'net'
+      args = ['start', serviceName]
+      break
+    case 'STOP':
+      command = 'net'
+      args = ['stop', serviceName]
+      break
+    case 'RESTART':
+      command = 'powershell.exe'
+      args = ['-NoProfile', '-Command', `Restart-Service -Name "${serviceName}" -Force`]
+      break
+    case 'ENABLE':
+      command = 'sc.exe'
+      args = ['config', serviceName, 'start=', 'auto']
+      break
+    case 'DISABLE':
+      command = 'sc.exe'
+      args = ['config', serviceName, 'start=', 'disabled']
+      break
+    case 'STATUS':
+      command = 'sc.exe'
+      args = ['query', serviceName]
+      break
+    default:
+      return {
+        success: false,
+        message: `Unknown action: ${action}`,
+        error: 'Invalid action'
+      }
     }
 
     const result = agent.exec(command, args, true)
-    
+
     if (!result) {
       return {
         success: false,
@@ -343,43 +343,43 @@ export class ServiceManager {
     }
   }
 
-  private async controlLinuxService(
+  private async controlLinuxService (
     agent: GuestAgent,
     serviceName: string,
     action: VMServiceAction
   ): Promise<InternalServiceControlResult> {
-    let command = 'systemctl'
+    const command = 'systemctl'
     let args: string[]
 
     switch (action) {
-      case 'START':
-        args = ['start', serviceName]
-        break
-      case 'STOP':
-        args = ['stop', serviceName]
-        break
-      case 'RESTART':
-        args = ['restart', serviceName]
-        break
-      case 'ENABLE':
-        args = ['enable', serviceName]
-        break
-      case 'DISABLE':
-        args = ['disable', serviceName]
-        break
-      case 'STATUS':
-        args = ['status', serviceName]
-        break
-      default:
-        return {
-          success: false,
-          message: `Unknown action: ${action}`,
-          error: 'Invalid action'
-        }
+    case 'START':
+      args = ['start', serviceName]
+      break
+    case 'STOP':
+      args = ['stop', serviceName]
+      break
+    case 'RESTART':
+      args = ['restart', serviceName]
+      break
+    case 'ENABLE':
+      args = ['enable', serviceName]
+      break
+    case 'DISABLE':
+      args = ['disable', serviceName]
+      break
+    case 'STATUS':
+      args = ['status', serviceName]
+      break
+    default:
+      return {
+        success: false,
+        message: `Unknown action: ${action}`,
+        error: 'Invalid action'
+      }
     }
 
     const result = agent.exec(command, args, true)
-    
+
     if (!result) {
       // Try fallback to service command
       if (action !== 'ENABLE' && action !== 'DISABLE') {
@@ -388,7 +388,7 @@ export class ServiceManager {
           [serviceName, action.toLowerCase()],
           true
         )
-        
+
         if (fallbackResult && !fallbackResult.stderr) {
           return {
             success: true,
@@ -397,7 +397,7 @@ export class ServiceManager {
           }
         }
       }
-      
+
       return {
         success: false,
         message: `Failed to execute ${action} on ${serviceName}`,
@@ -413,7 +413,7 @@ export class ServiceManager {
     }
   }
 
-  private async getWindowsServiceStatus(agent: GuestAgent, serviceName: string): Promise<InternalServiceInfo | undefined> {
+  private async getWindowsServiceStatus (agent: GuestAgent, serviceName: string): Promise<InternalServiceInfo | undefined> {
     try {
       const result = agent.exec(
         'powershell.exe',
@@ -437,18 +437,18 @@ export class ServiceManager {
     } catch (error) {
       this.debug.log('error', `Failed to get Windows service status: ${error}`)
     }
-    
+
     return undefined
   }
 
-  private async getLinuxServiceStatus(agent: GuestAgent, serviceName: string): Promise<InternalServiceInfo | undefined> {
+  private async getLinuxServiceStatus (agent: GuestAgent, serviceName: string): Promise<InternalServiceInfo | undefined> {
     try {
       const result = agent.exec('systemctl', ['status', serviceName, '--no-pager'], true)
-      
+
       if (result && result.stdout) {
         const lines = result.stdout.split('\n')
         let status: 'running' | 'stopped' | 'unknown' = 'unknown'
-        
+
         for (const line of lines) {
           if (line.includes('Active:')) {
             if (line.includes('active (running)')) {
@@ -459,7 +459,7 @@ export class ServiceManager {
             break
           }
         }
-        
+
         return {
           name: serviceName,
           status
@@ -468,26 +468,26 @@ export class ServiceManager {
     } catch (error) {
       this.debug.log('error', `Failed to get Linux service status: ${error}`)
     }
-    
+
     return undefined
   }
 
-  private mapWindowsStatus(status: number): 'running' | 'stopped' | 'unknown' {
+  private mapWindowsStatus (status: number): 'running' | 'stopped' | 'unknown' {
     // PowerShell ServiceControllerStatus enum values
     switch (status) {
-      case 4: return 'running'  // Running
-      case 1: return 'stopped'  // Stopped
-      default: return 'unknown'
+    case 4: return 'running' // Running
+    case 1: return 'stopped' // Stopped
+    default: return 'unknown'
     }
   }
 
-  private mapWindowsStartType(startType: number): 'automatic' | 'manual' | 'disabled' | 'unknown' {
+  private mapWindowsStartType (startType: number): 'automatic' | 'manual' | 'disabled' | 'unknown' {
     // PowerShell ServiceStartMode enum values
     switch (startType) {
-      case 2: return 'automatic'  // Automatic
-      case 3: return 'manual'     // Manual
-      case 4: return 'disabled'   // Disabled
-      default: return 'unknown'
+    case 2: return 'automatic' // Automatic
+    case 3: return 'manual' // Manual
+    case 4: return 'disabled' // Disabled
+    default: return 'unknown'
     }
   }
 }

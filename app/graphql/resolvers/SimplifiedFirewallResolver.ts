@@ -1,7 +1,7 @@
 import { Resolver, Query, Mutation, Arg, ID, Ctx, Authorized } from 'type-graphql'
 import { UserInputError } from 'apollo-server-core'
 import { InfinibayContext } from '@utils/context'
-import { FirewallSimplifierService, FirewallTemplate as ServiceFirewallTemplate } from '@services/FirewallSimplifierService'
+import { FirewallSimplifierService, FirewallTemplate as ServiceFirewallTemplate, SimplifiedRule } from '@services/FirewallSimplifierService'
 import {
   SimplifiedFirewallRule,
   VMFirewallState,
@@ -10,7 +10,6 @@ import {
   CreateSimplifiedFirewallRuleInput,
   ApplyFirewallTemplateInput
 } from '../types/SimplifiedFirewallType'
-import { SimplifiedRule } from '@services/FirewallSimplifierService'
 import { getSocketService } from '@services/SocketService'
 import Debug from 'debug'
 
@@ -20,12 +19,12 @@ const debug = Debug('infinibay:firewall-resolver')
 export class SimplifiedFirewallResolver {
   private firewallSimplifierService: FirewallSimplifierService
 
-  constructor() {
+  constructor () {
     // Service will be initialized per request with the request's prisma instance
     this.firewallSimplifierService = null as any
   }
 
-  private getService(prisma: any): FirewallSimplifierService {
+  private getService (prisma: any): FirewallSimplifierService {
     if (!this.firewallSimplifierService) {
       this.firewallSimplifierService = new FirewallSimplifierService(prisma)
     }
@@ -34,7 +33,7 @@ export class SimplifiedFirewallResolver {
 
   @Query(() => [SimplifiedFirewallRule])
   @Authorized('USER')
-  async getSimplifiedFirewallRules(
+  async getSimplifiedFirewallRules (
     @Arg('machineId', () => ID) machineId: string,
     @Ctx() { prisma, user }: InfinibayContext
   ): Promise<SimplifiedFirewallRule[]> {
@@ -56,7 +55,7 @@ export class SimplifiedFirewallResolver {
 
   @Query(() => VMFirewallState)
   @Authorized('USER')
-  async getVMFirewallState(
+  async getVMFirewallState (
     @Arg('machineId', () => ID) machineId: string,
     @Ctx() { prisma, user }: InfinibayContext
   ): Promise<VMFirewallState> {
@@ -78,7 +77,7 @@ export class SimplifiedFirewallResolver {
 
   @Query(() => [FirewallTemplateInfo])
   @Authorized('USER')
-  async getAvailableFirewallTemplates(
+  async getAvailableFirewallTemplates (
     @Ctx() { prisma }: InfinibayContext
   ): Promise<FirewallTemplateInfo[]> {
     const service = this.getService(prisma)
@@ -87,7 +86,7 @@ export class SimplifiedFirewallResolver {
 
   @Query(() => FirewallTemplateInfo, { nullable: true })
   @Authorized('USER')
-  async getFirewallTemplateInfo(
+  async getFirewallTemplateInfo (
     @Arg('template', () => FirewallTemplate) template: FirewallTemplate,
     @Ctx() { prisma }: InfinibayContext
   ): Promise<FirewallTemplateInfo | undefined> {
@@ -97,7 +96,7 @@ export class SimplifiedFirewallResolver {
 
   @Mutation(() => VMFirewallState)
   @Authorized('USER')
-  async applyFirewallTemplate(
+  async applyFirewallTemplate (
     @Arg('input') input: ApplyFirewallTemplateInput,
     @Ctx() { prisma, user }: InfinibayContext
   ): Promise<VMFirewallState> {
@@ -118,7 +117,7 @@ export class SimplifiedFirewallResolver {
       input.machineId,
       input.template as ServiceFirewallTemplate
     )
-    
+
     // Emit WebSocket event
     if (user) {
       try {
@@ -135,13 +134,13 @@ export class SimplifiedFirewallResolver {
         debug(`Failed to emit WebSocket event: ${eventError}`)
       }
     }
-    
+
     return result
   }
 
   @Mutation(() => VMFirewallState)
   @Authorized('USER')
-  async removeFirewallTemplate(
+  async removeFirewallTemplate (
     @Arg('machineId', () => ID) machineId: string,
     @Arg('template', () => FirewallTemplate) template: FirewallTemplate,
     @Ctx() { prisma, user }: InfinibayContext
@@ -163,7 +162,7 @@ export class SimplifiedFirewallResolver {
       machineId,
       template as ServiceFirewallTemplate
     )
-    
+
     // Emit WebSocket event
     if (user) {
       try {
@@ -180,13 +179,13 @@ export class SimplifiedFirewallResolver {
         debug(`Failed to emit WebSocket event: ${eventError}`)
       }
     }
-    
+
     return result
   }
 
   @Mutation(() => VMFirewallState)
   @Authorized('USER')
-  async toggleFirewallTemplate(
+  async toggleFirewallTemplate (
     @Arg('machineId', () => ID) machineId: string,
     @Arg('template', () => FirewallTemplate) template: FirewallTemplate,
     @Ctx() { prisma, user }: InfinibayContext
@@ -212,7 +211,7 @@ export class SimplifiedFirewallResolver {
 
   @Mutation(() => VMFirewallState)
   @Authorized('USER')
-  async createSimplifiedFirewallRule(
+  async createSimplifiedFirewallRule (
     @Arg('input') input: CreateSimplifiedFirewallRuleInput,
     @Ctx() { prisma, user }: InfinibayContext
   ): Promise<VMFirewallState> {
@@ -238,7 +237,7 @@ export class SimplifiedFirewallResolver {
     }
 
     const result = await service.addCustomRule(input.machineId, rule)
-    
+
     // Emit WebSocket event
     if (user) {
       try {
@@ -255,13 +254,13 @@ export class SimplifiedFirewallResolver {
         debug(`Failed to emit WebSocket event: ${eventError}`)
       }
     }
-    
+
     return result
   }
 
   @Mutation(() => VMFirewallState)
   @Authorized('USER')
-  async removeSimplifiedFirewallRule(
+  async removeSimplifiedFirewallRule (
     @Arg('machineId', () => ID) machineId: string,
     @Arg('ruleId', () => ID) ruleId: string,
     @Ctx() { prisma, user }: InfinibayContext
@@ -281,10 +280,10 @@ export class SimplifiedFirewallResolver {
     // Get current state
     const service = this.getService(prisma)
     const state = await service.getVMFirewallState(machineId)
-    
+
     // Remove the custom rule with the given ID
     const updatedCustomRules = state.customRules.filter(r => r.id !== ruleId)
-    
+
     // Update the firewall state in the database
     await prisma.machine.update({
       where: { id: machineId },
@@ -299,7 +298,7 @@ export class SimplifiedFirewallResolver {
 
     // Return updated state
     const result = await service.getVMFirewallState(machineId)
-    
+
     // Emit WebSocket event
     if (user) {
       try {
@@ -316,7 +315,7 @@ export class SimplifiedFirewallResolver {
         debug(`Failed to emit WebSocket event: ${eventError}`)
       }
     }
-    
+
     return result
   }
 }

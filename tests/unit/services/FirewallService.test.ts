@@ -5,11 +5,11 @@ import { NetworkFilterService } from '../../../app/services/networkFilterService
 import { mockPrisma } from '../../setup/jest.setup'
 import { KNOWN_SERVICES, getServiceById } from '../../../app/config/knownServices'
 import { createMockFWRule } from '../../setup/mock-factories'
-import type { 
-  VmServiceStatus, 
-  DepartmentServiceStatus, 
+import type {
+  VmServiceStatus,
+  DepartmentServiceStatus,
   GlobalServiceStatus,
-  DepartmentServiceDetailedStats 
+  DepartmentServiceDetailedStats
 } from '../../../app/services/firewallService'
 import type { Machine } from '@prisma/client'
 
@@ -409,7 +409,7 @@ describe('FirewallService', () => {
         stateMatch: false,
         flushedAt: null
       }))
-      
+
       // Mock the return value for getVmServiceStatus
       mockPrisma.machine.findUnique.mockResolvedValue(createMockVm({
         id: 'vm-123',
@@ -475,7 +475,7 @@ describe('FirewallService', () => {
         running: false,
         lastSeen: new Date()
       }))
-      
+
       // Mock the return value for getVmServiceStatus
       mockPrisma.machine.findUnique.mockResolvedValue(createMockVm({
         id: 'vm-123',
@@ -530,7 +530,7 @@ describe('FirewallService', () => {
         stateMatch: false,
         flushedAt: null
       }))
-      
+
       // Mock the return value for getVmServiceStatus
       mockPrisma.machine.findUnique.mockResolvedValue(createMockVm({
         id: 'vm-123',
@@ -633,7 +633,7 @@ describe('FirewallService', () => {
         flushedAt: null
       }))
       mockPrisma.globalServiceConfig.findMany.mockResolvedValue([])
-      
+
       // Mock fWRule for rule deletion
       mockPrisma.fWRule.findMany.mockResolvedValue([])
       mockPrisma.fWRule.delete.mockResolvedValue(createMockFWRule({ id: 'rule-1' }))

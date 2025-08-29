@@ -45,7 +45,7 @@ describe('DepartmentResolver', () => {
           machines: true
         }
       })
-      
+
       expect(result).toEqual({
         id: department.id,
         name: department.name,
@@ -171,7 +171,6 @@ describe('DepartmentResolver', () => {
         totalMachines: 0
       })
     })
-
   })
 
   describe('Mutation: destroyDepartment', () => {

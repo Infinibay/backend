@@ -1,58 +1,58 @@
-import { ObjectType, Field, Float } from 'type-graphql';
+import { ObjectType, Field, Float } from 'type-graphql'
 
 @ObjectType()
 export class GPU {
   @Field(() => String)
-  pciBus: string = '';
+    pciBus: string = ''
 
   @Field(() => String)
-  vendor: string = '';
+    vendor: string = ''
 
   @Field(() => String)
-  model: string = '';
+    model: string = ''
 
   @Field(() => Float)
-  memory: number = 0;
+    memory: number = 0
 }
 
 @ObjectType()
 export class SystemResourceCPU {
   @Field(() => Float)
-  total!: number;
+    total!: number
 
   @Field(() => Float)
-  available!: number;
+    available!: number
 }
 
 @ObjectType()
 export class SystemResourceMemory {
   @Field(() => Float)
-  total!: number;
+    total!: number
 
   @Field(() => Float)
-  available!: number;
+    available!: number
 }
 
 @ObjectType()
 export class SystemResourceDisk {
   @Field(() => Float)
-  total!: number;
+    total!: number
 
   @Field(() => Float)
-  available!: number;
+    available!: number
 
   @Field(() => Float)
-  used!: number;
+    used!: number
 }
 
 @ObjectType()
 export class SystemResources {
   @Field(() => SystemResourceCPU)
-  cpu!: SystemResourceCPU;
+    cpu!: SystemResourceCPU
 
   @Field(() => SystemResourceMemory)
-  memory!: SystemResourceMemory;
+    memory!: SystemResourceMemory
 
   @Field(() => SystemResourceDisk)
-  disk!: SystemResourceDisk;
+    disk!: SystemResourceDisk
 }

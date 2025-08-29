@@ -9,8 +9,7 @@ import {
 import { createAdminContext } from '../../setup/test-helpers'
 import { UserInputError } from 'apollo-server-errors'
 import { MachineTemplateInputType, MachineTemplateOrderBy, MachineTemplateOrderByEnum } from '@graphql/resolvers/machine_template/type'
-import { PaginationInputType } from '@utils/pagination'
-import { OrderByDirection } from '@utils/pagination'
+import { PaginationInputType, OrderByDirection } from '@utils/pagination'
 
 describe('MachineTemplateResolver', () => {
   let resolver: MachineTemplateResolver
@@ -25,7 +24,7 @@ describe('MachineTemplateResolver', () => {
     it('should return template by id with totalMachines count', async () => {
       const category = createMockMachineTemplateCategory()
       const template = createMockMachineTemplate({ categoryId: category.id })
-      
+
       const templateWithCategory = {
         ...template,
         category
@@ -64,7 +63,7 @@ describe('MachineTemplateResolver', () => {
   describe('Query: machineTemplates', () => {
     it('should return all templates with default pagination', async () => {
       const templates = Array.from({ length: 5 }, () => createMockMachineTemplate())
-      
+
       mockPrisma.machineTemplate.findMany.mockResolvedValue(templates)
       templates.forEach(() => {
         mockPrisma.machine.count.mockResolvedValueOnce(3)
@@ -80,7 +79,7 @@ describe('MachineTemplateResolver', () => {
         },
         orderBy: undefined
       })
-      
+
       expect(result).toHaveLength(5)
       result.forEach(template => {
         expect(template).toHaveProperty('totalMachines', 3)
@@ -111,9 +110,9 @@ describe('MachineTemplateResolver', () => {
 
     it('should apply custom ordering', async () => {
       const templates = Array.from({ length: 5 }, () => createMockMachineTemplate())
-      const orderBy: MachineTemplateOrderBy = { 
-        fieldName: MachineTemplateOrderByEnum.CORES, 
-        direction: OrderByDirection.DESC 
+      const orderBy: MachineTemplateOrderBy = {
+        fieldName: MachineTemplateOrderByEnum.CORES,
+        direction: OrderByDirection.DESC
       }
 
       mockPrisma.machineTemplate.findMany.mockResolvedValue(templates)

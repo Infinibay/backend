@@ -21,19 +21,19 @@ class EventManager {
   private socketService: MockSocketService
 
   // prisma parameter required to match real EventManager constructor signature
-  constructor(socketService: MockSocketService, prisma: MockPrismaClient) {
+  constructor (socketService: MockSocketService, prisma: MockPrismaClient) {
     this.resourceManagers = new Map()
     this.socketService = socketService
     // prisma is not used in this mock implementation
     void prisma
   }
 
-  registerResourceManager(resource: string, manager: ResourceEventManager): void {
+  registerResourceManager (resource: string, manager: ResourceEventManager): void {
     this.resourceManagers.set(resource, manager)
     console.log(`📋 Registered event manager for resource: ${resource}`)
   }
 
-  async dispatchEvent(resource: string, action: string, data: unknown, triggeredBy?: string): Promise<void> {
+  async dispatchEvent (resource: string, action: string, data: unknown, triggeredBy?: string): Promise<void> {
     try {
       console.log(`🎯 Dispatching event: ${resource}:${action}`, {
         dataId: (data as { id?: string })?.id,
@@ -61,67 +61,67 @@ class EventManager {
   }
 
   // Convenience methods
-  async vmCreated(vmData: unknown, triggeredBy?: string): Promise<void> {
+  async vmCreated (vmData: unknown, triggeredBy?: string): Promise<void> {
     await this.dispatchEvent('vms', 'create', vmData, triggeredBy)
   }
 
-  async vmUpdated(vmData: unknown, triggeredBy?: string): Promise<void> {
+  async vmUpdated (vmData: unknown, triggeredBy?: string): Promise<void> {
     await this.dispatchEvent('vms', 'update', vmData, triggeredBy)
   }
 
-  async vmDeleted(vmData: unknown, triggeredBy?: string): Promise<void> {
+  async vmDeleted (vmData: unknown, triggeredBy?: string): Promise<void> {
     await this.dispatchEvent('vms', 'delete', vmData, triggeredBy)
   }
 
-  async vmPowerOn(vmData: unknown, triggeredBy?: string): Promise<void> {
+  async vmPowerOn (vmData: unknown, triggeredBy?: string): Promise<void> {
     await this.dispatchEvent('vms', 'power_on', vmData, triggeredBy)
   }
 
-  async vmPowerOff(vmData: unknown, triggeredBy?: string): Promise<void> {
+  async vmPowerOff (vmData: unknown, triggeredBy?: string): Promise<void> {
     await this.dispatchEvent('vms', 'power_off', vmData, triggeredBy)
   }
 
-  async vmSuspend(vmData: unknown, triggeredBy?: string): Promise<void> {
+  async vmSuspend (vmData: unknown, triggeredBy?: string): Promise<void> {
     await this.dispatchEvent('vms', 'suspend', vmData, triggeredBy)
   }
 
-  async userCreated(userData: unknown, triggeredBy?: string): Promise<void> {
+  async userCreated (userData: unknown, triggeredBy?: string): Promise<void> {
     await this.dispatchEvent('users', 'create', userData, triggeredBy)
   }
 
-  async userUpdated(userData: unknown, triggeredBy?: string): Promise<void> {
+  async userUpdated (userData: unknown, triggeredBy?: string): Promise<void> {
     await this.dispatchEvent('users', 'update', userData, triggeredBy)
   }
 
-  async userDeleted(userData: unknown, triggeredBy?: string): Promise<void> {
+  async userDeleted (userData: unknown, triggeredBy?: string): Promise<void> {
     await this.dispatchEvent('users', 'delete', userData, triggeredBy)
   }
 
-  async departmentCreated(deptData: unknown, triggeredBy?: string): Promise<void> {
+  async departmentCreated (deptData: unknown, triggeredBy?: string): Promise<void> {
     await this.dispatchEvent('departments', 'create', deptData, triggeredBy)
   }
 
-  async departmentUpdated(deptData: unknown, triggeredBy?: string): Promise<void> {
+  async departmentUpdated (deptData: unknown, triggeredBy?: string): Promise<void> {
     await this.dispatchEvent('departments', 'update', deptData, triggeredBy)
   }
 
-  async departmentDeleted(deptData: unknown, triggeredBy?: string): Promise<void> {
+  async departmentDeleted (deptData: unknown, triggeredBy?: string): Promise<void> {
     await this.dispatchEvent('departments', 'delete', deptData, triggeredBy)
   }
 
-  async applicationCreated(appData: unknown, triggeredBy?: string): Promise<void> {
+  async applicationCreated (appData: unknown, triggeredBy?: string): Promise<void> {
     await this.dispatchEvent('applications', 'create', appData, triggeredBy)
   }
 
-  async applicationUpdated(appData: unknown, triggeredBy?: string): Promise<void> {
+  async applicationUpdated (appData: unknown, triggeredBy?: string): Promise<void> {
     await this.dispatchEvent('applications', 'update', appData, triggeredBy)
   }
 
-  async applicationDeleted(appData: unknown, triggeredBy?: string): Promise<void> {
+  async applicationDeleted (appData: unknown, triggeredBy?: string): Promise<void> {
     await this.dispatchEvent('applications', 'delete', appData, triggeredBy)
   }
 
-  getStats(): { registeredManagers: string[]; socketStats: { connectedUsers: number; userIds: string[] } } {
+  getStats (): { registeredManagers: string[]; socketStats: { connectedUsers: number; userIds: string[] } } {
     return {
       registeredManagers: Array.from(this.resourceManagers.keys()),
       socketStats: this.socketService.getStats() as { connectedUsers: number; userIds: string[] }
@@ -137,7 +137,7 @@ describe('EventManager', () => {
 
   beforeEach(() => {
     jest.clearAllMocks()
-    
+
     // Create mock SocketService
     mockSocketService = {
       sendToUser: jest.fn(),
@@ -188,10 +188,10 @@ describe('EventManager', () => {
 
     it('should allow multiple resource managers', () => {
       const mockManager2 = { handleEvent: jest.fn() } as jest.Mocked<ResourceEventManager>
-      
+
       eventManager.registerResourceManager('resource1', mockResourceManager)
       eventManager.registerResourceManager('resource2', mockManager2)
-      
+
       const stats = eventManager.getStats()
       expect(stats.registeredManagers).toContain('resource1')
       expect(stats.registeredManagers).toContain('resource2')
@@ -216,23 +216,23 @@ describe('EventManager', () => {
 
     it('should warn if no resource manager found', async () => {
       const consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {})
-      
+
       await eventManager.dispatchEvent('unknown-resource', 'create', {})
-      
+
       expect(consoleWarnSpy).toHaveBeenCalledWith('⚠️ No event manager found for resource: unknown-resource')
       expect(mockResourceManager.handleEvent).not.toHaveBeenCalled()
-      
+
       consoleWarnSpy.mockRestore()
     })
 
     it('should handle errors and send error event to user', async () => {
       const error = new Error('Test error')
       mockResourceManager.handleEvent.mockRejectedValue(error)
-      
+
       const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {})
-      
+
       await eventManager.dispatchEvent('vms', 'create', { id: 'vm-123' }, 'user-123')
-      
+
       expect(mockSocketService.sendToUser).toHaveBeenCalledWith(
         'user-123',
         'vms',
@@ -242,7 +242,7 @@ describe('EventManager', () => {
           error: 'Test error'
         }
       )
-      
+
       consoleErrorSpy.mockRestore()
     })
   })
@@ -358,9 +358,9 @@ describe('EventManager', () => {
     it('should return stats with registered managers and socket stats', () => {
       eventManager.registerResourceManager('vms', mockResourceManager)
       eventManager.registerResourceManager('users', mockResourceManager)
-      
+
       const stats = eventManager.getStats()
-      
+
       expect(stats.registeredManagers).toContain('vms')
       expect(stats.registeredManagers).toContain('users')
       expect(stats.socketStats).toEqual({

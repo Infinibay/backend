@@ -159,7 +159,7 @@ export class BackgroundTaskService {
 
   private async logRetry (task: BackgroundTask, attempt: number, error: Error): Promise<void> {
     console.log(`Retrying task ${task.name} (attempt ${attempt + 1}):`, error.message)
-    
+
     await this.eventManager.dispatchEvent('background_task', 'status_changed', {
       taskId: task.id,
       taskName: task.name,
@@ -245,7 +245,7 @@ export class BackgroundTaskService {
     running: number
     completed: number
     failed: number
-  } {
+    } {
     const stats = {
       total: this.tasks.size,
       running: 0,
@@ -255,15 +255,15 @@ export class BackgroundTaskService {
 
     for (const task of this.tasks.values()) {
       switch (task.status) {
-        case 'running':
-          stats.running++
-          break
-        case 'completed':
-          stats.completed++
-          break
-        case 'failed':
-          stats.failed++
-          break
+      case 'running':
+        stats.running++
+        break
+      case 'completed':
+        stats.completed++
+        break
+      case 'failed':
+        stats.failed++
+        break
       }
     }
 

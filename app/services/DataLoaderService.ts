@@ -1,10 +1,10 @@
 import DataLoader from 'dataloader'
-import { 
-  PrismaClient, 
-  User, 
-  MachineTemplate, 
-  Department, 
-  Application, 
+import {
+  PrismaClient,
+  User,
+  MachineTemplate,
+  Department,
+  Application,
   GlobalServiceConfig,
   ProcessSnapshot,
   SystemMetrics,
@@ -147,33 +147,33 @@ export class DataLoaderService {
 
   clear (loaderName: 'user' | 'template' | 'department' | 'application' | 'serviceConfig' | 'processSnapshot' | 'systemMetrics' | 'machineConfiguration' | 'machine'): void {
     switch (loaderName) {
-      case 'user':
-        this.userLoader.clearAll()
-        break
-      case 'template':
-        this.templateLoader.clearAll()
-        break
-      case 'department':
-        this.departmentLoader.clearAll()
-        break
-      case 'application':
-        this.applicationLoader.clearAll()
-        break
-      case 'serviceConfig':
-        this.serviceConfigLoader.clearAll()
-        break
-      case 'processSnapshot':
-        this.processSnapshotLoader.clearAll()
-        break
-      case 'systemMetrics':
-        this.systemMetricsLoader.clearAll()
-        break
-      case 'machineConfiguration':
-        this.machineConfigurationLoader.clearAll()
-        break
-      case 'machine':
-        this.machineLoader.clearAll()
-        break
+    case 'user':
+      this.userLoader.clearAll()
+      break
+    case 'template':
+      this.templateLoader.clearAll()
+      break
+    case 'department':
+      this.departmentLoader.clearAll()
+      break
+    case 'application':
+      this.applicationLoader.clearAll()
+      break
+    case 'serviceConfig':
+      this.serviceConfigLoader.clearAll()
+      break
+    case 'processSnapshot':
+      this.processSnapshotLoader.clearAll()
+      break
+    case 'systemMetrics':
+      this.systemMetricsLoader.clearAll()
+      break
+    case 'machineConfiguration':
+      this.machineConfigurationLoader.clearAll()
+      break
+    case 'machine':
+      this.machineLoader.clearAll()
+      break
     }
   }
 }

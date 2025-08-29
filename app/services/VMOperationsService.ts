@@ -14,7 +14,7 @@ export class VMOperationsService {
   private debug: Debugger
   private connection: Connection | null = null
 
-  constructor(prisma: PrismaClient) {
+  constructor (prisma: PrismaClient) {
     this.prisma = prisma
     this.debug = new Debugger('vm-operations')
   }
@@ -22,7 +22,7 @@ export class VMOperationsService {
   /**
    * Connect to libvirt
    */
-  private async connect(): Promise<Connection> {
+  private async connect (): Promise<Connection> {
     if (!this.connection) {
       this.connection = await Connection.open('qemu:///system')
       if (!this.connection) {
@@ -35,7 +35,7 @@ export class VMOperationsService {
   /**
    * Close libvirt connection
    */
-  async close(): Promise<void> {
+  async close (): Promise<void> {
     if (this.connection) {
       await this.connection.close()
       this.connection = null
@@ -45,7 +45,7 @@ export class VMOperationsService {
   /**
    * Get domain by machine ID
    */
-  private async getDomain(machineId: string): Promise<{ machine: Machine; domain: VirtualMachine }> {
+  private async getDomain (machineId: string): Promise<{ machine: Machine; domain: VirtualMachine }> {
     const machine = await this.prisma.machine.findUnique({
       where: { id: machineId }
     })
@@ -67,7 +67,7 @@ export class VMOperationsService {
   /**
    * Restart a virtual machine (graceful shutdown then start)
    */
-  async restartMachine(machineId: string): Promise<VMOperationResult> {
+  async restartMachine (machineId: string): Promise<VMOperationResult> {
     this.debug.log(`Restarting machine ${machineId}`)
 
     try {
@@ -106,7 +106,7 @@ export class VMOperationsService {
   /**
    * Force power off a virtual machine (immediate destroy)
    */
-  async forcePowerOff(machineId: string): Promise<VMOperationResult> {
+  async forcePowerOff (machineId: string): Promise<VMOperationResult> {
     this.debug.log(`Force powering off machine ${machineId}`)
 
     try {
@@ -159,7 +159,7 @@ export class VMOperationsService {
   /**
    * Reset a virtual machine (hardware reset)
    */
-  async resetMachine(machineId: string): Promise<VMOperationResult> {
+  async resetMachine (machineId: string): Promise<VMOperationResult> {
     this.debug.log(`Resetting machine ${machineId}`)
 
     try {
@@ -206,7 +206,7 @@ export class VMOperationsService {
   /**
    * Start a virtual machine
    */
-  private async startMachine(machineId: string): Promise<VMOperationResult> {
+  private async startMachine (machineId: string): Promise<VMOperationResult> {
     try {
       const { machine, domain } = await this.getDomain(machineId)
 
@@ -255,7 +255,7 @@ export class VMOperationsService {
   /**
    * Perform a graceful shutdown with timeout
    */
-  private async performGracefulShutdown(
+  private async performGracefulShutdown (
     domain: VirtualMachine,
     machineName: string
   ): Promise<VMOperationResult> {
@@ -286,7 +286,7 @@ export class VMOperationsService {
       })
 
       await Promise.race([shutdownPromise, timeoutPromise])
-      
+
       this.debug.log(`Graceful shutdown successful for machine ${machineName}`)
       return {
         success: true,
@@ -294,12 +294,12 @@ export class VMOperationsService {
       }
     } catch (error: any) {
       this.debug.log(`Graceful shutdown failed for ${machineName}: ${error.message}`)
-      
+
       // If graceful shutdown fails, try force destroy
       try {
         this.debug.log(`Attempting force destroy for ${machineName}`)
         const result = domain.destroy()
-        
+
         if (!result || result === 0) {
           return {
             success: true,
@@ -323,7 +323,7 @@ export class VMOperationsService {
   /**
    * Wait for a machine to reach a specific state
    */
-  private async waitForMachineState(
+  private async waitForMachineState (
     domain: VirtualMachine,
     targetState: 'running' | 'off',
     timeoutMs: number
@@ -333,11 +333,11 @@ export class VMOperationsService {
 
     while (Date.now() - startTime < timeoutMs) {
       const isActive = domain.isActive()
-      
+
       if (targetState === 'running' && isActive) {
         return
       }
-      
+
       if (targetState === 'off' && !isActive) {
         return
       }
@@ -352,7 +352,7 @@ export class VMOperationsService {
   /**
    * Perform a graceful restart with retries
    */
-  async performGracefulRestart(
+  async performGracefulRestart (
     machineId: string,
     maxRetries: number = 3
   ): Promise<VMOperationResult> {
@@ -360,21 +360,21 @@ export class VMOperationsService {
 
     while (retries < maxRetries) {
       const result = await this.restartMachine(machineId)
-      
+
       if (result.success) {
         return result
       }
 
       retries++
       this.debug.log(`Restart attempt ${retries} failed, retrying...`)
-      
+
       // Wait a bit before retrying
       await new Promise(resolve => setTimeout(resolve, 2000))
     }
 
     // If all retries failed, try force power off and start
-    this.debug.log(`All restart attempts failed, trying force power off and start`)
-    
+    this.debug.log('All restart attempts failed, trying force power off and start')
+
     const forceOffResult = await this.forcePowerOff(machineId)
     if (!forceOffResult.success) {
       return forceOffResult

@@ -1,6 +1,6 @@
 import { Resolver, Query, Mutation, Arg, Ctx, Authorized } from 'type-graphql'
 import { InfinibayContext } from '@utils/context'
-import { 
+import {
   ServiceManager,
   InternalServiceInfo,
   InternalServiceControlResult
@@ -23,7 +23,7 @@ export class ServiceResolver {
   /**
    * Maps internal service info to GraphQL type
    */
-  private mapToGraphQLServiceInfo(internal: InternalServiceInfo): ServiceInfo {
+  private mapToGraphQLServiceInfo (internal: InternalServiceInfo): ServiceInfo {
     const serviceInfo = new ServiceInfo()
     serviceInfo.name = internal.name
     serviceInfo.displayName = internal.displayName
@@ -37,7 +37,7 @@ export class ServiceResolver {
   /**
    * Maps internal service control result to GraphQL type
    */
-  private mapToGraphQLResult(internal: InternalServiceControlResult): ServiceStatusType {
+  private mapToGraphQLResult (internal: InternalServiceControlResult): ServiceStatusType {
     const result = new ServiceStatusType()
     result.success = internal.success
     result.message = internal.message
@@ -50,7 +50,7 @@ export class ServiceResolver {
 
   @Query(() => [ServiceInfo], { description: 'List all services running on a virtual machine' })
   @Authorized('USER')
-  async listServices(
+  async listServices (
     @Arg('machineId') machineId: string,
     @Ctx() { prisma, user }: InfinibayContext
   ): Promise<ServiceInfo[]> {
@@ -67,14 +67,14 @@ export class ServiceResolver {
       // Check if user has access to this machine
       const isAdmin = user?.role === 'ADMIN'
       const isOwner = machine.userId === user?.id
-      
+
       if (!isAdmin && !isOwner) {
         throw new Error('Access denied to this machine')
       }
 
       const serviceManager = new ServiceManager(prisma)
       const internalServices = await serviceManager.listServices(machineId)
-      
+
       // Map internal types to GraphQL types
       return internalServices.map(svc => this.mapToGraphQLServiceInfo(svc))
     } catch (error) {
@@ -85,7 +85,7 @@ export class ServiceResolver {
 
   @Mutation(() => ServiceStatusType, { description: 'Control a service on a virtual machine' })
   @Authorized('USER')
-  async controlService(
+  async controlService (
     @Arg('input') input: ServiceControlInput,
     @Ctx() { prisma, user }: InfinibayContext
   ): Promise<ServiceStatusType> {
@@ -106,7 +106,7 @@ export class ServiceResolver {
       // Check if user has access to this machine
       const isAdmin = user?.role === 'ADMIN'
       const isOwner = machine.userId === user?.id
-      
+
       if (!isAdmin && !isOwner) {
         return {
           success: false,
@@ -136,7 +136,7 @@ export class ServiceResolver {
         try {
           const socketService = getSocketService()
           const actionName = input.action.toLowerCase()
-          
+
           socketService.sendToUser(machine.userId || user.id, 'vm', `service:${actionName}`, {
             data: {
               machineId: input.machineId,

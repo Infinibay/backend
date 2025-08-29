@@ -28,9 +28,9 @@ describe('ProcessManager', () => {
 
   beforeEach(() => {
     jest.clearAllMocks()
-    
+
     processManager = new ProcessManager(mockPrisma, mockVirtioSocketWatcher)
-    
+
     // Reset libvirt mock state
     const mockLibvirt = require('libvirt-node')
     if (mockLibvirt.__resetLibvirtMockState) {
@@ -53,14 +53,14 @@ describe('ProcessManager', () => {
         status: 'running',
         os: 'linux'
       }
-      
+
       // Setup mock domain
       const mockDomain = {
         name: 'test-vm',
         state: 'running',
         getState: jest.fn().mockReturnValue({ result: 1 })
       }
-      
+
       // Mock Machine.lookupByName to return the domain
       const mockLibvirt = require('libvirt-node')
       mockLibvirt.Machine.lookupByName.mockReturnValue(mockDomain)
@@ -118,7 +118,7 @@ describe('ProcessManager', () => {
         status: 'running',
         os: 'linux'
       }
-      
+
       // Setup mock domain
       const mockDomain2 = {
         name: 'test-vm',
@@ -131,7 +131,7 @@ describe('ProcessManager', () => {
         success: false,
         error: 'InfiniService not available'
       })
-      
+
       // Setup mock domain in libvirt
       const mockLibvirt = require('libvirt-node')
       mockLibvirt.Machine.lookupByName.mockReturnValue(mockDomain2)
@@ -145,7 +145,7 @@ describe('ProcessManager', () => {
 
     it('should throw error when machine is not found', async () => {
       const machineId = 'non-existent'
-      
+
       ;(mockPrisma.machine.findUnique as jest.Mock).mockResolvedValue(null)
 
       await expect(processManager.listProcesses(machineId))
@@ -243,7 +243,7 @@ describe('ProcessManager', () => {
         success: false,
         error: 'InfiniService not available'
       })
-      
+
       // Setup mock domain in libvirt
       const mockLibvirt = require('libvirt-node')
       const mockDomain3 = {
@@ -295,7 +295,7 @@ describe('ProcessManager', () => {
       expect(result).toHaveLength(2)
       expect(result[0].name).toBe('high-cpu')
       expect(result[1].name).toBe('med-cpu')
-      
+
       // Verify the command was sent with correct params
       expect(mockVirtioSocketWatcher.sendSafeCommand).toHaveBeenCalledWith(
         machineId,
@@ -332,7 +332,7 @@ describe('ProcessManager', () => {
       expect(result).toHaveLength(2)
       expect(result[0].name).toBe('high-mem')
       expect(result[1].name).toBe('med-mem')
-      
+
       // Verify the command was sent with correct params
       expect(mockVirtioSocketWatcher.sendSafeCommand).toHaveBeenCalledWith(
         machineId,

@@ -28,6 +28,7 @@ export class LibvirtConnectionPool extends SingletonService {
     reject: (error: Error) => void
     timeout: NodeJS.Timeout
   }> = []
+
   private poolConfig: PoolConfig
   private cleanupInterval?: NodeJS.Timeout
   private connectionErrors = 0
@@ -72,7 +73,7 @@ export class LibvirtConnectionPool extends SingletonService {
     for (let i = 0; i < this.poolConfig.minConnections; i++) {
       connectionPromises.push(this.createConnection())
     }
-    
+
     try {
       await Promise.all(connectionPromises)
       this.debug.log('info', `Created ${this.poolConfig.minConnections} initial connections`)
@@ -122,7 +123,7 @@ export class LibvirtConnectionPool extends SingletonService {
 
   async acquire (): Promise<Connection> {
     this.requireInitialized()
-    
+
     return this.executeWithErrorHandling(async () => {
       // Try to find available connection
       let pooled = this.pool.find(p => !p.inUse && this.isConnectionHealthy(p))
@@ -151,7 +152,7 @@ export class LibvirtConnectionPool extends SingletonService {
 
   async release (connection: Connection): Promise<void> {
     const pooled = this.pool.find(p => p.connection === connection)
-    
+
     if (!pooled) {
       this.debug.log('warn', 'Attempted to release unknown connection')
       return
@@ -174,7 +175,7 @@ export class LibvirtConnectionPool extends SingletonService {
   private async createConnection (): Promise<PooledConnection> {
     const libvirt = await import('../../lib/libvirt-node')
     const connection = libvirt.Connection.open(this.poolConfig.connectionUri || 'qemu:///system')
-    
+
     if (!connection) {
       throw new AppError(
         'Failed to open libvirt connection',
@@ -183,7 +184,7 @@ export class LibvirtConnectionPool extends SingletonService {
         true
       )
     }
-    
+
     const pooled: PooledConnection = {
       connection,
       inUse: false,
@@ -194,7 +195,7 @@ export class LibvirtConnectionPool extends SingletonService {
 
     this.pool.push(pooled)
     this.debug.log('info', `Created new connection ${pooled.id}`)
-    
+
     return pooled
   }
 
@@ -214,7 +215,7 @@ export class LibvirtConnectionPool extends SingletonService {
       }, this.poolConfig.acquireTimeout)
 
       this.waitQueue.push({ resolve, reject, timeout })
-      
+
       this.debug.log('info', `Request waiting for connection. Queue size: ${this.waitQueue.length}`)
     })
   }
@@ -224,7 +225,7 @@ export class LibvirtConnectionPool extends SingletonService {
     const toRemove: PooledConnection[] = []
 
     for (const pooled of this.pool) {
-      if (!pooled.inUse && 
+      if (!pooled.inUse &&
           now - pooled.lastUsed > this.poolConfig.idleTimeout &&
           this.pool.filter(p => !p.inUse).length > this.poolConfig.minConnections) {
         toRemove.push(pooled)
@@ -250,12 +251,12 @@ export class LibvirtConnectionPool extends SingletonService {
       // Simple health check - could be enhanced
       const age = Date.now() - pooled.createdAt
       const maxAge = 3600000 // 1 hour
-      
+
       if (age > maxAge) {
         this.debug.log('info', `Connection ${pooled.id} exceeded max age`)
         return false
       }
-      
+
       return true
     } catch (error) {
       this.debug.log('warn', `Connection ${pooled.id} health check failed: ${error instanceof Error ? error.message : String(error)}`)
@@ -266,9 +267,9 @@ export class LibvirtConnectionPool extends SingletonService {
   private handleConnectionError (error: Error): void {
     this.connectionErrors++
     this.lastErrorTime = Date.now()
-    
+
     if (this.connectionErrors > 5) {
-      this.debug.log('error', `Multiple connection failures detected. Pool health may be degraded.`)
+      this.debug.log('error', 'Multiple connection failures detected. Pool health may be degraded.')
       // Could emit health status event here
     }
   }
@@ -287,7 +288,7 @@ export class LibvirtConnectionPool extends SingletonService {
     operation: (connection: Connection) => Promise<T>
   ): Promise<T> {
     const connection = await this.acquire()
-    
+
     try {
       return await operation(connection)
     } finally {
@@ -302,7 +303,7 @@ export class LibvirtConnectionPool extends SingletonService {
     available: number
     waitQueueSize: number
     connectionErrors: number
-  } {
+    } {
     return {
       total: this.pool.length,
       inUse: this.pool.filter(p => p.inUse).length,

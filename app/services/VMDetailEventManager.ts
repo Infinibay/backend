@@ -13,7 +13,7 @@ export class VMDetailEventManager {
   private socketService: SocketService
   private prisma: PrismaClient
 
-  constructor(prisma: PrismaClient) {
+  constructor (prisma: PrismaClient) {
     this.prisma = prisma
     this.socketService = getSocketService()
   }
@@ -21,7 +21,7 @@ export class VMDetailEventManager {
   /**
    * Emit an event to the owner of a VM
    */
-  private async emitToVMOwner(
+  private async emitToVMOwner (
     machineId: string,
     eventType: string,
     data: any,
@@ -58,124 +58,124 @@ export class VMDetailEventManager {
   }
 
   // Process Events
-  async emitProcessKilled(machineId: string, pid: number, processName?: string, userId?: string): Promise<void> {
+  async emitProcessKilled (machineId: string, pid: number, processName?: string, userId?: string): Promise<void> {
     await this.emitToVMOwner(machineId, 'process:killed', { pid, processName }, userId)
   }
 
-  async emitProcessesKilled(machineId: string, processes: Array<{ pid: number; processName?: string }>, userId?: string): Promise<void> {
+  async emitProcessesKilled (machineId: string, processes: Array<{ pid: number; processName?: string }>, userId?: string): Promise<void> {
     await this.emitToVMOwner(machineId, 'processes:killed', { processes }, userId)
   }
 
   // Service Events
-  async emitServiceStatusChanged(machineId: string, serviceName: string, action: string, newStatus?: string, userId?: string): Promise<void> {
-    await this.emitToVMOwner(machineId, `service:${action.toLowerCase()}`, { 
-      serviceName, 
-      action, 
-      newStatus 
+  async emitServiceStatusChanged (machineId: string, serviceName: string, action: string, newStatus?: string, userId?: string): Promise<void> {
+    await this.emitToVMOwner(machineId, `service:${action.toLowerCase()}`, {
+      serviceName,
+      action,
+      newStatus
     }, userId)
   }
 
   // Package Events
-  async emitPackageInstalling(machineId: string, packageName: string, userId?: string): Promise<void> {
+  async emitPackageInstalling (machineId: string, packageName: string, userId?: string): Promise<void> {
     await this.emitToVMOwner(machineId, 'package:installing', { packageName }, userId)
   }
 
-  async emitPackageInstalled(machineId: string, packageName: string, userId?: string): Promise<void> {
+  async emitPackageInstalled (machineId: string, packageName: string, userId?: string): Promise<void> {
     await this.emitToVMOwner(machineId, 'package:installed', { packageName, success: true }, userId)
   }
 
-  async emitPackageRemoving(machineId: string, packageName: string, userId?: string): Promise<void> {
+  async emitPackageRemoving (machineId: string, packageName: string, userId?: string): Promise<void> {
     await this.emitToVMOwner(machineId, 'package:removing', { packageName }, userId)
   }
 
-  async emitPackageRemoved(machineId: string, packageName: string, userId?: string): Promise<void> {
+  async emitPackageRemoved (machineId: string, packageName: string, userId?: string): Promise<void> {
     await this.emitToVMOwner(machineId, 'package:removed', { packageName, success: true }, userId)
   }
 
-  async emitPackageUpdating(machineId: string, packageName: string, userId?: string): Promise<void> {
+  async emitPackageUpdating (machineId: string, packageName: string, userId?: string): Promise<void> {
     await this.emitToVMOwner(machineId, 'package:updating', { packageName }, userId)
   }
 
-  async emitPackageUpdated(machineId: string, packageName: string, userId?: string): Promise<void> {
+  async emitPackageUpdated (machineId: string, packageName: string, userId?: string): Promise<void> {
     await this.emitToVMOwner(machineId, 'package:updated', { packageName, success: true }, userId)
   }
 
   // Firewall Events
-  async emitFirewallTemplateApplied(machineId: string, template: string, state: any, userId?: string): Promise<void> {
+  async emitFirewallTemplateApplied (machineId: string, template: string, state: any, userId?: string): Promise<void> {
     await this.emitToVMOwner(machineId, 'firewall:template:applied', { template, state }, userId)
   }
 
-  async emitFirewallTemplateRemoved(machineId: string, template: string, state: any, userId?: string): Promise<void> {
+  async emitFirewallTemplateRemoved (machineId: string, template: string, state: any, userId?: string): Promise<void> {
     await this.emitToVMOwner(machineId, 'firewall:template:removed', { template, state }, userId)
   }
 
-  async emitFirewallRuleCreated(machineId: string, rule: any, state: any, userId?: string): Promise<void> {
+  async emitFirewallRuleCreated (machineId: string, rule: any, state: any, userId?: string): Promise<void> {
     await this.emitToVMOwner(machineId, 'firewall:rule:created', { rule, state }, userId)
   }
 
-  async emitFirewallRuleRemoved(machineId: string, ruleId: string, state: any, userId?: string): Promise<void> {
+  async emitFirewallRuleRemoved (machineId: string, ruleId: string, state: any, userId?: string): Promise<void> {
     await this.emitToVMOwner(machineId, 'firewall:rule:removed', { ruleId, state }, userId)
   }
 
   // Snapshot Events
-  async emitSnapshotCreated(machineId: string, snapshot: any, userId?: string): Promise<void> {
+  async emitSnapshotCreated (machineId: string, snapshot: any, userId?: string): Promise<void> {
     await this.emitToVMOwner(machineId, 'snapshot:created', { snapshot }, userId)
   }
 
-  async emitSnapshotRestored(machineId: string, snapshotName: string, userId?: string): Promise<void> {
+  async emitSnapshotRestored (machineId: string, snapshotName: string, userId?: string): Promise<void> {
     await this.emitToVMOwner(machineId, 'snapshot:restored', { snapshotName }, userId)
   }
 
-  async emitSnapshotDeleted(machineId: string, snapshotName: string, userId?: string): Promise<void> {
+  async emitSnapshotDeleted (machineId: string, snapshotName: string, userId?: string): Promise<void> {
     await this.emitToVMOwner(machineId, 'snapshot:deleted', { snapshotName }, userId)
   }
 
   // VM Operation Events
-  async emitVMRestarting(machineId: string, userId?: string): Promise<void> {
+  async emitVMRestarting (machineId: string, userId?: string): Promise<void> {
     await this.emitToVMOwner(machineId, 'restarting', {}, userId)
   }
 
-  async emitVMRestarted(machineId: string, status: string = 'running', userId?: string): Promise<void> {
+  async emitVMRestarted (machineId: string, status: string = 'running', userId?: string): Promise<void> {
     await this.emitToVMOwner(machineId, 'restarted', { status }, userId)
   }
 
-  async emitVMForcedPowerOff(machineId: string, status: string = 'shutoff', userId?: string): Promise<void> {
+  async emitVMForcedPowerOff (machineId: string, status: string = 'shutoff', userId?: string): Promise<void> {
     await this.emitToVMOwner(machineId, 'forced:poweroff', { status }, userId)
   }
 
-  async emitVMReset(machineId: string, status: string = 'running', userId?: string): Promise<void> {
+  async emitVMReset (machineId: string, status: string = 'running', userId?: string): Promise<void> {
     await this.emitToVMOwner(machineId, 'reset', { status }, userId)
   }
 
   // Metrics Events
-  async emitMetricsUpdated(machineId: string, metrics: any, userId?: string): Promise<void> {
+  async emitMetricsUpdated (machineId: string, metrics: any, userId?: string): Promise<void> {
     await this.emitToVMOwner(machineId, 'metrics:updated', { metrics }, userId)
   }
 
   // Status Events
-  async emitStatusChanged(machineId: string, status: string, previousStatus?: string, userId?: string): Promise<void> {
+  async emitStatusChanged (machineId: string, status: string, previousStatus?: string, userId?: string): Promise<void> {
     await this.emitToVMOwner(machineId, 'status:changed', { status, previousStatus }, userId)
   }
 
   // Alert Events
-  async emitCriticalAlert(machineId: string, message: string, timestamp?: Date, userId?: string): Promise<void> {
-    await this.emitToVMOwner(machineId, 'alert:critical', { 
-      message, 
-      timestamp: timestamp || new Date() 
+  async emitCriticalAlert (machineId: string, message: string, timestamp?: Date, userId?: string): Promise<void> {
+    await this.emitToVMOwner(machineId, 'alert:critical', {
+      message,
+      timestamp: timestamp || new Date()
     }, userId)
   }
 
-  async emitWarningAlert(machineId: string, message: string, timestamp?: Date, userId?: string): Promise<void> {
-    await this.emitToVMOwner(machineId, 'alert:warning', { 
-      message, 
-      timestamp: timestamp || new Date() 
+  async emitWarningAlert (machineId: string, message: string, timestamp?: Date, userId?: string): Promise<void> {
+    await this.emitToVMOwner(machineId, 'alert:warning', {
+      message,
+      timestamp: timestamp || new Date()
     }, userId)
   }
 
-  async emitInfoAlert(machineId: string, message: string, timestamp?: Date, userId?: string): Promise<void> {
-    await this.emitToVMOwner(machineId, 'alert:info', { 
-      message, 
-      timestamp: timestamp || new Date() 
+  async emitInfoAlert (machineId: string, message: string, timestamp?: Date, userId?: string): Promise<void> {
+    await this.emitToVMOwner(machineId, 'alert:info', {
+      message,
+      timestamp: timestamp || new Date()
     }, userId)
   }
 }

@@ -7,21 +7,20 @@ import si from 'systeminformation'
 import { MachineCleanupService } from './cleanup/machineCleanupService'
 import { HardwareUpdateService } from './vm/hardwareUpdateService'
 import { getEventManager } from '../services/EventManager'
-import { CreateMachineInputType, UpdateMachineHardwareInput } from '../graphql/resolvers/machine/type'
-import { SuccessType } from '../graphql/resolvers/machine/type'
+import { CreateMachineInputType, UpdateMachineHardwareInput, SuccessType } from '../graphql/resolvers/machine/type'
 
 export class MachineLifecycleService {
   private prisma: PrismaClient
   private user: User | null
   private debug: Debugger
 
-  constructor(prisma: PrismaClient, user: User | null) {
+  constructor (prisma: PrismaClient, user: User | null) {
     this.prisma = prisma
     this.user = user
     this.debug = new Debugger('machine-lifecycle-service')
   }
 
-  async createMachine(input: CreateMachineInputType): Promise<Machine> {
+  async createMachine (input: CreateMachineInputType): Promise<Machine> {
     let cpuCores: number
     let ramGB: number
     let diskSizeGB: number
@@ -119,7 +118,7 @@ export class MachineLifecycleService {
     return machine
   }
 
-  async destroyMachine(id: string): Promise<SuccessType> {
+  async destroyMachine (id: string): Promise<SuccessType> {
     const isAdmin = this.user?.role === 'ADMIN'
     const whereClause = isAdmin ? { id } : { id, userId: this.user?.id }
     const machine = await this.prisma.machine.findFirst({
@@ -149,7 +148,7 @@ export class MachineLifecycleService {
     }
   }
 
-  async updateMachineHardware(input: UpdateMachineHardwareInput): Promise<Machine> {
+  async updateMachineHardware (input: UpdateMachineHardwareInput): Promise<Machine> {
     const { id, cpuCores, ramGB, gpuPciAddress } = input
 
     const machine = await this.prisma.machine.findUnique({
@@ -222,23 +221,23 @@ export class MachineLifecycleService {
     return updatedMachine
   }
 
-  private async backgroundCode(id: string, username: string, password: string, productKey: string | undefined, pciBus: string | null) {
+  private async backgroundCode (id: string, username: string, password: string, productKey: string | undefined, pciBus: string | null) {
     try {
       const machine = await this.prisma.machine.findUnique({
         where: {
           id
         }
       })
-      
+
       if (!machine) {
         console.error(`Machine with ID ${id} not found in background process`)
         return
       }
-      
+
       const virtManager = new VirtManager()
       virtManager.setPrisma(this.prisma)
       await virtManager.createMachine(machine, username, password, productKey, pciBus)
-      
+
       // Update machine status to running
       const updatedMachine = await this.prisma.machine.update({
         where: {
@@ -254,7 +253,7 @@ export class MachineLifecycleService {
           configuration: true
         }
       })
-      
+
       // Emit real-time event for VM status update
       try {
         const eventManager = getEventManager()
@@ -271,7 +270,7 @@ export class MachineLifecycleService {
   /**
    * Delegate hardware update to the dedicated HardwareUpdateService
    */
-  private async backgroundUpdateHardware(machineId: string): Promise<void> {
+  private async backgroundUpdateHardware (machineId: string): Promise<void> {
     this.debug.log(`Starting background hardware update for machine ${machineId}`)
 
     // We don't await this so it runs in the background

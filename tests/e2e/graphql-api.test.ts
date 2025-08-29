@@ -122,23 +122,23 @@ describe('E2E GraphQL API Tests', () => {
           schema,
           query: TestMutations.LOGIN,
           variables: { email: mockUser.email, password },
-          context: { 
-            req: {}, 
+          context: {
+            req: {},
             res: {} as express.Response,
-            prisma, 
-            user: null, 
-            setupMode: false 
+            prisma,
+            user: null,
+            setupMode: false
           } as InfinibayContext
         })
 
         expect(result.errors).toBeUndefined()
         expect((result.data?.login as { token?: string })?.token).toBeDefined()
-        
+
         const token = jwt.verify(
           (result.data?.login as { token: string }).token,
           process.env.TOKENKEY || 'test-secret'
         ) as { userId: string }
-        
+
         expect(token.userId).toBe(mockUser.id)
       })
 
@@ -150,12 +150,12 @@ describe('E2E GraphQL API Tests', () => {
           schema,
           query: TestMutations.LOGIN,
           variables: { email: mockUser.email, password: 'wrongPassword' },
-          context: { 
-            req: {}, 
+          context: {
+            req: {},
             res: {} as express.Response,
-            prisma, 
-            user: null, 
-            setupMode: false 
+            prisma,
+            user: null,
+            setupMode: false
           } as InfinibayContext
         })
 
@@ -194,12 +194,12 @@ describe('E2E GraphQL API Tests', () => {
         const result = await executeGraphQL({
           schema,
           query: TestQueries.CURRENT_USER,
-          context: { 
-            req: {}, 
+          context: {
+            req: {},
             res: {} as express.Response,
-            prisma, 
-            user: null, 
-            setupMode: false 
+            prisma,
+            user: null,
+            setupMode: false
           } as InfinibayContext
         })
 
@@ -213,7 +213,7 @@ describe('E2E GraphQL API Tests', () => {
     describe('Queries', () => {
       it('should get current user', async () => {
         const mockUser = createMockUser()
-        
+
         const result = await executeGraphQL({
           schema,
           query: TestQueries.CURRENT_USER,
@@ -379,7 +379,7 @@ describe('E2E GraphQL API Tests', () => {
         const result = await executeGraphQL({
           schema,
           query: TestQueries.MACHINES,
-          variables: { 
+          variables: {
             pagination: { take: 10, skip: 0 },
             filter: { status: 'running' }
           },
@@ -554,7 +554,7 @@ describe('E2E GraphQL API Tests', () => {
             }
           },
           context: {
-            req: { headers: { authorization: `token` } },
+            req: { headers: { authorization: 'token' } },
             res: {} as express.Response,
             prisma,
             user: adminUser,

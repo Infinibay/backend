@@ -11,7 +11,7 @@ export enum FirewallTemplate {
 
 export interface SimplifiedRule {
   id?: string
-  port: string // Always string to be compatible with GraphQL types  
+  port: string // Always string to be compatible with GraphQL types
   protocol: string
   direction: 'in' | 'out' | 'inout'
   action: 'accept' | 'drop' | 'reject'
@@ -79,7 +79,7 @@ export class FirewallSimplifierService {
     }]
   ])
 
-  constructor(prisma: PrismaClient) {
+  constructor (prisma: PrismaClient) {
     this.prisma = prisma
     this.networkFilterService = new NetworkFilterService(prisma)
     this.debug = new Debugger('firewall-simplifier')
@@ -88,7 +88,7 @@ export class FirewallSimplifierService {
   /**
    * Get the current firewall state for a VM
    */
-  async getVMFirewallState(vmId: string): Promise<VMFirewallState> {
+  async getVMFirewallState (vmId: string): Promise<VMFirewallState> {
     const machine = await this.prisma.machine.findUnique({
       where: { id: vmId }
     })
@@ -109,7 +109,7 @@ export class FirewallSimplifierService {
   /**
    * Apply a firewall template to a VM
    */
-  async applyFirewallTemplate(vmId: string, template: FirewallTemplate): Promise<VMFirewallState> {
+  async applyFirewallTemplate (vmId: string, template: FirewallTemplate): Promise<VMFirewallState> {
     this.debug.log(`Applying template ${template} to VM ${vmId}`)
 
     const machine = await this.prisma.machine.findUnique({
@@ -153,7 +153,7 @@ export class FirewallSimplifierService {
   /**
    * Remove a firewall template from a VM
    */
-  async removeFirewallTemplate(vmId: string, template: FirewallTemplate): Promise<VMFirewallState> {
+  async removeFirewallTemplate (vmId: string, template: FirewallTemplate): Promise<VMFirewallState> {
     this.debug.log(`Removing template ${template} from VM ${vmId}`)
 
     const machine = await this.prisma.machine.findUnique({
@@ -197,9 +197,9 @@ export class FirewallSimplifierService {
   /**
    * Toggle a firewall template (apply if not applied, remove if applied)
    */
-  async toggleFirewallTemplate(vmId: string, template: FirewallTemplate): Promise<VMFirewallState> {
+  async toggleFirewallTemplate (vmId: string, template: FirewallTemplate): Promise<VMFirewallState> {
     const state = await this.getVMFirewallState(vmId)
-    
+
     if (state.appliedTemplates.includes(template)) {
       return this.removeFirewallTemplate(vmId, template)
     } else {
@@ -210,7 +210,7 @@ export class FirewallSimplifierService {
   /**
    * Get simplified firewall rules for a VM
    */
-  async getSimplifiedRules(vmId: string): Promise<SimplifiedRule[]> {
+  async getSimplifiedRules (vmId: string): Promise<SimplifiedRule[]> {
     const machine = await this.prisma.machine.findUnique({
       where: { id: vmId },
       include: {
@@ -248,7 +248,7 @@ export class FirewallSimplifierService {
   /**
    * Add a custom firewall rule
    */
-  async addCustomRule(vmId: string, rule: SimplifiedRule): Promise<VMFirewallState> {
+  async addCustomRule (vmId: string, rule: SimplifiedRule): Promise<VMFirewallState> {
     const machine = await this.prisma.machine.findUnique({
       where: { id: vmId },
       include: { nwFilters: true }
@@ -259,7 +259,7 @@ export class FirewallSimplifierService {
     }
 
     const currentState = this.parseFirewallState(machine.firewallTemplates)
-    
+
     // Add custom rule
     rule.sources = ['CUSTOM']
     currentState.customRules.push(rule)
@@ -285,20 +285,20 @@ export class FirewallSimplifierService {
   /**
    * Get available firewall templates
    */
-  getAvailableTemplates(): TemplateDefinition[] {
+  getAvailableTemplates (): TemplateDefinition[] {
     return Array.from(this.templates.values())
   }
 
   /**
    * Get template information
    */
-  getTemplateInfo(template: FirewallTemplate): TemplateDefinition | undefined {
+  getTemplateInfo (template: FirewallTemplate): TemplateDefinition | undefined {
     return this.templates.get(template)
   }
 
   // Private helper methods
 
-  private parseFirewallState(data: any): Omit<VMFirewallState, 'effectiveRules'> {
+  private parseFirewallState (data: any): Omit<VMFirewallState, 'effectiveRules'> {
     if (!data) {
       return {
         appliedTemplates: [],
@@ -324,7 +324,7 @@ export class FirewallSimplifierService {
     }
   }
 
-  private async calculateEffectiveRules(
+  private async calculateEffectiveRules (
     templates: string[],
     customRules: SimplifiedRule[]
   ): Promise<SimplifiedRule[]> {
@@ -335,12 +335,12 @@ export class FirewallSimplifierService {
       // templateName is already a string enum value like 'WEB_SERVER'
       const template = templateName as unknown as FirewallTemplate
       const templateDef = this.templates.get(template)
-      
+
       if (templateDef) {
         for (const rule of templateDef.rules) {
           const key = this.getRuleKey(rule)
           const existing = rulesMap.get(key)
-          
+
           if (existing) {
             // Add source to existing rule
             if (!existing.sources) existing.sources = []
@@ -362,7 +362,7 @@ export class FirewallSimplifierService {
     for (const rule of customRules) {
       const key = this.getRuleKey(rule)
       const existing = rulesMap.get(key)
-      
+
       if (existing) {
         if (!existing.sources) existing.sources = []
         if (!existing.sources.includes('CUSTOM')) {
@@ -379,11 +379,11 @@ export class FirewallSimplifierService {
     return Array.from(rulesMap.values())
   }
 
-  private getRuleKey(rule: SimplifiedRule): string {
+  private getRuleKey (rule: SimplifiedRule): string {
     return `${rule.port}-${rule.protocol}-${rule.direction}-${rule.action}`
   }
 
-  private async syncFirewallRules(
+  private async syncFirewallRules (
     vmId: string,
     machine: any,
     effectiveRules: SimplifiedRule[]
@@ -420,13 +420,13 @@ export class FirewallSimplifierService {
     await this.networkFilterService.flushNWFilter(vmFilter.id, true)
   }
 
-  private async createNWFilterRule(
+  private async createNWFilterRule (
     filterId: string,
     rule: SimplifiedRule,
     priority: number
   ): Promise<void> {
     const port = rule.port === 'all' ? undefined : Number(rule.port)
-    
+
     await this.networkFilterService.createRule(
       filterId,
       rule.action,
@@ -441,7 +441,7 @@ export class FirewallSimplifierService {
     )
   }
 
-  private async getCurrentNWFilterRules(machine: any): Promise<FWRule[]> {
+  private async getCurrentNWFilterRules (machine: any): Promise<FWRule[]> {
     const vmFilter = machine.nwFilters?.[0]?.nwFilter
     if (!vmFilter) return []
 
@@ -453,22 +453,22 @@ export class FirewallSimplifierService {
     return filter?.rules || []
   }
 
-  private identifyRulesToRemove(
+  private identifyRulesToRemove (
     currentRules: FWRule[],
     effectiveRules: SimplifiedRule[]
   ): FWRule[] {
     const effectiveKeys = new Set(effectiveRules.map(r => this.getRuleKey(r)))
-    
+
     return currentRules.filter(rule => {
       const simplified = this.convertToSimplifiedRule(rule)
       if (!simplified) return false
-      
+
       const key = this.getRuleKey(simplified)
       return !effectiveKeys.has(key)
     })
   }
 
-  private async removeNWFilterRules(machine: any, rulesToRemove: FWRule[]): Promise<void> {
+  private async removeNWFilterRules (machine: any, rulesToRemove: FWRule[]): Promise<void> {
     for (const rule of rulesToRemove) {
       await this.networkFilterService.deleteRule(rule.id)
     }
@@ -480,14 +480,14 @@ export class FirewallSimplifierService {
     }
   }
 
-  private convertToSimplifiedRule(rule: FWRule): SimplifiedRule | null {
+  private convertToSimplifiedRule (rule: FWRule): SimplifiedRule | null {
     // Skip complex rules that can't be simplified
     if (rule.srcIpAddr || rule.dstIpAddr || rule.srcIpMask || rule.dstIpMask) {
       return null
     }
 
     const port = rule.dstPortStart || rule.srcPortStart
-    
+
     return {
       id: rule.id,
       port: port ? port.toString() : 'all',
@@ -498,20 +498,20 @@ export class FirewallSimplifierService {
     }
   }
 
-  private deduplicateRules(rules: SimplifiedRule[]): SimplifiedRule[] {
+  private deduplicateRules (rules: SimplifiedRule[]): SimplifiedRule[] {
     const seen = new Map<string, SimplifiedRule>()
-    
+
     for (const rule of rules) {
       const key = this.getRuleKey(rule)
       if (!seen.has(key)) {
         seen.set(key, rule)
       }
     }
-    
+
     return Array.from(seen.values())
   }
 
-  private async updateFirewallState(vmId: string, state: Omit<VMFirewallState, 'effectiveRules'>): Promise<void> {
+  private async updateFirewallState (vmId: string, state: Omit<VMFirewallState, 'effectiveRules'>): Promise<void> {
     const stateWithSync = {
       appliedTemplates: state.appliedTemplates,
       customRules: state.customRules as any, // Cast to any to satisfy Prisma Json type

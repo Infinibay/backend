@@ -1,5 +1,5 @@
 import 'reflect-metadata'
-import { PrismaClient } from '@prisma/client'
+import { PrismaClient, User, Prisma } from '@prisma/client'
 import { MachineLifecycleService } from '@services/machineLifecycleService'
 import { MachineCleanupService } from '@services/cleanup/machineCleanupService'
 import {
@@ -12,6 +12,7 @@ import {
   createMockApplication,
   generateId
 } from '../setup/mock-factories'
+import { OsEnum } from '@graphql/resolvers/machine/type'
 import { mockPrisma } from '../setup/jest.setup'
 import { Connection } from 'libvirt-node'
 
@@ -51,10 +52,10 @@ describe('VM Lifecycle Integration Tests', () => {
   let prisma: PrismaClient
   let lifecycleService: MachineLifecycleService
   let cleanupService: MachineCleanupService
-  let mockAdmin: any
+  let mockAdmin: User
 
   beforeAll(() => {
-    prisma = mockPrisma as any
+    prisma = mockPrisma as PrismaClient
     mockAdmin = createMockAdminUser()
   })
 
@@ -132,7 +133,7 @@ describe('VM Lifecycle Integration Tests', () => {
         name: 'Test VM',
         templateId: template.id,
         departmentId: department.id,
-        os: 'ubuntu-22.04',
+        os: OsEnum.UBUNTU,
         username: 'testuser',
         password: 'TestPass123!',
         productKey: null,
@@ -165,7 +166,7 @@ describe('VM Lifecycle Integration Tests', () => {
             name: 'Test VM',
             userId: mockAdmin.id,
             status: 'building',
-            os: 'ubuntu-22.04',
+            os: OsEnum.UBUNTU,
             templateId: template.id,
             departmentId: department.id,
             cpuCores: template.cores,
@@ -191,9 +192,12 @@ describe('VM Lifecycle Integration Tests', () => {
       const input = {
         name: 'Test VM',
         templateId: 'non-existent-template',
-        os: 'ubuntu-22.04',
+        departmentId: 'dept-id',
+        os: OsEnum.UBUNTU,
         username: 'testuser',
         password: 'TestPass123!',
+        productKey: null,
+        pciBus: null,
         applications: []
       }
 
@@ -218,9 +222,12 @@ describe('VM Lifecycle Integration Tests', () => {
       const input = {
         name: 'Test VM',
         templateId: template.id,
-        os: 'ubuntu-22.04',
+        departmentId: 'non-existent-dept',
+        os: OsEnum.UBUNTU,
         username: 'testuser',
         password: 'TestPass123!',
+        productKey: null,
+        pciBus: null,
         applications: []
       }
 
@@ -396,9 +403,12 @@ describe('VM Lifecycle Integration Tests', () => {
       const input = {
         name: 'Resource Test VM',
         templateId: template.id,
-        os: 'ubuntu-22.04',
+        departmentId: department.id,
+        os: OsEnum.UBUNTU,
         username: 'testuser',
         password: 'TestPass123!',
+        productKey: null,
+        pciBus: null,
         applications: []
       }
 
@@ -670,9 +680,12 @@ describe('VM Lifecycle Integration Tests', () => {
       const input = {
         name: 'User VM',
         templateId: template.id,
-        os: 'ubuntu-22.04',
+        departmentId: department.id,
+        os: OsEnum.UBUNTU,
         username: 'testuser',
         password: 'TestPass123!',
+        productKey: null,
+        pciBus: null,
         applications: []
       }
 
@@ -750,7 +763,7 @@ describe('VM Lifecycle Integration Tests', () => {
       (Connection.open as jest.Mock).mockResolvedValue(mockConn)
 
       // Simulate atomic state change
-      await prisma.$transaction(async (tx: any) => {
+      await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
         await mockDomain.create()
         await tx.machine.update({
           where: { id: machine.id },

@@ -6,28 +6,28 @@ import { ObjectType, Field, Int, Float, ID, registerEnumType } from 'type-graphq
 @ObjectType()
 export class ProcessInfo {
   @Field(() => Int)
-  pid!: number
+    pid!: number
 
   @Field()
-  name!: string
+    name!: string
 
   @Field(() => Float)
-  cpuUsage!: number
+    cpuUsage!: number
 
   @Field(() => Int)
-  memoryKb!: number
+    memoryKb!: number
 
   @Field()
-  status!: string
+    status!: string
 
   @Field({ nullable: true })
-  commandLine?: string
+    commandLine?: string
 
   @Field({ nullable: true })
-  user?: string
+    user?: string
 
   @Field({ nullable: true })
-  startTime?: Date
+    startTime?: Date
 }
 
 /**
@@ -36,19 +36,19 @@ export class ProcessInfo {
 @ObjectType()
 export class ProcessControlResult {
   @Field()
-  success!: boolean
+    success!: boolean
 
   @Field()
-  message!: string
+    message!: string
 
   @Field(() => Int, { nullable: true })
-  pid?: number
+    pid?: number
 
   @Field({ nullable: true })
-  processName?: string
+    processName?: string
 
   @Field({ nullable: true })
-  error?: string
+    error?: string
 }
 
 /**

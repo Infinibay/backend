@@ -19,7 +19,7 @@ describe('SecurityResolver', () => {
   beforeEach(() => {
     jest.clearAllMocks()
     resolver = new SecurityResolver()
-    
+
     // Create a mock FirewallService
     mockFirewallService = {
       getServices: jest.fn(),
@@ -30,7 +30,7 @@ describe('SecurityResolver', () => {
       toggleDepartmentService: jest.fn(),
       toggleGlobalService: jest.fn()
     } as unknown as jest.Mocked<FirewallService>
-    
+
     // Mock the private getFirewallService method
     // @ts-ignore - accessing private method for testing
     resolver.getFirewallService = jest.fn().mockReturnValue(mockFirewallService)
@@ -79,7 +79,7 @@ describe('SecurityResolver', () => {
       const mockStatus = [
         {
           serviceId: 'http',
-          vmId: vmId,
+          vmId,
           vmName: mockVm.name,
           serviceName: 'HTTP',
           useEnabled: true,
@@ -87,7 +87,7 @@ describe('SecurityResolver', () => {
           running: true
         }
       ]
-      
+
       mockPrisma.machine.findUnique.mockResolvedValue(mockVm)
       mockFirewallService.getVmServiceStatus.mockResolvedValue(mockStatus)
 
@@ -111,7 +111,7 @@ describe('SecurityResolver', () => {
       const mockStatus = [
         {
           serviceId: 'http',
-          vmId: vmId,
+          vmId,
           vmName: mockVm.name,
           serviceName: 'HTTP',
           useEnabled: true,
@@ -119,7 +119,7 @@ describe('SecurityResolver', () => {
           running: true
         }
       ]
-      
+
       mockPrisma.machine.findUnique.mockResolvedValue(mockVm)
       mockFirewallService.getVmServiceStatus.mockResolvedValue(mockStatus)
 
@@ -150,7 +150,7 @@ describe('SecurityResolver', () => {
       const mockStatus = [
         {
           serviceId: 'ssh',
-          departmentId: departmentId,
+          departmentId,
           departmentName: mockDepartment.name,
           serviceName: 'SSH',
           useEnabled: true,
@@ -159,7 +159,7 @@ describe('SecurityResolver', () => {
           enabledVmCount: 3
         }
       ]
-      
+
       mockPrisma.department.findUnique.mockResolvedValue(mockDepartment)
       mockFirewallService.getDepartmentServiceStatus.mockResolvedValue(mockStatus)
 
@@ -197,7 +197,7 @@ describe('SecurityResolver', () => {
           provideEnabled: false
         }
       ]
-      
+
       mockFirewallService.getGlobalServiceStatus.mockResolvedValue(mockStatus)
 
       // Act
@@ -219,7 +219,7 @@ describe('SecurityResolver', () => {
           provideEnabled: false
         }
       ]
-      
+
       mockFirewallService.getGlobalServiceStatus.mockResolvedValue(mockStatus)
 
       // Act
@@ -250,7 +250,7 @@ describe('SecurityResolver', () => {
         provideEnabled: false,
         running: true
       }
-      
+
       mockPrisma.machine.findUnique.mockResolvedValue(mockVm)
       mockFirewallService.toggleVmService.mockResolvedValue(mockResult)
 
@@ -307,7 +307,7 @@ describe('SecurityResolver', () => {
         vmCount: 5,
         enabledVmCount: 3
       }
-      
+
       mockPrisma.department.findUnique.mockResolvedValue(mockDepartment)
       mockFirewallService.toggleDepartmentService.mockResolvedValue(mockResult)
 
@@ -358,7 +358,7 @@ describe('SecurityResolver', () => {
         useEnabled: false,
         provideEnabled: false
       }
-      
+
       mockFirewallService.toggleGlobalService.mockResolvedValue(mockResult)
 
       // Act
@@ -393,7 +393,7 @@ describe('SecurityResolver', () => {
           enabledVms: 4
         }
       ]
-      
+
       mockFirewallService.getServices.mockResolvedValue([
         {
           id: 'http',

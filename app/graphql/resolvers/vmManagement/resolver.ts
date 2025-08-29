@@ -52,7 +52,7 @@ interface InfiniPackageData {
 
 @Resolver()
 export class VMManagementResolver {
-  constructor(
+  constructor (
     private networkFilterService: NetworkFilterService,
     private virtManager: VirtManager,
     private virtioSocketWatcher: VirtioSocketWatcherService
@@ -60,7 +60,7 @@ export class VMManagementResolver {
 
   @Query(() => [ServiceInfo])
   @Authorized()
-  async listVMServices(
+  async listVMServices (
     @Arg('vmId', () => ID) vmId: string,
     @Ctx() { prisma }: InfinibayContext
   ): Promise<ServiceInfo[]> {
@@ -79,14 +79,14 @@ export class VMManagementResolver {
         { action: 'ServiceList' },
         30000
       )
-      
+
       if (!result.success) {
         throw new Error(result.error || 'Failed to list services')
       }
 
       // Parse the service data from InfiniService response
       const services = (Array.isArray(result.data) ? result.data : []) as InfiniServiceData[]
-      
+
       return services.map((svc: InfiniServiceData) => ({
         name: svc.name || svc.Name || '',
         displayName: svc.display_name || svc.DisplayName || svc.name || svc.Name || '',
@@ -105,7 +105,7 @@ export class VMManagementResolver {
 
   @Query(() => [PackageInfo])
   @Authorized()
-  async listVMPackages(
+  async listVMPackages (
     @Arg('vmId', () => ID) vmId: string,
     @Ctx() { prisma }: InfinibayContext
   ): Promise<PackageInfo[]> {
@@ -125,14 +125,14 @@ export class VMManagementResolver {
         undefined,
         45000
       )
-      
+
       if (!result.success) {
         throw new Error(result.error || 'Failed to list packages')
       }
 
       // Parse the package data from InfiniService response
       const packages = (Array.isArray(result.data) ? result.data : []) as InfiniPackageData[]
-      
+
       return packages.map((pkg: InfiniPackageData) => ({
         name: pkg.name || pkg.Name || '',
         version: pkg.version || pkg.Version || 'unknown',
@@ -150,7 +150,7 @@ export class VMManagementResolver {
 
   @Query(() => [VMSnapshot])
   @Authorized()
-  async listVMSnapshots(
+  async listVMSnapshots (
     @Arg('vmId', () => ID) vmId: string,
     @Ctx() { prisma }: InfinibayContext
   ): Promise<VMSnapshot[]> {
@@ -184,7 +184,7 @@ export class VMManagementResolver {
 
   @Mutation(() => CommandResult)
   @Authorized()
-  async controlVMService(
+  async controlVMService (
     @Arg('input') input: ServiceActionInput,
     @Ctx() { prisma }: InfinibayContext
   ): Promise<CommandResult> {
@@ -200,16 +200,16 @@ export class VMManagementResolver {
       // Use InfiniService to control service
       const result = await this.virtioSocketWatcher.sendSafeCommand(
         vm.id,
-        { 
-          action: 'ServiceControl', 
-          params: { 
-            service_name: input.serviceName, 
-            action: input.action 
-          } 
+        {
+          action: 'ServiceControl',
+          params: {
+            service_name: input.serviceName,
+            action: input.action
+          }
         },
         30000
       )
-      
+
       return {
         success: result.success,
         output: result.stdout || '',
@@ -228,7 +228,7 @@ export class VMManagementResolver {
 
   @Mutation(() => CommandResult)
   @Authorized()
-  async manageVMPackage(
+  async manageVMPackage (
     @Arg('input') input: PackageActionInput,
     @Ctx() { prisma }: InfinibayContext
   ): Promise<CommandResult> {
@@ -243,19 +243,19 @@ export class VMManagementResolver {
     try {
       // Map action to InfiniService package command
       let packageAction: 'PackageInstall' | 'PackageRemove' | 'PackageUpdate'
-      
+
       switch (input.action) {
-        case 'install':
-          packageAction = 'PackageInstall'
-          break
-        case 'remove':
-          packageAction = 'PackageRemove'
-          break
-        case 'update':
-          packageAction = 'PackageUpdate'
-          break
-        default:
-          throw new UserInputError('Invalid package action')
+      case 'install':
+        packageAction = 'PackageInstall'
+        break
+      case 'remove':
+        packageAction = 'PackageRemove'
+        break
+      case 'update':
+        packageAction = 'PackageUpdate'
+        break
+      default:
+        throw new UserInputError('Invalid package action')
       }
 
       // Use InfiniService to manage package
@@ -265,7 +265,7 @@ export class VMManagementResolver {
         input.packageName,
         60000 // 60 seconds timeout for package operations
       )
-      
+
       return {
         success: result.success,
         output: result.stdout || '',
@@ -284,7 +284,7 @@ export class VMManagementResolver {
 
   @Mutation(() => VMSnapshot)
   @Authorized()
-  async createVMSnapshot(
+  async createVMSnapshot (
     @Arg('input') input: CreateSnapshotInput,
     @Ctx() { prisma }: InfinibayContext
   ): Promise<VMSnapshot> {
@@ -305,7 +305,7 @@ export class VMManagementResolver {
         input.name,
         input.description
       )
-      
+
       return {
         name: snapshot.name,
         description: snapshot.description || '',
@@ -323,7 +323,7 @@ export class VMManagementResolver {
 
   @Mutation(() => Boolean)
   @Authorized()
-  async revertVMSnapshot(
+  async revertVMSnapshot (
     @Arg('vmId', () => ID) vmId: string,
     @Arg('snapshotName') snapshotName: string,
     @Ctx() { prisma }: InfinibayContext
@@ -351,7 +351,7 @@ export class VMManagementResolver {
 
   @Mutation(() => Boolean)
   @Authorized()
-  async deleteVMSnapshot(
+  async deleteVMSnapshot (
     @Arg('vmId', () => ID) vmId: string,
     @Arg('snapshotName') snapshotName: string,
     @Ctx() { prisma }: InfinibayContext
@@ -379,7 +379,7 @@ export class VMManagementResolver {
 
   @Query(() => [SimplifiedFirewallRule])
   @Authorized()
-  async getVMFirewallRules(
+  async getVMFirewallRules (
     @Arg('vmId', () => ID) vmId: string,
     @Ctx() { prisma }: InfinibayContext
   ): Promise<SimplifiedFirewallRule[]> {
@@ -404,7 +404,7 @@ export class VMManagementResolver {
     }
 
     const simplifiedRules: SimplifiedFirewallRule[] = []
-    
+
     // Convert complex NWFilter rules to simplified format
     vm.nwFilters.forEach(vmFilter => {
       if (vmFilter.nwFilter?.rules) {
@@ -416,8 +416,8 @@ export class VMManagementResolver {
             action: rule.action || 'accept',
             protocol: rule.protocol,
             port: rule.dstPortStart ?? undefined,
-            portRange: rule.dstPortStart && rule.dstPortEnd 
-              ? `${rule.dstPortStart}-${rule.dstPortEnd}` 
+            portRange: rule.dstPortStart && rule.dstPortEnd
+              ? `${rule.dstPortStart}-${rule.dstPortEnd}`
               : undefined,
             sourceIp: rule.srcIpAddr ?? undefined,
             destinationIp: rule.dstIpAddr ?? undefined,
@@ -434,7 +434,7 @@ export class VMManagementResolver {
 
   @Mutation(() => SimplifiedFirewallRule)
   @Authorized('ADMIN')
-  async createVMFirewallRule(
+  async createVMFirewallRule (
     @Arg('input') input: CreateSimplifiedFirewallRuleInput,
     @Ctx() { prisma }: InfinibayContext
   ): Promise<SimplifiedFirewallRule> {
@@ -465,7 +465,7 @@ export class VMManagementResolver {
         'vm'
       )
       filterId = filter.id
-      
+
       // Associate filter with VM
       await prisma.vMNWFilter.create({
         data: {

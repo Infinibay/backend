@@ -41,7 +41,7 @@ export class ProcessManager {
   private prisma: PrismaClient
   private virtioSocketWatcher: VirtioSocketWatcherService
 
-  constructor(prisma: PrismaClient, virtioSocketWatcher: VirtioSocketWatcherService) {
+  constructor (prisma: PrismaClient, virtioSocketWatcher: VirtioSocketWatcherService) {
     this.prisma = prisma
     this.virtioSocketWatcher = virtioSocketWatcher
   }
@@ -49,7 +49,7 @@ export class ProcessManager {
   /**
    * Get domain and verify VM is running
    */
-  private async getDomain(machineId: string): Promise<{ machine: Machine; domain: any } | null> {
+  private async getDomain (machineId: string): Promise<{ machine: Machine; domain: any } | null> {
     try {
       const machine = await this.prisma.machine.findUnique({
         where: { id: machineId }
@@ -63,7 +63,7 @@ export class ProcessManager {
       // Get shared libvirt connection
       const conn = await getLibvirtConnection()
       if (!conn) {
-        debug(`Failed to get libvirt connection`)
+        debug('Failed to get libvirt connection')
         return null
       }
 
@@ -103,7 +103,7 @@ export class ProcessManager {
   /**
    * List all processes running on a VM
    */
-  async listProcesses(machineId: string, limit?: number): Promise<InternalProcessInfo[]> {
+  async listProcesses (machineId: string, limit?: number): Promise<InternalProcessInfo[]> {
     try {
       const domainInfo = await this.getDomain(machineId)
       if (!domainInfo) {
@@ -144,7 +144,7 @@ export class ProcessManager {
   /**
    * Get top processes by CPU or memory usage
    */
-  async getTopProcesses(
+  async getTopProcesses (
     machineId: string,
     limit: number = 10,
     sortBy: ProcessSortBy = ProcessSortBy.CPU
@@ -191,7 +191,7 @@ export class ProcessManager {
   /**
    * Kill a process on a VM
    */
-  async killProcess(
+  async killProcess (
     machineId: string,
     pid: number,
     force: boolean = false
@@ -245,7 +245,7 @@ export class ProcessManager {
   /**
    * Kill multiple processes on a VM
    */
-  async killProcesses(
+  async killProcesses (
     machineId: string,
     pids: number[],
     force: boolean = false
@@ -265,12 +265,12 @@ export class ProcessManager {
   /**
    * Map raw process data to internal format
    */
-  private mapProcesses(rawProcesses: any[]): InternalProcessInfo[] {
+  private mapProcesses (rawProcesses: any[]): InternalProcessInfo[] {
     // Log the first process to see the actual field names
     if (rawProcesses.length > 0) {
       debug(`Raw process fields: ${Object.keys(rawProcesses[0]).join(', ')}`)
     }
-    
+
     return rawProcesses.map(p => ({
       pid: p.pid || p.Pid || p.PID || 0,
       name: p.name || p.Name || p.ProcessName || 'unknown',
@@ -282,7 +282,6 @@ export class ProcessManager {
       startTime: p.start_time || p.startTime || p.StartTime ? new Date(p.start_time || p.startTime || p.StartTime) : undefined
     }))
   }
-
 }
 
 // Export internal types for use in resolver

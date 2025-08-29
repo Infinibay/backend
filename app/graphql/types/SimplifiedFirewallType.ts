@@ -16,98 +16,98 @@ registerEnumType(FirewallTemplate, {
 @ObjectType()
 export class SimplifiedFirewallRule {
   @Field(() => ID, { nullable: true })
-  id?: string
+    id?: string
 
   @Field(() => String)
-  port!: string // Can be number or "all"
+    port!: string // Can be number or "all"
 
   @Field()
-  protocol!: string
+    protocol!: string
 
   @Field()
-  direction!: string // 'in' | 'out' | 'inout'
+    direction!: string // 'in' | 'out' | 'inout'
 
   @Field()
-  action!: string // 'accept' | 'drop' | 'reject'
+    action!: string // 'accept' | 'drop' | 'reject'
 
   @Field({ nullable: true })
-  description?: string
+    description?: string
 
   @Field(() => [String], { nullable: true })
-  sources?: string[] // Which templates or custom rules created this
+    sources?: string[] // Which templates or custom rules created this
 }
 
 @ObjectType()
 export class VMFirewallState {
   @Field(() => [String])
-  appliedTemplates!: string[]
+    appliedTemplates!: string[]
 
   @Field(() => [SimplifiedFirewallRule])
-  customRules!: SimplifiedFirewallRule[]
+    customRules!: SimplifiedFirewallRule[]
 
   @Field(() => [SimplifiedFirewallRule])
-  effectiveRules!: SimplifiedFirewallRule[]
+    effectiveRules!: SimplifiedFirewallRule[]
 
   @Field(() => Date, { nullable: true })
-  lastSync!: Date | null
+    lastSync!: Date | null
 }
 
 @ObjectType()
 export class FirewallTemplateInfo {
   @Field()
-  name!: string
+    name!: string
 
   @Field()
-  description!: string
+    description!: string
 
   @Field(() => [SimplifiedFirewallRule])
-  rules!: SimplifiedFirewallRule[]
+    rules!: SimplifiedFirewallRule[]
 }
 
 @InputType()
 export class SimplifiedFirewallRuleInput {
   @Field()
-  port!: string
+    port!: string
 
   @Field()
-  protocol!: string
+    protocol!: string
 
   @Field()
-  direction!: string
+    direction!: string
 
   @Field({ defaultValue: 'accept' })
-  action!: string
+    action!: string
 
   @Field({ nullable: true })
-  description?: string
+    description?: string
 }
 
 @InputType()
 export class CreateSimplifiedFirewallRuleInput {
   @Field(() => ID)
-  machineId!: string
+    machineId!: string
 
   @Field()
-  port!: string
+    port!: string
 
   @Field({ defaultValue: 'tcp' })
-  protocol!: string
+    protocol!: string
 
   @Field({ defaultValue: 'in' })
-  direction!: string
+    direction!: string
 
   @Field({ defaultValue: 'accept' })
-  action!: string
+    action!: string
 
   @Field({ nullable: true })
-  description?: string
+    description?: string
 }
 
 @InputType()
 export class ApplyFirewallTemplateInput {
   @Field(() => ID)
-  machineId!: string
+    machineId!: string
 
   @Field(() => FirewallTemplate)
-  template!: FirewallTemplate
+    template!: FirewallTemplate
 }

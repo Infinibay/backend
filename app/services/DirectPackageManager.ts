@@ -120,7 +120,7 @@ export class DirectPackageManager {
             this.debug.log('warn', `VM ${machineId} is not connected, waiting for connection...`)
             // Wait a bit for connection to establish
             await new Promise(resolve => setTimeout(resolve, 2000))
-            
+
             // Check again after wait
             if (!this.virtioService.isVmConnected(machineId)) {
               throw new Error('VM is not connected. Please ensure the VM agent is running.')
@@ -397,7 +397,7 @@ export class DirectPackageManager {
             this.debug.log('warn', `VM ${machineId} is not connected, waiting for connection...`)
             // Wait a bit for connection to establish
             await new Promise(resolve => setTimeout(resolve, 2000))
-            
+
             // Check again after wait
             if (!this.virtioService.isVmConnected(machineId)) {
               throw new Error('VM is not connected. Please ensure the VM agent is running.')

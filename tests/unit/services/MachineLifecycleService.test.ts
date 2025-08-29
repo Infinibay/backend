@@ -8,8 +8,8 @@ import { HardwareUpdateService } from '../../../app/services/vm/hardwareUpdateSe
 import VirtManager from '../../../app/utils/VirtManager'
 import { getEventManager } from '../../../app/services/EventManager'
 import si from 'systeminformation'
-import { 
-  createMockMachine, 
+import {
+  createMockMachine,
   createMockMachineTemplate,
   createMockDepartment,
   createMockUser
@@ -37,7 +37,7 @@ describe.skip('MachineLifecycleService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks()
-    
+
     mockUser = createMockUser()
 
     // Mock EventManager
@@ -49,7 +49,7 @@ describe.skip('MachineLifecycleService', () => {
       joinRoom: jest.fn(),
       leaveRoom: jest.fn()
     } as unknown as ReturnType<typeof jest.mocked<ReturnType<typeof getEventManager>>>
-    
+
     const getEventManagerMock = jest.mocked(getEventManager)
     getEventManagerMock.mockReturnValue(mockEventManager)
 

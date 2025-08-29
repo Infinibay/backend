@@ -12,7 +12,7 @@ export abstract class SingletonService extends BaseService {
     config: ServiceConfig
   ): T {
     const key = config.name
-    
+
     if (!SingletonService.instances.has(key)) {
       SingletonService.instances.set(key, new this(config))
     }
@@ -31,7 +31,7 @@ export abstract class SingletonService extends BaseService {
   static async destroyAll (): Promise<void> {
     const shutdownPromises = Array.from(SingletonService.instances.values())
       .map(instance => instance.shutdown())
-    
+
     await Promise.all(shutdownPromises)
     SingletonService.instances.clear()
   }

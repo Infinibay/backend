@@ -565,7 +565,7 @@ export class MachineMutations {
 
   @Mutation(() => SuccessType)
   @Authorized('USER')
-  async restartMachine(
+  async restartMachine (
     @Arg('id') id: string,
     @Ctx() { prisma, user }: InfinibayContext
   ): Promise<SuccessType> {
@@ -583,7 +583,7 @@ export class MachineMutations {
     const vmOpsService = new VMOperationsService(prisma)
     try {
       const result = await vmOpsService.restartMachine(id)
-      
+
       if (result.success) {
         // Emit WebSocket events
         try {
@@ -594,12 +594,12 @@ export class MachineMutations {
             socketService.sendToUser(userId, 'vm', 'restarting', {
               data: { machineId: id }
             })
-            
+
             // Emit restarted event (since the operation is complete)
             socketService.sendToUser(userId, 'vm', 'restarted', {
               data: { machineId: id, status: 'running' }
             })
-            
+
             console.log(`📡 Emitted vm:restarting and vm:restarted events for machine ${id}`)
           }
         } catch (eventError) {
@@ -607,9 +607,9 @@ export class MachineMutations {
         }
       }
 
-      return { 
-        success: result.success, 
-        message: result.message || result.error || 'Machine restart initiated' 
+      return {
+        success: result.success,
+        message: result.message || result.error || 'Machine restart initiated'
       }
     } finally {
       await vmOpsService.close()
@@ -618,7 +618,7 @@ export class MachineMutations {
 
   @Mutation(() => SuccessType)
   @Authorized('USER')
-  async forcePowerOff(
+  async forcePowerOff (
     @Arg('id') id: string,
     @Ctx() { prisma, user }: InfinibayContext
   ): Promise<SuccessType> {
@@ -636,7 +636,7 @@ export class MachineMutations {
     const vmOpsService = new VMOperationsService(prisma)
     try {
       const result = await vmOpsService.forcePowerOff(id)
-      
+
       // Emit WebSocket event if successful
       if (result.success) {
         try {
@@ -646,17 +646,17 @@ export class MachineMutations {
             socketService.sendToUser(userId, 'vm', 'forced:poweroff', {
               data: { machineId: id, status: 'shutoff' }
             })
-            
+
             console.log(`📡 Emitted vm:forced:poweroff event for machine ${id}`)
           }
         } catch (eventError) {
           console.error('Failed to emit WebSocket event:', eventError)
         }
       }
-      
-      return { 
-        success: result.success, 
-        message: result.message || result.error || 'Machine forcefully powered off' 
+
+      return {
+        success: result.success,
+        message: result.message || result.error || 'Machine forcefully powered off'
       }
     } finally {
       await vmOpsService.close()
@@ -665,7 +665,7 @@ export class MachineMutations {
 
   @Mutation(() => SuccessType)
   @Authorized('USER')
-  async resetMachine(
+  async resetMachine (
     @Arg('id') id: string,
     @Ctx() { prisma, user }: InfinibayContext
   ): Promise<SuccessType> {
@@ -683,7 +683,7 @@ export class MachineMutations {
     const vmOpsService = new VMOperationsService(prisma)
     try {
       const result = await vmOpsService.resetMachine(id)
-      
+
       if (result.success) {
         // Emit WebSocket event
         try {
@@ -693,7 +693,7 @@ export class MachineMutations {
             socketService.sendToUser(userId, 'vm', 'reset', {
               data: { machineId: id, status: 'running' }
             })
-            
+
             console.log(`📡 Emitted vm:reset event for machine ${id}`)
           }
         } catch (eventError) {
@@ -701,9 +701,9 @@ export class MachineMutations {
         }
       }
 
-      return { 
-        success: result.success, 
-        message: result.message || result.error || 'Machine reset completed' 
+      return {
+        success: result.success,
+        message: result.message || result.error || 'Machine reset completed'
       }
     } finally {
       await vmOpsService.close()

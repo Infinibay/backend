@@ -182,7 +182,7 @@ export class VmEventManager implements ResourceEventManager {
       console.log(`📤 Sending delete event to user: ${userId}`)
       this.socketService.sendToUser(userId, 'vms', 'delete', payload)
     }
-    
+
     console.log(`✅ VM delete event sent to ${targetUsers.length} users`)
   }
 

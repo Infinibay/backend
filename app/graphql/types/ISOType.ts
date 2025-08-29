@@ -1,76 +1,76 @@
-import { ObjectType, Field, ID } from 'type-graphql';
+import { ObjectType, Field, ID } from 'type-graphql'
 
 @ObjectType()
 export class ISO {
   @Field(() => ID)
-  id!: string;
+    id!: string
 
   @Field()
-  filename!: string;
+    filename!: string
 
   @Field()
-  os!: string;
+    os!: string
 
   @Field(() => String, { nullable: true })
-  version?: string | null;
+    version?: string | null
 
   @Field(() => String)
-  size!: string; // BigInt serialized as string
+    size!: string // BigInt serialized as string
 
   @Field()
-  uploadedAt!: Date;
+    uploadedAt!: Date
 
   @Field(() => Date, { nullable: true })
-  lastVerified?: Date | null;
+    lastVerified?: Date | null
 
   @Field()
-  isAvailable!: boolean;
+    isAvailable!: boolean
 
   @Field(() => String, { nullable: true })
-  checksum?: string | null;
+    checksum?: string | null
 
   @Field(() => String, { nullable: true })
-  downloadUrl?: string | null;
+    downloadUrl?: string | null
 
   @Field()
-  path!: string;
+    path!: string
 
   @Field()
-  createdAt!: Date;
+    createdAt!: Date
 
   @Field()
-  updatedAt!: Date;
+    updatedAt!: Date
 }
 
 @ObjectType()
 export class ISOStatus {
   @Field()
-  os!: string;
+    os!: string
 
   @Field()
-  available!: boolean;
+    available!: boolean
 
   @Field(() => ISO, { nullable: true })
-  iso?: ISO;
+    iso?: ISO
 }
 
 @ObjectType()
 export class SystemReadiness {
   @Field()
-  ready!: boolean;
+    ready!: boolean
 
   @Field(() => [String])
-  availableOS!: string[];
+    availableOS!: string[]
 
   @Field(() => [String])
-  missingOS!: string[];
+    missingOS!: string[]
 }
 
 @ObjectType()
 export class ISOAvailabilityMap {
   @Field()
-  os!: string;
+    os!: string
 
   @Field()
-  available!: boolean;
+    available!: boolean
 }

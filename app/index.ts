@@ -114,7 +114,7 @@ async function bootstrap (): Promise<void> {
     socketService.initialize(httpServer)
 
     const eventManager = createEventManager(socketService, prisma)
-    
+
     // Initialize VMDetailEventManager for VM detail-specific events
     const { createVMDetailEventManager } = await import('./services/VMDetailEventManager')
     createVMDetailEventManager(prisma)

@@ -6,25 +6,25 @@ export enum ErrorCode {
   MACHINE_NOT_FOUND = 'MACHINE_NOT_FOUND',
   MACHINE_OPERATION_FAILED = 'MACHINE_OPERATION_FAILED',
   LIBVIRT_CONNECTION_FAILED = 'LIBVIRT_CONNECTION_FAILED',
-  
+
   // System errors
   DATABASE_ERROR = 'DATABASE_ERROR',
   EXTERNAL_SERVICE_ERROR = 'EXTERNAL_SERVICE_ERROR',
   INTERNAL_ERROR = 'INTERNAL_ERROR',
-  
+
   // Network errors
   NETWORK_FILTER_ERROR = 'NETWORK_FILTER_ERROR',
   FIREWALL_ERROR = 'FIREWALL_ERROR',
-  
+
   // Authentication errors
   UNAUTHORIZED = 'UNAUTHORIZED',
   FORBIDDEN = 'FORBIDDEN',
-  
+
   // Resource errors
   RESOURCE_NOT_FOUND = 'RESOURCE_NOT_FOUND',
   RESOURCE_CONFLICT = 'RESOURCE_CONFLICT',
   RESOURCE_EXHAUSTED = 'RESOURCE_EXHAUSTED',
-  
+
   // Validation errors
   VALIDATION_ERROR = 'VALIDATION_ERROR',
   INVALID_INPUT = 'INVALID_INPUT'
@@ -155,7 +155,7 @@ export class ErrorHandler {
         code: error.code
       }
     }
-    
+
     return {
       success: false,
       message: 'An unexpected error occurred',
@@ -179,9 +179,9 @@ export class ErrorLogger {
         timestamp: new Date(),
         severity: this.determineSeverity(error)
       }
-      
+
       console.error('[ERROR_LOG]', logEntry)
-      
+
       // TODO: Once errorLog table is created, uncomment this:
       // await this.prisma.errorLog.create({
       //   data: logEntry
