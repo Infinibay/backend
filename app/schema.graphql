@@ -328,6 +328,7 @@ type Machine {
   cpuCores: Int
   createdAt: DateTimeISO
   department: DepartmentType
+  departmentId: String
   gpuPciAddress: String
   id: ID!
   name: String!
@@ -342,7 +343,7 @@ type Machine {
 input MachineApplicationInputType {
   applicationId: String! = ""
   machineId: String! = ""
-  parameters: JSONObject = null
+  parameters: JSONObject
 }
 
 type MachineMetricsSummary {
@@ -497,6 +498,9 @@ type Mutation {
   """Install, remove, or update a package on a virtual machine"""
   managePackage(input: PackageManagementInput!): PackageManagementResult!
   moveMachine(departmentId: String!, id: String!): Machine!
+
+  """Perform disk cleanup on a VM"""
+  performDiskCleanup(drive: String!, targets: [String!], vmId: ID!): JSONObject!
   powerOff(id: String!): SuccessType!
   powerOn(id: String!): SuccessType!
 
@@ -515,6 +519,9 @@ type Mutation {
 
   """Restore a virtual machine to a snapshot"""
   restoreSnapshot(input: RestoreSnapshotInput!): SuccessType!
+
+  """Run Windows Defender quick scan on a VM"""
+  runDefenderQuickScan(vmId: ID!): JSONObject!
   setNetworkBridgeName(input: BridgeNameInput!): Boolean!
   setNetworkIp(input: NetworkIpInput!): Boolean!
   setNetworkIpRange(input: IpRangeInput!): Boolean!
@@ -736,15 +743,30 @@ type Query {
   """Get all available ISOs"""
   availableISOs: [ISO!]!
 
+  """Check for application updates on a VM"""
+  checkApplicationUpdates(vmId: ID!): JSONObject!
+
   """Check if ISO is available for specific OS"""
   checkISOStatus(os: String!): ISOStatus!
 
   """Check availability for multiple OS types"""
   checkMultipleOSAvailability(osList: [String!]!): [ISOAvailabilityMap!]!
+
+  """Check resource optimization opportunities for a VM"""
+  checkResourceOptimization(evaluationWindowDays: Float, vmId: ID!): JSONObject!
   checkSetupStatus: DyummyType!
 
   """Check overall system readiness"""
   checkSystemReadiness: SystemReadiness!
+
+  """Check disk space status for a VM"""
+  checkVMDiskSpace(criticalThreshold: Float, vmId: ID!, warningThreshold: Float): JSONObject!
+
+  """Check Windows Defender status for a VM"""
+  checkWindowsDefender(vmId: ID!): JSONObject!
+
+  """Check Windows Updates status for a VM"""
+  checkWindowsUpdates(vmId: ID!): JSONObject!
 
   """Get the current snapshot of a virtual machine"""
   currentSnapshot(machineId: String!): Snapshot
@@ -765,8 +787,17 @@ type Query {
   getSupportedOSTypes: [String!]!
   getSystemResources: SystemResources!
   getTopProcesses(limit: Int! = 10, machineId: String!, sortBy: ProcessSortBy! = CPU): [ProcessInfo!]!
+
+  """Get installed applications inventory for a VM"""
+  getVMApplicationInventory(vmId: ID!): JSONObject!
   getVMFirewallState(machineId: ID!): VMFirewallState!
+
+  """Get comprehensive health check status for a VM"""
+  getVMHealthStatus(vmId: ID!): JSONObject!
   getVmServiceStatus(serviceId: ID, vmId: ID!): [VmServiceStatus!]!
+
+  """Get Windows Update history for a VM"""
+  getWindowsUpdateHistory(days: Float, vmId: ID!): JSONObject!
   graphicConnection(id: String!): GraphicConfigurationType
   latestSystemMetrics(machineId: String!): SystemMetrics
   listFilterRules(filterId: ID): [FWRule!]!
@@ -793,6 +824,9 @@ type Query {
   networks: [Network!]!
   portUsage(listeningOnly: Boolean = false, machineId: String!): [PortUsage!]!
   processSnapshots(filter: ProcessFilterInput): [ProcessSnapshot!]!
+
+  """Run a specific health check on a VM"""
+  runHealthCheck(checkName: String!, vmId: ID!): JSONObject!
 
   """Search for available packages on a virtual machine"""
   searchPackages(machineId: ID!, query: String!): [PackageInfo!]!

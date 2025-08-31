@@ -78,6 +78,9 @@ model Machine {
   template          MachineTemplate?      @relation(fields: [templateId], references: [id])
   user              User?                 @relation(fields: [userId], references: [id])
   applications      MachineApplication[]
+  healthAlerts      VMHealthAlert[]
+  healthConfig      VMHealthConfig?
+  systemEvents      SystemEvent[]
   configuration     MachineConfiguration?
   pendingCommands   PendingCommand[]
   portUsage         PortUsage[]
@@ -513,4 +516,66 @@ model BackgroundTaskLog {
   @@index([status, createdAt])
   @@index([taskName, createdAt])
   @@index([createdAt])
+}
+
+// VM Health Management Models
+model VMHealthAlert {
+  id            String   @id @default(uuid())
+  machineId     String
+  type          String   // AlertType enum value
+  severity      String   // AlertSeverity enum value
+  title         String
+  description   String
+  resolved      Boolean  @default(false)
+  resolvedAt    DateTime?
+  metadata      Json?    // Additional alert data
+  remediation   Json?    // Remediation steps
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  machine       Machine  @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  
+  @@index([machineId, resolved])
+  @@index([machineId, severity])
+  @@index([createdAt])
+}
+
+model VMHealthConfig {
+  id                     String   @id @default(uuid())
+  machineId              String   @unique
+  checkIntervalMinutes   Int      @default(5)
+  metricsRetentionDays   Int      @default(7)
+  thresholds             Json     // Threshold configuration
+  enabledModules         String[] // List of enabled module IDs
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+  machine                Machine  @relation(fields: [machineId], references: [id], onDelete: Cascade)
+}
+
+model KnownService {
+  id            String   @id @default(uuid())
+  name          String   @unique
+  displayName   String
+  description   String
+  category      String   // gaming, database, web, development, etc.
+  ports         Json     // Array of { port: number, protocol: string, direction: string }
+  executable    String?  // Common executable names
+  os            String[] // ['windows', 'linux', 'all']
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model SystemEvent {
+  id          String   @id @default(uuid())
+  machineId   String
+  eventType   String   // reboot, service_crash, login_failed, etc.
+  severity    String   // critical, warning, info
+  title       String
+  description String
+  metadata    Json?    // Additional event data
+  timestamp   DateTime
+  createdAt   DateTime @default(now())
+  machine     Machine  @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  
+  @@index([machineId, timestamp])
+  @@index([machineId, eventType])
 }

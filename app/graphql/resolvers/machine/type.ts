@@ -34,7 +34,7 @@ export class Machine {
       gpuPciAddress: string | null = null
 
     @Field(() => GraphQLJSONObject, { nullable: true })
-      configuration: any | null = null
+      configuration: Record<string, unknown> | null = null
 
     @Field(() => String)
       status: MachineStatus = MachineStatus.STOPPED
@@ -50,6 +50,9 @@ export class Machine {
 
     @Field(() => MachineTemplateType, { nullable: true })
       template?: MachineTemplateType
+
+    @Field(() => String, { nullable: true })
+      departmentId: string | null = null
 
     @Field(() => DepartmentType, { nullable: true })
       department?: DepartmentType
@@ -156,7 +159,7 @@ export class MachineApplicationInputType {
       applicationId: string = ''
 
     @Field(() => GraphQLJSONObject, { nullable: true })
-      parameters?: any = null
+      parameters?: Record<string, unknown> | null
 }
 
 @InputType()

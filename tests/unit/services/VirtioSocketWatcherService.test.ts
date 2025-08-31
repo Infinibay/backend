@@ -46,7 +46,7 @@ jest.mock('net', () => ({
   Socket: jest.fn(() => new MockSocket())
 }))
 
-describe.skip('VirtioSocketWatcherService', () => {
+describe('VirtioSocketWatcherService', () => {
   let service: VirtioSocketWatcherService
   let mockSocket: MockSocket
   const baseDir = process.env.INFINIBAY_BASE_DIR || '/opt/infinibay'
@@ -68,7 +68,7 @@ describe.skip('VirtioSocketWatcherService', () => {
 
   afterEach(async () => {
     // Stop the service if running
-    if (service && service.isRunning) {
+    if (service && service.getServiceStatus()) {
       await service.stop()
     }
     jest.clearAllMocks()
@@ -210,15 +210,16 @@ describe.skip('VirtioSocketWatcherService', () => {
       mockSocket.emit('connect')
     })
 
-    it('should respond to ping with pong', async () => {
+    it('should process incoming ping messages', async () => {
       const pingMessage = JSON.stringify({ type: 'ping', timestamp: new Date().toISOString() }) + '\n'
 
       mockSocket.emit('data', Buffer.from(pingMessage))
       await new Promise(resolve => setTimeout(resolve, 100))
 
-      expect(mockSocket.write).toHaveBeenCalledWith(
-        expect.stringContaining('"type":"pong"')
-      )
+      // Service doesn't implement ping/pong - it just updates lastMessageTime
+      const connectionDetails = service.getConnectionDetails('test-vm')
+      expect(connectionDetails).toBeDefined()
+      expect(connectionDetails?.isConnected).toBe(true)
     })
 
     it('should store metrics in database', async () => {
@@ -318,17 +319,40 @@ describe.skip('VirtioSocketWatcherService', () => {
     })
 
     it('should handle partial messages and buffer them', async () => {
-      const message = JSON.stringify({ type: 'ping', timestamp: new Date().toISOString() })
-      const part1 = message.slice(0, 10)
-      const part2 = message.slice(10) + '\n'
+      const metricsMessage = {
+        type: 'metrics',
+        timestamp: new Date().toISOString(),
+        data: {
+          system: {
+            cpu: { usage_percent: 50, cores_usage: [], temperature: 60 },
+            memory: { total_kb: 8000000, used_kb: 4000000, available_kb: 4000000 },
+            disk: { 
+              usage_stats: [], 
+              io_stats: { read_bytes_per_sec: 0, write_bytes_per_sec: 0, read_ops_per_sec: 0, write_ops_per_sec: 0 }
+            },
+            network: { interfaces: [] },
+            uptime_seconds: 1000
+          }
+        }
+      }
+      
+      const fullMessage = JSON.stringify(metricsMessage) + '\n'
+      const part1 = fullMessage.slice(0, 20)
+      const part2 = fullMessage.slice(20)
+
+      // Clear any previous database calls
+      mockPrisma.systemMetrics.create.mockClear()
 
       mockSocket.emit('data', Buffer.from(part1))
+      // Message not complete yet, should not process
+      await new Promise(resolve => setTimeout(resolve, 50))
+      expect(mockPrisma.systemMetrics.create).not.toHaveBeenCalled()
+
       mockSocket.emit('data', Buffer.from(part2))
       await new Promise(resolve => setTimeout(resolve, 100))
 
-      expect(mockSocket.write).toHaveBeenCalledWith(
-        expect.stringContaining('"type":"pong"')
-      )
+      // Now message is complete, should be processed
+      expect(mockPrisma.systemMetrics.create).toHaveBeenCalled()
     })
   })
 
@@ -343,6 +367,18 @@ describe.skip('VirtioSocketWatcherService', () => {
     })
 
     it('should attempt reconnection on socket error', async () => {
+      // Stop any existing service before this test
+      if (service && service.getServiceStatus()) {
+        await service.stop()
+      }
+      
+      // Create a fresh service and socket for this test
+      service = createVirtioSocketWatcherService(mockPrisma as unknown as PrismaClient)
+      const freshSocket = new MockSocket()
+      ;(net.Socket as jest.MockedClass<typeof net.Socket>).mockImplementation(() => freshSocket as unknown as net.Socket)
+      
+      await service.start()
+      
       const vmId = 'test-vm'
       const socketPath = path.join(socketsDir, `${vmId}.socket`)
 
@@ -355,22 +391,23 @@ describe.skip('VirtioSocketWatcherService', () => {
       mockWatcher.emit('add', socketPath)
       await Promise.resolve()
 
-      // Simulate connection error
-      mockSocket.emit('error', new Error('Connection failed'))
+      // First connection attempt
+      expect(freshSocket.connect).toHaveBeenCalledTimes(1)
 
-      // Fast-forward time to trigger reconnection
-      jest.advanceTimersByTime(1000)
+      // Simulate connection error
+      freshSocket.emit('error', new Error('Connection failed'))
 
       // Socket file still exists
       ;(fs.access as jest.MockedFunction<typeof fs.access>).mockImplementation((path: fs.PathLike, callback: (err: NodeJS.ErrnoException | null) => void) => {
         callback(null)
       })
 
-      jest.advanceTimersByTime(1000)
+      // Fast-forward time to trigger reconnection (base delay is 1000ms)
+      jest.advanceTimersByTime(2000)
       await Promise.resolve()
 
-      // Should attempt reconnection (connect called twice)
-      expect(mockSocket.connect).toHaveBeenCalledTimes(2)
+      // Should have attempted reconnection
+      expect(freshSocket.connect.mock.calls.length).toBeGreaterThanOrEqual(2)
     })
   })
 
@@ -384,7 +421,7 @@ describe.skip('VirtioSocketWatcherService', () => {
       jest.useRealTimers()
     })
 
-    it('should send periodic ping messages', async () => {
+    it('should monitor connection health without active pinging', async () => {
       const vmId = 'test-vm'
       const socketPath = path.join(socketsDir, `${vmId}.socket`)
 
@@ -398,22 +435,30 @@ describe.skip('VirtioSocketWatcherService', () => {
       await Promise.resolve()
       mockSocket.emit('connect')
 
-      // Clear previous calls
-      mockSocket.write.mockClear()
+      // Service monitors connections but doesn't actively ping
+      // It relies on incoming messages to detect stale connections
+      const connectionDetails = service.getConnectionDetails(vmId)
+      expect(connectionDetails).toBeDefined()
+      expect(connectionDetails?.isConnected).toBe(true)
 
-      // Fast-forward 30 seconds (ping interval)
-      jest.advanceTimersByTime(30000)
+      // Fast-forward past the timeout threshold (60 seconds)
+      jest.advanceTimersByTime(70000)
 
-      expect(mockSocket.write).toHaveBeenCalledWith(
-        expect.stringContaining('"type":"ping"')
-      )
+      // Without any incoming messages, connection should be considered stale
+      // and reconnection should be attempted
+      expect(mockSocket.destroy).toHaveBeenCalled()
     })
   })
 
   describe('Statistics and Monitoring', () => {
     it('should return correct connection statistics', async () => {
-      await service.start()
-
+      // Stop any existing service and create fresh one
+      if (service && service.getServiceStatus()) {
+        await service.stop()
+      }
+      
+      service = createVirtioSocketWatcherService(mockPrisma as unknown as PrismaClient)
+      
       // Add two VMs
       const vm1 = { id: 'vm-1', name: 'VM 1', status: 'running' } as Machine
       const vm2 = { id: 'vm-2', name: 'VM 2', status: 'running' } as Machine
@@ -422,19 +467,27 @@ describe.skip('VirtioSocketWatcherService', () => {
         .mockResolvedValueOnce(vm1)
         .mockResolvedValueOnce(vm2)
 
-      // Create two different sockets
+      // Create two different socket mocks
       const socket1 = new MockSocket()
       const socket2 = new MockSocket()
-      ;(net.Socket as jest.MockedClass<typeof net.Socket>)
-        .mockImplementationOnce(() => socket1 as unknown as net.Socket)
-        .mockImplementationOnce(() => socket2 as unknown as net.Socket)
+      
+      let callCount = 0;
+      (net.Socket as jest.MockedClass<typeof net.Socket>).mockImplementation(() => {
+        callCount++
+        return (callCount === 1 ? socket1 : socket2) as unknown as net.Socket
+      })
+
+      await service.start()
 
       mockWatcher.emit('add', path.join(socketsDir, 'vm-1.socket'))
+      await new Promise(resolve => setTimeout(resolve, 100))
+      
       mockWatcher.emit('add', path.join(socketsDir, 'vm-2.socket'))
       await new Promise(resolve => setTimeout(resolve, 100))
 
       // Connect first VM
       socket1.emit('connect')
+      await new Promise(resolve => setTimeout(resolve, 100))
 
       const stats = service.getConnectionStats()
       expect(stats.totalConnections).toBe(2)

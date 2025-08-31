@@ -103,7 +103,7 @@ export class MachineLifecycleService {
           data: {
             machineId: createdMachine.id,
             applicationId: application.applicationId,
-            parameters: application.parameters
+            parameters: (application.parameters ?? {}) as Prisma.InputJsonValue
           }
         })
       }

@@ -12,6 +12,7 @@ import {
 } from './type'
 import { UserType } from '../user/type'
 import { MachineTemplateType } from '../machine_template/type'
+import { DepartmentType } from '../department/type'
 import { PaginationInputType } from '@utils/pagination'
 import { InfinibayContext } from '@main/utils/context'
 import { GraphicPortService } from '@utils/VirtManager/graphicPortService'
@@ -21,8 +22,16 @@ import { MachineLifecycleService } from '../../../services/machineLifecycleServi
 import { getEventManager } from '../../../services/EventManager'
 import { VMOperationsService } from '../../../services/VMOperationsService'
 import { getSocketService } from '../../../services/SocketService'
+import { Machine as PrismaMachine, User as PrismaUser, MachineTemplate as PrismaMachineTemplate, Department as PrismaDepartment, MachineConfiguration, PrismaClient } from '@prisma/client'
 
-async function transformMachine (prismaMachine: any, prisma: any): Promise<Machine> {
+type MachineWithRelations = PrismaMachine & {
+  configuration?: MachineConfiguration | null
+  department?: PrismaDepartment | null
+  template?: PrismaMachineTemplate | null
+  user?: PrismaUser | null
+}
+
+async function transformMachine (prismaMachine: MachineWithRelations, prisma: PrismaClient): Promise<Machine> {
   // TODO: fix n+1 problem
   const user = prismaMachine.userId ? await prisma.user.findUnique({ where: { id: prismaMachine.userId } }) : null
   const template = prismaMachine.templateId ? await prisma.machineTemplate.findUnique({ where: { id: prismaMachine.templateId } }) : null
@@ -41,7 +50,9 @@ async function transformMachine (prismaMachine: any, prisma: any): Promise<Machi
 
   return {
     ...prismaMachine,
-    userId: prismaMachine.userId || null, // Include userId field (can be null)
+    userId: prismaMachine.userId || null,
+    departmentId: prismaMachine.departmentId || null, // Explicitly include departmentId
+    templateId: prismaMachine.templateId || null,
     user: user
       ? {
         id: user.id,
@@ -67,11 +78,12 @@ async function transformMachine (prismaMachine: any, prisma: any): Promise<Machi
       ? {
         id: department.id,
         name: department.name,
-        description: department.description,
-        createdAt: department.createdAt
-      }
+        createdAt: department.createdAt,
+        internetSpeed: department.internetSpeed,
+        ipSubnet: department.ipSubnet
+      } as DepartmentType
       : undefined,
-    config: prismaMachine.configuration
+    configuration: prismaMachine.configuration
       ? {
         graphic: prismaMachine.configuration.graphicProtocol + '://' + prismaMachine.configuration.graphicPassword + '@' + graphicHost + ':' + graphicPort
       }
@@ -326,8 +338,8 @@ export class MachineMutations {
    */
   private async changeMachineState (
     id: string,
-    prisma: any,
-    user: any,
+    prisma: PrismaClient,
+    user: PrismaUser | null,
     action: 'powerOn' | 'destroy' | 'shutdown' | 'suspend',
     newStatus: 'running' | 'off' | 'suspended'
   ): Promise<SuccessType> {

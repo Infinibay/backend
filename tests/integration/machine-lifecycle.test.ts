@@ -136,9 +136,10 @@ describe('VM Lifecycle Integration Tests', () => {
         os: OsEnum.UBUNTU,
         username: 'testuser',
         password: 'TestPass123!',
-        productKey: null,
+        productKey: undefined,
         pciBus: null,
         applications: [{
+          machineId: '',  // Will be filled by the service
           applicationId: application.id,
           parameters: {}
         }]
@@ -196,7 +197,7 @@ describe('VM Lifecycle Integration Tests', () => {
         os: OsEnum.UBUNTU,
         username: 'testuser',
         password: 'TestPass123!',
-        productKey: null,
+        productKey: undefined,
         pciBus: null,
         applications: []
       }
@@ -226,7 +227,7 @@ describe('VM Lifecycle Integration Tests', () => {
         os: OsEnum.UBUNTU,
         username: 'testuser',
         password: 'TestPass123!',
-        productKey: null,
+        productKey: undefined,
         pciBus: null,
         applications: []
       }
@@ -407,7 +408,7 @@ describe('VM Lifecycle Integration Tests', () => {
         os: OsEnum.UBUNTU,
         username: 'testuser',
         password: 'TestPass123!',
-        productKey: null,
+        productKey: undefined,
         pciBus: null,
         applications: []
       }
@@ -684,7 +685,7 @@ describe('VM Lifecycle Integration Tests', () => {
         os: OsEnum.UBUNTU,
         username: 'testuser',
         password: 'TestPass123!',
-        productKey: null,
+        productKey: undefined,
         pciBus: null,
         applications: []
       }

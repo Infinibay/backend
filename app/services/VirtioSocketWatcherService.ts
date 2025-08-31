@@ -186,15 +186,82 @@ interface OsInfo {
   platform?: string
 }
 
+// Auto-check response data interfaces
+interface WindowsUpdate {
+  title: string
+  importance: 'Critical' | 'Important' | 'Moderate' | 'Low'
+  kb_id?: string
+  size?: number
+}
+
+interface WindowsUpdatesData {
+  pending_updates?: WindowsUpdate[]
+  installed_count?: number
+  failed_count?: number
+}
+
+interface DefenderData {
+  real_time_protection?: boolean
+  antivirus_enabled?: boolean
+  definitions_outdated?: boolean
+  last_definition_update?: string
+  scan_status?: string
+}
+
+interface DiskDrive {
+  drive_letter: string
+  total_gb: number
+  used_gb: number
+  available_gb: number
+}
+
+interface DiskSpaceData {
+  drives?: DiskDrive[]
+}
+
+interface ResourceOptimizationData {
+  cpu_optimization_available?: boolean
+  memory_optimization_available?: boolean
+  disk_optimization_available?: boolean
+  recommendations?: string[]
+}
+
+interface HealthCheckData {
+  overall_health?: 'Healthy' | 'Warning' | 'Critical'
+  checks?: Array<{
+    name: string
+    status: string
+    details?: unknown
+  }>
+}
+
+interface DefenderScanData {
+  threats_found?: number
+  scan_duration?: string
+  threats?: Array<{
+    name: string
+    severity: string
+    action: string
+  }>
+}
+
 // Response data can be different types depending on the command
 // For compatibility with GraphQL resolver expectations, ensure arrays are properly typed
-type ResponseData = PackageInfo[] | ServiceInfo[] | ProcessInfo[] | SystemInfo | OsInfo | unknown[] | Record<string, unknown>
+type ResponseData = PackageInfo[] | ServiceInfo[] | ProcessInfo[] | SystemInfo | OsInfo | 
+                   WindowsUpdatesData | DefenderData | DiskSpaceData | ResourceOptimizationData | 
+                   HealthCheckData | DefenderScanData | unknown[] | Record<string, unknown>
 
 // Safe command types matching InfiniService
 export interface SafeCommandType {
   action: 'ServiceList' | 'ServiceControl' | 'PackageList' | 'PackageInstall' |
   'PackageRemove' | 'PackageUpdate' | 'PackageSearch' | 'ProcessList' |
-  'ProcessKill' | 'ProcessTop' | 'SystemInfo' | 'OsInfo'
+  'ProcessKill' | 'ProcessTop' | 'SystemInfo' | 'OsInfo' |
+  // Auto-check commands
+  'CheckWindowsUpdates' | 'GetUpdateHistory' | 'GetPendingUpdates' |
+  'CheckWindowsDefender' | 'GetDefenderStatus' | 'RunDefenderQuickScan' | 'GetThreatHistory' |
+  'GetInstalledApplicationsWMI' | 'CheckApplicationUpdates' | 'GetApplicationDetails' |
+  'CheckDiskSpace' | 'CheckResourceOptimization' | 'RunHealthCheck' | 'RunAllHealthChecks' |
+  'DiskCleanup' | 'AutoFixWindowsUpdates' | 'AutoFixDefender' | 'AutoOptimizeDisk'
   params?: SafeCommandParams
 }
 
@@ -212,6 +279,15 @@ interface SafeCommandParams {
   service?: string
   service_name?: string // Alternative service name field
   action?: string
+  // Auto-check parameters
+  check_name?: string
+  days?: number
+  app_id?: string
+  warning_threshold?: number
+  critical_threshold?: number
+  evaluation_window_days?: number
+  drive?: string
+  targets?: string[]
 }
 
 export interface UnsafeCommandRequest {
@@ -616,13 +692,16 @@ export class VirtioSocketWatcherService extends EventEmitter {
           if (!response.success) {
             this.debug.log('warn', `Command ${response.id} failed: ${response.error || response.stderr || 'Unknown error'}`)
           }
+
+          // Check if this is an auto-check related command and emit events if needed
+          await this.handleAutoCheckResponse(connection.vmId, response, data || null)
         } else {
           this.debug.log('warn', `Received response for unknown command ${response.id} from VM ${connection.vmId}`)
         }
         break
 
       default:
-        this.debug.log('warn', `Unknown message type from VM ${connection.vmId}: ${(message as any).type}`)
+        this.debug.log('warn', `Unknown message type from VM ${connection.vmId}: ${typeof message === 'object' && message && 'type' in message ? message.type : 'unknown'}`)
       }
     } catch (error) {
       this.debug.log('error', `Failed to process message from VM ${connection.vmId}: ${error}`)
@@ -634,6 +713,393 @@ export class VirtioSocketWatcherService extends EventEmitter {
         this.debug.log('error', `First 500 chars: ${messageStr.substring(0, 500)}`)
       }
     }
+  }
+
+  // Handle auto-check related command responses and emit appropriate events
+  private async handleAutoCheckResponse(vmId: string, response: ResponseMessage, data: ResponseData | null): Promise<void> {
+    try {
+      if (!response.command_type || !this.vmEventManager) {
+        return
+      }
+
+      const commandType = response.command_type
+
+      // Check if this is an auto-check related command
+      const autoCheckCommands = [
+        'CheckWindowsUpdates', 'CheckWindowsDefender', 'CheckDiskSpace', 
+        'CheckResourceOptimization', 'RunHealthCheck', 'RunAllHealthChecks',
+        'AutoFixWindowsUpdates', 'AutoFixDefender', 'AutoOptimizeDisk',
+        'DiskCleanup', 'RunDefenderQuickScan'
+      ]
+
+      if (!autoCheckCommands.includes(commandType)) {
+        return
+      }
+
+      this.debug.log('debug', `Processing auto-check response for VM ${vmId}: ${commandType}`)
+
+      // If command failed, this might indicate an issue
+      if (!response.success) {
+        await this.vmEventManager.handleAutoCheckIssueDetected(vmId, {
+          checkType: commandType,
+          severity: 'warning',
+          description: `Auto-check command ${commandType} failed`,
+          details: {
+            error: response.error || response.stderr,
+            commandId: response.id,
+            executionTime: response.execution_time_ms
+          }
+        })
+        return
+      }
+
+      // For successful responses, analyze the data to detect issues or remediations
+      await this.analyzeAutoCheckData(vmId, commandType, data, response)
+
+    } catch (error) {
+      this.debug.log('error', `Error handling auto-check response for VM ${vmId}: ${error}`)
+    }
+  }
+
+  // Analyze auto-check command data to determine if issues or remediations should be reported
+  private async analyzeAutoCheckData(
+    vmId: string, 
+    commandType: string, 
+    data: ResponseData | null, 
+    response: ResponseMessage
+  ): Promise<void> {
+    try {
+      if (!this.vmEventManager) {
+        return
+      }
+
+      // Analyze different types of auto-check responses
+      switch (commandType) {
+        case 'CheckWindowsUpdates':
+          await this.analyzeWindowsUpdatesResponse(vmId, data, response)
+          break
+
+        case 'CheckWindowsDefender':
+          await this.analyzeDefenderResponse(vmId, data, response)
+          break
+
+        case 'CheckDiskSpace':
+          await this.analyzeDiskSpaceResponse(vmId, data, response)
+          break
+
+        case 'CheckResourceOptimization':
+          await this.analyzeResourceOptimizationResponse(vmId, data, response)
+          break
+
+        case 'RunAllHealthChecks':
+        case 'RunHealthCheck':
+          await this.analyzeHealthCheckResponse(vmId, data, response)
+          break
+
+        case 'AutoFixWindowsUpdates':
+        case 'AutoFixDefender':
+        case 'AutoOptimizeDisk':
+        case 'DiskCleanup':
+          await this.analyzeRemediationResponse(vmId, commandType, data, response)
+          break
+
+        case 'RunDefenderQuickScan':
+          await this.analyzeDefenderScanResponse(vmId, data, response)
+          break
+
+        default:
+          this.debug.log('debug', `No specific analysis for command type: ${commandType}`)
+      }
+    } catch (error) {
+      this.debug.log('error', `Error analyzing auto-check data for VM ${vmId}: ${error}`)
+    }
+  }
+
+  // Analyze Windows Updates response for issues
+  private async analyzeWindowsUpdatesResponse(vmId: string, data: ResponseData | null, response: ResponseMessage): Promise<void> {
+    if (!this.vmEventManager || !data) return
+
+    try {
+      // Type guard to check if data is WindowsUpdatesData
+      const isWindowsUpdatesData = (data: ResponseData | null): data is WindowsUpdatesData => {
+        return data !== null && 
+               typeof data === 'object' && 
+               'pending_updates' in data &&
+               Array.isArray((data as WindowsUpdatesData).pending_updates)
+      }
+
+      if (!isWindowsUpdatesData(data)) {
+        this.debug.log('debug', 'Data is not WindowsUpdatesData format')
+        return
+      }
+
+      const updateData = data as WindowsUpdatesData
+      
+      if (updateData.pending_updates && updateData.pending_updates.length > 0) {
+        // Critical updates pending
+        const criticalUpdates = updateData.pending_updates.filter((update: WindowsUpdate) => 
+          update.importance === 'Critical' || update.importance === 'Important'
+        )
+
+        if (criticalUpdates.length > 0) {
+          await this.vmEventManager.handleAutoCheckIssueDetected(vmId, {
+            checkType: 'WindowsUpdates',
+            severity: 'critical',
+            description: `${criticalUpdates.length} critical Windows updates are pending`,
+            details: { criticalUpdates, totalUpdates: updateData.pending_updates.length }
+          })
+
+          // Offer automatic remediation
+          await this.vmEventManager.handleAutoCheckRemediationAvailable(vmId, {
+            checkType: 'WindowsUpdates',
+            remediationType: 'AutoFixWindowsUpdates',
+            description: 'Automatically install pending Windows updates',
+            isAutomatic: true,
+            estimatedTime: '15-30 minutes',
+            details: { updateCount: criticalUpdates.length }
+          })
+        }
+      }
+    } catch (error) {
+      this.debug.log('error', `Error analyzing Windows updates response: ${error}`)
+    }
+  }
+
+  // Analyze Windows Defender response for issues
+  private async analyzeDefenderResponse(vmId: string, data: ResponseData | null, response: ResponseMessage): Promise<void> {
+    if (!this.vmEventManager || !data) return
+
+    try {
+      // Type guard to check if data is DefenderData
+      const isDefenderData = (data: ResponseData | null): data is DefenderData => {
+        return data !== null && 
+               typeof data === 'object' && 
+               ('real_time_protection' in data || 'antivirus_enabled' in data || 'definitions_outdated' in data)
+      }
+
+      if (!isDefenderData(data)) {
+        this.debug.log('debug', 'Data is not DefenderData format')
+        return
+      }
+
+      const defenderData = data as DefenderData
+
+      if (defenderData.real_time_protection === false || defenderData.antivirus_enabled === false) {
+        await this.vmEventManager.handleAutoCheckIssueDetected(vmId, {
+          checkType: 'WindowsDefender',
+          severity: 'critical',
+          description: 'Windows Defender real-time protection is disabled',
+          details: defenderData
+        })
+
+        await this.vmEventManager.handleAutoCheckRemediationAvailable(vmId, {
+          checkType: 'WindowsDefender',
+          remediationType: 'AutoFixDefender',
+          description: 'Enable Windows Defender real-time protection',
+          isAutomatic: true,
+          estimatedTime: '1-2 minutes',
+          details: {}
+        })
+      }
+
+      if (defenderData.definitions_outdated === true) {
+        await this.vmEventManager.handleAutoCheckIssueDetected(vmId, {
+          checkType: 'WindowsDefender',
+          severity: 'warning',
+          description: 'Windows Defender definitions are outdated',
+          details: { last_update: defenderData.last_definition_update }
+        })
+      }
+    } catch (error) {
+      this.debug.log('error', `Error analyzing Defender response: ${error}`)
+    }
+  }
+
+  // Analyze disk space response for issues
+  private async analyzeDiskSpaceResponse(vmId: string, data: ResponseData | null, response: ResponseMessage): Promise<void> {
+    if (!this.vmEventManager || !data) return
+
+    try {
+      // Type guard to check if data is DiskSpaceData
+      const isDiskSpaceData = (data: ResponseData | null): data is DiskSpaceData => {
+        return data !== null && 
+               typeof data === 'object' && 
+               'drives' in data &&
+               Array.isArray((data as DiskSpaceData).drives)
+      }
+
+      if (!isDiskSpaceData(data)) {
+        this.debug.log('debug', 'Data is not DiskSpaceData format')
+        return
+      }
+
+      const diskData = data as DiskSpaceData
+
+      if (diskData.drives && Array.isArray(diskData.drives)) {
+        for (const drive of diskData.drives) {
+          const usagePercent = (drive.used_gb / drive.total_gb) * 100
+
+          if (usagePercent > 90) {
+            await this.vmEventManager.handleAutoCheckIssueDetected(vmId, {
+              checkType: 'DiskSpace',
+              severity: 'critical',
+              description: `Drive ${drive.drive_letter} is ${usagePercent.toFixed(1)}% full`,
+              details: drive
+            })
+
+            await this.vmEventManager.handleAutoCheckRemediationAvailable(vmId, {
+              checkType: 'DiskSpace',
+              remediationType: 'DiskCleanup',
+              description: `Clean up temporary files on drive ${drive.drive_letter}`,
+              isAutomatic: true,
+              estimatedTime: '5-10 minutes',
+              details: { drive: drive.drive_letter }
+            })
+          } else if (usagePercent > 80) {
+            await this.vmEventManager.handleAutoCheckIssueDetected(vmId, {
+              checkType: 'DiskSpace',
+              severity: 'warning',
+              description: `Drive ${drive.drive_letter} is ${usagePercent.toFixed(1)}% full`,
+              details: drive
+            })
+          }
+        }
+      }
+    } catch (error) {
+      this.debug.log('error', `Error analyzing disk space response: ${error}`)
+    }
+  }
+
+  // Analyze resource optimization response
+  private async analyzeResourceOptimizationResponse(vmId: string, data: ResponseData | null, response: ResponseMessage): Promise<void> {
+    if (!this.vmEventManager || !data) return
+
+    try {
+      // Type guard to check if data is ResourceOptimizationData
+      const isResourceOptimizationData = (data: ResponseData | null): data is ResourceOptimizationData => {
+        return data !== null && 
+               typeof data === 'object' && 
+               ('cpu_optimization_available' in data || 'memory_optimization_available' in data || 'disk_optimization_available' in data)
+      }
+
+      if (!isResourceOptimizationData(data)) {
+        this.debug.log('debug', 'Data is not ResourceOptimizationData format')
+        return
+      }
+
+      const optimizationData = data as ResourceOptimizationData
+
+      if (optimizationData.cpu_optimization_available || optimizationData.memory_optimization_available) {
+        await this.vmEventManager.handleAutoCheckRemediationAvailable(vmId, {
+          checkType: 'ResourceOptimization',
+          remediationType: 'AutoOptimizeDisk',
+          description: 'System resources can be optimized for better performance',
+          isAutomatic: false,
+          estimatedTime: '10-15 minutes',
+          details: optimizationData
+        })
+      }
+    } catch (error) {
+      this.debug.log('error', `Error analyzing resource optimization response: ${error}`)
+    }
+  }
+
+  // Analyze general health check response
+  private async analyzeHealthCheckResponse(vmId: string, data: ResponseData | null, response: ResponseMessage): Promise<void> {
+    if (!this.vmEventManager || !data) return
+
+    try {
+      // Type guard to check if data is HealthCheckData
+      const isHealthCheckData = (data: ResponseData | null): data is HealthCheckData => {
+        return data !== null && 
+               typeof data === 'object' && 
+               ('overall_health' in data || 'checks' in data)
+      }
+
+      if (!isHealthCheckData(data)) {
+        this.debug.log('debug', 'Data is not HealthCheckData format')
+        return
+      }
+
+      const healthData = data as HealthCheckData
+
+      if (healthData.overall_health === 'Critical' || healthData.overall_health === 'Warning') {
+        await this.vmEventManager.handleAutoCheckIssueDetected(vmId, {
+          checkType: 'HealthCheck',
+          severity: healthData.overall_health === 'Critical' ? 'critical' : 'warning',
+          description: `System health check detected ${healthData.overall_health.toLowerCase()} issues`,
+          details: healthData
+        })
+      }
+    } catch (error) {
+      this.debug.log('error', `Error analyzing health check response: ${error}`)
+    }
+  }
+
+  // Analyze remediation command responses
+  private async analyzeRemediationResponse(vmId: string, commandType: string, data: ResponseData | null, response: ResponseMessage): Promise<void> {
+    if (!this.vmEventManager) return
+
+    try {
+      const success = response.success && (!response.exit_code || response.exit_code === 0)
+      
+      await this.vmEventManager.handleAutoCheckRemediationCompleted(vmId, {
+        checkType: this.getCheckTypeFromRemediationCommand(commandType),
+        remediationType: commandType,
+        success,
+        description: success 
+          ? `${commandType} completed successfully`
+          : `${commandType} failed to complete`,
+        executionTime: response.execution_time_ms ? `${response.execution_time_ms}ms` : undefined,
+        details: data,
+        error: success ? undefined : (response.error || response.stderr || 'Unknown error')
+      })
+    } catch (error) {
+      this.debug.log('error', `Error analyzing remediation response: ${error}`)
+    }
+  }
+
+  // Analyze Defender scan response
+  private async analyzeDefenderScanResponse(vmId: string, data: ResponseData | null, response: ResponseMessage): Promise<void> {
+    if (!this.vmEventManager || !data) return
+
+    try {
+      // Type guard to check if data is DefenderScanData
+      const isDefenderScanData = (data: ResponseData | null): data is DefenderScanData => {
+        return data !== null && 
+               typeof data === 'object' && 
+               ('threats_found' in data || 'scan_duration' in data || 'threats' in data)
+      }
+
+      if (!isDefenderScanData(data)) {
+        this.debug.log('debug', 'Data is not DefenderScanData format')
+        return
+      }
+
+      const scanData = data as DefenderScanData
+
+      if (scanData.threats_found && scanData.threats_found > 0) {
+        await this.vmEventManager.handleAutoCheckIssueDetected(vmId, {
+          checkType: 'DefenderScan',
+          severity: 'critical',
+          description: `Windows Defender scan found ${scanData.threats_found} threats`,
+          details: scanData
+        })
+      }
+    } catch (error) {
+      this.debug.log('error', `Error analyzing Defender scan response: ${error}`)
+    }
+  }
+
+  // Helper method to map remediation commands to their check types
+  private getCheckTypeFromRemediationCommand(commandType: string): string {
+    const mapping: Record<string, string> = {
+      'AutoFixWindowsUpdates': 'WindowsUpdates',
+      'AutoFixDefender': 'WindowsDefender', 
+      'AutoOptimizeDisk': 'ResourceOptimization',
+      'DiskCleanup': 'DiskSpace'
+    }
+    return mapping[commandType] || commandType
   }
 
   // Store metrics in database
@@ -1345,6 +1811,11 @@ export class VirtioSocketWatcherService extends EventEmitter {
   public isVmConnected (vmId: string): boolean {
     const connection = this.connections.get(vmId)
     return connection?.isConnected || false
+  }
+
+  // Check if the service is currently running
+  public getServiceStatus(): boolean {
+    return this.isRunning
   }
 
   // Get connection details for a VM
