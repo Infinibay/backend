@@ -28,11 +28,17 @@ import { DepartmentEventManager } from './services/DepartmentEventManager'
 import { ApplicationEventManager } from './services/ApplicationEventManager'
 import { createVirtioSocketWatcherService } from './services/VirtioSocketWatcherService'
 
+// Health Monitoring Services
+import { VMHealthQueueManager } from './services/VMHealthQueueManager'
+import { BackgroundHealthService } from './services/BackgroundHealthService'
+import { BackgroundTaskService } from './services/BackgroundTaskService'
+import { ErrorHandler } from './utils/errors/ErrorHandler'
+
 // Crons
 import { startCrons } from './crons/all'
 
 // Store services for cleanup
-let virtioSocketWatcherService: any = null
+let virtioSocketWatcherService: ReturnType<typeof createVirtioSocketWatcherService> | null = null
 
 async function bootstrap (): Promise<void> {
   try {
@@ -115,6 +121,10 @@ async function bootstrap (): Promise<void> {
 
     const eventManager = createEventManager(socketService, prisma)
 
+    // Initialize ErrorHandler for background services
+    ErrorHandler.initialize(prisma, eventManager)
+    console.log('⚠️ Error Handler initialized')
+
     // Initialize VMDetailEventManager for VM detail-specific events
     const { createVMDetailEventManager } = await import('./services/VMDetailEventManager')
     createVMDetailEventManager(prisma)
@@ -132,8 +142,23 @@ async function bootstrap (): Promise<void> {
 
     console.log('🎯 Real-time event system initialized with all resource managers')
 
+    // Initialize health monitoring system
+    const healthQueueManager = new VMHealthQueueManager(prisma, eventManager)
+    console.log('⚕️ VM Health Queue Manager initialized')
+
+    // Initialize and start background health service
+    const backgroundTaskService = new BackgroundTaskService(prisma, eventManager)
+    const backgroundHealthService = new BackgroundHealthService(
+      prisma,
+      backgroundTaskService,
+      eventManager,
+      healthQueueManager
+    )
+    backgroundHealthService.start()
+    console.log('🏥 Background Health Service initialized and started')
+
     // Initialize and start VirtioSocketWatcherService (already created earlier for context)
-    virtioSocketWatcher.initialize(vmEventManager)
+    virtioSocketWatcher.initialize(vmEventManager, healthQueueManager)
 
     // Forward metrics updates to Socket.io clients
     virtioSocketWatcher.on('metricsUpdated', ({ vmId, metrics }) => {

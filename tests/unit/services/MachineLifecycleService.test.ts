@@ -65,16 +65,16 @@ describe('MachineLifecycleService', () => {
     const siMock = jest.mocked(si)
     siMock.graphics.mockResolvedValue({
       controllers: [
-        { 
-          pciBus: '0000:01:00.0', 
+        {
+          pciBus: '0000:01:00.0',
           model: 'NVIDIA GeForce GTX 1080',
           vendor: 'NVIDIA',
           bus: 'PCIe',
           vram: 8192,
           vramDynamic: false
         },
-        { 
-          pciBus: '0000:02:00.0', 
+        {
+          pciBus: '0000:02:00.0',
           model: 'AMD Radeon RX 580',
           vendor: 'AMD',
           bus: 'PCIe',
@@ -301,8 +301,8 @@ describe('MachineLifecycleService', () => {
         customStorage: 100,
         os: OsEnum.UBUNTU,
         applications: [
-          { applicationId: 'app-1', parameters: {key: 'value1'}, machineId: '' },
-          { applicationId: 'app-2', parameters: {key: 'value2'}, machineId: '' }
+          { applicationId: 'app-1', parameters: { key: 'value1' }, machineId: '' },
+          { applicationId: 'app-2', parameters: { key: 'value2' }, machineId: '' }
         ],
         username: 'admin',
         password: 'password123',
@@ -359,14 +359,14 @@ describe('MachineLifecycleService', () => {
         data: {
           machineId: 'machine-123',
           applicationId: 'app-1',
-          parameters: {key: 'value1'}
+          parameters: { key: 'value1' }
         }
       })
       expect(createApplicationMock).toHaveBeenCalledWith({
         data: {
           machineId: 'machine-123',
           applicationId: 'app-2',
-          parameters: {key: 'value2'}
+          parameters: { key: 'value2' }
         }
       })
     })

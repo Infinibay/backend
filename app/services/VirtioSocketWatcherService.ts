@@ -15,6 +15,7 @@ import * as chokidar from 'chokidar'
 import { EventEmitter } from 'events'
 import { v4 as uuidv4 } from 'uuid'
 import { VmEventManager } from './VmEventManager'
+import { VMHealthQueueManager } from './VMHealthQueueManager'
 import { Debugger } from '../utils/debug'
 
 // Message types from InfiniService
@@ -247,8 +248,8 @@ interface DefenderScanData {
 
 // Response data can be different types depending on the command
 // For compatibility with GraphQL resolver expectations, ensure arrays are properly typed
-type ResponseData = PackageInfo[] | ServiceInfo[] | ProcessInfo[] | SystemInfo | OsInfo | 
-                   WindowsUpdatesData | DefenderData | DiskSpaceData | ResourceOptimizationData | 
+type ResponseData = PackageInfo[] | ServiceInfo[] | ProcessInfo[] | SystemInfo | OsInfo |
+                   WindowsUpdatesData | DefenderData | DiskSpaceData | ResourceOptimizationData |
                    HealthCheckData | DefenderScanData | unknown[] | Record<string, unknown>
 
 // Safe command types matching InfiniService
@@ -365,6 +366,7 @@ interface FormattedCommandType {
 export class VirtioSocketWatcherService extends EventEmitter {
   private prisma: PrismaClient
   private vmEventManager?: VmEventManager
+  private queueManager?: VMHealthQueueManager
   private connections: Map<string, VmConnection> = new Map()
   private watcher?: chokidar.FSWatcher
   private socketDir: string
@@ -383,8 +385,9 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Initialize the service with optional dependencies
-  initialize (vmEventManager?: VmEventManager): void {
+  initialize (vmEventManager?: VmEventManager, queueManager?: VMHealthQueueManager): void {
     this.vmEventManager = vmEventManager
+    this.queueManager = queueManager
   }
 
   // Start watching for socket files
@@ -528,8 +531,11 @@ export class VirtioSocketWatcherService extends EventEmitter {
       connection.lastErrorType = undefined
 
       // Connection established successfully
-      // Start health monitoring
+      // Start connection health monitoring (pings, timeouts)
       this.startHealthMonitoring(connection)
+
+      // Process any queued health checks for this VM
+      this.processHealthCheckQueue(connection)
 
       // TODO: Implement handshake authentication here
     })
@@ -716,7 +722,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Handle auto-check related command responses and emit appropriate events
-  private async handleAutoCheckResponse(vmId: string, response: ResponseMessage, data: ResponseData | null): Promise<void> {
+  private async handleAutoCheckResponse (vmId: string, response: ResponseMessage, data: ResponseData | null): Promise<void> {
     try {
       if (!response.command_type || !this.vmEventManager) {
         return
@@ -726,7 +732,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
 
       // Check if this is an auto-check related command
       const autoCheckCommands = [
-        'CheckWindowsUpdates', 'CheckWindowsDefender', 'CheckDiskSpace', 
+        'CheckWindowsUpdates', 'CheckWindowsDefender', 'CheckDiskSpace',
         'CheckResourceOptimization', 'RunHealthCheck', 'RunAllHealthChecks',
         'AutoFixWindowsUpdates', 'AutoFixDefender', 'AutoOptimizeDisk',
         'DiskCleanup', 'RunDefenderQuickScan'
@@ -755,17 +761,16 @@ export class VirtioSocketWatcherService extends EventEmitter {
 
       // For successful responses, analyze the data to detect issues or remediations
       await this.analyzeAutoCheckData(vmId, commandType, data, response)
-
     } catch (error) {
       this.debug.log('error', `Error handling auto-check response for VM ${vmId}: ${error}`)
     }
   }
 
   // Analyze auto-check command data to determine if issues or remediations should be reported
-  private async analyzeAutoCheckData(
-    vmId: string, 
-    commandType: string, 
-    data: ResponseData | null, 
+  private async analyzeAutoCheckData (
+    vmId: string,
+    commandType: string,
+    data: ResponseData | null,
     response: ResponseMessage
   ): Promise<void> {
     try {
@@ -775,40 +780,40 @@ export class VirtioSocketWatcherService extends EventEmitter {
 
       // Analyze different types of auto-check responses
       switch (commandType) {
-        case 'CheckWindowsUpdates':
-          await this.analyzeWindowsUpdatesResponse(vmId, data, response)
-          break
+      case 'CheckWindowsUpdates':
+        await this.analyzeWindowsUpdatesResponse(vmId, data, response)
+        break
 
-        case 'CheckWindowsDefender':
-          await this.analyzeDefenderResponse(vmId, data, response)
-          break
+      case 'CheckWindowsDefender':
+        await this.analyzeDefenderResponse(vmId, data, response)
+        break
 
-        case 'CheckDiskSpace':
-          await this.analyzeDiskSpaceResponse(vmId, data, response)
-          break
+      case 'CheckDiskSpace':
+        await this.analyzeDiskSpaceResponse(vmId, data, response)
+        break
 
-        case 'CheckResourceOptimization':
-          await this.analyzeResourceOptimizationResponse(vmId, data, response)
-          break
+      case 'CheckResourceOptimization':
+        await this.analyzeResourceOptimizationResponse(vmId, data, response)
+        break
 
-        case 'RunAllHealthChecks':
-        case 'RunHealthCheck':
-          await this.analyzeHealthCheckResponse(vmId, data, response)
-          break
+      case 'RunAllHealthChecks':
+      case 'RunHealthCheck':
+        await this.analyzeHealthCheckResponse(vmId, data, response)
+        break
 
-        case 'AutoFixWindowsUpdates':
-        case 'AutoFixDefender':
-        case 'AutoOptimizeDisk':
-        case 'DiskCleanup':
-          await this.analyzeRemediationResponse(vmId, commandType, data, response)
-          break
+      case 'AutoFixWindowsUpdates':
+      case 'AutoFixDefender':
+      case 'AutoOptimizeDisk':
+      case 'DiskCleanup':
+        await this.analyzeRemediationResponse(vmId, commandType, data, response)
+        break
 
-        case 'RunDefenderQuickScan':
-          await this.analyzeDefenderScanResponse(vmId, data, response)
-          break
+      case 'RunDefenderQuickScan':
+        await this.analyzeDefenderScanResponse(vmId, data, response)
+        break
 
-        default:
-          this.debug.log('debug', `No specific analysis for command type: ${commandType}`)
+      default:
+        this.debug.log('debug', `No specific analysis for command type: ${commandType}`)
       }
     } catch (error) {
       this.debug.log('error', `Error analyzing auto-check data for VM ${vmId}: ${error}`)
@@ -816,14 +821,14 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Analyze Windows Updates response for issues
-  private async analyzeWindowsUpdatesResponse(vmId: string, data: ResponseData | null, response: ResponseMessage): Promise<void> {
+  private async analyzeWindowsUpdatesResponse (vmId: string, data: ResponseData | null, response: ResponseMessage): Promise<void> {
     if (!this.vmEventManager || !data) return
 
     try {
       // Type guard to check if data is WindowsUpdatesData
       const isWindowsUpdatesData = (data: ResponseData | null): data is WindowsUpdatesData => {
-        return data !== null && 
-               typeof data === 'object' && 
+        return data !== null &&
+               typeof data === 'object' &&
                'pending_updates' in data &&
                Array.isArray((data as WindowsUpdatesData).pending_updates)
       }
@@ -834,10 +839,10 @@ export class VirtioSocketWatcherService extends EventEmitter {
       }
 
       const updateData = data as WindowsUpdatesData
-      
+
       if (updateData.pending_updates && updateData.pending_updates.length > 0) {
         // Critical updates pending
-        const criticalUpdates = updateData.pending_updates.filter((update: WindowsUpdate) => 
+        const criticalUpdates = updateData.pending_updates.filter((update: WindowsUpdate) =>
           update.importance === 'Critical' || update.importance === 'Important'
         )
 
@@ -866,14 +871,14 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Analyze Windows Defender response for issues
-  private async analyzeDefenderResponse(vmId: string, data: ResponseData | null, response: ResponseMessage): Promise<void> {
+  private async analyzeDefenderResponse (vmId: string, data: ResponseData | null, response: ResponseMessage): Promise<void> {
     if (!this.vmEventManager || !data) return
 
     try {
       // Type guard to check if data is DefenderData
       const isDefenderData = (data: ResponseData | null): data is DefenderData => {
-        return data !== null && 
-               typeof data === 'object' && 
+        return data !== null &&
+               typeof data === 'object' &&
                ('real_time_protection' in data || 'antivirus_enabled' in data || 'definitions_outdated' in data)
       }
 
@@ -916,14 +921,14 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Analyze disk space response for issues
-  private async analyzeDiskSpaceResponse(vmId: string, data: ResponseData | null, response: ResponseMessage): Promise<void> {
+  private async analyzeDiskSpaceResponse (vmId: string, data: ResponseData | null, response: ResponseMessage): Promise<void> {
     if (!this.vmEventManager || !data) return
 
     try {
       // Type guard to check if data is DiskSpaceData
       const isDiskSpaceData = (data: ResponseData | null): data is DiskSpaceData => {
-        return data !== null && 
-               typeof data === 'object' && 
+        return data !== null &&
+               typeof data === 'object' &&
                'drives' in data &&
                Array.isArray((data as DiskSpaceData).drives)
       }
@@ -971,14 +976,14 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Analyze resource optimization response
-  private async analyzeResourceOptimizationResponse(vmId: string, data: ResponseData | null, response: ResponseMessage): Promise<void> {
+  private async analyzeResourceOptimizationResponse (vmId: string, data: ResponseData | null, response: ResponseMessage): Promise<void> {
     if (!this.vmEventManager || !data) return
 
     try {
       // Type guard to check if data is ResourceOptimizationData
       const isResourceOptimizationData = (data: ResponseData | null): data is ResourceOptimizationData => {
-        return data !== null && 
-               typeof data === 'object' && 
+        return data !== null &&
+               typeof data === 'object' &&
                ('cpu_optimization_available' in data || 'memory_optimization_available' in data || 'disk_optimization_available' in data)
       }
 
@@ -1005,14 +1010,14 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Analyze general health check response
-  private async analyzeHealthCheckResponse(vmId: string, data: ResponseData | null, response: ResponseMessage): Promise<void> {
+  private async analyzeHealthCheckResponse (vmId: string, data: ResponseData | null, response: ResponseMessage): Promise<void> {
     if (!this.vmEventManager || !data) return
 
     try {
       // Type guard to check if data is HealthCheckData
       const isHealthCheckData = (data: ResponseData | null): data is HealthCheckData => {
-        return data !== null && 
-               typeof data === 'object' && 
+        return data !== null &&
+               typeof data === 'object' &&
                ('overall_health' in data || 'checks' in data)
       }
 
@@ -1037,17 +1042,17 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Analyze remediation command responses
-  private async analyzeRemediationResponse(vmId: string, commandType: string, data: ResponseData | null, response: ResponseMessage): Promise<void> {
+  private async analyzeRemediationResponse (vmId: string, commandType: string, data: ResponseData | null, response: ResponseMessage): Promise<void> {
     if (!this.vmEventManager) return
 
     try {
       const success = response.success && (!response.exit_code || response.exit_code === 0)
-      
+
       await this.vmEventManager.handleAutoCheckRemediationCompleted(vmId, {
         checkType: this.getCheckTypeFromRemediationCommand(commandType),
         remediationType: commandType,
         success,
-        description: success 
+        description: success
           ? `${commandType} completed successfully`
           : `${commandType} failed to complete`,
         executionTime: response.execution_time_ms ? `${response.execution_time_ms}ms` : undefined,
@@ -1060,14 +1065,14 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Analyze Defender scan response
-  private async analyzeDefenderScanResponse(vmId: string, data: ResponseData | null, response: ResponseMessage): Promise<void> {
+  private async analyzeDefenderScanResponse (vmId: string, data: ResponseData | null, response: ResponseMessage): Promise<void> {
     if (!this.vmEventManager || !data) return
 
     try {
       // Type guard to check if data is DefenderScanData
       const isDefenderScanData = (data: ResponseData | null): data is DefenderScanData => {
-        return data !== null && 
-               typeof data === 'object' && 
+        return data !== null &&
+               typeof data === 'object' &&
                ('threats_found' in data || 'scan_duration' in data || 'threats' in data)
       }
 
@@ -1092,12 +1097,12 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Helper method to map remediation commands to their check types
-  private getCheckTypeFromRemediationCommand(commandType: string): string {
+  private getCheckTypeFromRemediationCommand (commandType: string): string {
     const mapping: Record<string, string> = {
-      'AutoFixWindowsUpdates': 'WindowsUpdates',
-      'AutoFixDefender': 'WindowsDefender', 
-      'AutoOptimizeDisk': 'ResourceOptimization',
-      'DiskCleanup': 'DiskSpace'
+      AutoFixWindowsUpdates: 'WindowsUpdates',
+      AutoFixDefender: 'WindowsDefender',
+      AutoOptimizeDisk: 'ResourceOptimization',
+      DiskCleanup: 'DiskSpace'
     }
     return mapping[commandType] || commandType
   }
@@ -1814,7 +1819,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Check if the service is currently running
-  public getServiceStatus(): boolean {
+  public getServiceStatus (): boolean {
     return this.isRunning
   }
 
@@ -1848,6 +1853,25 @@ export class VirtioSocketWatcherService extends EventEmitter {
         this.debug.log('warn', `Failed to remove socket file for VM ${vmId}: ${error}`)
       }
     }
+  }
+
+  // Process health check queue when VM connects
+  private processHealthCheckQueue (connection: VmConnection): void {
+    if (!this.queueManager) {
+      this.debug.log('debug', `⚕️ No queue manager available for VM ${connection.vmId}, skipping health check queue processing`)
+      return
+    }
+
+    this.debug.log('info', `⚕️ Processing health check queue for VM ${connection.vmId}`)
+
+    // Process any queued health checks for this VM
+    setImmediate(async () => {
+      try {
+        await this.queueManager!.processQueue(connection.vmId)
+      } catch (error) {
+        this.debug.log('error', `Failed to process health queue for VM ${connection.vmId}: ${error}`)
+      }
+    })
   }
 }
 

@@ -1,14 +1,12 @@
 import 'reflect-metadata'
 import { VirtioSocketWatcherService } from '../../app/services/VirtioSocketWatcherService'
 import { VmEventManager } from '../../app/services/VmEventManager'
-import { EventManager } from '../../app/services/EventManager'
+import { EventManager, createEventManager } from '../../app/services/EventManager'
 import { SocketService, createSocketService } from '../../app/services/SocketService'
-import { createEventManager } from '../../app/services/EventManager'
 import { mockPrisma } from '../setup/jest.setup'
 import { PrismaClient } from '@prisma/client'
 import { Server } from 'socket.io'
-import { createServer } from 'http'
-import { Server as HTTPServer } from 'http'
+import { createServer, Server as HTTPServer } from 'http'
 import { AddressInfo } from 'net'
 import { createMockUser, createMockMachine, createMockDepartment } from '../setup/mock-factories'
 
@@ -55,7 +53,7 @@ describe('Auto-Check End-to-End Integration', () => {
 
     // Register VM event manager
     eventManager.registerResourceManager('vms', vmEventManager)
-    
+
     // Initialize virtio service with event manager
     virtioService.initialize(vmEventManager)
 
@@ -69,13 +67,13 @@ describe('Auto-Check End-to-End Integration', () => {
       userId: 'test-user-id',
       departmentId: 'test-dept-id'
     })
-    
+
     const machineWithRelations = {
       ...mockMachine,
       user: mockUser,
       department: mockDepartment
     }
-    
+
     mockPrisma.machine.findUnique.mockResolvedValue(machineWithRelations)
 
     const mockAdmin = createMockUser({ id: 'admin-user-id', role: 'ADMIN' })
@@ -87,7 +85,7 @@ describe('Auto-Check End-to-End Integration', () => {
       const mockSocket = {
         sendToUser: jest.fn()
       }
-      
+
       // Mock socket service methods
       jest.spyOn(socketService, 'sendToUser').mockImplementation(mockSocket.sendToUser)
 
@@ -193,7 +191,7 @@ describe('Auto-Check End-to-End Integration', () => {
       const mockSocket = {
         sendToUser: jest.fn()
       }
-      
+
       jest.spyOn(socketService, 'sendToUser').mockImplementation(mockSocket.sendToUser)
 
       // Simulate disk space check with critical usage
@@ -274,7 +272,7 @@ describe('Auto-Check End-to-End Integration', () => {
       const mockSocket = {
         sendToUser: jest.fn()
       }
-      
+
       jest.spyOn(socketService, 'sendToUser').mockImplementation(mockSocket.sendToUser)
 
       // Simulate disabled Windows Defender
@@ -331,7 +329,7 @@ describe('Auto-Check End-to-End Integration', () => {
       const mockSocket = {
         sendToUser: jest.fn()
       }
-      
+
       jest.spyOn(socketService, 'sendToUser').mockImplementation(mockSocket.sendToUser)
 
       // Simulate failed command
@@ -383,16 +381,13 @@ describe('Auto-Check End-to-End Integration', () => {
       const mockDeptUser1 = createMockUser({ id: 'dept-user-1', role: 'USER' })
       const mockDeptUser2 = createMockUser({ id: 'dept-user-2', role: 'USER' })
       const mockTestUser = createMockUser({ id: 'test-user-id', role: 'USER' })
-      
-      mockPrisma.user.findMany.mockImplementation(() => {
-        // Return all relevant users for this test
-        return Promise.resolve([mockAdmin1, mockAdmin2, mockDeptUser1, mockDeptUser2])
-      })
+
+      mockPrisma.user.findMany.mockResolvedValue([mockAdmin1, mockAdmin2, mockDeptUser1, mockDeptUser2])
 
       const mockSocket = {
         sendToUser: jest.fn()
       }
-      
+
       jest.spyOn(socketService, 'sendToUser').mockImplementation(mockSocket.sendToUser)
 
       await vmEventManager.handleAutoCheckIssueDetected('test-vm-id', {
@@ -402,8 +397,8 @@ describe('Auto-Check End-to-End Integration', () => {
         details: { overall_health: 'Warning' }
       })
 
-      // Should send to multiple users (VM owner + admins + potentially department users)
-      expect(mockSocket.sendToUser).toHaveBeenCalledTimes(3) // VM owner + 2 admins
+      // Should send to multiple users (VM owner + admins + department users)
+      expect(mockSocket.sendToUser).toHaveBeenCalledTimes(5) // VM owner + 2 admins + 2 dept users
     })
   })
 })

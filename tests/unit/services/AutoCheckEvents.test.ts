@@ -1,8 +1,5 @@
 import 'reflect-metadata'
 
-// Unmock EventManager for this test file since we need to test its actual implementation
-jest.unmock('../../../app/services/EventManager')
-
 import { VmEventManager } from '../../../app/services/VmEventManager'
 import { VirtioSocketWatcherService } from '../../../app/services/VirtioSocketWatcherService'
 import { EventManager } from '../../../app/services/EventManager'
@@ -10,6 +7,9 @@ import { SocketService } from '../../../app/services/SocketService'
 import { mockPrisma } from '../../setup/jest.setup'
 import { PrismaClient } from '@prisma/client'
 import { createMockUser, createMockMachine, createMockDepartment } from '../../setup/mock-factories'
+
+// Unmock EventManager for this test file since we need to test its actual implementation
+jest.unmock('../../../app/services/EventManager')
 
 // Mock socket service
 const mockSocketService = {
@@ -44,14 +44,14 @@ describe('Auto-Check WebSocket Events', () => {
       userId: mockUser.id,
       departmentId: mockDepartment.id
     })
-    
+
     // Add user and department to machine for relations
     const machineWithRelations = {
       ...mockMachine,
       user: mockUser,
       department: mockDepartment
     }
-    
+
     mockPrisma.machine.findUnique.mockResolvedValue(machineWithRelations)
 
     // Mock admin users
@@ -62,37 +62,37 @@ describe('Auto-Check WebSocket Events', () => {
   describe('EventManager Auto-Check Events', () => {
     it('should add auto-check event types to EventAction', () => {
       expect(typeof eventManager.autocheckIssueDetected).toBe('function')
-      expect(typeof eventManager.autocheckRemediationAvailable).toBe('function')  
+      expect(typeof eventManager.autocheckRemediationAvailable).toBe('function')
       expect(typeof eventManager.autocheckRemediationCompleted).toBe('function')
     })
 
     it('should dispatch autocheck issue detected event', async () => {
       const vmData = { id: 'test-vm-id', severity: 'critical' }
-      
+
       eventManager.registerResourceManager('vms', vmEventManager)
-      
+
       await eventManager.autocheckIssueDetected(vmData, 'test-user')
-      
+
       expect(mockSocketService.sendToUser).toHaveBeenCalled()
     })
 
     it('should dispatch autocheck remediation available event', async () => {
       const vmData = { id: 'test-vm-id', remediationType: 'AutoFixWindowsUpdates' }
-      
+
       eventManager.registerResourceManager('vms', vmEventManager)
-      
+
       await eventManager.autocheckRemediationAvailable(vmData, 'test-user')
-      
+
       expect(mockSocketService.sendToUser).toHaveBeenCalled()
     })
 
     it('should dispatch autocheck remediation completed event', async () => {
       const vmData = { id: 'test-vm-id', success: true }
-      
+
       eventManager.registerResourceManager('vms', vmEventManager)
-      
+
       await eventManager.autocheckRemediationCompleted(vmData, 'test-user')
-      
+
       expect(mockSocketService.sendToUser).toHaveBeenCalled()
     })
   })

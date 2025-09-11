@@ -3,6 +3,24 @@
 # !!!   DO NOT MODIFY THIS FILE BY YOURSELF   !!!
 # -----------------------------------------------
 
+type ApplicationInfo {
+  installDate: DateTimeISO
+  installLocation: String
+  name: String!
+  publisher: String
+  sizeInMB: Float
+  version: String
+}
+
+type ApplicationInventory {
+  applications: [ApplicationInfo!]!
+  error: String
+  success: Boolean!
+  timestamp: DateTimeISO!
+  totalCount: Int!
+  vmId: ID!
+}
+
 type ApplicationType {
   createdAt: DateTimeISO!
   description: String
@@ -12,6 +30,39 @@ type ApplicationType {
   name: String!
   os: [String!]!
   parameters: JSONObject
+}
+
+type ApplicationUpdateInfo {
+  applicationName: String!
+  availableVersion: String!
+  canUpdate: Boolean!
+  currentVersion: String!
+  downloadUrl: String
+  installDate: DateTimeISO
+  installLocation: String
+  installType: String
+  isSecurityUpdate: Boolean!
+  lastUpdateCheck: DateTimeISO
+  registryKey: String
+  releaseDate: DateTimeISO
+  sizeInMB: Float
+  updateSizeBytes: Float
+  updateSource: String
+  updateType: String
+  vendor: String
+}
+
+type ApplicationUpdates {
+  availableUpdates: [ApplicationUpdateInfo!]!
+  error: String
+  executionTimeMs: Int
+  microsoftStoreUpdatesCount: Int
+  success: Boolean!
+  summary: String
+  timestamp: DateTimeISO!
+  totalUpdatesCount: Int!
+  vmId: ID!
+  windowsUpdatesCount: Int
 }
 
 type ApplicationUsage {
@@ -150,6 +201,17 @@ A date-time string at UTC, such as 2007-12-03T10:15:30Z, compliant with the `dat
 """
 scalar DateTimeISO
 
+type DefenderScanResult {
+  error: String
+  filesScanned: Int!
+  scanDuration: Float!
+  scanType: String!
+  success: Boolean!
+  threatsFound: Int!
+  timestamp: DateTimeISO!
+  vmId: ID!
+}
+
 input DeleteNetworkInput {
   name: String!
 }
@@ -192,6 +254,37 @@ type DepartmentType {
   ipSubnet: String
   name: String!
   totalMachines: Float
+}
+
+type DiskCleanupResult {
+  drive: String!
+  error: String
+  filesDeleted: Int!
+  spaceClearedMB: Float!
+  success: Boolean!
+  targetsProcessed: [String!]!
+  timestamp: DateTimeISO!
+  vmId: ID!
+}
+
+type DiskDriveInfo {
+  drive: String!
+  freeGB: Float!
+  label: String!
+  status: HealthCheckSeverity!
+  totalGB: Float!
+  usedGB: Float!
+  usedPercent: Float!
+}
+
+type DiskSpaceInfo {
+  criticalThreshold: Float
+  drives: [DiskDriveInfo!]!
+  error: String
+  success: Boolean!
+  timestamp: DateTimeISO!
+  vmId: ID!
+  warningThreshold: Float
 }
 
 type DyummyType {
@@ -259,6 +352,17 @@ type GenericFilter {
   updatedAt: DateTimeISO!
 }
 
+type GenericHealthCheckResponse {
+  checkName: String!
+  details: String
+  error: String
+  message: String!
+  severity: HealthCheckSeverity!
+  success: Boolean!
+  timestamp: DateTimeISO!
+  vmId: ID!
+}
+
 type GlobalServiceStatus {
   """Whether the service is enabled for inbound traffic"""
   provideEnabled: Boolean!
@@ -277,6 +381,56 @@ type GraphicConfigurationType {
   link: String!
   password: String!
   protocol: String!
+}
+
+"""Available health check types that can be executed individually"""
+enum HealthCheckName {
+  APPLICATION_HEALTH
+  BOOT_TIME
+  CPU_USAGE
+  CRITICAL_SERVICES
+  DISK_FRAGMENTATION
+  DISK_HEALTH
+  DISK_SPACE
+  EVENT_LOG_ERRORS
+  FIREWALL_STATUS
+  MEMORY_USAGE
+  NETWORK_CONNECTIVITY
+  PERFORMANCE_COUNTERS
+  REGISTRY_HEALTH
+  RESOURCE_OPTIMIZATION
+  SECURITY_UPDATES
+  STARTUP_PROGRAMS
+  SYSTEM_FILES
+  SYSTEM_TEMPERATURE
+  UPDATE_SERVICES
+  WINDOWS_DEFENDER
+  WINDOWS_UPDATES
+}
+
+type HealthCheckResult {
+  checkName: String!
+  details: String
+  message: String!
+  severity: HealthCheckSeverity!
+  timestamp: DateTimeISO!
+}
+
+"""Severity level of health check results"""
+enum HealthCheckSeverity {
+  FAILED
+  INFO
+  PASSED
+  WARNING
+}
+
+type HealthCheckStatus {
+  checks: [HealthCheckResult!]!
+  error: String
+  overallScore: Float!
+  success: Boolean!
+  timestamp: DateTimeISO!
+  vmId: ID!
 }
 
 type ISO {
@@ -329,9 +483,12 @@ type Machine {
   createdAt: DateTimeISO
   department: DepartmentType
   departmentId: String
+  diskSizeGB: Int
   gpuPciAddress: String
   id: ID!
+  internalName: String!
   name: String!
+  os: String!
   ramGB: Int
   status: String!
   template: MachineTemplateType
@@ -500,7 +657,7 @@ type Mutation {
   moveMachine(departmentId: String!, id: String!): Machine!
 
   """Perform disk cleanup on a VM"""
-  performDiskCleanup(drive: String!, targets: [String!], vmId: ID!): JSONObject!
+  performDiskCleanup(drive: String!, targets: [String!], vmId: ID!): DiskCleanupResult!
   powerOff(id: String!): SuccessType!
   powerOn(id: String!): SuccessType!
 
@@ -521,7 +678,7 @@ type Mutation {
   restoreSnapshot(input: RestoreSnapshotInput!): SuccessType!
 
   """Run Windows Defender quick scan on a VM"""
-  runDefenderQuickScan(vmId: ID!): JSONObject!
+  runDefenderQuickScan(vmId: ID!): DefenderScanResult!
   setNetworkBridgeName(input: BridgeNameInput!): Boolean!
   setNetworkIp(input: NetworkIpInput!): Boolean!
   setNetworkIpRange(input: IpRangeInput!): Boolean!
@@ -744,7 +901,7 @@ type Query {
   availableISOs: [ISO!]!
 
   """Check for application updates on a VM"""
-  checkApplicationUpdates(vmId: ID!): JSONObject!
+  checkApplicationUpdates(vmId: ID!): ApplicationUpdates!
 
   """Check if ISO is available for specific OS"""
   checkISOStatus(os: String!): ISOStatus!
@@ -753,20 +910,20 @@ type Query {
   checkMultipleOSAvailability(osList: [String!]!): [ISOAvailabilityMap!]!
 
   """Check resource optimization opportunities for a VM"""
-  checkResourceOptimization(evaluationWindowDays: Float, vmId: ID!): JSONObject!
+  checkResourceOptimization(evaluationWindowDays: Float, vmId: ID!): ResourceOptimizationInfo!
   checkSetupStatus: DyummyType!
 
   """Check overall system readiness"""
   checkSystemReadiness: SystemReadiness!
 
   """Check disk space status for a VM"""
-  checkVMDiskSpace(criticalThreshold: Float, vmId: ID!, warningThreshold: Float): JSONObject!
+  checkVMDiskSpace(criticalThreshold: Float, vmId: ID!, warningThreshold: Float): DiskSpaceInfo!
 
   """Check Windows Defender status for a VM"""
-  checkWindowsDefender(vmId: ID!): JSONObject!
+  checkWindowsDefender(vmId: ID!): WindowsDefenderStatus!
 
   """Check Windows Updates status for a VM"""
-  checkWindowsUpdates(vmId: ID!): JSONObject!
+  checkWindowsUpdates(vmId: ID!): WindowsUpdateInfo!
 
   """Get the current snapshot of a virtual machine"""
   currentSnapshot(machineId: String!): Snapshot
@@ -789,15 +946,15 @@ type Query {
   getTopProcesses(limit: Int! = 10, machineId: String!, sortBy: ProcessSortBy! = CPU): [ProcessInfo!]!
 
   """Get installed applications inventory for a VM"""
-  getVMApplicationInventory(vmId: ID!): JSONObject!
+  getVMApplicationInventory(vmId: ID!): ApplicationInventory!
   getVMFirewallState(machineId: ID!): VMFirewallState!
 
   """Get comprehensive health check status for a VM"""
-  getVMHealthStatus(vmId: ID!): JSONObject!
+  getVMHealthStatus(vmId: ID!): HealthCheckStatus!
   getVmServiceStatus(serviceId: ID, vmId: ID!): [VmServiceStatus!]!
 
   """Get Windows Update history for a VM"""
-  getWindowsUpdateHistory(days: Float, vmId: ID!): JSONObject!
+  getWindowsUpdateHistory(days: Float, vmId: ID!): WindowsUpdateHistory!
   graphicConnection(id: String!): GraphicConfigurationType
   latestSystemMetrics(machineId: String!): SystemMetrics
   listFilterRules(filterId: ID): [FWRule!]!
@@ -826,7 +983,7 @@ type Query {
   processSnapshots(filter: ProcessFilterInput): [ProcessSnapshot!]!
 
   """Run a specific health check on a VM"""
-  runHealthCheck(checkName: String!, vmId: ID!): JSONObject!
+  runHealthCheck(checkName: HealthCheckName!, vmId: ID!): GenericHealthCheckResponse!
 
   """Search for available packages on a virtual machine"""
   searchPackages(machineId: ID!, query: String!): [PackageInfo!]!
@@ -842,6 +999,25 @@ type Query {
   """Get comprehensive diagnostics for VM socket connection issues"""
   vmSocketDiagnostics(vmId: String!): VmDiagnostics!
   windowsServices(machineId: String!, runningOnly: Boolean = false): [WindowsService!]!
+}
+
+type ResourceOptimizationInfo {
+  error: String
+  evaluationWindowDays: Float
+  overallStatus: HealthCheckSeverity!
+  recommendations: [ResourceRecommendation!]!
+  success: Boolean!
+  timestamp: DateTimeISO!
+  vmId: ID!
+}
+
+type ResourceRecommendation {
+  currentValue: Float!
+  potentialSavingsPercent: Float
+  reason: String!
+  recommendedValue: Float!
+  resource: String!
+  unit: String!
 }
 
 input RestoreSnapshotInput {
@@ -1188,6 +1364,23 @@ type VmServiceStatus {
   vmName: String!
 }
 
+type WindowsDefenderStatus {
+  antispywareEnabled: Boolean!
+  antivirusEnabled: Boolean!
+  antivirusSignatureLastUpdated: DateTimeISO!
+  antivirusSignatureVersion: String!
+  error: String
+  lastFullScanTime: DateTimeISO
+  lastQuickScanTime: DateTimeISO
+  overallStatus: HealthCheckSeverity!
+  realTimeProtectionEnabled: Boolean!
+  success: Boolean!
+  threatsDetected: Int!
+  threatsQuarantined: Int!
+  timestamp: DateTimeISO!
+  vmId: ID!
+}
+
 type WindowsService {
   currentState: String!
   dependencies: JSONObject
@@ -1206,4 +1399,44 @@ type WindowsService {
   startType: String!
   stateChangeCount: Int!
   usageScore: Float
+}
+
+type WindowsUpdateHistory {
+  daysIncluded: Float
+  error: String
+  success: Boolean!
+  timestamp: DateTimeISO!
+  totalCount: Int!
+  updates: [WindowsUpdateHistoryItem!]!
+  vmId: ID!
+}
+
+type WindowsUpdateHistoryItem {
+  description: String
+  installDate: DateTimeISO!
+  kbArticle: String
+  resultCode: String
+  status: String!
+  title: String!
+}
+
+type WindowsUpdateInfo {
+  criticalUpdatesCount: Int!
+  error: String
+  lastCheckTime: DateTimeISO
+  lastInstallTime: DateTimeISO
+  pendingUpdates: [WindowsUpdateItem!]!
+  pendingUpdatesCount: Int!
+  securityUpdatesCount: Int!
+  success: Boolean!
+  timestamp: DateTimeISO!
+  vmId: ID!
+}
+
+type WindowsUpdateItem {
+  description: String
+  kbArticle: String
+  severity: String!
+  sizeInMB: Float!
+  title: String!
 }

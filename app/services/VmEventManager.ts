@@ -106,7 +106,6 @@ export class VmEventManager implements ResourceEventManager {
     }
   }
 
-
   // Get complete VM data from database
   private async getVmData (vmData: EventData): Promise<VMData | null> {
     try {
@@ -282,10 +281,10 @@ export class VmEventManager implements ResourceEventManager {
   }
 
   // Health check specific event handlers
-  async handleHealthCheckEvent(
-    vmId: string, 
-    checkType: string, 
-    result: unknown, 
+  async handleHealthCheckEvent (
+    vmId: string,
+    checkType: string,
+    result: unknown,
     triggeredBy?: string
   ): Promise<void> {
     try {
@@ -333,7 +332,7 @@ export class VmEventManager implements ResourceEventManager {
   }
 
   // Handle health status changes (Critical/Warning/Healthy)
-  async handleHealthStatusChange(
+  async handleHealthStatusChange (
     vmId: string,
     newStatus: 'healthy' | 'warning' | 'critical',
     checkResults: unknown[],
@@ -379,13 +378,13 @@ export class VmEventManager implements ResourceEventManager {
 
       console.log(`✅ Health status change event sent to ${targetUsers.length} users`)
     } catch (error) {
-      console.error(`❌ Error handling health status change:`, error)
+      console.error('❌ Error handling health status change:', error)
       throw error
     }
   }
 
   // Handle remediation events
-  async handleRemediationEvent(
+  async handleRemediationEvent (
     vmId: string,
     actionType: string,
     result: unknown,
@@ -437,7 +436,7 @@ export class VmEventManager implements ResourceEventManager {
   }
 
   // Handle auto-check events
-  async handleAutoCheckIssueDetected(
+  async handleAutoCheckIssueDetected (
     vmId: string,
     issueData: {
       checkType: string
@@ -489,12 +488,12 @@ export class VmEventManager implements ResourceEventManager {
 
       console.log(`✅ Auto-check issue event sent to ${targetUsers.length} users`)
     } catch (error) {
-      console.error(`❌ Error handling auto-check issue event:`, error)
+      console.error('❌ Error handling auto-check issue event:', error)
       throw error
     }
   }
 
-  async handleAutoCheckRemediationAvailable(
+  async handleAutoCheckRemediationAvailable (
     vmId: string,
     remediationData: {
       checkType: string
@@ -550,12 +549,12 @@ export class VmEventManager implements ResourceEventManager {
 
       console.log(`✅ Auto-check remediation available event sent to ${targetUsers.length} users`)
     } catch (error) {
-      console.error(`❌ Error handling auto-check remediation available event:`, error)
+      console.error('❌ Error handling auto-check remediation available event:', error)
       throw error
     }
   }
 
-  async handleAutoCheckRemediationCompleted(
+  async handleAutoCheckRemediationCompleted (
     vmId: string,
     completionData: {
       checkType: string
@@ -613,7 +612,7 @@ export class VmEventManager implements ResourceEventManager {
 
       console.log(`✅ Auto-check remediation completed event sent to ${targetUsers.length} users`)
     } catch (error) {
-      console.error(`❌ Error handling auto-check remediation completed event:`, error)
+      console.error('❌ Error handling auto-check remediation completed event:', error)
       throw error
     }
   }

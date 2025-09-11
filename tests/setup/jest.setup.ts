@@ -13,24 +13,61 @@ jest.mock('@prisma/client', () => ({
         this.code = code
       }
     }
+  },
+  // Export the enums for tests to use
+  TaskStatus: {
+    PENDING: 'PENDING',
+    RUNNING: 'RUNNING',
+    COMPLETED: 'COMPLETED',
+    FAILED: 'FAILED',
+    CANCELLED: 'CANCELLED',
+    RETRY_SCHEDULED: 'RETRY_SCHEDULED'
+  },
+  TaskPriority: {
+    URGENT: 'URGENT',
+    HIGH: 'HIGH',
+    MEDIUM: 'MEDIUM',
+    LOW: 'LOW'
+  },
+  HealthCheckType: {
+    OVERALL_STATUS: 'OVERALL_STATUS',
+    DISK_SPACE: 'DISK_SPACE',
+    RESOURCE_OPTIMIZATION: 'RESOURCE_OPTIMIZATION',
+    WINDOWS_UPDATES: 'WINDOWS_UPDATES',
+    WINDOWS_DEFENDER: 'WINDOWS_DEFENDER',
+    APPLICATION_INVENTORY: 'APPLICATION_INVENTORY',
+    APPLICATION_UPDATES: 'APPLICATION_UPDATES',
+    SECURITY_CHECK: 'SECURITY_CHECK',
+    PERFORMANCE_CHECK: 'PERFORMANCE_CHECK',
+    SYSTEM_HEALTH: 'SYSTEM_HEALTH',
+    CUSTOM_CHECK: 'CUSTOM_CHECK'
   }
 }))
 
 // Mock EventManager
+const MockEventManagerClass = class MockEventManager {
+  registerResourceManager = jest.fn()
+  dispatchEvent = jest.fn()
+  vmCreated = jest.fn()
+  vmUpdated = jest.fn()
+  vmDeleted = jest.fn()
+  getStats = jest.fn(() => ({
+    registeredManagers: [],
+    socketStats: { connectedUsers: 0, userIds: [] }
+  }))
+}
+
 jest.mock('@services/EventManager', () => ({
-  EventManager: {
-    getInstance: jest.fn(() => ({
-      dispatch: jest.fn(),
-      subscribe: jest.fn(),
-      unsubscribe: jest.fn()
-    }))
-  }
+  EventManager: MockEventManagerClass,
+  createEventManager: jest.fn(() => new MockEventManagerClass()),
+  getEventManager: jest.fn(() => new MockEventManagerClass())
 }))
 
 // Mock Socket.io
 jest.mock('socket.io', () => ({
   Server: jest.fn(() => ({
     on: jest.fn(),
+    use: jest.fn(), // Add missing use method for middleware
     emit: jest.fn(),
     sockets: {
       emit: jest.fn()
@@ -76,10 +113,13 @@ beforeEach(() => {
 // Clean up after all tests
 afterAll(async () => {
   jest.restoreAllMocks()
-});
+})
 
 // Global test utilities
-(global as any).testTimeout = 30000
+declare global {
+  var testTimeout: number
+}
+global.testTimeout = 30000
 
 // Suppress console errors during tests unless DEBUG is set
 if (!process.env.DEBUG) {

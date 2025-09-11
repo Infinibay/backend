@@ -80,6 +80,8 @@ model Machine {
   applications      MachineApplication[]
   healthAlerts      VMHealthAlert[]
   healthConfig      VMHealthConfig?
+  healthSnapshots   VMHealthSnapshot[]
+  healthCheckQueue  VMHealthCheckQueue[]
   systemEvents      SystemEvent[]
   configuration     MachineConfiguration?
   pendingCommands   PendingCommand[]
@@ -578,4 +580,102 @@ model SystemEvent {
   
   @@index([machineId, timestamp])
   @@index([machineId, eventType])
+}
+
+// Background VM Health Monitoring System Models
+
+model VMHealthSnapshot {
+  id                   String      @id @default(uuid())
+  machineId            String
+  snapshotDate         DateTime    @default(now())
+  overallStatus        String      // Overall health status
+  
+  // Health Check Results (JSON for flexibility across different check types)
+  diskSpaceInfo        Json?       // Disk space check results
+  resourceOptInfo      Json?       // Resource optimization data
+  windowsUpdateInfo    Json?       // Windows update status
+  defenderStatus       Json?       // Windows Defender status
+  applicationInventory Json?       // Application inventory data
+  customCheckResults   Json?       // Custom health check results
+  
+  // Metadata and execution info
+  osType               String?     // Windows/Linux
+  checksCompleted      Int         @default(0)
+  checksFailed         Int         @default(0)
+  executionTimeMs      Int?        // Total execution time
+  errorSummary         String?     // Summary of any errors
+  
+  createdAt            DateTime    @default(now())
+  updatedAt            DateTime    @updatedAt
+  
+  machine              Machine     @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  
+  @@index([machineId, snapshotDate])
+  @@index([snapshotDate])
+  @@index([machineId, overallStatus])
+}
+
+model VMHealthCheckQueue {
+  id           String          @id @default(uuid())
+  machineId    String
+  checkType    HealthCheckType
+  priority     TaskPriority    @default(MEDIUM)
+  status       TaskStatus      @default(PENDING)
+  
+  // Task execution details
+  payload      Json?           // Parameters for the health check
+  attempts     Int             @default(0)
+  maxAttempts  Int             @default(3)
+  
+  // Scheduling information
+  scheduledFor DateTime        @default(now())
+  executedAt   DateTime?       // When execution started
+  completedAt  DateTime?       // When execution finished
+  
+  // Results and error handling
+  error        String?         // Error message if failed
+  result       Json?           // Health check results
+  executionTimeMs Int?         // How long the check took
+  
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+  
+  machine      Machine         @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  
+  @@index([machineId, status])
+  @@index([status, priority, scheduledFor])
+  @@index([scheduledFor, status])
+  @@index([machineId, checkType, status])
+}
+
+// Enums for Background Health Monitoring System
+
+enum HealthCheckType {
+  OVERALL_STATUS
+  DISK_SPACE
+  RESOURCE_OPTIMIZATION
+  WINDOWS_UPDATES
+  WINDOWS_DEFENDER
+  APPLICATION_INVENTORY
+  APPLICATION_UPDATES
+  SECURITY_CHECK
+  PERFORMANCE_CHECK
+  SYSTEM_HEALTH
+  CUSTOM_CHECK
+}
+
+enum TaskStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
+  RETRY_SCHEDULED
+}
+
+enum TaskPriority {
+  URGENT      // 1 - Critical security issues, failures
+  HIGH        // 2 - Performance degradation, warnings  
+  MEDIUM      // 3 - Regular health checks (default)
+  LOW         // 4 - Background maintenance
 }

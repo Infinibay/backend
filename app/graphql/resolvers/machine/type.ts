@@ -24,11 +24,20 @@ export class Machine {
     @Field(() => String)
       name: string = ''
 
+    @Field(() => String)
+      internalName: string = ''
+
+    @Field(() => String)
+      os: string = ''
+
     @Field(() => Int, { nullable: true })
       cpuCores: number | null = null
 
     @Field(() => Int, { nullable: true })
       ramGB: number | null = null
+
+    @Field(() => Int, { nullable: true })
+      diskSizeGB: number | null = null
 
     @Field(() => String, { nullable: true })
       gpuPciAddress: string | null = null

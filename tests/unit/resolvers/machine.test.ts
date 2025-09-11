@@ -434,7 +434,7 @@ describe.skip('MachineResolver', () => {
     it('should allow USER to view their own machines', async () => {
       const user = createMockUser()
       const userMachine = createMockMachine({ userId: user.id })
-      const context = createMockContext({ user })
+      const context = createMockContext(user)
 
       mockPrisma.machine.findUnique.mockResolvedValue(userMachine)
 

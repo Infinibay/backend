@@ -2,7 +2,7 @@ import { PrismaClient } from '@prisma/client'
 import { SocketService } from './SocketService'
 
 // Event action types
-export type EventAction = 'create' | 'update' | 'delete' | 'power_on' | 'power_off' | 'suspend' | 'resume' | 'registered' | 'removed' | 'validated' | 'progress' | 'status_changed' | 'health_check' | 'health_status_change' | 'remediation' | 'autocheck_issue_detected' | 'autocheck_remediation_available' | 'autocheck_remediation_completed'
+export type EventAction = 'create' | 'update' | 'delete' | 'power_on' | 'power_off' | 'suspend' | 'resume' | 'registered' | 'removed' | 'validated' | 'progress' | 'status_changed' | 'health_check' | 'health_status_change' | 'remediation' | 'autocheck_issue_detected' | 'autocheck_remediation_available' | 'autocheck_remediation_completed' | 'round_started' | 'round_completed' | 'round_failed'
 
 // Event data types
 export interface EventData {

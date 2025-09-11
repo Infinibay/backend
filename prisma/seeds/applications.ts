@@ -1,7 +1,7 @@
 import { Prisma, PrismaClient } from '@prisma/client'
 import { getApplicationIcon } from './applicationIcons'
 
-function generateAppEntry(name: string, description: string, os: string[], installCommand: Prisma.JsonObject) {
+function generateAppEntry (name: string, description: string, os: string[], installCommand: Prisma.JsonObject) {
   const icon = getApplicationIcon(name)
   return {
     name,
@@ -14,7 +14,7 @@ function generateAppEntry(name: string, description: string, os: string[], insta
 }
 
 // Helper function to generate Fedora Flatpak installation command
-function getFedoraFlatpakCommand(flatpakId: string): string {
+function getFedoraFlatpakCommand (flatpakId: string): string {
   return `dnf install -y flatpak && flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo && flatpak install -y flathub ${flatpakId}`
 }
 

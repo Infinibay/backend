@@ -35,7 +35,10 @@ jest.mock('@utils/VirtManager', () => ({
 jest.mock('@utils/VirtManager/xmlGenerator', () => ({
   XMLGenerator: jest.fn().mockImplementation(() => ({
     generateDomainXML: jest.fn().mockReturnValue('<domain>...</domain>'),
-    generateNetworkXML: jest.fn().mockReturnValue('<network>...</network>')
+    generateNetworkXML: jest.fn().mockReturnValue('<network>...</network>'),
+    load: jest.fn().mockReturnValue(true),
+    getUefiVarFile: jest.fn().mockReturnValue(null),
+    getDisks: jest.fn().mockReturnValue([])
   }))
 }))
 
@@ -139,7 +142,7 @@ describe('VM Lifecycle Integration Tests', () => {
         productKey: undefined,
         pciBus: null,
         applications: [{
-          machineId: '',  // Will be filled by the service
+          machineId: '', // Will be filled by the service
           applicationId: application.id,
           parameters: {}
         }]
@@ -372,7 +375,8 @@ describe('VM Lifecycle Integration Tests', () => {
           findUnique: jest.fn().mockResolvedValue(template)
         },
         department: {
-          findFirst: jest.fn().mockResolvedValue(department)
+          findFirst: jest.fn().mockResolvedValue(department),
+          findUnique: jest.fn().mockResolvedValue(department)
         },
         machine: {
           create: jest.fn().mockImplementation(({ data }) => {
@@ -554,7 +558,11 @@ describe('VM Lifecycle Integration Tests', () => {
     it('should handle partial cleanup failures gracefully', async () => {
       const machine = createMockMachine();
 
-      (prisma.machine.findUnique as jest.Mock).mockResolvedValue(machine)
+      (prisma.machine.findUnique as jest.Mock).mockResolvedValue({
+        ...machine,
+        configuration: createMockMachineConfiguration({ machineId: machine.id }),
+        nwFilters: []
+      })
 
       const mockDomain = {
         destroy: jest.fn().mockRejectedValue(new Error('Failed to destroy')),
@@ -565,10 +573,20 @@ describe('VM Lifecycle Integration Tests', () => {
         lookupDomainByName: jest.fn().mockResolvedValue(mockDomain)
       };
 
-      (Connection.open as jest.Mock).mockResolvedValue(mockConn);
+      (Connection.open as jest.Mock).mockResolvedValue(mockConn)
 
-      // Even if destroy fails, cleanup should continue
-      (prisma.machine.delete as jest.Mock).mockResolvedValue(machine)
+      // Mock transaction to execute the callback with a transaction object
+      const mockTx = {
+        machine: { delete: jest.fn().mockResolvedValue(machine) },
+        machineConfiguration: { delete: jest.fn() },
+        machineApplication: { deleteMany: jest.fn() },
+        vMNWFilter: { deleteMany: jest.fn() },
+        vmPort: { deleteMany: jest.fn() },
+        nWFilter: { deleteMany: jest.fn() }
+      };
+      (prisma.$transaction as jest.Mock).mockImplementation(async (callback: Function) => {
+        return callback(mockTx)
+      })
 
       // Cleanup should not throw even if some operations fail
       await expect(cleanupService.cleanupVM(machine.id)).resolves.not.toThrow()
@@ -580,7 +598,7 @@ describe('VM Lifecycle Integration Tests', () => {
 
       (prisma.machine.findUnique as jest.Mock).mockResolvedValue({
         ...machine,
-        configuration: null, // No configuration
+        configuration: createMockMachineConfiguration({ machineId: machine.id }),
         nwFilters: []
       })
 
@@ -593,13 +611,25 @@ describe('VM Lifecycle Integration Tests', () => {
         lookupDomainByName: jest.fn().mockRejectedValue(new Error('Domain not found'))
       };
 
-      (Connection.open as jest.Mock).mockResolvedValue(mockConn);
-      (prisma.machine.delete as jest.Mock).mockResolvedValue(machine)
+      (Connection.open as jest.Mock).mockResolvedValue(mockConn)
+
+      // Mock transaction to execute the callback with a transaction object
+      const mockTx = {
+        machine: { delete: jest.fn().mockResolvedValue(machine) },
+        machineConfiguration: { delete: jest.fn() },
+        machineApplication: { deleteMany: jest.fn() },
+        vMNWFilter: { deleteMany: jest.fn() },
+        vmPort: { deleteMany: jest.fn() },
+        nWFilter: { deleteMany: jest.fn() }
+      };
+      (prisma.$transaction as jest.Mock).mockImplementation(async (callback: Function) => {
+        return callback(mockTx)
+      })
 
       await cleanupService.cleanupVM(machine.id)
 
-      // Verify database entry was still cleaned up
-      expect(prisma.machine.delete).toHaveBeenCalledWith({
+      // Verify database entry was still cleaned up via transaction
+      expect(mockTx.machine.delete).toHaveBeenCalledWith({
         where: { id: machine.id }
       })
     })
@@ -660,7 +690,8 @@ describe('VM Lifecycle Integration Tests', () => {
           findUnique: jest.fn().mockResolvedValue(template)
         },
         department: {
-          findFirst: jest.fn().mockResolvedValue(department)
+          findFirst: jest.fn().mockResolvedValue(department),
+          findUnique: jest.fn().mockResolvedValue(department)
         },
         machine: {
           create: jest.fn().mockImplementation(({ data }) => {

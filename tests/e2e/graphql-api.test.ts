@@ -18,13 +18,22 @@ import {
   createMockApplication,
   generateId
 } from '../setup/mock-factories'
+import {
+  createMockContext,
+  createAdminContext,
+  createUserContext,
+  createUnauthenticatedContext,
+  executeGraphQL,
+  TestQueries,
+  TestMutations
+} from '../setup/test-helpers'
 import { mockPrisma } from '../setup/jest.setup'
-import { executeGraphQL, TestQueries, TestMutations } from '../setup/test-helpers'
 
 // Import resolvers
 import { UserResolver } from '@graphql/resolvers/user/resolver'
 import { MachineQueries, MachineMutations } from '@graphql/resolvers/machine/resolver'
 import { DepartmentResolver } from '@graphql/resolvers/department/resolver'
+import { MachineTemplateResolver } from '@graphql/resolvers/machine_template/resolver'
 
 // Mock EventManager
 jest.mock('@services/EventManager', () => ({
@@ -41,9 +50,27 @@ jest.mock('@services/machineLifecycleService')
 // Mock libvirt-node
 jest.mock('libvirt-node')
 
+// Mock authChecker to avoid database connection
+jest.mock('@utils/authChecker', () => ({
+  authChecker: jest.fn().mockImplementation(async ({ context }, roles) => {
+    // Allow all operations in tests
+    if (context.user) {
+      return true
+    }
+    // Allow unauthenticated operations like login
+    if (roles.length === 0) {
+      return true
+    }
+    return false
+  })
+}))
+
+// Mock database to prevent connection attempts
+jest.mock('@utils/database', () => mockPrisma)
+
 // Define partial context type for testing
-interface TestContext extends Partial<InfinibayContext> {
-  req: Partial<express.Request> & { headers?: { authorization?: string } }
+interface TestContext {
+  req?: Partial<express.Request> & { headers?: { authorization?: string } }
   prisma: typeof mockPrisma
   user: InfinibayContext['user'] | null
   setupMode: boolean
@@ -52,12 +79,12 @@ interface TestContext extends Partial<InfinibayContext> {
 describe('E2E GraphQL API Tests', () => {
   let apolloServer: ApolloServer
   let schema: GraphQLSchema
-  let prisma: PrismaClient
+  let prisma: typeof mockPrisma
   let app: express.Application
   let httpServer: Server
 
   beforeAll(async () => {
-    prisma = mockPrisma as unknown as PrismaClient
+    prisma = mockPrisma
 
     // Build GraphQL schema
     schema = await buildSchema({
@@ -65,7 +92,8 @@ describe('E2E GraphQL API Tests', () => {
         UserResolver,
         MachineQueries,
         MachineMutations,
-        DepartmentResolver
+        DepartmentResolver,
+        MachineTemplateResolver
       ],
       authChecker,
       validate: false
@@ -79,7 +107,7 @@ describe('E2E GraphQL API Tests', () => {
     apolloServer = new ApolloServer({
       schema,
       context: ({ req }): InfinibayContext => ({
-        req,
+        req: req as express.Request,
         res: {} as express.Response,
         prisma,
         user: null,
@@ -120,15 +148,9 @@ describe('E2E GraphQL API Tests', () => {
 
         const result = await executeGraphQL({
           schema,
-          query: TestMutations.LOGIN,
+          query: TestQueries.LOGIN,
           variables: { email: mockUser.email, password },
-          context: {
-            req: {},
-            res: {} as express.Response,
-            prisma,
-            user: null,
-            setupMode: false
-          } as InfinibayContext
+          context: createUnauthenticatedContext()
         })
 
         expect(result.errors).toBeUndefined()
@@ -148,15 +170,9 @@ describe('E2E GraphQL API Tests', () => {
 
         const result = await executeGraphQL({
           schema,
-          query: TestMutations.LOGIN,
+          query: TestQueries.LOGIN,
           variables: { email: mockUser.email, password: 'wrongPassword' },
-          context: {
-            req: {},
-            res: {} as express.Response,
-            prisma,
-            user: null,
-            setupMode: false
-          } as InfinibayContext
+          context: createUnauthenticatedContext()
         })
 
         expect(result.errors).toBeDefined()
@@ -174,13 +190,8 @@ describe('E2E GraphQL API Tests', () => {
         const result = await executeGraphQL({
           schema,
           query: TestQueries.CURRENT_USER,
-          context: {
-            req: { headers: { authorization: token } },
-            res: {} as express.Response,
-            prisma,
-            user: mockUser,
-            setupMode: false
-          } as InfinibayContext
+          variables: undefined,
+          context: createMockContext(mockUser, token)
         })
 
         expect(result.errors).toBeUndefined()
@@ -194,13 +205,7 @@ describe('E2E GraphQL API Tests', () => {
         const result = await executeGraphQL({
           schema,
           query: TestQueries.CURRENT_USER,
-          context: {
-            req: {},
-            res: {} as express.Response,
-            prisma,
-            user: null,
-            setupMode: false
-          } as InfinibayContext
+          context: createMockContext()
         })
 
         expect(result.errors).toBeDefined()
@@ -217,13 +222,7 @@ describe('E2E GraphQL API Tests', () => {
         const result = await executeGraphQL({
           schema,
           query: TestQueries.CURRENT_USER,
-          context: {
-            req: { headers: { authorization: 'admin-token' } },
-            res: {} as express.Response,
-            prisma,
-            user: mockUser,
-            setupMode: false
-          } as InfinibayContext
+          context: createMockContext(mockUser, 'admin-token')
         })
 
         expect(result.errors).toBeUndefined()
@@ -248,13 +247,7 @@ describe('E2E GraphQL API Tests', () => {
           schema,
           query: TestQueries.USERS,
           variables: { pagination: { take: 10, skip: 0 } },
-          context: {
-            req: { headers: { authorization: 'user-token' } },
-            res: {} as express.Response,
-            prisma,
-            user: adminUser,
-            setupMode: false
-          } as InfinibayContext
+          context: createMockContext(adminUser, 'user-token')
         })
 
         expect(result.errors).toBeUndefined()
@@ -285,13 +278,7 @@ describe('E2E GraphQL API Tests', () => {
           schema,
           query: TestMutations.UPDATE_USER,
           variables: { input: updates },
-          context: {
-            req: { headers: { authorization: 'admin-token' } },
-            res: {} as express.Response,
-            prisma,
-            user: mockUser,
-            setupMode: false
-          } as InfinibayContext
+          context: createMockContext(mockUser, 'admin-token')
         })
 
         expect(result.errors).toBeUndefined()
@@ -312,13 +299,7 @@ describe('E2E GraphQL API Tests', () => {
           schema,
           query: TestMutations.DELETE_USER,
           variables: { id: userToDelete.id },
-          context: {
-            req: { headers: { authorization: 'admin-token' } },
-            res: {} as express.Response,
-            prisma,
-            user: adminUser,
-            setupMode: false
-          } as InfinibayContext
+          context: createMockContext(adminUser, 'admin-token')
         })
 
         expect(result.errors).toBeUndefined()
@@ -339,23 +320,16 @@ describe('E2E GraphQL API Tests', () => {
 
         mockPrisma.machine.findUnique.mockResolvedValue({
           ...mockMachine,
-          template: mockTemplate,
-          department: mockDepartment,
-          user: mockUser,
-          configuration: { graphicHost: 'localhost' }
+          templateId: mockTemplate.id,
+          departmentId: mockDepartment.id,
+          userId: mockUser.id
         })
 
         const result = await executeGraphQL({
           schema,
           query: TestQueries.MACHINE,
           variables: { id: mockMachine.id },
-          context: {
-            req: { headers: { authorization: 'user-token' } },
-            res: {} as express.Response,
-            prisma,
-            user: mockUser,
-            setupMode: false
-          } as InfinibayContext
+          context: createMockContext(mockUser, 'user-token')
         })
 
         expect(result.errors).toBeUndefined()
@@ -383,13 +357,7 @@ describe('E2E GraphQL API Tests', () => {
             pagination: { take: 10, skip: 0 },
             filter: { status: 'running' }
           },
-          context: {
-            req: { headers: { authorization: 'user-token' } },
-            res: {} as express.Response,
-            prisma,
-            user: createMockUser(),
-            setupMode: false
-          } as InfinibayContext
+          context: createUserContext()
         })
 
         expect(result.errors).toBeUndefined()
@@ -427,13 +395,7 @@ describe('E2E GraphQL API Tests', () => {
               applications: []
             }
           },
-          context: {
-            req: { headers: { authorization: 'admin-token' } },
-            res: {} as express.Response,
-            prisma,
-            user: mockUser,
-            setupMode: false
-          } as InfinibayContext
+          context: createMockContext(mockUser, 'admin-token')
         })
 
         expect(result.errors).toBeUndefined()
@@ -453,13 +415,7 @@ describe('E2E GraphQL API Tests', () => {
           schema,
           query: TestMutations.DESTROY_MACHINE,
           variables: { id: mockMachine.id },
-          context: {
-            req: { headers: {} },
-            res: {} as express.Response,
-            prisma,
-            user: null,
-            setupMode: false
-          } as InfinibayContext
+          context: createUnauthenticatedContext()
         })
 
         // Should fail without authentication
@@ -478,22 +434,13 @@ describe('E2E GraphQL API Tests', () => {
           createMockMachine({ departmentId: mockDepartment.id })
         ]
 
-        mockPrisma.department.findUnique.mockResolvedValue({
-          ...mockDepartment,
-          machines: mockMachines
-        })
+        mockPrisma.department.findUnique.mockResolvedValue(mockDepartment)
 
         const result = await executeGraphQL({
           schema,
           query: TestQueries.DEPARTMENT,
           variables: { id: mockDepartment.id },
-          context: {
-            req: { headers: { authorization: 'admin-token' } },
-            res: {} as express.Response,
-            prisma,
-            user: createMockAdminUser(),
-            setupMode: false
-          } as InfinibayContext
+          context: createAdminContext()
         })
 
         expect(result.errors).toBeUndefined()
@@ -515,13 +462,7 @@ describe('E2E GraphQL API Tests', () => {
         const result = await executeGraphQL({
           schema,
           query: TestQueries.DEPARTMENTS,
-          context: {
-            req: { headers: { authorization: `token-${createMockUser().id}` } },
-            res: {} as express.Response,
-            prisma,
-            user: createMockUser(),
-            setupMode: false
-          } as InfinibayContext
+          context: createUserContext()
         })
 
         expect(result.errors).toBeUndefined()
@@ -553,13 +494,7 @@ describe('E2E GraphQL API Tests', () => {
               ipSubnet: '192.168.1.0/24'
             }
           },
-          context: {
-            req: { headers: { authorization: 'token' } },
-            res: {} as express.Response,
-            prisma,
-            user: adminUser,
-            setupMode: false
-          } as InfinibayContext
+          context: createMockContext(adminUser, 'token')
         })
 
         expect(result.errors).toBeUndefined()
@@ -581,13 +516,7 @@ describe('E2E GraphQL API Tests', () => {
               ipSubnet: '192.168.2.0/24'
             }
           },
-          context: {
-            req: { headers: {} },
-            res: {} as express.Response,
-            prisma,
-            user: null,
-            setupMode: false
-          } as InfinibayContext
+          context: createUnauthenticatedContext()
         })
 
         expect(result.errors).toBeDefined()
@@ -605,13 +534,7 @@ describe('E2E GraphQL API Tests', () => {
           schema,
           query: TestMutations.DELETE_DEPARTMENT,
           variables: { id: departmentToDelete.id },
-          context: {
-            req: { headers: { authorization: 'admin-token' } },
-            res: {} as express.Response,
-            prisma,
-            user: adminUser,
-            setupMode: false
-          } as InfinibayContext
+          context: createMockContext(adminUser, 'admin-token')
         })
 
         expect(result.errors).toBeUndefined()
@@ -637,13 +560,7 @@ describe('E2E GraphQL API Tests', () => {
           schema,
           query: TestQueries.MACHINE_TEMPLATES,
           variables: { pagination: { take: 10, skip: 0 } },
-          context: {
-            req: {},
-            res: {} as express.Response,
-            prisma,
-            user: createMockUser(),
-            setupMode: false
-          } as InfinibayContext
+          context: createUserContext()
         })
 
         expect(result.errors).toBeUndefined()

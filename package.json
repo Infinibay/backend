@@ -103,6 +103,7 @@
     "@types/jsonwebtoken": "^9.0.5",
     "@types/ms": "^0.7.34",
     "@types/node": "^16.18.68",
+    "@types/node-cron": "^3.0.11",
     "@types/nodemailer": "^6.4.14",
     "@types/nodemailer-smtp-transport": "^2.7.8",
     "@types/ref-napi": "^3.0.12",

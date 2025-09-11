@@ -3,56 +3,10 @@ import { buildSchema } from 'type-graphql'
 import * as jwt from 'jsonwebtoken'
 import { User, PrismaClient } from '@prisma/client'
 import { Request, Response } from 'express'
+import * as Express from 'express'
 import { InfinibayContext } from '@utils/context'
 import { mockPrisma } from './jest.setup'
-
-// Authentication context builder
-export interface TestContext extends InfinibayContext {
-  token?: string;
-}
-
-export function createMockContext (overrides?: Partial<TestContext>): TestContext {
-  const defaultUser: User = {
-    id: 'test-user-id',
-    email: 'test@example.com',
-    password: 'hashed-password',
-    deleted: false,
-    token: 'test-token',
-    firstName: 'Test',
-    lastName: 'User',
-    userImage: null,
-    role: 'USER',
-    createdAt: new Date()
-  }
-
-  return {
-    req: {} as Request,
-    res: {} as Response,
-    user: defaultUser,
-    prisma: mockPrisma as unknown as PrismaClient,
-    setupMode: false,
-    eventManager: undefined,
-    virtioSocketWatcher: undefined,
-    ...overrides
-  }
-}
-
-export function createAdminContext (): TestContext {
-  return createMockContext({
-    user: {
-      id: 'admin-user-id',
-      email: 'admin@example.com',
-      password: 'hashed-password',
-      deleted: false,
-      token: 'admin-token',
-      firstName: 'Admin',
-      lastName: 'User',
-      userImage: null,
-      role: 'ADMIN',
-      createdAt: new Date()
-    }
-  })
-}
+import { createMockUser, createMockAdminUser } from './mock-factories'
 
 // JWT token generation for testing
 export function generateTestToken (userId: string, role: string = 'USER'): string {
@@ -64,20 +18,105 @@ export function generateTestToken (userId: string, role: string = 'USER'): strin
 }
 
 // GraphQL query/mutation executor
-export async function executeGraphQL (
+export async function executeGraphQL (options: {
   schema: GraphQLSchema,
   query: string,
   variables?: Record<string, unknown>,
   context?: unknown
-) {
+}) {
   const result = await graphql({
-    schema,
-    source: query,
-    variableValues: variables,
-    contextValue: context
+    schema: options.schema,
+    source: options.query,
+    variableValues: options.variables,
+    contextValue: options.context
   })
 
   return result
+}
+
+// Create mock Express request/response objects
+export function createMockContext (options: { user?: User | null; prisma?: PrismaClient } | User | null = null, authorization?: string): InfinibayContext {
+  // Handle both calling patterns: createMockContext(user) and createMockContext({ user, prisma })
+  let user: User | null = null
+  if (options && typeof options === 'object' && 'user' in options) {
+    user = options.user || null
+  } else {
+    user = options as User | null
+  }
+  const mockReq = {
+    headers: authorization ? { authorization } : {},
+    get: jest.fn(),
+    header: jest.fn(),
+    accepts: jest.fn(),
+    acceptsCharsets: jest.fn(),
+    // Add other required Request properties as empty functions/values
+    method: 'GET',
+    url: '/',
+    originalUrl: '/',
+    path: '/',
+    query: {},
+    params: {},
+    body: {},
+    cookies: {},
+    files: undefined,
+    hostname: 'localhost',
+    ip: '127.0.0.1',
+    ips: [],
+    protocol: 'http',
+    secure: false,
+    xhr: false,
+    fresh: false,
+    stale: true,
+    subdomains: [],
+    baseUrl: '',
+    route: undefined,
+    app: {} as Express.Application,
+    is: jest.fn(),
+    param: jest.fn(),
+    range: jest.fn(),
+    accepted: [],
+    acceptsEncodings: jest.fn(),
+    acceptsLanguages: jest.fn(),
+    connection: {} as NodeJS.Socket,
+    socket: {} as NodeJS.Socket
+  } as unknown as Request
+
+  const mockRes = {
+    status: jest.fn().mockReturnThis(),
+    json: jest.fn().mockReturnThis(),
+    send: jest.fn().mockReturnThis(),
+    end: jest.fn().mockReturnThis(),
+    header: jest.fn().mockReturnThis(),
+    set: jest.fn().mockReturnThis(),
+    cookie: jest.fn().mockReturnThis(),
+    clearCookie: jest.fn().mockReturnThis(),
+    redirect: jest.fn().mockReturnThis(),
+    locals: {},
+    headersSent: false
+  } as unknown as Response
+
+  return {
+    req: mockReq,
+    res: mockRes,
+    prisma: mockPrisma,
+    user,
+    setupMode: false
+  }
+}
+
+// Helper functions for common context scenarios
+export function createAdminContext (): InfinibayContext {
+  const adminUser = createMockAdminUser()
+  return createMockContext(adminUser, 'admin-token')
+}
+
+export function createUserContext (): InfinibayContext {
+  const user = createMockUser()
+  return createMockContext(user, 'user-token')
+}
+
+export function createUnauthenticatedContext (): InfinibayContext {
+  return createMockContext(null)
 }
 
 // Common GraphQL queries and mutations for testing
@@ -85,11 +124,6 @@ export const TestQueries = {
   LOGIN: `
     query Login($email: String!, $password: String!) {
       login(email: $email, password: $password) {
-        id
-        email
-        firstName
-        lastName
-        role
         token
       }
     }
@@ -172,6 +206,86 @@ export const TestQueries = {
         totalMachines
       }
     }
+  `,
+
+  USERS: `
+    query Users($orderBy: String, $take: Int, $skip: Int) {
+      users(orderBy: $orderBy, take: $take, skip: $skip) {
+        users {
+          id
+          email
+          firstName
+          lastName
+          role
+        }
+        total
+      }
+    }
+  `,
+
+  MACHINE: `
+    query Machine($id: String!) {
+      machine(id: $id) {
+        id
+        name
+        internalName
+        status
+        os
+        cpuCores
+        ramGB
+        diskSizeGB
+      }
+    }
+  `,
+
+  MACHINES: `
+    query Machines($take: Int, $skip: Int) {
+      machines(take: $take, skip: $skip) {
+        machines {
+          id
+          name
+          status
+          os
+        }
+        total
+      }
+    }
+  `,
+
+  DEPARTMENT: `
+    query Department($id: String!) {
+      department(id: $id) {
+        id
+        name
+        totalMachines
+      }
+    }
+  `,
+
+  DEPARTMENTS: `
+    query Departments {
+      departments {
+        id
+        name
+        totalMachines
+      }
+    }
+  `,
+
+  MACHINE_TEMPLATES: `
+    query MachineTemplates($take: Int, $skip: Int) {
+      machineTemplates(take: $take, skip: $skip) {
+        templates {
+          id
+          name
+          os
+          cpuCores
+          ramGB
+          diskSizeGB
+        }
+        total
+      }
+    }
   `
 }
 
@@ -249,6 +363,37 @@ export const TestMutations = {
 
   DESTROY_DEPARTMENT: `
     mutation DestroyDepartment($id: String!) {
+      destroyDepartment(id: $id) {
+        success
+        message
+      }
+    }
+  `,
+
+  LOGIN: `
+    mutation Login($email: String!, $password: String!) {
+      login(email: $email, password: $password) {
+        id
+        email
+        firstName
+        lastName
+        role
+        token
+      }
+    }
+  `,
+
+  DELETE_USER: `
+    mutation DeleteUser($id: String!) {
+      deleteUser(id: $id) {
+        success
+        message
+      }
+    }
+  `,
+
+  DELETE_DEPARTMENT: `
+    mutation DeleteDepartment($id: String!) {
       destroyDepartment(id: $id) {
         success
         message
