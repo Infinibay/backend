@@ -5,6 +5,7 @@ import { EventManager } from '@services/EventManager'
 import { VMHealthQueueManager } from '@services/VMHealthQueueManager'
 import { BackgroundTaskService } from '@services/BackgroundTaskService'
 import { mockPrisma } from '../../setup/jest.setup'
+import { RUNNING_STATUS, STOPPED_STATUS, PAUSED_STATUS } from '../../../app/constants/machine-status'
 
 // Mock cron module
 interface MockedCronJob {
@@ -66,12 +67,12 @@ describe('BackgroundHealthService', () => {
       clearCompletedTasks: jest.fn()
     } as unknown as jest.Mocked<BackgroundTaskService>
 
-    // Mock database responses
+    // Mock database responses - only running VMs should be returned
     mockPrisma.machine.findMany.mockResolvedValue([
       {
         id: 'vm-1',
         name: 'test-vm-1',
-        status: 'RUNNING',
+        status: RUNNING_STATUS,
         userId: 'user-1',
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -80,23 +81,6 @@ describe('BackgroundHealthService', () => {
         cpuCores: 2,
         ramGB: 4,
         diskSizeGB: 50,
-        departmentId: null,
-        templateId: null,
-        gpuPciAddress: null,
-        firewallTemplates: {}
-      },
-      {
-        id: 'vm-2',
-        name: 'test-vm-2',
-        status: 'STOPPED',
-        userId: 'user-2',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        internalName: 'test-vm-2',
-        os: 'linux',
-        cpuCores: 4,
-        ramGB: 8,
-        diskSizeGB: 100,
         departmentId: null,
         templateId: null,
         gpuPciAddress: null,
@@ -230,7 +214,7 @@ describe('BackgroundHealthService', () => {
       await service.executeHealthCheckRound()
 
       expect(mockPrisma.machine.findMany).toHaveBeenCalledWith({
-        where: { status: { not: 'DELETED' } },
+        where: { status: RUNNING_STATUS },
         select: {
           id: true,
           name: true,
@@ -240,9 +224,8 @@ describe('BackgroundHealthService', () => {
         }
       })
 
-      expect(mockQueueManager.queueHealthChecks).toHaveBeenCalledTimes(2)
+      expect(mockQueueManager.queueHealthChecks).toHaveBeenCalledTimes(1)
       expect(mockQueueManager.queueHealthChecks).toHaveBeenCalledWith('vm-1')
-      expect(mockQueueManager.queueHealthChecks).toHaveBeenCalledWith('vm-2')
     })
 
     it('should emit round_started event', async () => {
@@ -257,7 +240,7 @@ describe('BackgroundHealthService', () => {
         'health',
         'round_started',
         expect.objectContaining({
-          vmCount: 2,
+          vmCount: 1,
           timestamp: expect.any(String)
         })
       )
@@ -275,8 +258,8 @@ describe('BackgroundHealthService', () => {
         'health',
         'round_completed',
         expect.objectContaining({
-          totalVMs: 2,
-          successCount: 2,
+          totalVMs: 1,
+          successCount: 1,
           failureCount: 0,
           executionTimeMs: expect.any(Number),
           timestamp: expect.any(String)
@@ -285,6 +268,44 @@ describe('BackgroundHealthService', () => {
     })
 
     it('should handle VM health check queuing failures', async () => {
+      // Set up two running VMs to test both success and failure scenarios
+      mockPrisma.machine.findMany.mockResolvedValue([
+        {
+          id: 'vm-1',
+          name: 'test-vm-1',
+          status: RUNNING_STATUS,
+          userId: 'user-1',
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          internalName: 'test-vm-1',
+          os: 'ubuntu',
+          cpuCores: 2,
+          ramGB: 4,
+          diskSizeGB: 50,
+          departmentId: null,
+          templateId: null,
+          gpuPciAddress: null,
+          firewallTemplates: {}
+        },
+        {
+          id: 'vm-2',
+          name: 'test-vm-2',
+          status: RUNNING_STATUS,
+          userId: 'user-2',
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          internalName: 'test-vm-2',
+          os: 'windows',
+          cpuCores: 4,
+          ramGB: 8,
+          diskSizeGB: 100,
+          departmentId: null,
+          templateId: null,
+          gpuPciAddress: null,
+          firewallTemplates: {}
+        }
+      ])
+
       const error = new Error('Queue full')
       mockQueueManager.queueHealthChecks.mockRejectedValueOnce(error)
       mockQueueManager.queueHealthChecks.mockResolvedValueOnce(undefined)
@@ -416,12 +437,12 @@ describe('BackgroundHealthService', () => {
   })
 
   describe('integration scenarios', () => {
-    it('should handle mixed VM statuses correctly', async () => {
+    it('should only process running VMs when mixed VM statuses exist', async () => {
       mockPrisma.machine.findMany.mockResolvedValue([
         {
           id: 'vm-running',
           name: 'running-vm',
-          status: 'RUNNING',
+          status: RUNNING_STATUS,
           userId: 'user-1',
           createdAt: new Date(),
           updatedAt: new Date(),
@@ -434,15 +455,93 @@ describe('BackgroundHealthService', () => {
           templateId: null,
           gpuPciAddress: null,
           firewallTemplates: {}
+        }
+      ])
+
+      mockBackgroundTaskService.queueTask.mockImplementation(async (name, taskFn) => {
+        await taskFn()
+        return 'task-123'
+      })
+
+      await service.executeHealthCheckRound()
+
+      // Should only queue health checks for running VMs
+      expect(mockPrisma.machine.findMany).toHaveBeenCalledWith({
+        where: { status: RUNNING_STATUS },
+        select: {
+          id: true,
+          name: true,
+          status: true,
+          os: true,
+          internalName: true
+        }
+      })
+      expect(mockQueueManager.queueHealthChecks).toHaveBeenCalledTimes(1)
+      expect(mockQueueManager.queueHealthChecks).toHaveBeenCalledWith('vm-running')
+    })
+
+    it('should handle no running VMs scenario', async () => {
+      mockPrisma.machine.findMany.mockResolvedValue([])
+
+      mockBackgroundTaskService.queueTask.mockImplementation(async (name, taskFn) => {
+        await taskFn()
+        return 'task-123'
+      })
+
+      await service.executeHealthCheckRound()
+
+      expect(mockPrisma.machine.findMany).toHaveBeenCalledWith({
+        where: { status: RUNNING_STATUS },
+        select: {
+          id: true,
+          name: true,
+          status: true,
+          os: true,
+          internalName: true
+        }
+      })
+
+      expect(mockQueueManager.queueHealthChecks).not.toHaveBeenCalled()
+      expect(mockEventManager.dispatchEvent).toHaveBeenCalledWith(
+        'health',
+        'round_completed',
+        expect.objectContaining({
+          totalVMs: 0,
+          successCount: 0,
+          failureCount: 0
+        })
+      )
+    })
+
+    it('should verify running VM status filtering with comprehensive test', async () => {
+      // This test verifies that the service correctly filters for only running VMs
+      // and ignores stopped, suspended, or other non-running states
+      mockPrisma.machine.findMany.mockResolvedValue([
+        {
+          id: 'vm-running-1',
+          name: 'running-vm-1',
+          status: RUNNING_STATUS,
+          userId: 'user-1',
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          internalName: 'running-vm-1',
+          os: 'windows',
+          cpuCores: 2,
+          ramGB: 4,
+          diskSizeGB: 50,
+          departmentId: null,
+          templateId: null,
+          gpuPciAddress: null,
+          firewallTemplates: {}
         },
         {
-          id: 'vm-stopped',
-          name: 'stopped-vm',
-          status: 'STOPPED',
+          id: 'vm-running-2',
+          name: 'running-vm-2',
+          status: RUNNING_STATUS,
           userId: 'user-2',
           createdAt: new Date(),
           updatedAt: new Date(),
-          internalName: 'stopped-vm',
+          internalName: 'running-vm-2',
           os: 'linux',
           cpuCores: 4,
           ramGB: 8,
@@ -461,42 +560,9 @@ describe('BackgroundHealthService', () => {
 
       await service.executeHealthCheckRound()
 
-      // Should queue health checks for both VMs regardless of status (as long as not DELETED)
-      expect(mockQueueManager.queueHealthChecks).toHaveBeenCalledTimes(2)
-      expect(mockQueueManager.queueHealthChecks).toHaveBeenCalledWith('vm-running')
-      expect(mockQueueManager.queueHealthChecks).toHaveBeenCalledWith('vm-stopped')
-    })
-
-    it('should exclude DELETED VMs from health checks', async () => {
-      mockPrisma.machine.findMany.mockResolvedValue([
-        {
-          id: 'vm-active',
-          name: 'active-vm',
-          status: 'RUNNING',
-          userId: 'user-1',
-          createdAt: new Date(),
-          updatedAt: new Date(),
-          internalName: 'active-vm',
-          os: 'windows',
-          cpuCores: 2,
-          ramGB: 4,
-          diskSizeGB: 50,
-          departmentId: null,
-          templateId: null,
-          gpuPciAddress: null,
-          firewallTemplates: {}
-        }
-      ])
-
-      mockBackgroundTaskService.queueTask.mockImplementation(async (name, taskFn) => {
-        await taskFn()
-        return 'task-123'
-      })
-
-      await service.executeHealthCheckRound()
-
+      // Verify database query filters for running VMs only
       expect(mockPrisma.machine.findMany).toHaveBeenCalledWith({
-        where: { status: { not: 'DELETED' } },
+        where: { status: RUNNING_STATUS },
         select: {
           id: true,
           name: true,
@@ -506,8 +572,30 @@ describe('BackgroundHealthService', () => {
         }
       })
 
-      expect(mockQueueManager.queueHealthChecks).toHaveBeenCalledTimes(1)
-      expect(mockQueueManager.queueHealthChecks).toHaveBeenCalledWith('vm-active')
+      // Verify both running VMs are processed
+      expect(mockQueueManager.queueHealthChecks).toHaveBeenCalledTimes(2)
+      expect(mockQueueManager.queueHealthChecks).toHaveBeenCalledWith('vm-running-1')
+      expect(mockQueueManager.queueHealthChecks).toHaveBeenCalledWith('vm-running-2')
+
+      // Verify events reflect correct VM count
+      expect(mockEventManager.dispatchEvent).toHaveBeenCalledWith(
+        'health',
+        'round_started',
+        expect.objectContaining({
+          vmCount: 2,
+          timestamp: expect.any(String)
+        })
+      )
+
+      expect(mockEventManager.dispatchEvent).toHaveBeenCalledWith(
+        'health',
+        'round_completed',
+        expect.objectContaining({
+          totalVMs: 2,
+          successCount: 2,
+          failureCount: 0
+        })
+      )
     })
   })
 })

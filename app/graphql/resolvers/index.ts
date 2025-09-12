@@ -19,6 +19,8 @@ import { ProcessResolver } from './ProcessResolver'
 import { SimplifiedFirewallResolver } from './SimplifiedFirewallResolver'
 import { MetricsResolver } from './metrics/resolver'
 import { AutoCheckResolver } from './AutoCheckResolver'
+import { VMHealthHistoryResolver } from './VMHealthHistoryResolver'
+import { BackgroundHealthResolver } from './health/BackgroundHealthResolver'
 
 const resolvers: NonEmptyArray<Function> = [
   UserResolver,
@@ -42,7 +44,9 @@ const resolvers: NonEmptyArray<Function> = [
   ProcessResolver,
   SimplifiedFirewallResolver,
   MetricsResolver,
-  AutoCheckResolver
+  AutoCheckResolver,
+  VMHealthHistoryResolver,
+  BackgroundHealthResolver
 ]
 
 export default resolvers as NonEmptyArray<Function>

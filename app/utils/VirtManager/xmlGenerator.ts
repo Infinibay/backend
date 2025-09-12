@@ -758,7 +758,7 @@ export class XMLGenerator {
     // Ensure the channel array exists
     this.xml.domain.devices[0].channel = this.xml.domain.devices[0].channel || []
 
-    // Construct the socket path using the VM's ID
+    // Construct the socket path using the VM's internalName (libvirt UUID)
     const baseDir = process.env.INFINIBAY_BASE_DIR ?? '/opt/infinibay'
     const socketsDir = path.join(baseDir, 'sockets')
     const socketPath = path.join(socketsDir, `${this.id}.socket`)
@@ -797,6 +797,13 @@ export class XMLGenerator {
           $: {
             mode: 'bind',
             path: socketPath
+          }
+        }
+      ],
+      permissions: [
+        {
+          $: {
+            mode: '0666'
           }
         }
       ],

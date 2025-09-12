@@ -89,6 +89,16 @@ input ApplyFirewallTemplateInput {
   template: FirewallTemplate!
 }
 
+type BackgroundHealthServiceStatus {
+  activeQueues: Int!
+  cronActive: Boolean!
+  isRunning: Boolean!
+  lastRun: DateTimeISO!
+  nextRun: DateTimeISO
+  pendingChecks: Int!
+  totalVMsMonitored: Int!
+}
+
 input BridgeNameInput {
   bridgeName: String! = ""
   networkName: String! = ""
@@ -416,6 +426,14 @@ type HealthCheckResult {
   timestamp: DateTimeISO!
 }
 
+type HealthCheckRoundResult {
+  error: String
+  message: String!
+  success: Boolean!
+  taskId: String!
+  timestamp: DateTimeISO!
+}
+
 """Severity level of health check results"""
 enum HealthCheckSeverity {
   FAILED
@@ -660,6 +678,7 @@ type Mutation {
   performDiskCleanup(drive: String!, targets: [String!], vmId: ID!): DiskCleanupResult!
   powerOff(id: String!): SuccessType!
   powerOn(id: String!): SuccessType!
+  queueAllVMHealthChecks: HealthCheckRoundResult!
 
   """Register uploaded ISO"""
   registerISO(filename: String!, os: String!, path: String!, size: Float!): ISO!
@@ -691,6 +710,7 @@ type Mutation {
   toggleFirewallTemplate(machineId: ID!, template: FirewallTemplate!): VMFirewallState!
   toggleGlobalService(input: ToggleServiceInput!): GlobalServiceStatus!
   toggleVmService(input: ToggleVmServiceInput!): VmServiceStatus!
+  triggerHealthCheckRound: HealthCheckRoundResult!
   updateApplication(id: String!, input: CreateApplicationInputType!): ApplicationType!
   updateFilter(id: ID!, input: UpdateFilterInput!): GenericFilter!
   updateFilterRule(id: ID!, input: UpdateFilterRuleInput!): FWRule!
@@ -899,6 +919,7 @@ type Query {
 
   """Get all available ISOs"""
   availableISOs: [ISO!]!
+  backgroundHealthServiceStatus: BackgroundHealthServiceStatus!
 
   """Check for application updates on a VM"""
   checkApplicationUpdates(vmId: ID!): ApplicationUpdates!
@@ -937,6 +958,7 @@ type Query {
   getFirewallTemplateInfo(template: FirewallTemplate!): FirewallTemplateInfo
   getGlobalServiceStatus(serviceId: ID): [GlobalServiceStatus!]!
   getGraphics: [GPU!]!
+  getLatestVMHealth(machineId: ID!): VMHealthSnapshotType
   getServiceStatusSummary: [ServiceStatusSummary!]!
   getSimplifiedFirewallRules(machineId: ID!): [SimplifiedFirewallRule!]!
 
@@ -956,7 +978,10 @@ type Query {
   """Get Windows Update history for a VM"""
   getWindowsUpdateHistory(days: Float, vmId: ID!): WindowsUpdateHistory!
   graphicConnection(id: String!): GraphicConfigurationType
+  healthCheckQueueStats: QueueStatsType!
+  healthQueueStatistics: QueueStatistics!
   latestSystemMetrics(machineId: String!): SystemMetrics
+  latestVMHealthSnapshot(machineId: ID!): VMHealthSnapshotType
   listFilterRules(filterId: ID): [FWRule!]!
   listFilters(departmentId: ID, vmId: ID): [GenericFilter!]!
 
@@ -995,10 +1020,30 @@ type Query {
   topProcessesByMachine(limit: Float = 10, machineId: String!): [ProcessSnapshot!]!
   user(id: String!): UserType!
   users(orderBy: UserOrderByInputType, pagination: PaginationInputType): [UserType!]!
+  vmHealthCheckQueue(limit: Int = 20, machineId: ID, offset: Int = 0, status: String): [VMHealthCheckQueueType!]!
+  vmHealthHistory(limit: Int = 20, machineId: ID!, offset: Int = 0): [VMHealthSnapshotType!]!
+  vmHealthStats(machineId: ID!): VMHealthStatsType!
 
   """Get comprehensive diagnostics for VM socket connection issues"""
   vmSocketDiagnostics(vmId: String!): VmDiagnostics!
   windowsServices(machineId: String!, runningOnly: Boolean = false): [WindowsService!]!
+}
+
+type QueueStatistics {
+  activeChecks: Int!
+  completedToday: Int!
+  failedToday: Int!
+  pendingTasks: Int!
+  totalQueues: Int!
+}
+
+type QueueStatsType {
+  completed: Int!
+  failed: Int!
+  pending: Int!
+  retryScheduled: Int!
+  running: Int!
+  totalToday: Int!
 }
 
 type ResourceOptimizationInfo {
@@ -1307,6 +1352,54 @@ type VMFirewallState {
   customRules: [SimplifiedFirewallRule!]!
   effectiveRules: [SimplifiedFirewallRule!]!
   lastSync: DateTimeISO
+}
+
+type VMHealthCheckQueueType {
+  attempts: Int!
+  checkType: String!
+  completedAt: DateTimeISO
+  createdAt: DateTimeISO!
+  error: String
+  executedAt: DateTimeISO
+  executionTimeMs: Int
+  id: ID!
+  machineId: ID!
+  maxAttempts: Int!
+  payload: JSONObject
+  priority: String!
+  result: JSONObject
+  scheduledFor: DateTimeISO!
+  status: String!
+  updatedAt: DateTimeISO!
+}
+
+type VMHealthSnapshotType {
+  applicationInventory: JSONObject
+  checksCompleted: Int!
+  checksFailed: Int!
+  createdAt: DateTimeISO!
+  customCheckResults: JSONObject
+  defenderStatus: JSONObject
+  diskSpaceInfo: JSONObject
+  errorSummary: String
+  executionTimeMs: Int
+  id: ID!
+  machineId: ID!
+  osType: String
+  overallStatus: String!
+  resourceOptInfo: JSONObject
+  snapshotDate: DateTimeISO!
+  updatedAt: DateTimeISO!
+  windowsUpdateInfo: JSONObject
+}
+
+type VMHealthStatsType {
+  errorSnapshots: Int!
+  healthySnapshots: Int!
+  lastHealthCheck: DateTimeISO
+  lastHealthStatus: String
+  totalSnapshots: Int!
+  warningSnapshots: Int!
 }
 
 """Actions that can be performed on a VM service"""

@@ -7,8 +7,9 @@ import { CronJob } from 'cron'
 import { Connection } from 'libvirt-node'
 import prisma from '../utils/database'
 import { getEventManager } from '../services/EventManager'
+import { getVMHealthQueueManager } from '../services/VMHealthQueueManager'
 
-async function getRunningDomainNames (): Promise<string[]> {
+async function getRunningDomainNames(): Promise<string[]> {
   try {
     const conn = Connection.open('qemu:///system')
     if (!conn) {
@@ -34,6 +35,10 @@ async function getRunningDomainNames (): Promise<string[]> {
 
 const UpdateVmStatusJob = new CronJob('*/1 * * * *', async () => {
   try {
+    // Get singleton instances
+    const eventManager = getEventManager()
+    const queueManager = getVMHealthQueueManager(prisma, eventManager)
+
     // Get list of running VMs from libvirt
     const runningVms = await getRunningDomainNames()
 
@@ -50,15 +55,15 @@ const UpdateVmStatusJob = new CronJob('*/1 * * * *', async () => {
     const runningVmIds = allVms
       .filter((vm) =>
         runningVms.includes(vm.internalName) &&
-                vm.status !== 'running'
+        vm.status !== 'running'
       )
       .map((vm) => vm.id)
 
     const stoppedVmIds = allVms
       .filter((vm) =>
         !runningVms.includes(vm.internalName) &&
-                vm.status !== 'stopped' &&
-                vm.status !== 'failed' // Don't update failed VMs
+        vm.status !== 'stopped' &&
+        vm.status !== 'failed' // Don't update failed VMs
       )
       .map((vm) => vm.id)
 
@@ -70,7 +75,6 @@ const UpdateVmStatusJob = new CronJob('*/1 * * * *', async () => {
       })
 
       // Emit update events for each VM that became running
-      const eventManager = getEventManager()
       for (const vmId of runningVmIds) {
         try {
           // Fetch complete VM data to send in the event
@@ -86,6 +90,13 @@ const UpdateVmStatusJob = new CronJob('*/1 * * * *', async () => {
           if (vm) {
             await eventManager.dispatchEvent('vms', 'update', vm)
             console.log(`🎯 VM status update: ${vm.name} (${vmId}) -> running`)
+
+            // Trigger queue processing for newly running VM
+            try {
+              await queueManager.processQueue(vmId)
+            } catch (error) {
+              console.error(`🗂️ Failed to process health queue for newly running VM ${vm.name} (${vmId}):`, error)
+            }
           }
         } catch (error) {
           console.error(`Failed to emit update event for VM ${vmId}:`, error)
@@ -101,7 +112,6 @@ const UpdateVmStatusJob = new CronJob('*/1 * * * *', async () => {
       })
 
       // Emit update events for each VM that became stopped
-      const eventManager = getEventManager()
       for (const vmId of stoppedVmIds) {
         try {
           // Fetch complete VM data to send in the event
