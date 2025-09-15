@@ -48,6 +48,7 @@
     "chokidar": "^4.0.3",
     "connect-timeout": "^1.9.0",
     "cron": "^3.2.1",
+    "cron-parser": "^5.3.1",
     "crypto": "^1.0.1",
     "dataloader": "^2.2.3",
     "debug": "^4.3.4",

@@ -11,14 +11,14 @@ export class ScheduleOverallScansJob {
   private queueManager: ReturnType<typeof getVMHealthQueueManager>
   private isRunning = false
 
-  constructor(
+  constructor (
     private prisma: PrismaClient,
     private eventManager: EventManager
   ) {
     this.queueManager = getVMHealthQueueManager(prisma, eventManager)
   }
 
-  start(): void {
+  start (): void {
     if (this.job) {
       debug.log('ScheduleOverallScans job is already running')
       return
@@ -50,7 +50,7 @@ export class ScheduleOverallScansJob {
     console.log(`🗂️ ScheduleOverallScans job started (every 30 minutes, scan interval: ${OVERALL_SCAN_INTERVAL_MINUTES} minutes)`)
   }
 
-  stop(): void {
+  stop (): void {
     if (this.job) {
       this.job.stop()
       this.job = null
@@ -58,7 +58,7 @@ export class ScheduleOverallScansJob {
     }
   }
 
-  private async scheduleOverdueScans(): Promise<void> {
+  private async scheduleOverdueScans (): Promise<void> {
     try {
       debug.log('Starting overdue scan scheduling cycle')
 
@@ -136,7 +136,6 @@ export class ScheduleOverallScansJob {
               debug.log(`VM ${vm.name} (${vm.id}) already has pending overall scan, skipping`)
             }
           }
-
         } catch (error) {
           console.error(`🗂️ Failed to check/schedule overall scan for VM ${vm.name} (${vm.id}):`, error)
         }
@@ -147,7 +146,6 @@ export class ScheduleOverallScansJob {
       } else {
         debug.log('No overdue overall scans found')
       }
-
     } catch (error) {
       console.error('🗂️ Error scheduling overdue scans:', error)
       throw error
@@ -157,7 +155,7 @@ export class ScheduleOverallScansJob {
   /**
    * Calculate exponential backoff delay for failed scans
    */
-  private async calculateBackoffDelay(machineId: string): Promise<number> {
+  private async calculateBackoffDelay (machineId: string): Promise<number> {
     try {
       const now = new Date()
       const backoffWindow = 60 * 60 * 1000 // 1 hour window
@@ -219,7 +217,7 @@ export class ScheduleOverallScansJob {
   /**
    * Raise health alert for repeated scan failures
    */
-  private async raiseHealthAlert(machineId: string, failureCount: number, backoffMinutes: number): Promise<void> {
+  private async raiseHealthAlert (machineId: string, failureCount: number, backoffMinutes: number): Promise<void> {
     try {
       // Create VMHealthAlert record
       await this.prisma.vMHealthAlert.create({
@@ -247,7 +245,7 @@ export class ScheduleOverallScansJob {
 // Export factory function for singleton pattern
 let scheduleOverallScansJobInstance: ScheduleOverallScansJob | null = null
 
-export function createScheduleOverallScansJob(
+export function createScheduleOverallScansJob (
   prisma: PrismaClient,
   eventManager: EventManager
 ): ScheduleOverallScansJob {

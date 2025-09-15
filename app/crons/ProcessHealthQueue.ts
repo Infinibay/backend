@@ -11,14 +11,14 @@ export class ProcessHealthQueueJob {
   private queueManager: ReturnType<typeof getVMHealthQueueManager>
   private isRunning = false
 
-  constructor(
+  constructor (
     private prisma: PrismaClient,
     private eventManager: EventManager
   ) {
     this.queueManager = getVMHealthQueueManager(prisma, eventManager)
   }
 
-  start(): void {
+  start (): void {
     if (this.job) {
       debug.log('ProcessHealthQueue job is already running')
       return
@@ -52,7 +52,7 @@ export class ProcessHealthQueueJob {
     console.log(`🗂️ ProcessHealthQueue job started (every ${QUEUE_PROCESSING_INTERVAL_SECONDS} seconds)`)
   }
 
-  stop(): void {
+  stop (): void {
     if (this.job) {
       this.job.stop()
       this.job = null
@@ -60,9 +60,12 @@ export class ProcessHealthQueueJob {
     }
   }
 
-  private async processHealthQueues(): Promise<void> {
+  private async processHealthQueues (): Promise<void> {
     try {
       debug.log('Starting health queue processing cycle')
+
+      // Sync from database first
+      await this.queueManager.syncFromDatabase()
 
       // Get all running VMs
       const runningVMs = await this.prisma.machine.findMany({
@@ -106,7 +109,6 @@ export class ProcessHealthQueueJob {
       if (stats.totalQueued > 0 || stats.activeChecks > 0) {
         debug.log(`Queue stats: ${stats.totalQueued} queued, ${stats.activeChecks} active, ${stats.vmQueues} VM queues`)
       }
-
     } catch (error) {
       console.error('🗂️ Error processing health queues:', error)
       throw error
@@ -117,7 +119,7 @@ export class ProcessHealthQueueJob {
 // Export factory function for singleton pattern
 let processHealthQueueJobInstance: ProcessHealthQueueJob | null = null
 
-export function createProcessHealthQueueJob(
+export function createProcessHealthQueueJob (
   prisma: PrismaClient,
   eventManager: EventManager
 ): ProcessHealthQueueJob {

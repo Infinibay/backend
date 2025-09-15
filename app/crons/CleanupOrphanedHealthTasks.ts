@@ -10,9 +10,9 @@ export class CleanupOrphanedHealthTasksJob {
   private job: CronJob | null = null
   private isRunning = false
 
-  constructor(private prisma: PrismaClient) {}
+  constructor (private prisma: PrismaClient) {}
 
-  start(): void {
+  start (): void {
     if (this.job) {
       debug.log('CleanupOrphanedHealthTasks job is already running')
       return
@@ -44,7 +44,7 @@ export class CleanupOrphanedHealthTasksJob {
     console.log('🗂️ CleanupOrphanedHealthTasks job started (every hour)')
   }
 
-  stop(): void {
+  stop (): void {
     if (this.job) {
       this.job.stop()
       this.job = null
@@ -52,7 +52,7 @@ export class CleanupOrphanedHealthTasksJob {
     }
   }
 
-  private async cleanupOrphanedTasks(): Promise<void> {
+  private async cleanupOrphanedTasks (): Promise<void> {
     try {
       debug.log('Starting orphaned health tasks cleanup')
 
@@ -64,7 +64,6 @@ export class CleanupOrphanedHealthTasksJob {
       await queueManager.cleanupOrphanedTasks()
 
       debug.log('Orphaned health tasks cleanup completed')
-
     } catch (error) {
       console.error('🗂️ Error during orphaned tasks cleanup:', error)
       throw error
@@ -75,7 +74,7 @@ export class CleanupOrphanedHealthTasksJob {
 // Export factory function for singleton pattern
 let cleanupOrphanedHealthTasksJobInstance: CleanupOrphanedHealthTasksJob | null = null
 
-export function createCleanupOrphanedHealthTasksJob(prisma: PrismaClient): CleanupOrphanedHealthTasksJob {
+export function createCleanupOrphanedHealthTasksJob (prisma: PrismaClient): CleanupOrphanedHealthTasksJob {
   if (!cleanupOrphanedHealthTasksJobInstance) {
     cleanupOrphanedHealthTasksJobInstance = new CleanupOrphanedHealthTasksJob(prisma)
   }

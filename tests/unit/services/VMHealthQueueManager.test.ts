@@ -434,7 +434,7 @@ describe('VMHealthQueueManager', () => {
           status: 'healthy'
         }
       })
-  
+
       // Mock snapshot operations
       mockPrisma.vMHealthSnapshot.findFirst.mockResolvedValue(null)
       mockPrisma.vMHealthSnapshot.create.mockResolvedValue({
@@ -456,7 +456,7 @@ describe('VMHealthQueueManager', () => {
         createdAt: new Date(),
         updatedAt: new Date()
       })
-  
+
       mockPrisma.vMHealthSnapshot.update.mockResolvedValue({
         id: 'snapshot-1',
         machineId: mockMachineId,
@@ -476,11 +476,11 @@ describe('VMHealthQueueManager', () => {
         createdAt: new Date(),
         updatedAt: new Date()
       })
-  
+
       // Queue and process a health check
       await queueManager.queueHealthCheck(mockMachineId, 'DISK_SPACE')
       await queueManager.processQueue(mockMachineId)
-  
+
       // Verify snapshot was updated with health check results
       expect(mockPrisma.vMHealthCheckQueue.update).toHaveBeenCalledWith({
         where: { id: mockTask.id },
@@ -492,14 +492,14 @@ describe('VMHealthQueueManager', () => {
         }
       })
     })
-  
+
     it('should create new snapshot if none exists for today', async () => {
       // Mock no existing snapshot
       mockPrisma.vMHealthSnapshot.findFirst.mockResolvedValue(null)
-  
+
       await queueManager.queueHealthCheck(mockMachineId, 'DISK_SPACE')
       await queueManager.processQueue(mockMachineId)
-  
+
       // Verify new snapshot was created
       expect(mockPrisma.vMHealthSnapshot.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
@@ -512,7 +512,7 @@ describe('VMHealthQueueManager', () => {
       })
     })
   })
-  
+
   describe('database queue loading', () => {
     it('should load existing pending tasks from database on startup', async () => {
       const pendingTasks = [
@@ -535,25 +535,25 @@ describe('VMHealthQueueManager', () => {
           updatedAt: new Date()
         }
       ]
-  
+
       mockPrisma.vMHealthCheckQueue.findMany.mockResolvedValue(pendingTasks)
-  
+
       // Create new queue manager instance to trigger loading
       const newQueueManager = new VMHealthQueueManager(mockPrisma, mockEventManager)
-  
+
       // Allow async loading to complete
       await new Promise(resolve => setImmediate(resolve))
-  
+
       expect(mockPrisma.vMHealthCheckQueue.findMany).toHaveBeenCalled()
-  
+
       // Verify queue was loaded
       expect(newQueueManager.getQueueSize(mockMachineId)).toBe(1)
     })
   })
-  
+
   describe('health check execution types', () => {
     let mockService: { sendSafeCommand: jest.Mock }
-  
+
     beforeEach(async () => {
       const { getVirtioSocketWatcherService } = await import('@services/VirtioSocketWatcherService')
       mockService = getVirtioSocketWatcherService()
@@ -562,7 +562,7 @@ describe('VMHealthQueueManager', () => {
         data: { status: 'healthy' }
       })
     })
-  
+
     it('should execute OVERALL_STATUS check with correct timeout', async () => {
       // Just verify the health check was queued properly
       const result = await queueManager.executeHealthCheck(mockTask)
@@ -570,30 +570,30 @@ describe('VMHealthQueueManager', () => {
       expect(typeof queueId).toBe('string')
       expect(queueManager.getQueueSize(mockMachineId)).toBe(1)
     })
-  
+
     it('should execute WINDOWS_UPDATES check with correct timeout', async () => {
       // Just verify the health check was queued properly
       const queueId = await queueManager.queueHealthCheck(mockMachineId, 'WINDOWS_UPDATES')
-  
+
       expect(typeof queueId).toBe('string')
       expect(queueManager.getQueueSize(mockMachineId)).toBe(1)
     })
-  
+
     it('should execute APPLICATION_INVENTORY check with correct timeout', async () => {
       // Just verify the health check was queued properly
       const queueId = await queueManager.queueHealthCheck(mockMachineId, 'APPLICATION_INVENTORY')
-  
+
       expect(typeof queueId).toBe('string')
       expect(queueManager.getQueueSize(mockMachineId)).toBe(1)
     })
-  
+
     it('should handle unsupported health check types', async () => {
       // This would be caught at TypeScript level, but test runtime behavior
       const unsupportedType = 'UNSUPPORTED_TYPE' as HealthCheckType
-  
+
       await queueManager.queueHealthCheck(mockMachineId, unsupportedType)
       await queueManager.processQueue(mockMachineId)
-  
+
       expect(mockPrisma.vMHealthCheckQueue.update).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { id: expect.any(String) },

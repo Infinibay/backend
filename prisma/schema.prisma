@@ -9,17 +9,19 @@ datasource db {
 }
 
 model User {
-  id        String    @id @default(uuid())
-  email     String    @unique
-  password  String
-  deleted   Boolean
-  token     String    @default("null")
-  firstName String
-  lastName  String
-  userImage String?   @unique
-  role      String
-  createdAt DateTime  @default(now())
-  VM        Machine[]
+  id                  String               @id @default(uuid())
+  email               String               @unique
+  password            String
+  deleted             Boolean
+  token               String               @default("null")
+  firstName           String
+  lastName            String
+  userImage           String?              @unique
+  role                String
+  createdAt           DateTime             @default(now())
+  VM                  Machine[]
+  maintenanceTasks    MaintenanceTask[]
+  maintenanceHistory  MaintenanceHistory[]
 }
 
 model Node {
@@ -92,6 +94,9 @@ model Machine {
   serviceConfigs    VMServiceConfig[]
   ports             VmPort[]
   windowsServices   WindowsService[]
+  maintenanceTasks  MaintenanceTask[]
+  maintenanceHistory MaintenanceHistory[]
+  recommendations   VMRecommendation[]
 }
 
 model MachineConfiguration {
@@ -607,9 +612,10 @@ model VMHealthSnapshot {
   
   createdAt            DateTime    @default(now())
   updatedAt            DateTime    @updatedAt
-  
-  machine              Machine     @relation(fields: [machineId], references: [id], onDelete: Cascade)
-  
+
+  machine              Machine             @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  recommendations      VMRecommendation[]
+
   @@index([machineId, snapshotDate])
   @@index([snapshotDate])
   @@index([machineId, overallStatus])
@@ -675,7 +681,114 @@ enum TaskStatus {
 
 enum TaskPriority {
   URGENT      // 1 - Critical security issues, failures
-  HIGH        // 2 - Performance degradation, warnings  
+  HIGH        // 2 - Performance degradation, warnings
   MEDIUM      // 3 - Regular health checks (default)
   LOW         // 4 - Background maintenance
+}
+
+// Maintenance System Models
+
+model MaintenanceTask {
+  id              String                @id @default(uuid())
+  machineId       String
+  taskType        MaintenanceTaskType
+  name            String
+  description     String?
+  isEnabled       Boolean               @default(true)
+  isRecurring     Boolean               @default(false)
+  cronSchedule    String?               // Cron pattern for recurring tasks
+  runAt           DateTime?             // Specific run time for one-time tasks
+  nextRunAt       DateTime?
+  lastRunAt       DateTime?
+  executionStatus String                @default("IDLE") // IDLE, RUNNING, LOCKED
+  parameters      Json?                 // Task-specific parameters
+  createdByUserId String
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+
+  machine         Machine               @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  createdBy       User                  @relation(fields: [createdByUserId], references: [id])
+  history         MaintenanceHistory[]
+
+  @@index([machineId, isEnabled])
+  @@index([machineId, taskType])
+  @@index([nextRunAt, isEnabled])
+  @@index([taskType, isEnabled])
+}
+
+model MaintenanceHistory {
+  id              String               @id @default(uuid())
+  taskId          String?              // Null for immediate executions
+  machineId       String
+  taskType        MaintenanceTaskType
+  status          MaintenanceStatus
+  duration        Int?                 // Execution duration in milliseconds
+  result          Json?                // Detailed results
+  error           String?              // Error message if failed
+  triggeredBy     MaintenanceTrigger
+  executedByUserId String?
+  executedAt      DateTime             @default(now())
+
+  task            MaintenanceTask?     @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  machine         Machine              @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  executedBy      User?                @relation(fields: [executedByUserId], references: [id])
+
+  @@index([machineId, executedAt])
+  @@index([machineId, status])
+  @@index([taskType, status])
+  @@index([executedAt])
+}
+
+enum MaintenanceTaskType {
+  DISK_CLEANUP
+  DEFRAG
+  WINDOWS_UPDATES
+  DEFENDER_SCAN
+  SYSTEM_FILE_CHECK
+  DISK_CHECK
+  REGISTRY_CLEANUP
+  CUSTOM_SCRIPT
+}
+
+enum MaintenanceStatus {
+  SUCCESS
+  FAILED
+  CANCELLED
+  TIMEOUT
+  RUNNING
+}
+
+enum MaintenanceTrigger {
+  SCHEDULED
+  MANUAL
+}
+
+enum RecommendationType {
+  DISK_SPACE_LOW
+  HIGH_CPU_APP
+  HIGH_RAM_APP
+  PORT_BLOCKED
+  OVER_PROVISIONED
+  UNDER_PROVISIONED
+  OS_UPDATE_AVAILABLE
+  APP_UPDATE_AVAILABLE
+  DEFENDER_DISABLED
+  DEFENDER_THREAT
+  OTHER
+}
+
+model VMRecommendation {
+  id          String             @id @default(uuid())
+  machineId   String
+  snapshotId  String?
+  type        RecommendationType
+  text        String
+  actionText  String
+  data        Json?
+  createdAt   DateTime           @default(now())
+
+  machine     Machine            @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  snapshot    VMHealthSnapshot?  @relation(fields: [snapshotId], references: [id], onDelete: SetNull)
+
+  @@index([machineId, createdAt])
 }

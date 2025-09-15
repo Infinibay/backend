@@ -1,5 +1,4 @@
-import { Resolver, Query, Mutation, Authorized, Ctx } from 'type-graphql'
-import { ObjectType, Field, Int } from 'type-graphql'
+import { Resolver, Query, Mutation, Authorized, Ctx, ObjectType, Field, Int } from 'type-graphql'
 import { InfinibayContext } from '@utils/context'
 import { BackgroundHealthService } from '@services/BackgroundHealthService'
 import { VMHealthQueueManager } from '@services/VMHealthQueueManager'
@@ -13,25 +12,25 @@ import { getSocketService } from '@services/SocketService'
 @ObjectType()
 export class BackgroundHealthServiceStatus {
   @Field()
-  isRunning!: boolean
+    isRunning!: boolean
 
   @Field()
-  cronActive!: boolean
+    cronActive!: boolean
 
   @Field({ nullable: true })
-  nextRun?: Date
+    nextRun?: Date
 
   @Field()
-  lastRun?: Date
+    lastRun?: Date
 
   @Field(() => Int)
-  totalVMsMonitored!: number
+    totalVMsMonitored!: number
 
   @Field(() => Int)
-  activeQueues!: number
+    activeQueues!: number
 
   @Field(() => Int)
-  pendingChecks!: number
+    pendingChecks!: number
 }
 
 /**
@@ -40,19 +39,19 @@ export class BackgroundHealthServiceStatus {
 @ObjectType()
 export class HealthCheckRoundResult {
   @Field()
-  success!: boolean
+    success!: boolean
 
   @Field()
-  taskId!: string
+    taskId!: string
 
   @Field()
-  message!: string
+    message!: string
 
   @Field({ nullable: true })
-  error?: string
+    error?: string
 
   @Field()
-  timestamp!: Date
+    timestamp!: Date
 }
 
 /**
@@ -61,19 +60,19 @@ export class HealthCheckRoundResult {
 @ObjectType()
 export class QueueStatistics {
   @Field(() => Int)
-  totalQueues!: number
+    totalQueues!: number
 
   @Field(() => Int)
-  activeChecks!: number
+    activeChecks!: number
 
   @Field(() => Int)
-  pendingTasks!: number
+    pendingTasks!: number
 
   @Field(() => Int)
-  completedToday!: number
+    completedToday!: number
 
   @Field(() => Int)
-  failedToday!: number
+    failedToday!: number
 }
 
 @Resolver()
@@ -84,7 +83,7 @@ export class BackgroundHealthResolver {
   /**
    * Get or create BackgroundHealthService instance
    */
-  private getBackgroundHealthService(context: InfinibayContext): BackgroundHealthService {
+  private getBackgroundHealthService (context: InfinibayContext): BackgroundHealthService {
     if (!this.backgroundHealthService) {
       const socketService = getSocketService()
       const eventManager = createEventManager(socketService, context.prisma)
@@ -106,7 +105,7 @@ export class BackgroundHealthResolver {
    */
   @Query(() => BackgroundHealthServiceStatus)
   @Authorized(['ADMIN'])
-  async backgroundHealthServiceStatus(
+  async backgroundHealthServiceStatus (
     @Ctx() context: InfinibayContext
   ): Promise<BackgroundHealthServiceStatus> {
     const service = this.getBackgroundHealthService(context)
@@ -142,7 +141,7 @@ export class BackgroundHealthResolver {
    */
   @Query(() => QueueStatistics)
   @Authorized(['ADMIN'])
-  async healthQueueStatistics(
+  async healthQueueStatistics (
     @Ctx() context: InfinibayContext
   ): Promise<QueueStatistics> {
     const today = new Date()
@@ -186,7 +185,7 @@ export class BackgroundHealthResolver {
    */
   @Mutation(() => HealthCheckRoundResult)
   @Authorized(['ADMIN'])
-  async triggerHealthCheckRound(
+  async triggerHealthCheckRound (
     @Ctx() context: InfinibayContext
   ): Promise<HealthCheckRoundResult> {
     try {
@@ -216,7 +215,7 @@ export class BackgroundHealthResolver {
    */
   @Mutation(() => HealthCheckRoundResult)
   @Authorized(['ADMIN'])
-  async queueAllVMHealthChecks(
+  async queueAllVMHealthChecks (
     @Ctx() context: InfinibayContext
   ): Promise<HealthCheckRoundResult> {
     try {

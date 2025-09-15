@@ -100,7 +100,8 @@ export function createMockContext (options: { user?: User | null; prisma?: Prism
     res: mockRes,
     prisma: mockPrisma,
     user,
-    setupMode: false
+    setupMode: false,
+    virtioSocketWatcher: undefined
   }
 }
 
@@ -155,16 +156,13 @@ export const TestQueries = {
   `,
 
   LIST_USERS: `
-    query ListUsers($orderBy: String, $take: Int, $skip: Int) {
-      users(orderBy: $orderBy, take: $take, skip: $skip) {
-        users {
-          id
-          email
-          firstName
-          lastName
-          role
-        }
-        total
+    query ListUsers($orderBy: UserOrderByInputType, $pagination: PaginationInputType) {
+      users(orderBy: $orderBy, pagination: $pagination) {
+        id
+        email
+        firstName
+        lastName
+        role
       }
     }
   `,
@@ -185,15 +183,12 @@ export const TestQueries = {
   `,
 
   LIST_MACHINES: `
-    query ListMachines($take: Int, $skip: Int) {
-      machines(take: $take, skip: $skip) {
-        machines {
-          id
-          name
-          status
-          os
-        }
-        total
+    query ListMachines($orderBy: MachineOrderBy, $pagination: PaginationInputType) {
+      machines(orderBy: $orderBy, pagination: $pagination) {
+        id
+        name
+        status
+        os
       }
     }
   `,
@@ -209,16 +204,13 @@ export const TestQueries = {
   `,
 
   USERS: `
-    query Users($orderBy: String, $take: Int, $skip: Int) {
-      users(orderBy: $orderBy, take: $take, skip: $skip) {
-        users {
-          id
-          email
-          firstName
-          lastName
-          role
-        }
-        total
+    query Users($orderBy: UserOrderByInputType, $pagination: PaginationInputType) {
+      users(orderBy: $orderBy, pagination: $pagination) {
+        id
+        email
+        firstName
+        lastName
+        role
       }
     }
   `,
@@ -239,15 +231,12 @@ export const TestQueries = {
   `,
 
   MACHINES: `
-    query Machines($take: Int, $skip: Int) {
-      machines(take: $take, skip: $skip) {
-        machines {
-          id
-          name
-          status
-          os
-        }
-        total
+    query Machines($orderBy: MachineOrderBy, $pagination: PaginationInputType) {
+      machines(orderBy: $orderBy, pagination: $pagination) {
+        id
+        name
+        status
+        os
       }
     }
   `,
@@ -273,17 +262,13 @@ export const TestQueries = {
   `,
 
   MACHINE_TEMPLATES: `
-    query MachineTemplates($take: Int, $skip: Int) {
-      machineTemplates(take: $take, skip: $skip) {
-        templates {
-          id
-          name
-          os
-          cpuCores
-          ramGB
-          diskSizeGB
-        }
-        total
+    query MachineTemplates($orderBy: MachineTemplateOrderBy, $pagination: PaginationInputType) {
+      machineTemplates(orderBy: $orderBy, pagination: $pagination) {
+        id
+        name
+        cores
+        ram
+        storage
       }
     }
   `
@@ -291,7 +276,7 @@ export const TestQueries = {
 
 export const TestMutations = {
   CREATE_USER: `
-    mutation CreateUser($input: UserInput!) {
+    mutation CreateUser($input: CreateUserInputType!) {
       createUser(input: $input) {
         id
         email
@@ -303,7 +288,7 @@ export const TestMutations = {
   `,
 
   UPDATE_USER: `
-    mutation UpdateUser($id: String!, $input: UserInput!) {
+    mutation UpdateUser($id: String!, $input: UpdateUserInputType!) {
       updateUser(id: $id, input: $input) {
         id
         email
@@ -314,7 +299,7 @@ export const TestMutations = {
   `,
 
   CREATE_MACHINE: `
-    mutation CreateMachine($input: MachineInput!) {
+    mutation CreateMachine($input: CreateMachineInputType!) {
       createMachine(input: $input) {
         id
         name

@@ -28,19 +28,19 @@ export class EventManager {
   private socketService: SocketService
   private prisma: PrismaClient
 
-  constructor(socketService: SocketService, prisma: PrismaClient) {
+  constructor (socketService: SocketService, prisma: PrismaClient) {
     this.socketService = socketService
     this.prisma = prisma
   }
 
   // Register a resource-specific event manager
-  registerResourceManager(resource: string, manager: ResourceEventManager): void {
+  registerResourceManager (resource: string, manager: ResourceEventManager): void {
     this.resourceManagers.set(resource, manager)
     console.log(`📋 Registered event manager for resource: ${resource}`)
   }
 
   // Main event dispatch method
-  async dispatchEvent(
+  async dispatchEvent (
     resource: string,
     action: EventAction,
     data: EventData,
@@ -79,87 +79,87 @@ export class EventManager {
   // Convenience methods for common events
 
   // VM Events
-  async vmCreated(vmData: EventData, triggeredBy?: string): Promise<void> {
+  async vmCreated (vmData: EventData, triggeredBy?: string): Promise<void> {
     await this.dispatchEvent('vms', 'create', vmData, triggeredBy)
   }
 
-  async vmUpdated(vmData: EventData, triggeredBy?: string): Promise<void> {
+  async vmUpdated (vmData: EventData, triggeredBy?: string): Promise<void> {
     await this.dispatchEvent('vms', 'update', vmData, triggeredBy)
   }
 
-  async vmDeleted(vmData: EventData, triggeredBy?: string): Promise<void> {
+  async vmDeleted (vmData: EventData, triggeredBy?: string): Promise<void> {
     await this.dispatchEvent('vms', 'delete', vmData, triggeredBy)
   }
 
-  async vmPowerOn(vmData: EventData, triggeredBy?: string): Promise<void> {
+  async vmPowerOn (vmData: EventData, triggeredBy?: string): Promise<void> {
     await this.dispatchEvent('vms', 'power_on', vmData, triggeredBy)
   }
 
-  async vmPowerOff(vmData: EventData, triggeredBy?: string): Promise<void> {
+  async vmPowerOff (vmData: EventData, triggeredBy?: string): Promise<void> {
     await this.dispatchEvent('vms', 'power_off', vmData, triggeredBy)
   }
 
-  async vmSuspend(vmData: EventData, triggeredBy?: string): Promise<void> {
+  async vmSuspend (vmData: EventData, triggeredBy?: string): Promise<void> {
     await this.dispatchEvent('vms', 'suspend', vmData, triggeredBy)
   }
 
   // User Events
-  async userCreated(userData: EventData, triggeredBy?: string): Promise<void> {
+  async userCreated (userData: EventData, triggeredBy?: string): Promise<void> {
     await this.dispatchEvent('users', 'create', userData, triggeredBy)
   }
 
-  async userUpdated(userData: EventData, triggeredBy?: string): Promise<void> {
+  async userUpdated (userData: EventData, triggeredBy?: string): Promise<void> {
     await this.dispatchEvent('users', 'update', userData, triggeredBy)
   }
 
-  async userDeleted(userData: EventData, triggeredBy?: string): Promise<void> {
+  async userDeleted (userData: EventData, triggeredBy?: string): Promise<void> {
     await this.dispatchEvent('users', 'delete', userData, triggeredBy)
   }
 
   // Department Events
-  async departmentCreated(deptData: EventData, triggeredBy?: string): Promise<void> {
+  async departmentCreated (deptData: EventData, triggeredBy?: string): Promise<void> {
     await this.dispatchEvent('departments', 'create', deptData, triggeredBy)
   }
 
-  async departmentUpdated(deptData: EventData, triggeredBy?: string): Promise<void> {
+  async departmentUpdated (deptData: EventData, triggeredBy?: string): Promise<void> {
     await this.dispatchEvent('departments', 'update', deptData, triggeredBy)
   }
 
-  async departmentDeleted(deptData: EventData, triggeredBy?: string): Promise<void> {
+  async departmentDeleted (deptData: EventData, triggeredBy?: string): Promise<void> {
     await this.dispatchEvent('departments', 'delete', deptData, triggeredBy)
   }
 
   // Application Events
-  async applicationCreated(appData: EventData, triggeredBy?: string): Promise<void> {
+  async applicationCreated (appData: EventData, triggeredBy?: string): Promise<void> {
     await this.dispatchEvent('applications', 'create', appData, triggeredBy)
   }
 
-  async applicationUpdated(appData: EventData, triggeredBy?: string): Promise<void> {
+  async applicationUpdated (appData: EventData, triggeredBy?: string): Promise<void> {
     await this.dispatchEvent('applications', 'update', appData, triggeredBy)
   }
 
-  async applicationDeleted(appData: EventData, triggeredBy?: string): Promise<void> {
+  async applicationDeleted (appData: EventData, triggeredBy?: string): Promise<void> {
     await this.dispatchEvent('applications', 'delete', appData, triggeredBy)
   }
 
   // Auto-check Events
-  async autocheckIssueDetected(vmData: EventData, triggeredBy?: string): Promise<void> {
+  async autocheckIssueDetected (vmData: EventData, triggeredBy?: string): Promise<void> {
     await this.dispatchEvent('vms', 'autocheck_issue_detected', vmData, triggeredBy)
   }
 
-  async autocheckRemediationAvailable(vmData: EventData, triggeredBy?: string): Promise<void> {
+  async autocheckRemediationAvailable (vmData: EventData, triggeredBy?: string): Promise<void> {
     await this.dispatchEvent('vms', 'autocheck_remediation_available', vmData, triggeredBy)
   }
 
-  async autocheckRemediationCompleted(vmData: EventData, triggeredBy?: string): Promise<void> {
+  async autocheckRemediationCompleted (vmData: EventData, triggeredBy?: string): Promise<void> {
     await this.dispatchEvent('vms', 'autocheck_remediation_completed', vmData, triggeredBy)
   }
 
   // Get statistics
-  getStats(): {
+  getStats (): {
     registeredManagers: string[]
     socketStats: { connectedUsers: number; userIds: string[] }
-  } {
+    } {
     return {
       registeredManagers: Array.from(this.resourceManagers.keys()),
       socketStats: this.socketService.getStats()

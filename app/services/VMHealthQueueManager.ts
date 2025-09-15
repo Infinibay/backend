@@ -3,16 +3,17 @@ import { EventManager } from './EventManager'
 import { getVirtioSocketWatcherService, CommandResponse, SafeCommandType } from './VirtioSocketWatcherService'
 import { MachineStatus } from '../graphql/resolvers/machine/type'
 import { v4 as uuidv4 } from 'uuid'
+import { VMRecommendationService } from './VMRecommendationService'
 
 // Configuration constants for health monitoring intervals
-export const OVERALL_SCAN_INTERVAL_MINUTES = 60; // 1 hour
-export const QUEUE_PROCESSING_INTERVAL_SECONDS = 30; // 30 seconds
+export const OVERALL_SCAN_INTERVAL_MINUTES = 60 // 1 hour
+export const QUEUE_PROCESSING_INTERVAL_SECONDS = 30 // 30 seconds
 
 // Configuration constants for health check retry logic
-export const DEFAULT_MAX_ATTEMPTS = 20; // 20 attempts for VM startup scenarios
-export const INITIAL_BACKOFF_MS = 30000; // Start with 30 seconds
-export const MAX_BACKOFF_MS = 300000; // Cap at 5 minutes
-export const BACKOFF_MULTIPLIER = 1.5; // Gentler exponential growth
+export const DEFAULT_MAX_ATTEMPTS = 20 // 20 attempts for VM startup scenarios
+export const INITIAL_BACKOFF_MS = 30000 // Start with 30 seconds
+export const MAX_BACKOFF_MS = 300000 // Cap at 5 minutes
+export const BACKOFF_MULTIPLIER = 1.5 // Gentler exponential growth
 
 // Health check payload interface - using record for Prisma JSON compatibility
 export interface HealthCheckPayload {
@@ -40,26 +41,28 @@ export class VMHealthQueueManager {
   private readonly MAX_HEAVY_CHECKS_PER_VM = 1
   private readonly MAX_SYSTEM_WIDE_CONCURRENT = 50
   private activeChecks = new Set<string>()
+  private recommendationService: VMRecommendationService
 
   // Health check timeout constants (in milliseconds)
   private static readonly HEALTH_CHECK_TIMEOUTS: Record<HealthCheckType, number> = {
-    OVERALL_STATUS: 300000,        // 5 minutes
-    DISK_SPACE: 60000,             // 1 minute
+    OVERALL_STATUS: 300000, // 5 minutes
+    DISK_SPACE: 60000, // 1 minute
     RESOURCE_OPTIMIZATION: 240000, // 4 minutes
-    WINDOWS_UPDATES: 300000,       // 5 minutes
-    WINDOWS_DEFENDER: 300000,      // 5 minutes
+    WINDOWS_UPDATES: 300000, // 5 minutes
+    WINDOWS_DEFENDER: 300000, // 5 minutes
     APPLICATION_INVENTORY: 180000, // 3 minutes
-    APPLICATION_UPDATES: 180000,   // 3 minutes (default)
-    SECURITY_CHECK: 180000,        // 3 minutes (default)
-    PERFORMANCE_CHECK: 180000,     // 3 minutes (default)
-    SYSTEM_HEALTH: 300000,         // 5 minutes (default)
-    CUSTOM_CHECK: 120000           // 2 minutes (default)
+    APPLICATION_UPDATES: 180000, // 3 minutes (default)
+    SECURITY_CHECK: 180000, // 3 minutes (default)
+    PERFORMANCE_CHECK: 180000, // 3 minutes (default)
+    SYSTEM_HEALTH: 300000, // 5 minutes (default)
+    CUSTOM_CHECK: 120000 // 2 minutes (default)
   }
 
-  constructor(
+  constructor (
     private prisma: PrismaClient,
     private eventManager: EventManager
   ) {
+    this.recommendationService = new VMRecommendationService(this.prisma)
     // Load existing queues from database on startup
     this.loadQueuesFromDatabase()
   }
@@ -68,7 +71,7 @@ export class VMHealthQueueManager {
    * Get timeout for a specific health check type
    * Reads from environment variables with fallback to constants
    */
-  private getHealthCheckTimeout(checkType: HealthCheckType): number {
+  private getHealthCheckTimeout (checkType: HealthCheckType): number {
     const envKey = `HEALTH_CHECK_TIMEOUT_${checkType}`
     const envValue = process.env[envKey]
     if (envValue) {
@@ -87,7 +90,7 @@ export class VMHealthQueueManager {
   /**
    * Queue all standard health checks for a VM
    */
-  async queueHealthChecks(machineId: string): Promise<void> {
+  async queueHealthChecks (machineId: string): Promise<void> {
     // Check if VM exists and is running before queuing any health checks
     const vm = await this.prisma.machine.findUnique({
       where: { id: machineId },
@@ -150,7 +153,7 @@ export class VMHealthQueueManager {
    * @note This method validates VM status and only allows health checks for running VMs.
    *       Callers should either pre-filter for running VMs or handle the thrown errors.
    */
-  async queueHealthCheck(
+  async queueHealthCheck (
     machineId: string,
     checkType: HealthCheckType,
     priority: TaskPriority = 'MEDIUM',
@@ -273,7 +276,7 @@ export class VMHealthQueueManager {
   /**
    * Process queue for a specific VM when it comes online
    */
-  async processQueue(machineId: string): Promise<void> {
+  async processQueue (machineId: string): Promise<void> {
     // Load pending tasks from database first to ensure DB is source of truth
     await this.loadPendingTasksForVm(machineId)
 
@@ -343,7 +346,7 @@ export class VMHealthQueueManager {
   /**
    * Execute a single health check
    */
-  private async executeHealthCheck(task: QueuedHealthCheck): Promise<void> {
+  private async executeHealthCheck (task: QueuedHealthCheck): Promise<void> {
     const startTime = Date.now()
     try {
       // First, verify the VM is running before attempting health check
@@ -380,20 +383,20 @@ export class VMHealthQueueManager {
       // Determine action and timeout
       let action: SafeCommandType['action']
       switch (task.checkType) {
-        case 'OVERALL_STATUS':
-          action = 'RunAllHealthChecks'; break
-        case 'DISK_SPACE':
-          action = 'CheckDiskSpace'; break
-        case 'RESOURCE_OPTIMIZATION':
-          action = 'CheckResourceOptimization'; break
-        case 'WINDOWS_UPDATES':
-          action = 'CheckWindowsUpdates'; break
-        case 'WINDOWS_DEFENDER':
-          action = 'CheckWindowsDefender'; break
-        case 'APPLICATION_INVENTORY':
-          action = 'GetInstalledApplicationsWMI'; break
-        default:
-          throw new Error(`Unsupported health check type: ${task.checkType}`)
+      case 'OVERALL_STATUS':
+        action = 'RunAllHealthChecks'; break
+      case 'DISK_SPACE':
+        action = 'CheckDiskSpace'; break
+      case 'RESOURCE_OPTIMIZATION':
+        action = 'CheckResourceOptimization'; break
+      case 'WINDOWS_UPDATES':
+        action = 'CheckWindowsUpdates'; break
+      case 'WINDOWS_DEFENDER':
+        action = 'CheckWindowsDefender'; break
+      case 'APPLICATION_INVENTORY':
+        action = 'GetInstalledApplicationsWMI'; break
+      default:
+        throw new Error(`Unsupported health check type: ${task.checkType}`)
       }
       const timeout = this.getHealthCheckTimeout(task.checkType)
       let result: CommandResponse
@@ -432,9 +435,9 @@ export class VMHealthQueueManager {
       console.log(`🩺 Completed health check ${task.checkType} for VM ${task.machineId} (${executionTime}ms)`)
     } catch (error) {
       const executionTime = Date.now() - startTime
-      const err = error as any
-      const errorMessage = err?.message || ''
-      const errorCode = err?.code || ''
+      const err = error as unknown
+      const errorMessage = (err && typeof err === 'object' && 'message' in err && typeof err.message === 'string') ? err.message : ''
+      const errorCode = (err && typeof err === 'object' && 'code' in err && typeof err.code === 'string') ? err.code : ''
       // Categorize error types for better debugging
       let errorCategory = 'unknown'
       if (
@@ -482,7 +485,7 @@ export class VMHealthQueueManager {
   /**
    * Handle task failure with retry logic
    */
-  private async handleTaskFailure(task: QueuedHealthCheck, error: Error): Promise<void> {
+  private async handleTaskFailure (task: QueuedHealthCheck, error: Error): Promise<void> {
     task.attempts++
 
     if (task.attempts >= task.maxAttempts) {
@@ -535,7 +538,7 @@ export class VMHealthQueueManager {
   /**
    * Remove task from queue
    */
-  private async removeFromQueue(machineId: string, taskId: string, deleteFromDB: boolean = true): Promise<void> {
+  private async removeFromQueue (machineId: string, taskId: string, deleteFromDB: boolean = true): Promise<void> {
     // Remove from in-memory queue
     const queue = this.inMemoryQueues.get(machineId) || []
     const filteredQueue = queue.filter(task => task.id !== taskId)
@@ -555,7 +558,7 @@ export class VMHealthQueueManager {
   /**
    * Store health check result in snapshot
    */
-  private async storeHealthSnapshot(
+  private async storeHealthSnapshot (
     machineId: string,
     checkType: HealthCheckType,
     result: CommandResponse,
@@ -596,21 +599,21 @@ export class VMHealthQueueManager {
 
     // Store result in appropriate field
     switch (checkType) {
-      case 'DISK_SPACE':
-        updateData.diskSpaceInfo = result.data
-        break
-      case 'RESOURCE_OPTIMIZATION':
-        updateData.resourceOptInfo = result.data
-        break
-      case 'WINDOWS_UPDATES':
-        updateData.windowsUpdateInfo = result.data
-        break
-      case 'WINDOWS_DEFENDER':
-        updateData.defenderStatus = result.data
-        break
-      case 'APPLICATION_INVENTORY':
-        updateData.applicationInventory = result.data
-        break
+    case 'DISK_SPACE':
+      updateData.diskSpaceInfo = result.data
+      break
+    case 'RESOURCE_OPTIMIZATION':
+      updateData.resourceOptInfo = result.data
+      break
+    case 'WINDOWS_UPDATES':
+      updateData.windowsUpdateInfo = result.data
+      break
+    case 'WINDOWS_DEFENDER':
+      updateData.defenderStatus = result.data
+      break
+    case 'APPLICATION_INVENTORY':
+      updateData.applicationInventory = result.data
+      break
     }
 
     await this.prisma.vMHealthSnapshot.update({
@@ -625,7 +628,7 @@ export class VMHealthQueueManager {
   /**
    * Update health snapshot with failure information
    */
-  private async updateHealthSnapshotFailure(
+  private async updateHealthSnapshotFailure (
     machineId: string,
     _checkType: HealthCheckType, // Prefixed with _ to indicate intentionally unused
     executionTimeMs: number
@@ -671,9 +674,28 @@ export class VMHealthQueueManager {
   }
 
   /**
+   * Get list of enabled check types for health monitoring
+   */
+  private getEnabledCheckTypes(): string[] {
+    // Standard health check types - can be made configurable via environment
+    const defaultCheckTypes = [
+      'OVERALL_STATUS',
+      'DISK_SPACE',
+      'RESOURCE_OPTIMIZATION',
+      'WINDOWS_UPDATES',
+      'WINDOWS_DEFENDER',
+      'APPLICATION_INVENTORY'
+    ]
+
+    // Check for environment configuration
+    const enabledChecks = process.env.HEALTH_CHECK_ENABLED_TYPES?.split(',') || defaultCheckTypes
+    return enabledChecks.map(check => check.trim()).filter(Boolean)
+  }
+
+  /**
    * Update snapshot overall status based on completed and failed checks
    */
-  private async updateSnapshotOverallStatus(snapshotId: string, _machineId: string): Promise<void> {
+  private async updateSnapshotOverallStatus (snapshotId: string, _machineId: string): Promise<void> {
     const snapshot = await this.prisma.vMHealthSnapshot.findUnique({
       where: { id: snapshotId }
     })
@@ -681,7 +703,10 @@ export class VMHealthQueueManager {
     if (!snapshot) return
 
     const totalChecks = snapshot.checksCompleted + snapshot.checksFailed
-    const expectedChecks = 6 // OVERALL_STATUS, DISK_SPACE, RESOURCE_OPTIMIZATION, WINDOWS_UPDATES, WINDOWS_DEFENDER, APPLICATION_INVENTORY
+
+    // Calculate expected checks dynamically based on enabled check types
+    const enabledCheckTypes = this.getEnabledCheckTypes()
+    const expectedChecks = enabledCheckTypes.length || 6 // fallback to 6 if no specific config
 
     let overallStatus = 'PENDING'
     if (totalChecks >= expectedChecks) {
@@ -698,12 +723,40 @@ export class VMHealthQueueManager {
       where: { id: snapshotId },
       data: { overallStatus }
     })
+
+    // Generate recommendations when all health checks are complete
+    if (totalChecks >= expectedChecks) {
+      await this.generateRecommendationsForSnapshot(snapshotId, _machineId)
+    }
+  }
+
+  /**
+   * Generate recommendations for a completed health snapshot
+   */
+  private async generateRecommendationsForSnapshot(snapshotId: string, machineId: string): Promise<void> {
+    try {
+      // Check if recommendations already exist for this snapshot
+      const existingCount = await this.prisma.vMRecommendation.count({
+        where: { snapshotId }
+      })
+
+      if (existingCount > 0) {
+        console.log(`📋 Recommendations already exist for snapshot ${snapshotId}, skipping generation`)
+        return
+      }
+
+      await this.recommendationService.generateRecommendations(machineId, snapshotId)
+      console.log(`💡 Generated recommendations for VM ${machineId} snapshot ${snapshotId}`)
+    } catch (error) {
+      console.error(`❌ Failed to generate recommendations for VM ${machineId}:`, error)
+      // Don't throw error to prevent breaking health check workflow
+    }
   }
 
   /**
    * Sort queue by priority (URGENT > HIGH > MEDIUM > LOW)
    */
-  private sortQueue(machineId: string): void {
+  private sortQueue (machineId: string): void {
     const queue = this.inMemoryQueues.get(machineId)
     if (!queue) return
 
@@ -718,7 +771,7 @@ export class VMHealthQueueManager {
   /**
    * Load existing queues from database on startup
    */
-  private async loadQueuesFromDatabase(): Promise<void> {
+  private async loadQueuesFromDatabase (): Promise<void> {
     try {
       const pendingTasks = await this.prisma.vMHealthCheckQueue.findMany({
         where: {
@@ -758,7 +811,7 @@ export class VMHealthQueueManager {
   /**
    * Parse payload from database JSON
    */
-  private parsePayload(payload: unknown): HealthCheckPayload | null {
+  private parsePayload (payload: unknown): HealthCheckPayload | null {
     if (!payload || typeof payload !== 'object') {
       return null
     }
@@ -768,18 +821,18 @@ export class VMHealthQueueManager {
   /**
    * Get queue size for a VM
    */
-  public getQueueSize(machineId: string): number {
+  public getQueueSize (machineId: string): number {
     return this.inMemoryQueues.get(machineId)?.length || 0
   }
 
   /**
    * Get queue statistics
    */
-  public getQueueStatistics(): {
+  public getQueueStatistics (): {
     totalQueued: number
     activeChecks: number
     vmQueues: number
-  } {
+    } {
     const totalQueued = Array.from(this.inMemoryQueues.values())
       .reduce((sum, queue) => sum + queue.length, 0)
 
@@ -793,7 +846,7 @@ export class VMHealthQueueManager {
   /**
    * Clear queue for a VM (for maintenance)
    */
-  public async clearQueue(machineId: string): Promise<void> {
+  public async clearQueue (machineId: string): Promise<void> {
     this.inMemoryQueues.delete(machineId)
 
     await this.prisma.vMHealthCheckQueue.deleteMany({
@@ -809,7 +862,7 @@ export class VMHealthQueueManager {
   /**
    * Get overall scan interval for a specific VM (per-VM config overrides global)
    */
-  public async getOverallScanIntervalMinutes(machineId: string): Promise<number> {
+  public async getOverallScanIntervalMinutes (machineId: string): Promise<number> {
     try {
       // Check for per-VM configuration first
       const vmConfig = await this.prisma.vMHealthConfig.findUnique({
@@ -841,7 +894,7 @@ export class VMHealthQueueManager {
   /**
    * Clean up orphaned tasks for deleted VMs
    */
-  public async cleanupOrphanedTasks(): Promise<void> {
+  public async cleanupOrphanedTasks (): Promise<void> {
     try {
       // Get all VMs with DELETED status
       const deletedVMs = await this.prisma.machine.findMany({
@@ -879,7 +932,7 @@ export class VMHealthQueueManager {
   /**
    * Get the timestamp of the last successful overall health scan for a VM
    */
-  public async getLastOverallScanTime(machineId: string): Promise<Date | null> {
+  public async getLastOverallScanTime (machineId: string): Promise<Date | null> {
     try {
       const lastScan = await this.prisma.vMHealthCheckQueue.findFirst({
         where: {
@@ -905,7 +958,7 @@ export class VMHealthQueueManager {
   /**
    * Sync pending tasks from database for a specific VM
    */
-  public async loadPendingTasksForVm(machineId: string): Promise<void> {
+  public async loadPendingTasksForVm (machineId: string): Promise<void> {
     try {
       const pendingTasks = await this.prisma.vMHealthCheckQueue.findMany({
         where: {
@@ -954,7 +1007,7 @@ export class VMHealthQueueManager {
   /**
    * Get ready tasks with DB-level locking for cross-process safety
    */
-  private async getReadyTasksWithLocking(machineId: string, maxTasks: number): Promise<QueuedHealthCheck[]> {
+  private async getReadyTasksWithLocking (machineId: string, maxTasks: number): Promise<QueuedHealthCheck[]> {
     try {
       // Use database transaction to atomically claim tasks
       const claimedTasks = await this.prisma.$transaction(async (tx) => {
@@ -1013,7 +1066,7 @@ export class VMHealthQueueManager {
   /**
    * Sync all pending tasks from database
    */
-  public async syncFromDatabase(): Promise<void> {
+  public async syncFromDatabase (): Promise<void> {
     try {
       const pendingTasks = await this.prisma.vMHealthCheckQueue.findMany({
         where: {
@@ -1073,7 +1126,7 @@ export class VMHealthQueueManager {
 // Singleton instance
 let vmHealthQueueManagerInstance: VMHealthQueueManager | null = null
 
-export function getVMHealthQueueManager(
+export function getVMHealthQueueManager (
   prisma: PrismaClient,
   eventManager: EventManager
 ): VMHealthQueueManager {

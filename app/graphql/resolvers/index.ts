@@ -21,6 +21,8 @@ import { MetricsResolver } from './metrics/resolver'
 import { AutoCheckResolver } from './AutoCheckResolver'
 import { VMHealthHistoryResolver } from './VMHealthHistoryResolver'
 import { BackgroundHealthResolver } from './health/BackgroundHealthResolver'
+import { MaintenanceResolver } from './MaintenanceResolver'
+import { VMRecommendationResolver } from './VMRecommendationResolver'
 
 const resolvers: NonEmptyArray<Function> = [
   UserResolver,
@@ -46,7 +48,9 @@ const resolvers: NonEmptyArray<Function> = [
   MetricsResolver,
   AutoCheckResolver,
   VMHealthHistoryResolver,
-  BackgroundHealthResolver
+  VMRecommendationResolver,
+  BackgroundHealthResolver,
+  MaintenanceResolver
 ]
 
 export default resolvers as NonEmptyArray<Function>

@@ -4,6 +4,24 @@ import { EventManager } from '../../app/services/EventManager'
 import { PrismaClient } from '@prisma/client'
 import { mockDeep, DeepMockProxy } from 'jest-mock-extended'
 
+// Type definitions for test data
+interface TestMachine {
+  id: string
+  name: string
+  status: string
+}
+
+interface TestHealthFailure {
+  id: string
+  executedAt: Date
+}
+
+interface JobWithPrivateMethods {
+  scheduleOverdueScans: () => Promise<void>
+  queueManager: VMHealthQueueManager
+  job: unknown
+}
+
 describe('ScheduleOverallScansJob', () => {
   let job: ScheduleOverallScansJob
   let mockPrisma: DeepMockProxy<PrismaClient>
@@ -12,14 +30,14 @@ describe('ScheduleOverallScansJob', () => {
 
   beforeEach(() => {
     jest.clearAllMocks()
-    
+
     mockPrisma = mockDeep<PrismaClient>()
     mockEventManager = mockDeep<EventManager>()
     mockQueueManager = mockDeep<VMHealthQueueManager>()
-    
+
     job = new ScheduleOverallScansJob(mockPrisma, mockEventManager)
     // Replace the queue manager with our mock
-    ;(job as any).queueManager = mockQueueManager
+    ;(job as unknown as JobWithPrivateMethods).queueManager = mockQueueManager
   })
 
   afterEach(() => {
@@ -33,13 +51,13 @@ describe('ScheduleOverallScansJob', () => {
         { id: 'vm2', name: 'Running VM 2', status: 'running' }
       ]
 
-      mockPrisma.machine.findMany.mockResolvedValue(runningVMs as any)
+      mockPrisma.machine.findMany.mockResolvedValue(runningVMs as never[])
       mockQueueManager.getOverallScanIntervalMinutes.mockResolvedValue(60)
       mockQueueManager.getLastOverallScanTime.mockResolvedValue(null) // No previous scans
       mockPrisma.vMHealthCheckQueue.findFirst.mockResolvedValue(null) // No pending checks
       mockQueueManager.queueHealthCheck.mockResolvedValue('queue-id')
 
-      const scheduleMethod = (job as any).scheduleOverdueScans.bind(job)
+      const scheduleMethod = (job as unknown as JobWithPrivateMethods).scheduleOverdueScans.bind(job)
       await scheduleMethod()
 
       expect(mockPrisma.machine.findMany).toHaveBeenCalledWith({
@@ -62,8 +80,8 @@ describe('ScheduleOverallScansJob', () => {
       const vm1LastScan = new Date(now.getTime() - 31 * 60 * 1000) // 31 minutes ago
       const vm2LastScan = new Date(now.getTime() - 61 * 60 * 1000) // 61 minutes ago
 
-      mockPrisma.machine.findMany.mockResolvedValue(runningVMs as any)
-      
+      mockPrisma.machine.findMany.mockResolvedValue(runningVMs as never[])
+
       // VM1 has 30-minute interval, VM2 has 60-minute interval
       mockQueueManager.getOverallScanIntervalMinutes
         .mockResolvedValueOnce(30) // vm1
@@ -76,7 +94,7 @@ describe('ScheduleOverallScansJob', () => {
       mockPrisma.vMHealthCheckQueue.findFirst.mockResolvedValue(null)
       mockQueueManager.queueHealthCheck.mockResolvedValue('queue-id')
 
-      const scheduleMethod = (job as any).scheduleOverdueScans.bind(job)
+      const scheduleMethod = (job as unknown as JobWithPrivateMethods).scheduleOverdueScans.bind(job)
       await scheduleMethod()
 
       // Both VMs should be scheduled since both are overdue according to their intervals
@@ -88,7 +106,7 @@ describe('ScheduleOverallScansJob', () => {
         { id: 'vm1', name: 'Failing VM', status: 'running' }
       ]
 
-      mockPrisma.machine.findMany.mockResolvedValue(runningVMs as any)
+      mockPrisma.machine.findMany.mockResolvedValue(runningVMs as never[])
       mockQueueManager.getOverallScanIntervalMinutes.mockResolvedValue(60)
       mockQueueManager.getLastOverallScanTime.mockResolvedValue(null) // No previous scans
 
@@ -96,20 +114,20 @@ describe('ScheduleOverallScansJob', () => {
       const recentFailures = [
         { id: 'fail1', executedAt: new Date(Date.now() - 10 * 60 * 1000) }, // 10 min ago
         { id: 'fail2', executedAt: new Date(Date.now() - 20 * 60 * 1000) }, // 20 min ago
-        { id: 'fail3', executedAt: new Date(Date.now() - 30 * 60 * 1000) }  // 30 min ago
+        { id: 'fail3', executedAt: new Date(Date.now() - 30 * 60 * 1000) } // 30 min ago
       ]
 
-      mockPrisma.vMHealthCheckQueue.findMany.mockResolvedValue(recentFailures as any)
+      mockPrisma.vMHealthCheckQueue.findMany.mockResolvedValue(recentFailures as never[])
 
       // Mock alert creation for repeated failures
-      mockPrisma.vMHealthAlert.create.mockResolvedValue({} as any)
+      mockPrisma.vMHealthAlert.create.mockResolvedValue({} as never)
 
-      const scheduleMethod = (job as any).scheduleOverdueScans.bind(job)
+      const scheduleMethod = (job as unknown as JobWithPrivateMethods).scheduleOverdueScans.bind(job)
       await scheduleMethod()
 
       // Should not schedule due to backoff
       expect(mockQueueManager.queueHealthCheck).not.toHaveBeenCalled()
-      
+
       // Should create health alert for repeated failures
       expect(mockPrisma.vMHealthAlert.create).toHaveBeenCalledWith({
         data: {
@@ -132,19 +150,19 @@ describe('ScheduleOverallScansJob', () => {
         { id: 'vm1', name: 'VM with pending', status: 'running' }
       ]
 
-      mockPrisma.machine.findMany.mockResolvedValue(runningVMs as any)
+      mockPrisma.machine.findMany.mockResolvedValue(runningVMs as never[])
       mockQueueManager.getOverallScanIntervalMinutes.mockResolvedValue(60)
       mockQueueManager.getLastOverallScanTime.mockResolvedValue(null) // No previous scans
-      
+
       // Mock existing pending check
       mockPrisma.vMHealthCheckQueue.findFirst.mockResolvedValue({
         id: 'pending-check'
-      } as any)
+      } as never)
 
       // Mock no recent failures (no backoff)
       mockPrisma.vMHealthCheckQueue.findMany.mockResolvedValue([])
 
-      const scheduleMethod = (job as any).scheduleOverdueScans.bind(job)
+      const scheduleMethod = (job as unknown as JobWithPrivateMethods).scheduleOverdueScans.bind(job)
       await scheduleMethod()
 
       expect(mockQueueManager.queueHealthCheck).not.toHaveBeenCalled()
@@ -156,9 +174,9 @@ describe('ScheduleOverallScansJob', () => {
         { id: 'vm2', name: 'Error VM', status: 'running' }
       ]
 
-      mockPrisma.machine.findMany.mockResolvedValue(runningVMs as any)
+      mockPrisma.machine.findMany.mockResolvedValue(runningVMs as never[])
       mockQueueManager.getOverallScanIntervalMinutes.mockResolvedValue(60)
-      
+
       // First VM succeeds
       mockQueueManager.getLastOverallScanTime
         .mockResolvedValueOnce(null)
@@ -170,12 +188,12 @@ describe('ScheduleOverallScansJob', () => {
 
       const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation()
 
-      const scheduleMethod = (job as any).scheduleOverdueScans.bind(job)
+      const scheduleMethod = (job as unknown as JobWithPrivateMethods).scheduleOverdueScans.bind(job)
       await scheduleMethod()
 
       // Should still schedule for the good VM
       expect(mockQueueManager.queueHealthCheck).toHaveBeenCalledWith('vm1', 'OVERALL_STATUS', 'MEDIUM')
-      
+
       // Should log error for the failing VM
       expect(consoleErrorSpy).toHaveBeenCalledWith(
         expect.stringContaining('Failed to check/schedule overall scan for VM Error VM'),
@@ -194,15 +212,16 @@ describe('ScheduleOverallScansJob', () => {
 
     it('should not start multiple times', () => {
       job.start()
-      const consoleSpy = jest.spyOn(console, 'log').mockImplementation()
-      
-      job.start() // Second start
-      
-      expect(consoleSpy).toHaveBeenCalledWith(
-        expect.stringContaining('ScheduleOverallScans job is already running')
-      )
-      
-      consoleSpy.mockRestore()
+
+      // Get reference to the first job instance
+      const firstJob = (job as unknown as { job: unknown }).job
+
+      // Try to start again
+      expect(() => job.start()).not.toThrow()
+
+      // Verify the job instance hasn't changed (same job is reused)
+      const secondJob = (job as unknown as { job: unknown }).job
+      expect(secondJob).toBe(firstJob)
     })
   })
 })

@@ -173,6 +173,18 @@ input CreateMachineInputType {
   username: String! = ""
 }
 
+input CreateMaintenanceTaskInput {
+  cronSchedule: String
+  description: String
+  isEnabled: Boolean! = true
+  isRecurring: Boolean! = false
+  machineId: ID!
+  name: String!
+  parameters: JSONObject
+  runAt: DateTimeISO
+  taskType: MaintenanceTaskType!
+}
+
 input CreateNetworkInput {
   bridgeName: String! = ""
   description: String! = ""
@@ -299,6 +311,12 @@ type DiskSpaceInfo {
 
 type DyummyType {
   value: String!
+}
+
+input ExecuteMaintenanceInput {
+  machineId: ID!
+  parameters: JSONObject
+  taskType: MaintenanceTaskType!
 }
 
 type FWRule {
@@ -616,6 +634,93 @@ type MachineTemplateType {
   totalMachines: Int
 }
 
+type MaintenanceExecutionResponse {
+  error: String
+  execution: MaintenanceHistory
+  message: String
+  success: Boolean!
+}
+
+type MaintenanceHistory {
+  duration: Float
+  error: String
+  executedAt: DateTimeISO!
+  executedByUserId: ID
+  id: ID!
+  machineId: ID!
+  parameters: JSONObject
+  result: JSONObject
+  status: MaintenanceStatus!
+  taskId: ID
+  taskType: MaintenanceTaskType!
+  triggeredBy: MaintenanceTrigger!
+}
+
+type MaintenanceStats {
+  enabledTasks: Float!
+  failedExecutions: Float!
+  lastExecutionDate: DateTimeISO
+  machineId: ID!
+  pendingTasks: Float!
+  recurringTasks: Float!
+  successfulExecutions: Float!
+  totalExecutions: Float!
+  totalTasks: Float!
+}
+
+"""Status of maintenance task execution"""
+enum MaintenanceStatus {
+  CANCELLED
+  FAILED
+  RUNNING
+  SUCCESS
+  TIMEOUT
+}
+
+type MaintenanceTask {
+  createdAt: DateTimeISO!
+  createdByUserId: ID!
+  cronSchedule: String
+  description: String
+  executionStatus: String!
+  id: ID!
+  isEnabled: Boolean!
+  isRecurring: Boolean!
+  lastRunAt: DateTimeISO
+  machineId: ID!
+  name: String!
+  nextRunAt: DateTimeISO
+  parameters: JSONObject
+  runAt: DateTimeISO
+  taskType: MaintenanceTaskType!
+  updatedAt: DateTimeISO!
+}
+
+type MaintenanceTaskResponse {
+  error: String
+  message: String
+  success: Boolean!
+  task: MaintenanceTask
+}
+
+"""Types of maintenance tasks that can be performed"""
+enum MaintenanceTaskType {
+  CUSTOM_SCRIPT
+  DEFENDER_SCAN
+  DEFRAG
+  DISK_CHECK
+  DISK_CLEANUP
+  REGISTRY_CLEANUP
+  SYSTEM_FILE_CHECK
+  WINDOWS_UPDATES
+}
+
+"""What triggered the maintenance task execution"""
+enum MaintenanceTrigger {
+  MANUAL
+  SCHEDULED
+}
+
 input MetricsFilterInput {
   endDate: DateTimeISO
   limit: Int = 100
@@ -639,6 +744,7 @@ type Mutation {
   createMachine(input: CreateMachineInputType!): Machine!
   createMachineTemplate(input: MachineTemplateInputType!): MachineTemplateType!
   createMachineTemplateCategory(input: MachineTemplateCategoryInputType!): MachineTemplateCategoryType!
+  createMaintenanceTask(input: CreateMaintenanceTaskInput!): MaintenanceTaskResponse!
   createNetwork(input: CreateNetworkInput!): Boolean!
   createSimplifiedFirewallRule(input: CreateSimplifiedFirewallRuleInput!): VMFirewallState!
 
@@ -648,6 +754,7 @@ type Mutation {
   deleteApplication(id: String!): Boolean!
   deleteFilter(id: ID!): Boolean!
   deleteFilterRule(id: ID!): Boolean!
+  deleteMaintenanceTask(id: ID!): MaintenanceTaskResponse!
   deleteNetwork(input: DeleteNetworkInput!): Boolean!
 
   """Delete a snapshot from a virtual machine"""
@@ -657,6 +764,8 @@ type Mutation {
   destroyMachineTemplate(id: String!): Boolean!
   destroyMachineTemplateCategory(id: String!): Boolean!
   executeCommand(command: String!, id: String!): CommandExecutionResponseType!
+  executeImmediateMaintenance(input: ExecuteMaintenanceInput!): MaintenanceExecutionResponse!
+  executeMaintenanceTask(taskId: ID!): MaintenanceExecutionResponse!
 
   """Apply a network filter inmediatly"""
   flushFilter(filterId: ID!): Boolean!
@@ -709,6 +818,7 @@ type Mutation {
   toggleDepartmentService(input: ToggleDepartmentServiceInput!): DepartmentServiceStatus!
   toggleFirewallTemplate(machineId: ID!, template: FirewallTemplate!): VMFirewallState!
   toggleGlobalService(input: ToggleServiceInput!): GlobalServiceStatus!
+  toggleMaintenanceTask(enabled: Boolean!, id: ID!): MaintenanceTaskResponse!
   toggleVmService(input: ToggleVmServiceInput!): VmServiceStatus!
   triggerHealthCheckRound: HealthCheckRoundResult!
   updateApplication(id: String!, input: CreateApplicationInputType!): ApplicationType!
@@ -717,6 +827,7 @@ type Mutation {
   updateMachineHardware(input: UpdateMachineHardwareInput!): Machine!
   updateMachineTemplate(id: String!, input: MachineTemplateInputType!): MachineTemplateType!
   updateMachineTemplateCategory(id: String!, input: MachineTemplateCategoryInputType!): MachineTemplateCategoryType!
+  updateMaintenanceTask(input: UpdateMaintenanceTaskInput!): MaintenanceTaskResponse!
 
   """Update a package on a virtual machine (legacy compatibility)"""
   updatePackage(machineId: ID!, packageName: String!): CommandResult!
@@ -951,6 +1062,7 @@ type Query {
   currentUser: UserType
   department(id: String!): DepartmentType
   departments: [DepartmentType!]!
+  dueMaintenanceTasks: [MaintenanceTask!]!
   findDepartmentByName(name: String!): DepartmentType
   getAvailableFirewallTemplates: [FirewallTemplateInfo!]!
   getDepartmentServiceStatus(departmentId: ID!, serviceId: ID): [DepartmentServiceStatus!]!
@@ -1002,6 +1114,10 @@ type Query {
   machineTemplateCategory(id: String!): MachineTemplateCategoryType
   machineTemplates(orderBy: MachineTemplateOrderBy, pagination: PaginationInputType): [MachineTemplateType!]!
   machines(orderBy: MachineOrderBy, pagination: PaginationInputType): [Machine!]!
+  maintenanceHistory(limit: Float = 50, machineId: ID!, status: MaintenanceStatus, taskType: MaintenanceTaskType): [MaintenanceHistory!]!
+  maintenanceStats(machineId: ID!): MaintenanceStats!
+  maintenanceTask(id: ID!): MaintenanceTask
+  maintenanceTasks(machineId: ID!, status: String): [MaintenanceTask!]!
   network(name: String!): Network!
   networks: [Network!]!
   portUsage(listeningOnly: Boolean = false, machineId: String!): [PortUsage!]!
@@ -1297,6 +1413,17 @@ input UpdateMachineHardwareInput {
 
   """New RAM in GB"""
   ramGB: Int
+}
+
+input UpdateMaintenanceTaskInput {
+  cronSchedule: String
+  description: String
+  id: ID!
+  isEnabled: Boolean
+  isRecurring: Boolean
+  name: String
+  parameters: JSONObject
+  runAt: DateTimeISO
 }
 
 input UpdateUserInputType {

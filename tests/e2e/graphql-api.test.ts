@@ -111,7 +111,9 @@ describe('E2E GraphQL API Tests', () => {
         res: {} as express.Response,
         prisma,
         user: null,
-        setupMode: false
+        setupMode: false,
+        eventManager: undefined,
+        virtioSocketWatcher: undefined
       }),
       formatError: (error) => {
         console.error('GraphQL Error:', error)

@@ -9,7 +9,7 @@ import prisma from '../utils/database'
 import { getEventManager } from '../services/EventManager'
 import { getVMHealthQueueManager } from '../services/VMHealthQueueManager'
 
-async function getRunningDomainNames(): Promise<string[]> {
+async function getRunningDomainNames (): Promise<string[]> {
   try {
     const conn = Connection.open('qemu:///system')
     if (!conn) {

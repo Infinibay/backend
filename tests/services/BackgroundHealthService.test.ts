@@ -58,8 +58,8 @@ describe('BackgroundHealthService', () => {
       mockQueueManager
     )
 
-      // Setup default mock for machine.findMany
-      ; (mockPrisma.machine.findMany as jest.Mock).mockResolvedValue([])
+    // Setup default mock for machine.findMany
+    ; (mockPrisma.machine.findMany as jest.Mock).mockResolvedValue([])
   })
 
   afterEach(() => {
@@ -115,7 +115,7 @@ describe('BackgroundHealthService', () => {
   describe('VM status filtering integration', () => {
     it('should work with updated VMHealthQueueManager that validates VM status', async () => {
       // Mock running VMs data
-      ; (mockPrisma.machine.findMany as jest.Mock).mockResolvedValue([
+      (mockPrisma.machine.findMany as jest.Mock).mockResolvedValue([
         {
           id: 'vm-running-1',
           name: 'running-vm-1',
@@ -158,7 +158,7 @@ describe('BackgroundHealthService', () => {
 
     it('should handle VMHealthQueueManager rejections for non-running VMs', async () => {
       // Mock mixed VM data (running and stopped)
-      ; (mockPrisma.machine.findMany as jest.Mock).mockResolvedValue([
+      (mockPrisma.machine.findMany as jest.Mock).mockResolvedValue([
         {
           id: 'vm-running-1',
           name: 'running-vm-1',

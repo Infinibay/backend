@@ -9,7 +9,7 @@ export class BackgroundHealthService {
   private cronJob: CronJob | null = null
   private isRunning = false
 
-  constructor(
+  constructor (
     private prisma: PrismaClient,
     private backgroundTaskService: BackgroundTaskService,
     private eventManager: EventManager,
@@ -20,7 +20,7 @@ export class BackgroundHealthService {
    * Initialize and start the background health monitoring system
    * Schedules daily health checks at 2 AM
    */
-  public start(): void {
+  public start (): void {
     if (this.cronJob) {
       console.log('BackgroundHealthService is already running')
       return
@@ -38,7 +38,7 @@ export class BackgroundHealthService {
   /**
    * Stop the background health monitoring system
    */
-  public stop(): void {
+  public stop (): void {
     if (this.cronJob) {
       this.cronJob.stop()
       this.cronJob = null
@@ -49,7 +49,7 @@ export class BackgroundHealthService {
   /**
    * Execute a complete round of health checks for all running VMs
    */
-  public async executeHealthCheckRound(): Promise<void> {
+  public async executeHealthCheckRound (): Promise<void> {
     if (this.isRunning) {
       console.log('🩺 Health check round already in progress, skipping')
       return
@@ -93,7 +93,7 @@ export class BackgroundHealthService {
   /**
    * Perform the actual health check round implementation
    */
-  private async performHealthCheckRound(): Promise<void> {
+  private async performHealthCheckRound (): Promise<void> {
     const startTime = Date.now()
     const roundId = `round-${startTime}`
 
@@ -179,7 +179,7 @@ export class BackgroundHealthService {
   /**
    * Manually trigger a health check round (for testing/debugging)
    */
-  public async triggerHealthCheckRound(): Promise<string> {
+  public async triggerHealthCheckRound (): Promise<string> {
     const taskId = uuidv4()
 
     console.log(`🩺 Manually triggering health check round (task: ${taskId})`)
@@ -199,11 +199,11 @@ export class BackgroundHealthService {
   /**
    * Get health check service status
    */
-  public getStatus(): {
+  public getStatus (): {
     isRunning: boolean
     cronActive: boolean
     nextRun: Date | null
-  } {
+    } {
     return {
       isRunning: this.isRunning,
       cronActive: this.cronJob !== null && this.cronJob.running,
@@ -214,7 +214,7 @@ export class BackgroundHealthService {
   /**
    * Update cron schedule (for configuration changes)
    */
-  public updateSchedule(cronExpression: string): void {
+  public updateSchedule (cronExpression: string): void {
     if (this.cronJob) {
       this.cronJob.stop()
     }

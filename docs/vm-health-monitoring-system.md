@@ -4,12 +4,33 @@
 
 The VM Health Monitoring System provides automated background health checks for virtual machines, queue management for offline VMs, and persistent storage of health data with GraphQL API access.
 
+## Configuration
+
+### Per-VM Health Check Intervals
+
+The system supports per-VM configurable health check intervals through the `VMHealthConfig` model. Per-VM `VMHealthConfig.checkIntervalMinutes` overrides both the `OVERALL_SCAN_INTERVAL_MINUTES` environment variable and the default value.
+
+#### Configuration Precedence
+
+For overall scan intervals, the system uses the following precedence:
+
+1. **Per-VM Configuration**: `VMHealthConfig.checkIntervalMinutes` (highest priority)
+2. **Environment Variable**: `OVERALL_SCAN_INTERVAL_MINUTES` if set and valid
+3. **Default Value**: 60 minutes (fallback)
+
+#### Environment Variables
+
+```bash
+# Optional: Set global default scan interval (minutes)
+OVERALL_SCAN_INTERVAL_MINUTES=60
+```
+
 ## Architecture
 
 ### Components
 
 1. **BackgroundHealthService** - Schedules daily health check rounds using cron
-2. **VMHealthQueueManager** - Manages health check queues with priority and retry logic  
+2. **VMHealthQueueManager** - Manages health check queues with priority and retry logic
 3. **VMHealthHistoryResolver** - GraphQL API for accessing health data
 4. **VirtioSocketWatcherService Integration** - Processes queues when VMs come online
 

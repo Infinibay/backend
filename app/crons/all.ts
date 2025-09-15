@@ -6,10 +6,11 @@ import { createProcessHealthQueueJob } from './ProcessHealthQueue'
 import { createScheduleOverallScansJob } from './ScheduleOverallScans'
 import { createMetricsWatchdogJob } from './MetricsWatchdog'
 import { createCleanupOrphanedHealthTasksJob } from './CleanupOrphanedHealthTasks'
+import ProcessMaintenanceQueue from './ProcessMaintenanceQueue'
 import prisma from '../utils/database'
 import { getEventManager } from '../services/EventManager'
 
-export async function startCrons() {
+export async function startCrons () {
   UpdateVmStatusJob.start()
   CheckRunningServicesJob.start()
   UpdateGraphicsInformationJob.start()
@@ -26,4 +27,8 @@ export async function startCrons() {
   scheduleOverallScansJob.start()
   metricsWatchdogJob.start()
   cleanupOrphanedHealthTasksJob.start()
+
+  // Start maintenance queue processing
+  const maintenanceQueue = new ProcessMaintenanceQueue(prisma)
+  maintenanceQueue.start()
 }
