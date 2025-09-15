@@ -44,12 +44,11 @@ export class UserResolver implements UserResolverInterface {
     }
 
     // Generate namespace for the user (same format as SocketService)
-    const user = context.user as any
-    const namespace = `user_${user.id.substring(0, 8)}`
+    const namespace = `user_${context.user.id.substring(0, 8)}`
 
     // Return the user with namespace
     return {
-      ...user,
+      ...context.user,
       namespace
     } as unknown as UserType
   }
@@ -95,7 +94,7 @@ export class UserResolver implements UserResolverInterface {
     }
     const take = pagination.take || 20
     const skip = pagination.skip || 0
-    let order: any = {}
+    let order: Record<string, string> = {}
     if (orderBy && orderBy.fieldName && orderBy.direction) {
       order = {
         [orderBy.fieldName]: orderBy.direction
@@ -118,25 +117,23 @@ export class UserResolver implements UserResolverInterface {
   }
 
   // Login query, requires email and password, returns { token: string }
-  @Query(() => UserToken)
+  @Query(() => UserToken, { nullable: true })
   async login (
     @Arg('email') email: string,
     @Arg('password') password: string
   ): Promise<UserToken | null> {
     const prisma = new PrismaClient()
-    const user = await prisma.user.findUnique({ where: { email } })
+    const user = await prisma.user.findFirst({ where: { email } })
     if (!user) {
-      // throw new UserInputError('User not found')
-      return null
+      throw new AuthenticationError('Invalid credentials')
     }
     const passwordMatch = await bcrypt.compare(password, user.password)
     if (!passwordMatch) {
-      return null
-      // throw new AuthenticationError('Invalid password')
+      throw new AuthenticationError('Invalid credentials')
     }
     // Now that we know the user is valid, we can generate a token
     const token = jwt.sign({ userId: user.id, userRole: user.role }, process.env.TOKENKEY ?? 'secret')
-    return Promise.resolve({ token })
+    return { token }
   }
 
   /*

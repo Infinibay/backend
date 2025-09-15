@@ -11,10 +11,14 @@ interface DecodedToken {
   userRole: string;
 }
 
-export const authChecker: AuthChecker<{ req: any; user: User; setupMode: boolean }> = async (
-  { context },
+export const authChecker: AuthChecker<{ req: unknown; user: User; setupMode: boolean }> = async (
+  resolverData,
   roles
 ) => {
+  // Handle both test and production contexts
+  const context = resolverData && typeof resolverData === 'object' && 'context' in resolverData
+    ? (resolverData as { context: { req: unknown; user: User; setupMode: boolean } }).context
+    : resolverData as { req: unknown; user: User; setupMode: boolean }
   // Check if user is already populated in context (from index.ts)
   if (context.user) {
     debug.log('User already in context, checking access...')
@@ -26,7 +30,7 @@ export const authChecker: AuthChecker<{ req: any; user: User; setupMode: boolean
   }
 
   // Fallback: Try to verify token if user not in context
-  const token = context.req.headers.authorization
+  const token = (context.req as { headers?: { authorization?: string } })?.headers?.authorization
 
   if (!token) {
     debug.log('No token found.')

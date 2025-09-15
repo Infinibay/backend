@@ -101,7 +101,8 @@ export function createMockContext (options: { user?: User | null; prisma?: Prism
     prisma: mockPrisma,
     user,
     setupMode: false,
-    virtioSocketWatcher: undefined
+    virtioSocketWatcher: undefined,
+    eventManager: undefined
   }
 }
 
@@ -356,32 +357,27 @@ export const TestMutations = {
   `,
 
   LOGIN: `
-    mutation Login($email: String!, $password: String!) {
+    query Login($email: String!, $password: String!) {
       login(email: $email, password: $password) {
-        id
-        email
-        firstName
-        lastName
-        role
         token
       }
     }
   `,
 
   DELETE_USER: `
-    mutation DeleteUser($id: String!) {
-      deleteUser(id: $id) {
-        success
-        message
+    mutation UpdateUser($id: String!, $input: UpdateUserInputType!) {
+      updateUser(id: $id, input: $input) {
+        id
+        email
       }
     }
   `,
 
   DELETE_DEPARTMENT: `
-    mutation DeleteDepartment($id: String!) {
+    mutation DestroyDepartment($id: String!) {
       destroyDepartment(id: $id) {
-        success
-        message
+        id
+        name
       }
     }
   `

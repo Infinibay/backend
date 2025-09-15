@@ -1,8 +1,22 @@
 import { PrismaClient, Machine, VMHealthSnapshot, SystemMetrics, ProcessSnapshot, PortUsage, VMNWFilter, FWRule, VMRecommendation, RecommendationType, Prisma } from '@prisma/client'
 import { RecommendationFilterInput } from '../graphql/types/RecommendationTypes'
 
+interface AppUpdateInfo {
+  name: string | undefined
+  currentVersion: string | undefined
+  availableVersion: string | undefined
+  isSecurityUpdate: boolean
+}
+
+interface ThreatTimelineInfo {
+  name: string | null
+  detectionTime: string | null
+  status: string | null
+  severity: string | number | null
+}
+
 export interface RecommendationData {
-  [key: string]: string | number | boolean | null | undefined
+  [key: string]: string | number | boolean | null | undefined | (string | undefined)[] | AppUpdateInfo[] | ThreatTimelineInfo[] | string[]
 }
 
 interface ProcessData {
@@ -44,6 +58,65 @@ interface ResourceOptInfo {
   [key: string]: unknown
 }
 
+interface WindowsUpdate {
+  title?: string
+  name?: string
+  kb_number?: string
+  severity?: string
+  importance?: string
+  is_security_update?: boolean
+  security?: boolean
+  size_bytes?: number
+  download_size?: number
+}
+
+interface UpdateStatus {
+  pending_updates?: WindowsUpdate[]
+  reboot_required?: boolean
+  automatic_updates_enabled?: boolean
+  last_check_date?: string
+  pending_reboot_updates?: number
+}
+
+interface Application {
+  name?: string
+  app_name?: string
+  version?: string
+  current_version?: string
+  update_available?: string
+  new_version?: string
+  is_security_update?: boolean
+  update_source?: string
+  update_size_bytes?: number
+}
+
+interface ApplicationInventory {
+  applications?: Application[]
+}
+
+interface ThreatInfo {
+  name?: string
+  threat_name?: string
+  status?: string
+  severity_id?: number
+  detection_time?: string
+  detected_at?: string
+  quarantine_time?: string
+}
+
+interface DefenderStatus {
+  enabled?: boolean
+  real_time_protection?: boolean
+  signature_age_days?: number
+  threats_detected?: number
+  recent_threats?: ThreatInfo[]
+  last_quick_scan?: string
+  last_full_scan?: string
+  last_signature_update?: string
+  engine_version?: string
+  scan_history?: unknown[]
+}
+
 export interface RecommendationResult {
   type: RecommendationType
   text: string
@@ -71,6 +144,41 @@ export abstract class RecommendationChecker {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   isApplicable (context: RecommendationContext): boolean {
     return true
+  }
+
+  /**
+   * Safely parse a date string and calculate days since now using UTC
+   * @param dateString - The date string to parse
+   * @returns Object with isValid, date, and daysSince properties, or null if invalid
+   */
+  protected parseAndCalculateDaysSince(dateString: string | null | undefined): { isValid: true; date: Date; daysSince: number } | { isValid: false; date: null; daysSince: null } {
+    if (!dateString) {
+      return { isValid: false, date: null, daysSince: null }
+    }
+
+    try {
+      const parsedDate = new Date(dateString)
+
+      // Validate that the date is valid
+      if (isNaN(parsedDate.getTime())) {
+        return { isValid: false, date: null, daysSince: null }
+      }
+
+      // Use UTC calculations for consistent day comparisons across timezones
+      const nowUtc = new Date()
+      const parsedUtc = new Date(parsedDate.getTime())
+
+      // Calculate days using UTC dates to avoid timezone issues
+      const nowUtcMidnight = Date.UTC(nowUtc.getUTCFullYear(), nowUtc.getUTCMonth(), nowUtc.getUTCDate())
+      const parsedUtcMidnight = Date.UTC(parsedUtc.getUTCFullYear(), parsedUtc.getUTCMonth(), parsedUtc.getUTCDate())
+
+      const daysSince = Math.floor((nowUtcMidnight - parsedUtcMidnight) / (1000 * 60 * 60 * 24))
+
+      return { isValid: true, date: parsedDate, daysSince }
+    } catch (error) {
+      console.warn('VMRecommendationService: Failed to parse date string:', dateString, error)
+      return { isValid: false, date: null, daysSince: null }
+    }
   }
 
   protected extractDiskSpaceData (context: RecommendationContext): Record<string, DiskUsageData> | null {
@@ -179,7 +287,7 @@ class DiskSpaceChecker extends RecommendationChecker {
                 totalGB: total,
                 availableGB: available,
                 usagePercent: percentage,
-                severity: 'warning'
+                severity: 'medium'
               }
             })
           }
@@ -398,7 +506,7 @@ class ResourceOptimizationChecker extends RecommendationChecker {
                 cpuPercent: p.cpuPercent,
                 memoryMB: Math.round(p.memoryMB)
               }))),
-              severity: app.avgCpuPercent > criticalCpuThreshold ? 'critical' : 'warning'
+              severity: app.avgCpuPercent > criticalCpuThreshold ? 'critical' : 'medium'
             }
           })
         }
@@ -428,7 +536,7 @@ class ResourceOptimizationChecker extends RecommendationChecker {
                 cpuPercent: p.cpuPercent,
                 memoryMB: Math.round(p.memoryMB)
               }))),
-              severity: app.totalMemoryPercent > 30 ? 'critical' : 'warning'
+              severity: app.totalMemoryPercent > 30 ? 'critical' : 'medium'
             }
           })
         }
@@ -660,7 +768,7 @@ class DiskIOBottleneckChecker extends RecommendationChecker {
 
       // Generate recommendations based on I/O bottleneck indicators
       if (lowThroughputPercent > 60 || ioWaitHigh || (avgTotalRate < 10 && peakTotalRate > 50)) {
-        let severity = 'warning'
+        let severity = 'medium'
         let message = ''
         let actionText = ''
 
@@ -669,15 +777,15 @@ class DiskIOBottleneckChecker extends RecommendationChecker {
           message = `VM experiencing severe disk I/O bottlenecks - average I/O wait time ${Math.round(avgIoWait)}% and low throughput ${Math.round(lowThroughputPercent)}% of the time`
           actionText = 'Consider upgrading to faster storage (SSD), increasing IOPS allocation, or optimizing applications to reduce I/O operations'
         } else if (ioWaitHigh) {
-          severity = 'warning'
+          severity = 'medium'
           message = `VM experiencing high disk I/O wait times (${Math.round(avgIoWait)}%) indicating storage bottlenecks`
           actionText = 'Consider upgrading storage performance or investigating high I/O applications'
         } else if (lowThroughputPercent > 60) {
-          severity = 'warning'
+          severity = 'medium'
           message = `VM showing low disk throughput (${Math.round(avgTotalRate)} MB/s average) in ${Math.round(lowThroughputPercent)}% of measurements`
           actionText = 'Monitor disk performance and consider storage optimization or upgrade if applications are affected'
         } else {
-          severity = 'warning'
+          severity = 'medium'
           message = `VM showing inconsistent disk I/O performance - peak throughput ${Math.round(peakTotalRate)} MB/s but average only ${Math.round(avgTotalRate)} MB/s`
           actionText = 'Investigate I/O patterns and consider storage optimization'
         }
@@ -1320,10 +1428,120 @@ class OsUpdateChecker extends RecommendationChecker {
   getName (): string { return 'OsUpdateChecker' }
   getCategory (): string { return 'Maintenance' }
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   async analyze (context: RecommendationContext): Promise<RecommendationResult[]> {
-    // TODO: Implement OS update analysis using context.latestSnapshot.windowsUpdateInfo
-    return []
+    const results: RecommendationResult[] = []
+
+    if (!context.latestSnapshot?.windowsUpdateInfo) {
+      return results
+    }
+
+    try {
+      // Parse windowsUpdateInfo JSON data
+      const updateData = typeof context.latestSnapshot.windowsUpdateInfo === 'string'
+        ? JSON.parse(context.latestSnapshot.windowsUpdateInfo)
+        : context.latestSnapshot.windowsUpdateInfo
+
+      if (!updateData || typeof updateData !== 'object') {
+        console.warn('VMRecommendationService: Invalid windowsUpdateInfo format')
+        return results
+      }
+
+      // Collect all update-related issues into flags and details
+      const flags: string[] = []
+      const details: Record<string, string | number | boolean | (string | undefined)[]> = {}
+      const issues: string[] = []
+      const actions: string[] = []
+      let highestSeverity = 'low'
+
+      // Check Windows Update last check freshness (7 days threshold)
+      const lastCheckResult = this.parseAndCalculateDaysSince(updateData.last_check_date)
+      if (lastCheckResult.isValid && lastCheckResult.daysSince > 7) {
+        flags.push('stale_check_date')
+        details.lastCheckDate = updateData.last_check_date
+        details.daysSinceLastCheck = lastCheckResult.daysSince
+        issues.push(`last checked ${lastCheckResult.daysSince} days ago`)
+        actions.push('check for updates')
+        if (highestSeverity === 'low') highestSeverity = 'medium'
+      }
+
+      // Analyze pending updates
+      const pendingUpdates = updateData.pending_updates || []
+      if (Array.isArray(pendingUpdates) && pendingUpdates.length > 0) {
+        flags.push('pending_updates')
+
+        // Categorize updates by severity
+        const criticalUpdates = pendingUpdates.filter(u => u.severity === 'Critical' || u.importance === 'Critical')
+        const importantUpdates = pendingUpdates.filter(u => u.severity === 'Important' || u.importance === 'Important')
+        const securityUpdates = pendingUpdates.filter(u => u.is_security_update === true || u.security === true)
+
+        // Calculate total update size if available
+        const totalSizeMB = pendingUpdates.reduce((sum, update) => {
+          const sizeBytes = update.size_bytes || update.download_size || 0
+          return sum + (sizeBytes / (1024 * 1024))
+        }, 0)
+
+        details.totalUpdates = pendingUpdates.length
+        details.criticalCount = criticalUpdates.length
+        details.importantCount = importantUpdates.length
+        details.securityCount = securityUpdates.length
+        details.optionalCount = pendingUpdates.length - criticalUpdates.length - importantUpdates.length
+        details.totalSizeMB = Math.round(totalSizeMB)
+        details.updateTitles = pendingUpdates.slice(0, 10).map((u: WindowsUpdate) => u.title || u.name || u.kb_number).filter(Boolean)
+
+        issues.push(`${pendingUpdates.length} updates available (${criticalUpdates.length} critical, ${importantUpdates.length} important, ${securityUpdates.length} security)`)
+        actions.push('install pending updates')
+
+        // Determine severity based on update criticality
+        if (criticalUpdates.length > 0) {
+          highestSeverity = 'critical'
+        } else if (importantUpdates.length > 0 && (highestSeverity === 'low' || highestSeverity === 'medium')) {
+          highestSeverity = 'high'
+        } else if (highestSeverity === 'low') {
+          highestSeverity = 'medium'
+        }
+      }
+
+      // Check for required reboot
+      if (updateData.reboot_required === true) {
+        flags.push('reboot_required')
+        details.rebootRequired = true
+        details.updatesPendingReboot = updateData.pending_reboot_updates || 0
+        issues.push('system restart required')
+        actions.push('restart computer')
+        if (highestSeverity === 'low') highestSeverity = 'medium'
+      }
+
+      // Check for disabled automatic updates
+      if (updateData.automatic_updates_enabled === false) {
+        flags.push('auto_updates_disabled')
+        details.automaticUpdatesDisabled = true
+        issues.push('automatic updates disabled')
+        actions.push('enable automatic updates')
+        if (highestSeverity === 'low') highestSeverity = 'medium'
+      }
+
+      // Create consolidated recommendation if any issues found
+      if (flags.length > 0) {
+        const text = `Windows Update issues detected: ${issues.join(', ')}`
+        const actionText = `Address Windows Update issues: ${actions.join(', ')} through Settings > Update & Security > Windows Update`
+
+        results.push({
+          type: 'OS_UPDATE_AVAILABLE',
+          text,
+          actionText,
+          data: {
+            flags,
+            severity: highestSeverity,
+            ...details
+          }
+        })
+      }
+
+    } catch (error) {
+      console.warn('VMRecommendationService: Failed to parse windowsUpdateInfo:', error)
+    }
+
+    return results
   }
 }
 
@@ -1331,10 +1549,120 @@ class AppUpdateChecker extends RecommendationChecker {
   getName (): string { return 'AppUpdateChecker' }
   getCategory (): string { return 'Maintenance' }
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   async analyze (context: RecommendationContext): Promise<RecommendationResult[]> {
-    // TODO: Implement application update analysis using context.latestSnapshot.applicationInventory
-    return []
+    const results: RecommendationResult[] = []
+
+    if (!context.latestSnapshot?.applicationInventory) {
+      return results
+    }
+
+    try {
+      // Parse applicationInventory JSON data
+      const inventoryData = typeof context.latestSnapshot.applicationInventory === 'string'
+        ? JSON.parse(context.latestSnapshot.applicationInventory)
+        : context.latestSnapshot.applicationInventory
+
+      if (!inventoryData || typeof inventoryData !== 'object') {
+        console.warn('VMRecommendationService: Invalid applicationInventory format')
+        return results
+      }
+
+      // Access the applications array within the inventory
+      const applications = inventoryData.applications || []
+      if (!Array.isArray(applications)) {
+        return results
+      }
+
+      // Filter applications with available updates
+      const updatableApps = applications.filter(app =>
+        app &&
+        typeof app === 'object' &&
+        app.update_available &&
+        app.update_available !== null &&
+        app.update_available !== ''
+      )
+
+      if (updatableApps.length === 0) {
+        return results
+      }
+
+      // Prioritize security updates
+      const securityUpdates = updatableApps.filter(app => app.is_security_update === true)
+      const regularUpdates = updatableApps.filter(app => app.is_security_update !== true)
+
+      // Calculate total update size
+      const totalSizeMB = updatableApps.reduce((sum, app) => {
+        const sizeBytes = app.update_size_bytes || 0
+        return sum + (sizeBytes / (1024 * 1024))
+      }, 0)
+
+      // Generate individual recommendations for top 5 most important apps
+      const topApps = [
+        ...securityUpdates.slice(0, 3), // Top 3 security updates
+        ...regularUpdates.slice(0, 2)   // Top 2 regular updates
+      ].slice(0, 5)
+
+      for (const app of topApps) {
+        const isSecurityUpdate = app.is_security_update === true
+        const appName = app.name || app.app_name || 'Unknown Application'
+        const currentVersion = app.version || app.current_version || 'Unknown'
+        const availableVersion = app.update_available || app.new_version || 'Unknown'
+        const updateSource = app.update_source || 'Windows Update'
+
+        const text = isSecurityUpdate
+          ? `Security update available for ${appName} (current: ${currentVersion}, available: ${availableVersion})`
+          : `Update available for ${appName} (current: ${currentVersion}, available: ${availableVersion})`
+
+        const actionText = isSecurityUpdate
+          ? `Update ${appName} through ${updateSource} to fix security vulnerabilities`
+          : `Update ${appName} through ${updateSource} to get new features and improvements`
+
+        results.push({
+          type: 'APP_UPDATE_AVAILABLE',
+          text,
+          actionText,
+          data: {
+            appName,
+            currentVersion,
+            availableVersion,
+            updateSource,
+            isSecurityUpdate,
+            updateSizeMB: app.update_size_bytes ? Math.round(app.update_size_bytes / (1024 * 1024)) : null,
+            severity: isSecurityUpdate ? 'high' : 'medium'
+          }
+        })
+      }
+
+      // Create summary recommendation if more than 5 apps have updates
+      if (updatableApps.length > 5) {
+        const totalCount = updatableApps.length
+        const securityCount = securityUpdates.length
+
+        results.push({
+          type: 'APP_UPDATE_AVAILABLE',
+          text: `${totalCount} application updates available (${securityCount} security updates)`,
+          actionText: 'Review and install available updates to keep applications secure and up-to-date',
+          data: {
+            totalCount,
+            securityCount,
+            regularCount: regularUpdates.length,
+            totalSizeMB: Math.round(totalSizeMB),
+            topApps: updatableApps.slice(0, 10).map((app: Application) => ({
+              name: app.name || app.app_name,
+              currentVersion: app.version || app.current_version,
+              availableVersion: app.update_available || app.new_version,
+              isSecurityUpdate: app.is_security_update === true
+            })),
+            severity: securityCount > 0 ? 'high' : 'medium'
+          }
+        })
+      }
+
+    } catch (error) {
+      console.warn('VMRecommendationService: Failed to parse applicationInventory:', error)
+    }
+
+    return results
   }
 }
 
@@ -1342,10 +1670,130 @@ class DefenderDisabledChecker extends RecommendationChecker {
   getName (): string { return 'DefenderDisabledChecker' }
   getCategory (): string { return 'Security' }
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   async analyze (context: RecommendationContext): Promise<RecommendationResult[]> {
-    // TODO: Implement Windows Defender analysis using context.latestSnapshot.defenderStatus
-    return []
+    const results: RecommendationResult[] = []
+
+    if (!context.latestSnapshot?.defenderStatus) {
+      return results
+    }
+
+    try {
+      // Parse defenderStatus JSON data
+      const defenderData = typeof context.latestSnapshot.defenderStatus === 'string'
+        ? JSON.parse(context.latestSnapshot.defenderStatus)
+        : context.latestSnapshot.defenderStatus
+
+      if (!defenderData || typeof defenderData !== 'object') {
+        console.warn('VMRecommendationService: Invalid defenderStatus format')
+        return results
+      }
+
+      // Check if Defender is completely disabled
+      if (defenderData.enabled === false) {
+        results.push({
+          type: 'DEFENDER_DISABLED',
+          text: 'Windows Defender antivirus protection is disabled',
+          actionText: 'Enable Windows Defender through Settings > Update & Security > Windows Security',
+          data: {
+            defenderDisabled: true,
+            realTimeProtection: defenderData.real_time_protection || false,
+            lastQuickScan: defenderData.last_quick_scan,
+            lastFullScan: defenderData.last_full_scan,
+            signatureAge: defenderData.signature_age_days,
+            severity: 'critical'
+          }
+        })
+      }
+      // Check if real-time protection is disabled (but Defender is enabled)
+      else if (defenderData.real_time_protection === false) {
+        results.push({
+          type: 'DEFENDER_DISABLED',
+          text: 'Windows Defender real-time protection is disabled',
+          actionText: 'Enable real-time protection in Windows Security > Virus & threat protection settings',
+          data: {
+            realTimeProtectionDisabled: true,
+            defenderEnabled: true,
+            lastQuickScan: defenderData.last_quick_scan,
+            lastFullScan: defenderData.last_full_scan,
+            signatureAge: defenderData.signature_age_days,
+            severity: 'high'
+          }
+        })
+      }
+
+      // Check signature age (skip if unknown - signature_age_days: 999 indicates unknown)
+      const signatureAge = defenderData.signature_age_days
+      if (typeof signatureAge === 'number' && signatureAge !== 999) {
+        if (signatureAge > 7) {
+          results.push({
+            type: 'DEFENDER_DISABLED',
+            text: `Windows Defender virus signatures are ${signatureAge} days old`,
+            actionText: 'Update virus signatures through Windows Security > Virus & threat protection > Check for updates',
+            data: {
+              outdatedSignatures: true,
+              signatureAgeDays: signatureAge,
+              lastSignatureUpdate: defenderData.last_signature_update,
+              engineVersion: defenderData.engine_version,
+              severity: signatureAge > 14 ? 'high' : 'medium'
+            }
+          })
+        } else if (signatureAge > 3) {
+          results.push({
+            type: 'DEFENDER_DISABLED',
+            text: `Windows Defender virus signatures are ${signatureAge} days old`,
+            actionText: 'Update virus signatures through Windows Security > Virus & threat protection > Check for updates',
+            data: {
+              outdatedSignatures: true,
+              signatureAgeDays: signatureAge,
+              lastSignatureUpdate: defenderData.last_signature_update,
+              engineVersion: defenderData.engine_version,
+              severity: 'medium'
+            }
+          })
+        }
+      }
+
+      // Check for missing recent scans
+      const lastQuickScan = defenderData.last_quick_scan
+      const lastFullScan = defenderData.last_full_scan
+
+      if (!lastQuickScan && !lastFullScan) {
+        results.push({
+          type: 'DEFENDER_DISABLED',
+          text: 'No recent Windows Defender scans detected',
+          actionText: 'Run a quick scan through Windows Security > Virus & threat protection',
+          data: {
+            noRecentScans: true,
+            lastQuickScan: null,
+            lastFullScan: null,
+            scanHistory: defenderData.scan_history || [],
+            severity: 'medium'
+          }
+        })
+      } else {
+        // Check if scans are too old (more than 7 days for quick scan)
+        const quickScanResult = this.parseAndCalculateDaysSince(lastQuickScan)
+        if (quickScanResult.isValid && quickScanResult.daysSince > 7) {
+          results.push({
+            type: 'DEFENDER_DISABLED',
+            text: `Last Windows Defender quick scan was ${quickScanResult.daysSince} days ago`,
+            actionText: 'Run a quick scan through Windows Security > Virus & threat protection',
+            data: {
+              outdatedScans: true,
+              daysSinceQuickScan: quickScanResult.daysSince,
+              lastQuickScan,
+              lastFullScan,
+              severity: quickScanResult.daysSince > 14 ? 'medium' : 'low'
+            }
+          })
+        }
+      }
+
+    } catch (error) {
+      console.warn('VMRecommendationService: Failed to parse defenderStatus:', error)
+    }
+
+    return results
   }
 }
 
@@ -1353,10 +1801,138 @@ class DefenderThreatChecker extends RecommendationChecker {
   getName (): string { return 'DefenderThreatChecker' }
   getCategory (): string { return 'Security' }
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   async analyze (context: RecommendationContext): Promise<RecommendationResult[]> {
-    // TODO: Implement threat analysis using context.latestSnapshot.defenderStatus
-    return []
+    const results: RecommendationResult[] = []
+
+    if (!context.latestSnapshot?.defenderStatus) {
+      return results
+    }
+
+    try {
+      // Parse defenderStatus JSON data
+      const defenderData = typeof context.latestSnapshot.defenderStatus === 'string'
+        ? JSON.parse(context.latestSnapshot.defenderStatus)
+        : context.latestSnapshot.defenderStatus
+
+      if (!defenderData || typeof defenderData !== 'object') {
+        console.warn('VMRecommendationService: Invalid defenderStatus format for threat analysis')
+        return results
+      }
+
+      // Check threats detected count
+      const threatsDetected = defenderData.threats_detected || 0
+      const recentThreats = defenderData.recent_threats || []
+
+      if (threatsDetected > 0 || (Array.isArray(recentThreats) && recentThreats.length > 0)) {
+        // Analyze recent threats for severity and status
+        const activeThreats = recentThreats.filter((threat: ThreatInfo) =>
+          threat &&
+          threat.status &&
+          (threat.status.toLowerCase() === 'active' || threat.status.toLowerCase() === 'detected')
+        )
+
+        const quarantinedThreats = recentThreats.filter((threat: ThreatInfo) =>
+          threat &&
+          threat.status &&
+          threat.status.toLowerCase() === 'quarantined'
+        )
+
+        const highSeverityThreats = recentThreats.filter((threat: ThreatInfo) =>
+          threat &&
+          typeof threat.severity_id === 'number' &&
+          threat.severity_id >= 4 // High/Severe threats (4-5)
+        )
+
+        const mediumSeverityThreats = recentThreats.filter((threat: ThreatInfo) =>
+          threat &&
+          typeof threat.severity_id === 'number' &&
+          threat.severity_id >= 2 && threat.severity_id < 4 // Medium threats (2-3)
+        )
+
+        // Generate recommendations based on threat analysis
+        if (activeThreats.length > 0) {
+          // Active threats - highest priority
+          const threatNames = activeThreats.slice(0, 3).map((t: ThreatInfo) => t.name || t.threat_name || 'Unknown threat')
+
+          results.push({
+            type: 'DEFENDER_THREAT',
+            text: `${activeThreats.length} active security threats detected by Windows Defender`,
+            actionText: 'Immediately review and remove threats through Windows Security > Virus & threat protection > Protection history',
+            data: {
+              activeThreats: activeThreats.length,
+              totalThreats: threatsDetected,
+              threatNames: threatNames,
+              highSeverityCount: highSeverityThreats.length,
+              detectionDates: activeThreats.slice(0, 5).map((t: ThreatInfo) => t.detection_time || t.detected_at),
+              severity: 'critical'
+            }
+          })
+        } else if (highSeverityThreats.length > 0) {
+          // High-severity threats (even if not active)
+          const threatName = highSeverityThreats[0].name || highSeverityThreats[0].threat_name || 'Unknown threat'
+
+          results.push({
+            type: 'DEFENDER_THREAT',
+            text: `High-severity threat detected: ${threatName}`,
+            actionText: 'Immediately review and remove this threat through Windows Security',
+            data: {
+              highSeverityThreats: highSeverityThreats.length,
+              totalThreats: threatsDetected,
+              threatName,
+              severityId: highSeverityThreats[0].severity_id,
+              detectionTime: highSeverityThreats[0].detection_time || highSeverityThreats[0].detected_at,
+              status: highSeverityThreats[0].status,
+              severity: 'high'
+            }
+          })
+        } else if (quarantinedThreats.length > 0) {
+          // Quarantined threats
+          results.push({
+            type: 'DEFENDER_THREAT',
+            text: `${quarantinedThreats.length} threats quarantined by Windows Defender`,
+            actionText: 'Review quarantined threats and ensure they are properly removed',
+            data: {
+              quarantinedThreats: quarantinedThreats.length,
+              totalThreats: threatsDetected,
+              threatNames: quarantinedThreats.slice(0, 5).map((t: ThreatInfo) => t.name || t.threat_name || 'Unknown threat'),
+              quarantineDates: quarantinedThreats.slice(0, 5).map((t: ThreatInfo) => t.quarantine_time || t.detection_time),
+              severity: 'medium'
+            }
+          })
+        } else if (threatsDetected > 0) {
+          // General threat activity
+          const recentActivity = recentThreats.some((threat: ThreatInfo) => {
+            const dateResult = this.parseAndCalculateDaysSince(threat.detection_time || threat.detected_at)
+            return dateResult.isValid && dateResult.daysSince <= 7
+          })
+
+          if (recentActivity) {
+            results.push({
+              type: 'DEFENDER_THREAT',
+              text: 'Recent security threat activity detected (last 7 days)',
+              actionText: 'Monitor system security and consider running a full system scan',
+              data: {
+                totalThreats: threatsDetected,
+                recentActivity: true,
+                mediumSeverityCount: mediumSeverityThreats.length,
+                threatTimeline: recentThreats.slice(0, 5).map((t: ThreatInfo) => ({
+                  name: t.name || t.threat_name,
+                  detectionTime: t.detection_time || t.detected_at,
+                  status: t.status,
+                  severity: t.severity_id
+                })),
+                severity: 'medium'
+              }
+            })
+          }
+        }
+      }
+
+    } catch (error) {
+      console.warn('VMRecommendationService: Failed to parse defenderStatus for threat analysis:', error)
+    }
+
+    return results
   }
 }
 
@@ -1368,59 +1944,61 @@ export class VMRecommendationService {
   }
 
   private registerDefaultCheckers (): void {
+    const enabledCheckers: string[] = []
+    const disabledCheckers: string[] = []
+
+    // Helper function to register checker with validation and logging
+    const registerIfEnabled = (envVar: string, CheckerClass: new () => RecommendationChecker, description: string): void => {
+      if (process.env[envVar] !== 'false') {
+        try {
+          const checker = new CheckerClass()
+          this.registerChecker(checker)
+          enabledCheckers.push(`${checker.getName()} (${checker.getCategory()})`)
+          console.debug(`VM Recommendations: ${description} enabled`)
+        } catch (error) {
+          console.error(`VM Recommendations: Failed to register ${description}:`, error)
+        }
+      } else {
+        disabledCheckers.push(description)
+        console.debug(`VM Recommendations: ${description} disabled via ${envVar}`)
+      }
+    }
+
     // Core resource analysis checkers
-    if (process.env.ENABLE_DISK_SPACE_CHECKER !== 'false') {
-      this.registerChecker(new DiskSpaceChecker())
-      console.debug('VM Recommendations: DiskSpaceChecker enabled')
+    registerIfEnabled('ENABLE_DISK_SPACE_CHECKER', DiskSpaceChecker, 'DiskSpaceChecker')
+    registerIfEnabled('ENABLE_RESOURCE_OPTIMIZATION_CHECKER', ResourceOptimizationChecker, 'ResourceOptimizationChecker')
+    registerIfEnabled('ENABLE_OVER_PROVISIONED_CHECKER', OverProvisionedChecker, 'OverProvisionedChecker')
+    registerIfEnabled('ENABLE_UNDER_PROVISIONED_CHECKER', UnderProvisionedChecker, 'UnderProvisionedChecker')
+    registerIfEnabled('ENABLE_DISK_IO_BOTTLENECK_CHECKER', DiskIOBottleneckChecker, 'DiskIOBottleneckChecker')
+
+    // Security checkers (prioritized first for security recommendations)
+    registerIfEnabled('ENABLE_DEFENDER_DISABLED_CHECKER', DefenderDisabledChecker, 'DefenderDisabledChecker')
+    registerIfEnabled('ENABLE_DEFENDER_THREAT_CHECKER', DefenderThreatChecker, 'DefenderThreatChecker')
+    registerIfEnabled('ENABLE_PORT_BLOCKED_CHECKER', PortBlockedChecker, 'PortBlockedChecker')
+
+    // Update and maintenance checkers
+    registerIfEnabled('ENABLE_OS_UPDATE_CHECKER', OsUpdateChecker, 'OsUpdateChecker')
+    registerIfEnabled('ENABLE_APP_UPDATE_CHECKER', AppUpdateChecker, 'AppUpdateChecker')
+
+    // Validation and summary logging
+    const totalCheckers = this.checkers.length
+    const uniqueNames = new Set(this.checkers.map(c => c.getName()))
+
+    if (uniqueNames.size !== totalCheckers) {
+      console.warn('VM Recommendations: Duplicate checker names detected - this may cause issues')
     }
 
-    if (process.env.ENABLE_RESOURCE_OPTIMIZATION_CHECKER !== 'false') {
-      this.registerChecker(new ResourceOptimizationChecker()) // Combines CPU and RAM app analysis
-      console.debug('VM Recommendations: ResourceOptimizationChecker enabled')
+    console.log(`VM Recommendations: Successfully registered ${totalCheckers} recommendation checkers`)
+    console.log(`VM Recommendations: Enabled checkers: ${enabledCheckers.join(', ')}`)
+
+    if (disabledCheckers.length > 0) {
+      console.log(`VM Recommendations: Disabled checkers: ${disabledCheckers.join(', ')}`)
     }
 
-    if (process.env.ENABLE_OVER_PROVISIONED_CHECKER !== 'false') {
-      this.registerChecker(new OverProvisionedChecker())
-      console.debug('VM Recommendations: OverProvisionedChecker enabled')
-    }
-
-    if (process.env.ENABLE_UNDER_PROVISIONED_CHECKER !== 'false') {
-      this.registerChecker(new UnderProvisionedChecker())
-      console.debug('VM Recommendations: UnderProvisionedChecker enabled')
-    }
-
-    if (process.env.ENABLE_DISK_IO_BOTTLENECK_CHECKER !== 'false') {
-      this.registerChecker(new DiskIOBottleneckChecker())
-      console.debug('VM Recommendations: DiskIOBottleneckChecker enabled')
-    }
-
-    // Security and maintenance checkers (placeholders for future implementation)
-    if (process.env.ENABLE_PORT_BLOCKED_CHECKER !== 'false') {
-      this.registerChecker(new PortBlockedChecker())
-      console.debug('VM Recommendations: PortBlockedChecker enabled')
-    }
-
-    if (process.env.ENABLE_OS_UPDATE_CHECKER !== 'false') {
-      this.registerChecker(new OsUpdateChecker())
-      console.debug('VM Recommendations: OsUpdateChecker enabled')
-    }
-
-    if (process.env.ENABLE_APP_UPDATE_CHECKER !== 'false') {
-      this.registerChecker(new AppUpdateChecker())
-      console.debug('VM Recommendations: AppUpdateChecker enabled')
-    }
-
-    if (process.env.ENABLE_DEFENDER_DISABLED_CHECKER !== 'false') {
-      this.registerChecker(new DefenderDisabledChecker())
-      console.debug('VM Recommendations: DefenderDisabledChecker enabled')
-    }
-
-    if (process.env.ENABLE_DEFENDER_THREAT_CHECKER !== 'false') {
-      this.registerChecker(new DefenderThreatChecker())
-      console.debug('VM Recommendations: DefenderThreatChecker enabled')
-    }
-
-    console.log(`VM Recommendations: Registered ${this.checkers.length} recommendation checkers`)
+    // Log security and update checker status
+    const securityCheckers = this.checkers.filter(c => c.getCategory() === 'Security').length
+    const maintenanceCheckers = this.checkers.filter(c => c.getCategory() === 'Maintenance').length
+    console.log(`VM Recommendations: Security checkers: ${securityCheckers}, Maintenance checkers: ${maintenanceCheckers}`)
   }
 
   registerChecker (checker: RecommendationChecker): void {
