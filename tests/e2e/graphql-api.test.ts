@@ -48,9 +48,23 @@ jest.mock('@services/machineLifecycleService')
 // Mock libvirt-node
 jest.mock('libvirt-node')
 
-// Simple test authChecker that always allows access
-const testAuthChecker = async () => {
-  return true
+// Test authChecker that properly checks authorization
+const testAuthChecker = async (
+  { root, args, context, info }: { root: unknown; args: unknown; context: InfinibayContext; info: unknown },
+  roles: string[]
+) => {
+  // If no user in context, deny access
+  if (!context.user) {
+    return false
+  }
+
+  // If no specific roles required, just check if user exists
+  if (!roles || roles.length === 0) {
+    return true
+  }
+
+  // Check if user has one of the required roles
+  return roles.includes(context.user.role)
 }
 
 jest.mock('@utils/authChecker', () => ({
@@ -210,7 +224,10 @@ describe('E2E GraphQL API Tests', () => {
         expect(result.data?.users).toEqual(
           expect.arrayContaining(mockUsers.map(u => ({
             id: u.id,
-            email: u.email
+            email: u.email,
+            firstName: u.firstName,
+            lastName: u.lastName,
+            role: u.role
           })))
         )
       })
@@ -224,6 +241,7 @@ describe('E2E GraphQL API Tests', () => {
           lastName: 'Name'
         }
 
+        mockPrisma.user.findUnique.mockResolvedValue(mockUser)
         mockPrisma.user.update.mockResolvedValue({
           ...mockUser,
           ...updates
@@ -240,26 +258,27 @@ describe('E2E GraphQL API Tests', () => {
         expect(result.data?.updateUser).toMatchObject(updates)
       })
 
-      it('should delete user (admin only)', async () => {
+      it('should update user role (admin only)', async () => {
         const adminUser = createMockAdminUser()
-        const userToDelete = createMockUser({ id: 'user-to-delete' })
+        const userToUpdate = createMockUser({ id: 'user-to-update', role: 'USER' })
 
-        mockPrisma.user.findUnique.mockResolvedValue(userToDelete)
+        mockPrisma.user.findUnique.mockResolvedValue(userToUpdate)
         mockPrisma.user.update.mockResolvedValue({
-          ...userToDelete,
-          deleted: true
+          ...userToUpdate,
+          role: 'ADMIN'
         })
 
         const result = await executeGraphQL({
           schema,
-          query: TestMutations.DELETE_USER,
-          variables: { id: userToDelete.id, input: { deleted: true } },
+          query: TestMutations.UPDATE_USER,
+          variables: { id: userToUpdate.id, input: { role: 'ADMIN' } },
           context: createMockContext(adminUser, 'admin-token')
         })
 
         expect(result.errors).toBeUndefined()
         expect(result.data?.updateUser).toMatchObject({
-          id: userToDelete.id
+          id: userToUpdate.id,
+          role: 'ADMIN'
         })
       })
     })
@@ -273,7 +292,7 @@ describe('E2E GraphQL API Tests', () => {
         const mockDepartment = createMockDepartment()
         const mockUser = createMockUser()
 
-        mockPrisma.machine.findUnique.mockResolvedValue({
+        mockPrisma.machine.findFirst.mockResolvedValue({
           ...mockMachine,
           templateId: mockTemplate.id,
           departmentId: mockDepartment.id,
@@ -345,7 +364,7 @@ describe('E2E GraphQL API Tests', () => {
             input: {
               name: 'Test Machine',
               templateId: mockTemplate.id,
-              os: 'Ubuntu 20.04',
+              os: 'ubuntu',
               applications: []
             }
           },
@@ -388,7 +407,10 @@ describe('E2E GraphQL API Tests', () => {
           createMockMachine({ departmentId: mockDepartment.id })
         ]
 
-        mockPrisma.department.findUnique.mockResolvedValue(mockDepartment)
+        mockPrisma.department.findUnique.mockResolvedValue({
+          ...mockDepartment,
+          machines: mockMachines
+        })
 
         const result = await executeGraphQL({
           schema,
@@ -411,7 +433,9 @@ describe('E2E GraphQL API Tests', () => {
           createMockDepartment({ id: 'dept-3', name: 'Sales' })
         ]
 
-        mockPrisma.department.findMany.mockResolvedValue(mockDepartments)
+        mockPrisma.department.findMany.mockResolvedValue(
+          mockDepartments.map(dept => ({ ...dept, machines: [] }))
+        )
 
         const result = await executeGraphQL({
           schema,

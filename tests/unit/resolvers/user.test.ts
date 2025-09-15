@@ -157,11 +157,11 @@ describe('UserResolver', () => {
       const hashedPassword = await bcrypt.hash(password, 10)
       const mockUser = createMockUser({ password: hashedPassword })
 
-      mockPrisma.user.findUnique.mockResolvedValue(mockUser)
+      mockPrisma.user.findFirst.mockResolvedValue(mockUser)
 
       const result = await resolver.login(mockUser.email, password)
 
-      expect(mockPrisma.user.findUnique).toHaveBeenCalledWith({
+      expect(mockPrisma.user.findFirst).toHaveBeenCalledWith({
         where: { email: mockUser.email }
       })
       expect(result).toBeTruthy()
@@ -169,20 +169,18 @@ describe('UserResolver', () => {
     })
 
     it('should fail login with invalid email', async () => {
-      mockPrisma.user.findUnique.mockResolvedValue(null)
+      mockPrisma.user.findFirst.mockResolvedValue(null)
 
-      const result = await resolver.login('invalid@example.com', 'password')
-
-      expect(result).toBeNull()
+      await expect(resolver.login('invalid@example.com', 'password'))
+        .rejects.toThrow('Invalid credentials')
     })
 
     it('should fail login with invalid password', async () => {
       const mockUser = createMockUser({ password: await bcrypt.hash('correct', 10) })
-      mockPrisma.user.findUnique.mockResolvedValue(mockUser)
+      mockPrisma.user.findFirst.mockResolvedValue(mockUser)
 
-      const result = await resolver.login(mockUser.email, 'wrong-password')
-
-      expect(result).toBeNull()
+      await expect(resolver.login(mockUser.email, 'wrong-password'))
+        .rejects.toThrow('Invalid credentials')
     })
 
     it('should handle deleted user login', async () => {
@@ -190,7 +188,7 @@ describe('UserResolver', () => {
         deleted: true,
         password: await bcrypt.hash('password', 10)
       })
-      mockPrisma.user.findUnique.mockResolvedValue(mockUser)
+      mockPrisma.user.findFirst.mockResolvedValue(mockUser)
 
       const result = await resolver.login(mockUser.email, 'password')
 
