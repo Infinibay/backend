@@ -3,6 +3,12 @@
 # !!!   DO NOT MODIFY THIS FILE BY YOURSELF   !!!
 # -----------------------------------------------
 
+input AdvancedPortInput {
+  description: String
+  type: PortInputType!
+  value: String!
+}
+
 type ApplicationInfo {
   installDate: DateTimeISO
   installLocation: String
@@ -65,25 +71,6 @@ type ApplicationUpdates {
   windowsUpdatesCount: Int
 }
 
-type ApplicationUsage {
-  accessCount: Int!
-  applicationName: String!
-  description: String
-  executablePath: String!
-  fileSize: Float
-  firstSeen: DateTimeISO!
-  iconFormat: String
-  id: ID!
-  isActive: Boolean!
-  lastAccessTime: DateTimeISO
-  lastModifiedTime: DateTimeISO
-  lastSeen: DateTimeISO!
-  machineId: String!
-  publisher: String
-  totalUsageMinutes: Int!
-  version: String
-}
-
 input ApplyFirewallTemplateInput {
   machineId: ID!
   template: FirewallTemplate!
@@ -126,6 +113,15 @@ type CommandResult {
 
   """Whether the command was successful"""
   success: Boolean!
+}
+
+input CreateAdvancedFirewallRuleInput {
+  action: String! = "accept"
+  description: String
+  direction: String! = "in"
+  machineId: ID!
+  ports: AdvancedPortInput!
+  protocol: String! = "tcp"
 }
 
 input CreateApplicationInputType {
@@ -539,17 +535,6 @@ input MachineApplicationInputType {
   parameters: JSONObject
 }
 
-type MachineMetricsSummary {
-  activeProcessCount: Int!
-  firstDataPoint: DateTimeISO
-  installedApplicationsCount: Int!
-  lastDataPoint: DateTimeISO
-  latestSystemMetrics: SystemMetrics
-  machineId: String!
-  openPortsCount: Int!
-  totalDataPoints: Int!
-}
-
 input MachineOrderBy {
   direction: OrderByDirection
   fieldName: MachineOrderByField
@@ -721,15 +706,10 @@ enum MaintenanceTrigger {
   SCHEDULED
 }
 
-input MetricsFilterInput {
-  endDate: DateTimeISO
-  limit: Int = 100
-  machineId: String
-  offset: Int = 0
-  startDate: DateTimeISO
-}
-
 type Mutation {
+  _placeholderCreateAdvancedFirewallRule(input: CreateAdvancedFirewallRuleInput!): PortValidationResult!
+  _placeholderSimplifiedFirewallRule(input: SimplifiedFirewallRuleInput!): Boolean!
+  _placeholderValidatePortString(portString: String!): PortValidationResult!
   applyFirewallTemplate(input: ApplyFirewallTemplateInput!): VMFirewallState!
 
   """Calculate ISO checksum"""
@@ -954,19 +934,24 @@ input PaginationInputType {
   take: Int = 20
 }
 
-type PortUsage {
-  connectionCount: Int!
-  executablePath: String
-  id: ID!
-  isListening: Boolean!
-  lastActivity: DateTimeISO!
-  machineId: String!
-  port: Int!
-  processId: Int
-  processName: String
-  protocol: String!
-  state: String!
-  timestamp: DateTimeISO!
+"""Types of port configurations supported in firewall rules"""
+enum PortInputType {
+  ALL
+  MULTIPLE
+  RANGE
+  SINGLE
+}
+
+type PortRange {
+  description: String
+  end: Int!
+  start: Int!
+}
+
+type PortValidationResult {
+  errors: [String!]!
+  isValid: Boolean!
+  parsedRanges: [PortRange!]
 }
 
 type ProcessControlResult {
@@ -977,55 +962,10 @@ type ProcessControlResult {
   success: Boolean!
 }
 
-input ProcessFilterInput {
-  endDate: DateTimeISO
-  limit: Int = 20
-  machineId: String
-  name: String
-  startDate: DateTimeISO
-}
-
-type ProcessInfo {
-  commandLine: String
-  cpuUsage: Float!
-  memoryKb: Int!
-  name: String!
-  pid: Int!
-  startTime: DateTimeISO
-  status: String!
-  user: String
-}
-
-type ProcessSnapshot {
-  commandLine: String
-  cpuUsagePercent: Float!
-  diskReadBytes: Float
-  diskWriteBytes: Float
-  executablePath: String
-  id: ID!
-  machineId: String!
-  memoryUsageKB: Float!
-  name: String!
-  parentPid: Int
-  processId: Int!
-  startTime: DateTimeISO
-  status: String!
-  timestamp: DateTimeISO!
-}
-
-"""Options for sorting processes"""
-enum ProcessSortBy {
-  CPU
-  MEMORY
-  NAME
-  PID
-}
-
 type Query {
   """Get all ISOs (available and unavailable)"""
   allISOs: [ISO!]!
   application(id: String!): ApplicationType
-  applicationUsage(limit: Float = 50, machineId: String): [ApplicationUsage!]!
   applications: [ApplicationType!]!
 
   """Get all available ISOs"""
@@ -1077,7 +1017,6 @@ type Query {
   """Get supported OS types"""
   getSupportedOSTypes: [String!]!
   getSystemResources: SystemResources!
-  getTopProcesses(limit: Int! = 10, machineId: String!, sortBy: ProcessSortBy! = CPU): [ProcessInfo!]!
 
   """Get installed applications inventory for a VM"""
   getVMApplicationInventory(vmId: ID!): ApplicationInventory!
@@ -1110,20 +1049,17 @@ type Query {
   graphicConnection(id: String!): GraphicConfigurationType
   healthCheckQueueStats: QueueStatsType!
   healthQueueStatistics: QueueStatistics!
-  latestSystemMetrics(machineId: String!): SystemMetrics
   latestVMHealthSnapshot(machineId: ID!): VMHealthSnapshotType
   listFilterRules(filterId: ID): [FWRule!]!
   listFilters(departmentId: ID, vmId: ID): [GenericFilter!]!
 
   """List all installed packages on a virtual machine"""
   listInstalledPackages(machineId: ID!): [PackageInfo!]!
-  listProcesses(limit: Int, machineId: String!): [ProcessInfo!]!
 
   """List all services running on a virtual machine"""
   listServices(machineId: String!): [ServiceInfo!]!
   login(email: String!, password: String!): UserToken
   machine(id: String!): Machine
-  machineMetricsSummary(machineId: String!): MachineMetricsSummary
 
   """List all snapshots for a virtual machine"""
   machineSnapshots(machineId: String!): SnapshotListResult!
@@ -1138,8 +1074,6 @@ type Query {
   maintenanceTasks(machineId: ID!, status: String): [MaintenanceTask!]!
   network(name: String!): Network!
   networks: [Network!]!
-  portUsage(listeningOnly: Boolean = false, machineId: String!): [PortUsage!]!
-  processSnapshots(filter: ProcessFilterInput): [ProcessSnapshot!]!
 
   """Run a specific health check on a VM"""
   runHealthCheck(checkName: HealthCheckName!, vmId: ID!): GenericHealthCheckResponse!
@@ -1149,9 +1083,6 @@ type Query {
 
   """Get current socket connection statistics for all VMs"""
   socketConnectionStats: SocketConnectionStats
-  systemMetrics(filter: MetricsFilterInput): [SystemMetrics!]!
-  systemMetricsHistory(hours: Float = 24, machineId: String!, maxPoints: Float = 100): [SystemMetrics!]!
-  topProcessesByMachine(limit: Float = 10, machineId: String!): [ProcessSnapshot!]!
   user(id: String!): UserType!
   users(orderBy: UserOrderByInputType, pagination: PaginationInputType): [UserType!]!
   vmHealthCheckQueue(limit: Int = 20, machineId: ID, offset: Int = 0, status: String): [VMHealthCheckQueueType!]!
@@ -1160,7 +1091,6 @@ type Query {
 
   """Get comprehensive diagnostics for VM socket connection issues"""
   vmSocketDiagnostics(vmId: String!): VmDiagnostics!
-  windowsServices(machineId: String!, runningOnly: Boolean = false): [WindowsService!]!
 }
 
 type QueueStatistics {
@@ -1352,6 +1282,15 @@ type SimplifiedFirewallRule {
   sources: [String!]
 }
 
+input SimplifiedFirewallRuleInput {
+  action: String! = "accept"
+  description: String
+  direction: String!
+  port: String!
+  portType: PortInputType
+  protocol: String!
+}
+
 type Snapshot {
   createdAt: DateTimeISO!
   description: String
@@ -1389,25 +1328,6 @@ type SocketConnectionStats {
 type SuccessType {
   message: String!
   success: Boolean!
-}
-
-type SystemMetrics {
-  availableMemoryKB: Float!
-  cpuCoresUsage: [Float!]!
-  cpuTemperature: Float
-  cpuUsagePercent: Float!
-  diskIOStats: JSONObject!
-  diskUsageStats: JSONObject!
-  id: ID!
-  loadAverage: JSONObject
-  machineId: String!
-  networkStats: JSONObject!
-  swapTotalKB: Float
-  swapUsedKB: Float
-  timestamp: DateTimeISO!
-  totalMemoryKB: Float!
-  uptime: Float!
-  usedMemoryKB: Float!
 }
 
 type SystemReadiness {
@@ -1727,26 +1647,6 @@ type WindowsDefenderStatus {
   threatsQuarantined: Int!
   timestamp: DateTimeISO!
   vmId: ID!
-}
-
-type WindowsService {
-  currentState: String!
-  dependencies: JSONObject
-  description: String
-  displayName: String!
-  executablePath: String
-  firstSeen: DateTimeISO!
-  id: ID!
-  isDefaultService: Boolean!
-  lastSeen: DateTimeISO!
-  lastStateChange: DateTimeISO
-  machineId: String!
-  processId: Int
-  serviceName: String!
-  serviceType: String!
-  startType: String!
-  stateChangeCount: Int!
-  usageScore: Float
 }
 
 type WindowsUpdateHistory {

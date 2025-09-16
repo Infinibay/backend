@@ -6,7 +6,7 @@ import { Request, Response } from 'express'
 import * as Express from 'express'
 import { InfinibayContext } from '@utils/context'
 import { mockPrisma } from './jest.setup'
-import { createMockUser, createMockAdminUser } from './mock-factories'
+import { createMockUser, createMockAdminUser, createMockMachine } from './mock-factories'
 
 // JWT token generation for testing
 export function generateTestToken (userId: string, role: string = 'USER'): string {
@@ -467,4 +467,83 @@ export function createPaginationInput (
     skip: (page - 1) * pageSize,
     orderBy
   }
+}
+
+// Transaction test helper interface
+export interface TransactionTestParams {
+  testUser: any;
+  adminUser?: any;
+  testMachine: any;
+  context: InfinibayContext;
+  adminContext?: InfinibayContext;
+}
+
+// Shared transaction helper for integration tests
+export async function withTransaction(
+  prisma: PrismaClient,
+  testFn: (params: TransactionTestParams) => Promise<void>
+): Promise<void> {
+  await prisma.$transaction(async (tx) => {
+    // Create test users within transaction
+    const testUser = await tx.user.create({
+      data: createMockUser()
+    })
+
+    const adminUser = await tx.user.create({
+      data: {
+        ...createMockUser(),
+        role: 'ADMIN',
+        email: 'admin@test.com'
+      }
+    })
+
+    // Create test machine
+    const testMachine = await tx.machine.create({
+      data: {
+        ...createMockMachine(),
+        userId: testUser.id,
+        firewallTemplates: {
+          appliedTemplates: [],
+          customRules: [],
+          lastSync: new Date().toISOString()
+        }
+      }
+    })
+
+    const context: InfinibayContext = {
+      prisma: tx,
+      user: testUser,
+      req: {} as any,
+      res: {} as any,
+      setupMode: false,
+      virtioSocketWatcher: undefined,
+      eventManager: undefined
+    }
+
+    const adminContext: InfinibayContext = {
+      prisma: tx,
+      user: adminUser,
+      req: {} as any,
+      res: {} as any,
+      setupMode: false,
+      virtioSocketWatcher: undefined,
+      eventManager: undefined
+    }
+
+    // Clear all mocks
+    jest.clearAllMocks()
+
+    // Run the test
+    await testFn({ testUser, adminUser, testMachine, context, adminContext })
+
+    // Throw error to force rollback
+    throw new Error('Test complete - rollback transaction')
+  }, {
+    timeout: 30000 // 30 second timeout for long tests
+  }).catch((error) => {
+    // Expected error from rollback
+    if (!error.message.includes('Test complete - rollback transaction')) {
+      throw error // Re-throw unexpected errors
+    }
+  })
 }

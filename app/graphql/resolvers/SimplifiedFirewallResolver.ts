@@ -2,6 +2,7 @@ import { Resolver, Query, Mutation, Arg, ID, Ctx, Authorized } from 'type-graphq
 import { UserInputError } from 'apollo-server-core'
 import { InfinibayContext } from '@utils/context'
 import { FirewallSimplifierService, FirewallTemplate as ServiceFirewallTemplate, SimplifiedRule } from '@services/FirewallSimplifierService'
+import { PortValidationService } from '@services/PortValidationService'
 import {
   SimplifiedFirewallRule,
   VMFirewallState,
@@ -18,10 +19,12 @@ const debug = Debug('infinibay:firewall-resolver')
 @Resolver()
 export class SimplifiedFirewallResolver {
   private firewallSimplifierService: FirewallSimplifierService
+  private portValidationService: PortValidationService
 
   constructor () {
     // Service will be initialized per request with the request's prisma instance
     this.firewallSimplifierService = null as any
+    this.portValidationService = null as any
   }
 
   private getService (prisma: any): FirewallSimplifierService {
@@ -29,6 +32,13 @@ export class SimplifiedFirewallResolver {
       this.firewallSimplifierService = new FirewallSimplifierService(prisma)
     }
     return this.firewallSimplifierService
+  }
+
+  private getPortValidationService(): PortValidationService {
+    if (!this.portValidationService) {
+      this.portValidationService = new PortValidationService()
+    }
+    return this.portValidationService
   }
 
   @Query(() => [SimplifiedFirewallRule])
@@ -122,11 +132,15 @@ export class SimplifiedFirewallResolver {
     if (user) {
       try {
         const socketService = getSocketService()
+        const normalizedState = {
+          ...result,
+          lastSync: result.lastSync instanceof Date ? result.lastSync.toISOString() : result.lastSync ?? null
+        }
         socketService.sendToUser(machine.userId || user.id, 'vm', 'firewall:template:applied', {
           data: {
             machineId: input.machineId,
             template: input.template,
-            state: result
+            state: normalizedState
           }
         })
         debug(`📡 Emitted vm:firewall:template:applied event for machine ${input.machineId}`)
@@ -167,11 +181,15 @@ export class SimplifiedFirewallResolver {
     if (user) {
       try {
         const socketService = getSocketService()
+        const normalizedState = {
+          ...result,
+          lastSync: result.lastSync instanceof Date ? result.lastSync.toISOString() : result.lastSync ?? null
+        }
         socketService.sendToUser(machine.userId || user.id, 'vm', 'firewall:template:removed', {
           data: {
             machineId,
             template,
-            state: result
+            state: normalizedState
           }
         })
         debug(`📡 Emitted vm:firewall:template:removed event for machine ${machineId}`)
@@ -227,9 +245,30 @@ export class SimplifiedFirewallResolver {
       throw new UserInputError('Machine not found or access denied')
     }
 
+    // Normalize port string
+    const portSpec = input.port.trim()
+
+    // Validate port string format (unless it's "all")
+    if (portSpec.toLowerCase() !== 'all') {
+      debug(`Validating port string: "${portSpec}"`)
+      const portValidationService = this.getPortValidationService()
+      const validation = portValidationService.validatePortString(portSpec)
+
+      if (!validation.isValid) {
+        throw new UserInputError(`Invalid port configuration: ${validation.errors.join(', ')}`)
+      }
+
+      // Log warnings if any
+      if (validation.warnings && validation.warnings.length > 0) {
+        debug(`Port validation warnings: ${validation.warnings.join(', ')}`)
+      }
+
+      debug(`Port validation successful for: "${portSpec}"`)
+    }
+
     const service = this.getService(prisma)
     const rule: SimplifiedRule = {
-      port: input.port,
+      port: portSpec,
       protocol: input.protocol,
       direction: input.direction as 'in' | 'out' | 'inout',
       action: input.action as 'accept' | 'drop' | 'reject',
@@ -242,11 +281,15 @@ export class SimplifiedFirewallResolver {
     if (user) {
       try {
         const socketService = getSocketService()
+        const normalizedState = {
+          ...result,
+          lastSync: result.lastSync instanceof Date ? result.lastSync.toISOString() : result.lastSync ?? null
+        }
         socketService.sendToUser(machine.userId || user.id, 'vm', 'firewall:rule:created', {
           data: {
             machineId: input.machineId,
             rule,
-            state: result
+            state: normalizedState
           }
         })
         debug(`📡 Emitted vm:firewall:rule:created event for machine ${input.machineId}`)
@@ -303,11 +346,15 @@ export class SimplifiedFirewallResolver {
     if (user) {
       try {
         const socketService = getSocketService()
+        const normalizedState = {
+          ...result,
+          lastSync: result.lastSync instanceof Date ? result.lastSync.toISOString() : result.lastSync ?? null
+        }
         socketService.sendToUser(machine.userId || user.id, 'vm', 'firewall:rule:removed', {
           data: {
             machineId,
             ruleId,
-            state: result
+            state: normalizedState
           }
         })
         debug(`📡 Emitted vm:firewall:rule:removed event for machine ${machineId}`)
