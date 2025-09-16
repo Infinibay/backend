@@ -275,8 +275,8 @@ export class AdvancedFirewallResolver {
     @Arg('protocol', { defaultValue: 'tcp', description: 'Network protocol: tcp, udp, or icmp' }) protocol: string,
     @Arg('direction', { defaultValue: 'in', description: 'Traffic direction: in, out, or inout' }) direction: string,
     @Arg('action', { defaultValue: 'accept', description: 'Firewall action: accept, drop, or reject' }) action: string,
-    @Arg('description', { nullable: true, description: 'Optional description for the rule' }) description?: string,
-    @Ctx() { prisma, user }: InfinibayContext
+    @Ctx() { prisma, user }: InfinibayContext,
+    @Arg('description', { nullable: true, description: 'Optional description for the rule' }) description?: string
   ): Promise<VMFirewallState> {
     debug(`Creating port range rule ${startPort}-${endPort} for machine ${machineId}`)
 
