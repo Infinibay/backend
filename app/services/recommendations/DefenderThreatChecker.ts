@@ -10,6 +10,51 @@ interface ThreatInfo {
   quarantine_time?: string
 }
 
+/**
+ * DefenderThreatChecker - Analyzes Windows Defender threat detection and security incidents
+ *
+ * @description
+ * Examines detected threats by Windows Defender, analyzing severity, status, and timeline
+ * to provide appropriate security recommendations. Prioritizes active threats and recent
+ * security incidents requiring immediate attention.
+ *
+ * @category Security
+ *
+ * @analysis
+ * 1. **Threat Classification**:
+ *    - Active threats (status: 'active', 'detected') - Critical priority
+ *    - Quarantined threats - Medium priority review
+ *    - Historical threats - Timeline analysis for patterns
+ *
+ * 2. **Severity Assessment**:
+ *    - High severity (severity_id ≥ 4) - Immediate action
+ *    - Medium severity (severity_id 2-3) - Monitoring required
+ *    - Recent activity (last 7 days) - Increased vigilance
+ *
+ * 3. **Timeline Analysis**:
+ *    - Recent threat activity detection
+ *    - Pattern recognition for recurring issues
+ *    - Security posture assessment
+ *
+ * @input
+ * - context.latestSnapshot.defenderStatus.recent_threats: Array of threat information
+ * - context.latestSnapshot.defenderStatus.threats_detected: Total threat count
+ *
+ * @output
+ * - type: 'DEFENDER_THREAT'
+ * - Severity: 'critical' (active), 'high' (high-severity), 'medium' (quarantined/recent)
+ * - Threat details including names, detection times, and security impact
+ *
+ * @threat_priorities
+ * 1. Active threats (immediate removal required)
+ * 2. High-severity threats (urgent review)
+ * 3. Quarantined threats (verification needed)
+ * 4. Recent activity (monitoring required)
+ *
+ * @example
+ * Active threat detection: Immediate security response with threat names and removal steps
+ * Quarantined threats: Review recommendations to ensure proper threat handling
+ */
 export class DefenderThreatChecker extends RecommendationChecker {
   getName (): string { return 'DefenderThreatChecker' }
   getCategory (): string { return 'Security' }

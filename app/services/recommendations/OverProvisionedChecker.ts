@@ -1,5 +1,79 @@
 import { RecommendationChecker, RecommendationContext, RecommendationResult, DiskUsageData } from './BaseRecommendationChecker'
 
+/**
+ * OverProvisionedChecker - Detects over-allocated resources through temporal usage analysis
+ *
+ * @description
+ * Analyzes resource utilization patterns over time to identify VMs with excessive resource
+ * allocation. Uses historical metrics to calculate average and peak usage, identifying
+ * opportunities for resource optimization without impacting performance.
+ *
+ * @category Resource Optimization
+ *
+ * @analysis
+ * 1. **Temporal Analysis**: Requires minimum 5 days of metrics for reliable trends
+ * 2. **CPU Analysis**:
+ *    - Average usage <30% over 5+ days indicates over-provisioning
+ *    - Recommendation: Reduce to 120% of peak usage (safety buffer)
+ * 3. **RAM Analysis**:
+ *    - Average usage <40% over 5+ days indicates over-provisioning
+ *    - Recommendation: Reduce to 130% of peak usage (safety buffer)
+ * 4. **Disk Analysis**:
+ *    - Usage <50% AND allocated >2x used space indicates over-provisioning
+ *    - Recommendation: Reduce to 150% of used space
+ *
+ * @input
+ * - context.machineConfig: VM resource allocation (cpuCores, ramGB, diskSizeGB)
+ * - context.historicalMetrics: Time-series resource usage data
+ * - context.latestSnapshot.diskSpace: Current disk usage across drives
+ *
+ * @output
+ * RecommendationResult[] with:
+ * - type: 'OVER_PROVISIONED'
+ * - text: Description of over-allocation with current usage stats
+ * - actionText: Specific resource reduction recommendations
+ * - data: {
+ *     resourceType: 'CPU' | 'RAM' | 'DISK',
+ *     allocatedCores/GB: number,      // Current allocation
+ *     avgUsagePercent: number,        // Average utilization
+ *     peakUsagePercent: number,       // Peak utilization
+ *     recommendedCores/GB: number,    // Suggested allocation
+ *     potentialSavings: number,       // Resources that can be freed
+ *     efficiency: number,             // Current efficiency score
+ *     daysAnalyzed: number           // Analysis time span
+ *   }
+ *
+ * @thresholds
+ * - CPU over-provisioned: Average <30% over 5+ days
+ * - RAM over-provisioned: Average <40% over 5+ days
+ * - Disk over-provisioned: Usage <50% AND allocated >2x used
+ * - Minimum analysis period: 5 days of metrics
+ * - Safety buffers: CPU 20%, RAM 30%, Disk 50%
+ *
+ * @example
+ * ```typescript
+ * // VM with 8 cores averaging 15% CPU usage over 7 days
+ * machineConfig: { cpuCores: 8, ramGB: 16 }
+ * metrics: [{ cpuUsagePercent: 15, timestamp: ... }, ...] // 7 days
+ *
+ * // Output:
+ * [{
+ *   type: 'OVER_PROVISIONED',
+ *   text: 'VM has 8 CPU cores allocated but only uses 15% on average',
+ *   actionText: 'Consider reducing allocated CPU cores to 4 to optimize resource utilization',
+ *   data: {
+ *     resourceType: 'CPU',
+ *     allocatedCores: 8,
+ *     avgUsagePercent: 15,
+ *     peakUsagePercent: 28,
+ *     recommendedCores: 4,
+ *     potentialSavings: 4,
+ *     efficiency: 15,
+ *     daysAnalyzed: 7.2
+ *   }
+ * }]
+ * ```
+ */
 export class OverProvisionedChecker extends RecommendationChecker {
   getName (): string { return 'OverProvisionedChecker' }
   getCategory (): string { return 'Resource Optimization' }

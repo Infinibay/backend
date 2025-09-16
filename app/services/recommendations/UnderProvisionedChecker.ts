@@ -1,5 +1,122 @@
 import { RecommendationChecker, RecommendationContext, RecommendationResult, DiskUsageData } from './BaseRecommendationChecker'
 
+/**
+ * UnderProvisionedChecker - Detects resource constraints causing performance degradation
+ *
+ * @description
+ * Performs sophisticated analysis of resource pressure indicators to identify VMs that
+ * need additional resources. Uses multiple metrics including usage patterns, swap activity,
+ * available memory, and sustained high usage to detect performance bottlenecks.
+ *
+ * @category Resource Optimization
+ *
+ * @analysis
+ * 1. **CPU Constraint Detection**:
+ *    - High usage (>85%) for extended periods (>2 hours)
+ *    - Peak usage >90% indicates CPU bottlenecks
+ *    - Recommendation: Increase by 50% for sustained performance
+ *
+ * 2. **Memory Pressure Analysis** (Multi-layered):
+ *    - **Memory Usage**: >90% for >1 hour
+ *    - **Swap Pressure**: Active swap usage (>10% swap utilization)
+ *    - **Available Memory**: <512MB or <10% available for >1 hour
+ *    - **Severe Indicators**: Multiple pressure types simultaneously
+ *
+ * 3. **Disk Space Constraints**:
+ *    - Usage >90% on any drive
+ *    - Critical threshold >95% (high performance impact)
+ *    - Recommendation: Expand by 30% of current size
+ *
+ * 4. **Time-based Analysis**:
+ *    - Calculates actual time spent in high-usage states
+ *    - Distinguishes between brief spikes and sustained pressure
+ *    - Uses time-weighted analysis for accurate recommendations
+ *
+ * @input
+ * - context.machineConfig: Current resource allocation
+ * - context.historicalMetrics: Time-series metrics including:
+ *   - cpuUsagePercent, totalMemoryKB, usedMemoryKB, availableMemoryKB
+ *   - swapTotalKB, swapUsedKB (for swap pressure analysis)
+ * - context.latestSnapshot.diskSpace: Current disk usage
+ *
+ * @output
+ * RecommendationResult[] with:
+ * - type: 'UNDER_PROVISIONED'
+ * - text: Detailed description of resource constraints
+ * - actionText: Specific resource increase recommendations
+ * - data: {
+ *     resourceType: 'CPU' | 'RAM' | 'DISK',
+ *     currentCores/GB: number,        // Current allocation
+ *     avgUsagePercent: number,        // Average usage
+ *     peakUsagePercent: number,       // Peak usage
+ *     hoursHighUsage: number,         // Time in constrained state
+ *     recommendedCores/GB: number,    // Suggested increase
+ *     performanceImpact: 'high' | 'medium', // Severity assessment
+ *
+ *     // Memory-specific:
+ *     swapPressure: boolean,          // Whether swap is being used
+ *     avgSwapUsage: number,           // Average swap utilization
+ *     availablePressure: boolean,     // Whether available memory is low
+ *     avgAvailableMB: number,         // Average available memory
+ *
+ *     // Disk-specific:
+ *     drive: string,                  // Affected drive
+ *     usagePercent: number,           // Current usage percentage
+ *     additionalSpaceNeeded: number  // GB to add
+ *   }
+ *
+ * @complex_analysis
+ * **Memory Pressure Detection Algorithm**:
+ * ```typescript
+ * const memoryPressure = hoursHighUsage > 1 && peakUsage > 95
+ * const swapPressure = avgSwapUsage > 5 || peakSwapUsage > 20
+ * const availablePressure = lowAvailableHours > 1 && (avgAvailable < 1024MB || min < 256MB)
+ * const shouldRecommend = memoryPressure || swapPressure || availablePressure
+ * ```
+ *
+ * **Time Calculation Method**:
+ * - Sorts metrics chronologically
+ * - Calculates time spans between consecutive measurements
+ * - Accumulates time where usage exceeds thresholds
+ * - Converts to hours for human-readable recommendations
+ *
+ * @thresholds
+ * - CPU high usage: >85% (analysis), >90% (critical)
+ * - Memory high usage: >90%, low available: <512MB or <10%
+ * - Swap usage concern: >10%, critical: >20%
+ * - Disk critical: >90%, severe: >95%
+ * - Minimum constraint time: 1-2 hours for recommendations
+ * - Resource increase factors: CPU 1.5x, RAM 1.5-2.5x, Disk 1.3x
+ *
+ * @example
+ * ```typescript
+ * // VM with high memory pressure and swap usage
+ * historicalMetrics: [
+ *   { cpuUsagePercent: 45, usedMemoryKB: 7500000, totalMemoryKB: 8000000,
+ *     swapUsedKB: 1000000, swapTotalKB: 2000000, timestamp: ... },
+ *   // ... more metrics showing sustained pressure
+ * ]
+ *
+ * // Output:
+ * [{
+ *   type: 'UNDER_PROVISIONED',
+ *   text: 'VM is severely memory-constrained - RAM usage exceeds 90% for 4 hours and swap is heavily used (50% average)',
+ *   actionText: 'Urgently increase RAM allocation from 8GB to 16GB - swap usage indicates severe memory pressure',
+ *   data: {
+ *     resourceType: 'RAM',
+ *     currentGB: 8,
+ *     avgUsagePercent: 94,
+ *     peakUsagePercent: 98,
+ *     hoursHighUsage: 4,
+ *     recommendedGB: 16,
+ *     performanceImpact: 'high',
+ *     swapPressure: true,
+ *     avgSwapUsage: 50,
+ *     peakSwapUsage: 80
+ *   }
+ * }]
+ * ```
+ */
 export class UnderProvisionedChecker extends RecommendationChecker {
   getName (): string { return 'UnderProvisionedChecker' }
   getCategory (): string { return 'Resource Optimization' }

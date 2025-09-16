@@ -11,6 +11,98 @@ interface ResourceOptInfo {
   [key: string]: unknown
 }
 
+/**
+ * ResourceOptimizationChecker - Identifies applications with high CPU/RAM usage for optimization
+ *
+ * @description
+ * Performs complex analysis of running processes, groups them by application, and identifies
+ * resource-intensive applications that may benefit from optimization. Uses intelligent application
+ * name extraction and normalization to provide meaningful recommendations.
+ *
+ * @category Performance
+ *
+ * @analysis
+ * 1. **Process Aggregation**: Groups processes by normalized application name
+ *    - Removes version numbers, file extensions, and architecture indicators
+ *    - Maps common process names to well-known applications (Chrome, Firefox, etc.)
+ *    - Excludes system processes to focus on user applications
+ *
+ * 2. **Resource Calculation**: For each application group:
+ *    - Total CPU: Sum of all process CPU usage weighted by sample count
+ *    - Total Memory: Sum of all process memory usage
+ *    - Peak values: Maximum individual process resource usage
+ *    - Process count: Number of running instances
+ *
+ * 3. **Threshold Evaluation**:
+ *    - High CPU: >80% total or >90% critical (configurable)
+ *    - High RAM: >1GB total or >20% of system memory (configurable)
+ *    - Multiple instances: Applications with >5 processes
+ *
+ * 4. **Recommendation Generation**: Prioritizes by severity and impact
+ *
+ * @input
+ * - context.latestSnapshot.applicationInventory.processes: Array of process data
+ * - context.recentProcessSnapshots: Historical process data for averaging
+ * - context.machineConfig.ramGB: Total system RAM for percentage calculations
+ *
+ * Process data format:
+ * ```typescript
+ * {
+ *   name: string,           // Process name (e.g., "chrome.exe")
+ *   executablePath?: string, // Full path to executable
+ *   cpuPercent: number,     // CPU usage percentage
+ *   memoryKB: number,       // Memory usage in KB
+ *   pid: number             // Process ID
+ * }
+ * ```
+ *
+ * @output
+ * RecommendationResult[] with types:
+ * - 'HIGH_CPU_APP': Applications consuming excessive CPU
+ * - 'HIGH_RAM_APP': Applications consuming excessive memory
+ *
+ * Data includes:
+ * - appName: Normalized application name
+ * - processCount: Number of running processes
+ * - avgCpuPercent, totalMemoryMB: Aggregated metrics
+ * - topProcesses: JSON array of highest-impact processes
+ * - severity: 'critical' or 'medium' based on thresholds
+ *
+ * @configuration
+ * Environment variables:
+ * - HIGH_CPU_THRESHOLD: High CPU usage threshold (default: 80%)
+ * - CRITICAL_CPU_THRESHOLD: Critical CPU usage threshold (default: 90%)
+ * - HIGH_RAM_THRESHOLD_MB: High RAM usage in MB (default: 1024MB)
+ * - HIGH_RAM_THRESHOLD_PERCENT: High RAM usage percentage (default: 20%)
+ * - TOP_APPS_LIMIT: Maximum applications to report (default: 5)
+ * - SYSTEM_PROCESS_EXCLUDES: Comma-separated list of processes to exclude
+ * - SYSTEM_PROCESS_INCLUDE: Comma-separated list of processes to force include
+ *
+ * @example
+ * ```typescript
+ * // Input processes:
+ * [
+ *   { name: "chrome.exe", cpuPercent: 15.2, memoryKB: 256000, pid: 1234 },
+ *   { name: "chrome.exe", cpuPercent: 8.1, memoryKB: 180000, pid: 1235 },
+ *   { name: "chrome.exe", cpuPercent: 12.0, memoryKB: 320000, pid: 1236 }
+ * ]
+ *
+ * // Output:
+ * [{
+ *   type: 'HIGH_CPU_APP',
+ *   text: 'Application Google Chrome is consuming high CPU resources (35% average across 3 processes)',
+ *   actionText: 'Consider closing the application if not needed...',
+ *   data: {
+ *     appName: 'Google Chrome',
+ *     processCount: 3,
+ *     avgCpuPercent: 35,
+ *     totalMemoryMB: 756,
+ *     topProcesses: '[{"processName":"chrome.exe","pid":1236,"cpuPercent":12.0,"memoryMB":320}]',
+ *     severity: 'medium'
+ *   }
+ * }]
+ * ```
+ */
 export class ResourceOptimizationChecker extends RecommendationChecker {
   getName (): string { return 'ResourceOptimizationChecker' }
   getCategory (): string { return 'Performance' }

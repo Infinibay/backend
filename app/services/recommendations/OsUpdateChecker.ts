@@ -20,6 +20,109 @@ interface UpdateStatus {
   pending_reboot_updates?: number
 }
 
+/**
+ * OsUpdateChecker - Monitors Windows Update status and recommends system maintenance
+ *
+ * @description
+ * Analyzes Windows Update information to identify pending updates, security patches,
+ * and system maintenance needs. Prioritizes critical and security updates while
+ * tracking update configuration and reboot requirements.
+ *
+ * @category Maintenance
+ *
+ * @analysis
+ * 1. **Update Check Staleness**: Last check >7 days indicates outdated status
+ * 2. **Update Classification**:
+ *    - Critical: Immediate installation required
+ *    - Important: High priority for system stability
+ *    - Security: Patches for known vulnerabilities
+ *    - Optional: Non-critical improvements
+ * 3. **Configuration Analysis**:
+ *    - Automatic updates disabled
+ *    - Pending reboot requirements
+ * 4. **Severity Assessment**: Critical > Important > Security > Optional
+ *
+ * @input
+ * - context.latestSnapshot.windowsUpdateInfo: Windows Update status data
+ *
+ * Format:
+ * ```typescript
+ * {
+ *   pending_updates: [
+ *     {
+ *       title: "Security Update for Windows 10",
+ *       kb_number: "KB5021233",
+ *       severity: "Critical",
+ *       is_security_update: true,
+ *       size_bytes: 512000000
+ *     }
+ *   ],
+ *   reboot_required: true,
+ *   automatic_updates_enabled: false,
+ *   last_check_date: "2024-01-15T10:30:00Z"
+ * }
+ * ```
+ *
+ * @output
+ * RecommendationResult[] with:
+ * - type: 'OS_UPDATE_AVAILABLE'
+ * - text: Summary of Windows Update issues
+ * - actionText: Specific remediation steps
+ * - data: {
+ *     flags: string[],                    // Issue indicators
+ *     severity: 'critical' | 'high' | 'medium' | 'low',
+ *     totalUpdates: number,              // Total pending updates
+ *     criticalCount: number,             // Critical updates
+ *     securityCount: number,             // Security updates
+ *     totalSizeMB: number,               // Download size
+ *     rebootRequired: boolean,           // Restart needed
+ *     automaticUpdatesDisabled: boolean, // Config issue
+ *     updateTitles: string[]             // Update names (first 10)
+ *   }
+ *
+ * @flags
+ * - 'stale_check_date': Last check >7 days ago
+ * - 'pending_updates': Updates available for installation
+ * - 'reboot_required': System restart needed
+ * - 'auto_updates_disabled': Automatic updates turned off
+ *
+ * @severity_logic
+ * - **Critical**: Any critical updates present
+ * - **High**: Important updates (no critical)
+ * - **Medium**: Security/optional updates, config issues
+ * - **Low**: Default baseline
+ *
+ * @example
+ * ```typescript
+ * // Input with critical security updates
+ * windowsUpdateInfo: {
+ *   pending_updates: [
+ *     { title: "Critical Security Update", severity: "Critical", is_security_update: true, size_bytes: 100MB },
+ *     { title: "Feature Update", severity: "Important", size_bytes: 2GB }
+ *   ],
+ *   reboot_required: true,
+ *   automatic_updates_enabled: false
+ * }
+ *
+ * // Output:
+ * [{
+ *   type: 'OS_UPDATE_AVAILABLE',
+ *   text: 'Windows Update issues detected on VM-Server-01: 2 updates available (1 critical, 1 important, 1 security), system restart required, automatic updates disabled',
+ *   actionText: 'Address Windows Update issues on VM-Server-01: install pending updates, restart computer, enable automatic updates through Settings > Update & Security > Windows Update',
+ *   data: {
+ *     flags: ['pending_updates', 'reboot_required', 'auto_updates_disabled'],
+ *     severity: 'critical',
+ *     totalUpdates: 2,
+ *     criticalCount: 1,
+ *     importantCount: 1,
+ *     securityCount: 1,
+ *     totalSizeMB: 2148,
+ *     rebootRequired: true,
+ *     automaticUpdatesDisabled: true
+ *   }
+ * }]
+ * ```
+ */
 export class OsUpdateChecker extends RecommendationChecker {
   getName (): string { return 'OsUpdateChecker' }
   getCategory (): string { return 'Maintenance' }

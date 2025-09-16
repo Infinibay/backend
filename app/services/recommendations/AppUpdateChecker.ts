@@ -16,6 +16,34 @@ interface ApplicationInventory {
   applications?: Application[]
 }
 
+/**
+ * AppUpdateChecker - Tracks application updates and security patches
+ *
+ * @description
+ * Monitors installed applications for available updates, prioritizing security updates
+ * and providing actionable recommendations for application maintenance.
+ *
+ * @category Maintenance
+ *
+ * @analysis
+ * 1. Filters applications with available updates
+ * 2. Prioritizes security updates (displayed first)
+ * 3. Calculates total download size and update count
+ * 4. Limits individual recommendations to top 5 apps
+ * 5. Provides summary for large update sets (>5 apps)
+ *
+ * @input
+ * - context.latestSnapshot.applicationInventory.applications: Array of installed apps
+ *
+ * @output
+ * - type: 'APP_UPDATE_AVAILABLE'
+ * - Individual app updates (top 5) + summary if >5 total
+ * - Severity: 'high' for security updates, 'medium' for regular updates
+ *
+ * @example
+ * Input: Chrome security update available
+ * Output: Recommendation to update Chrome with security priority
+ */
 export class AppUpdateChecker extends RecommendationChecker {
   getName (): string { return 'AppUpdateChecker' }
   getCategory (): string { return 'Maintenance' }

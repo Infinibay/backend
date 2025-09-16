@@ -1,5 +1,93 @@
 import { RecommendationChecker, RecommendationContext, RecommendationResult } from './BaseRecommendationChecker'
 
+/**
+ * DiskIOBottleneckChecker - Detects disk I/O performance bottlenecks and storage issues
+ *
+ * @description
+ * Analyzes disk I/O patterns over time to identify performance bottlenecks that may impact
+ * application performance. Uses historical metrics to calculate I/O rates, detect low
+ * throughput periods, and identify high I/O wait times that indicate storage constraints.
+ *
+ * @category Performance
+ *
+ * @analysis
+ * 1. **Historical Analysis**: Requires minimum 10 historical metrics for trend analysis
+ *
+ * 2. **I/O Rate Calculation**: For each metric pair:
+ *    - Calculates read/write rates: (current_bytes - previous_bytes) / time_diff
+ *    - Tracks total throughput: read_rate + write_rate
+ *    - Excludes invalid time differences (>1 hour or ≤0)
+ *
+ * 3. **Performance Metrics**:
+ *    - Average throughput: Mean I/O rate across all samples
+ *    - Peak throughput: Maximum I/O rate observed
+ *    - Low throughput periods: Percentage of time with <5 MB/s
+ *
+ * 4. **I/O Wait Analysis**:
+ *    - Extracts I/O wait percentage from resource optimization data
+ *    - High I/O wait (>20%) indicates storage bottlenecks
+ *
+ * 5. **Bottleneck Detection Criteria**:
+ *    - Severe: I/O wait >20% AND low throughput >80% of time
+ *    - Medium: I/O wait >20% OR low throughput >60% of time
+ *    - Inconsistent: High peak but low average (indicates sporadic issues)
+ *
+ * @input
+ * - context.historicalMetrics[].diskIOStats: Historical disk I/O statistics
+ *   Format: { readBytes: number, writeBytes: number, timestamp: Date }
+ * - context.latestSnapshot.resourceOptInfo: Current I/O wait statistics
+ *   Format: { ioWaitPercent?: number, await?: number, avgWait?: number }
+ *
+ * @output
+ * RecommendationResult[] with:
+ * - type: 'OTHER' (with checkType: 'DISK_IO_BOTTLENECK')
+ * - text: Description of I/O performance issue
+ * - actionText: Storage optimization recommendations
+ * - data: {
+ *     avgThroughputMBs: number,     // Average I/O rate
+ *     peakThroughputMBs: number,    // Peak I/O rate
+ *     lowThroughputPercent: number, // % of time with low throughput
+ *     avgIoWaitPercent: number,     // I/O wait time percentage
+ *     ioWaitHigh: boolean,          // Whether I/O wait is problematic
+ *     metricsAnalyzed: number,      // Number of samples analyzed
+ *     severity: string              // 'critical' or 'medium'
+ *   }
+ *
+ * @thresholds
+ * - Low throughput: <5 MB/s
+ * - High I/O wait: >20%
+ * - Severe bottleneck: Low throughput >80% of time + high I/O wait
+ * - Medium bottleneck: Low throughput >60% of time OR high I/O wait
+ * - Minimum samples: 5 valid I/O rate calculations required
+ *
+ * @example
+ * ```typescript
+ * // Input historicalMetrics with diskIOStats:
+ * [
+ *   { diskIOStats: { readBytes: 1000000, writeBytes: 500000 }, timestamp: new Date('2024-01-01T10:00:00Z') },
+ *   { diskIOStats: { readBytes: 1200000, writeBytes: 600000 }, timestamp: new Date('2024-01-01T10:01:00Z') }
+ * ]
+ *
+ * // Calculation: (300KB read + 100KB write) / 60s = 6.67 KB/s = 0.0065 MB/s (low throughput)
+ *
+ * // Output:
+ * [{
+ *   type: 'OTHER',
+ *   text: 'VM showing low disk throughput (2 MB/s average) in 85% of measurements',
+ *   actionText: 'Monitor disk performance and consider storage optimization...',
+ *   data: {
+ *     checkType: 'DISK_IO_BOTTLENECK',
+ *     avgThroughputMBs: 2,
+ *     peakThroughputMBs: 15,
+ *     lowThroughputPercent: 85,
+ *     avgIoWaitPercent: 12,
+ *     ioWaitHigh: false,
+ *     metricsAnalyzed: 25,
+ *     severity: 'medium'
+ *   }
+ * }]
+ * ```
+ */
 export class DiskIOBottleneckChecker extends RecommendationChecker {
   getName (): string { return 'DiskIOBottleneckChecker' }
   getCategory (): string { return 'Performance' }

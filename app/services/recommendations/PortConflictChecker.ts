@@ -1,6 +1,109 @@
 import { RecommendationChecker, RecommendationContext, RecommendationResult } from './BaseRecommendationChecker'
 import { RecommendationType, PortUsage, VMNWFilter, FWRule, VmPort } from '@prisma/client'
 
+/**
+ * PortConflictChecker - Advanced network security analysis for port conflicts and misconfigurations
+ *
+ * @description
+ * Performs comprehensive analysis of network security by examining port usage, firewall rules,
+ * and VM port configurations. Detects security vulnerabilities including uncovered ports,
+ * protocol mismatches, and missing configurations that could expose the VM to attacks.
+ *
+ * @category Security
+ *
+ * @analysis
+ * 1. **Firewall Validation**: Checks if VM has any firewall rules attached
+ * 2. **Port Extraction**: Identifies all listening ports excluding system-managed ports
+ * 3. **Rule Mapping**: Extracts allowed port ranges from firewall rules
+ * 4. **Conflict Detection**: Multi-layered security analysis:
+ *    - **Uncovered Ports**: Listening ports without firewall rules
+ *    - **Protocol Mismatches**: Ports with rules for different protocols
+ *    - **VM Port Conflicts**: Services using ports not declared in VM config
+ *    - **Disabled Ports**: Services using ports that are disabled in VM settings
+ *
+ * 5. **Risk Assessment**: Categorizes issues by security impact
+ *
+ * @input
+ * - context.portUsage: Array of active port connections
+ * - context.firewallFilters: VM firewall rules and network filters
+ * - context.vmPorts: VM port configuration settings
+ *
+ * Port usage format:
+ * ```typescript
+ * {
+ *   port: number,
+ *   protocol: string,
+ *   isListening: boolean,
+ *   processName?: string,
+ *   executablePath?: string,
+ *   processId?: number,
+ *   timestamp: Date
+ * }
+ * ```
+ *
+ * Firewall rules format:
+ * ```typescript
+ * {
+ *   action: 'accept' | 'reject',
+ *   direction: 'in' | 'out' | 'inout',
+ *   protocol?: string,
+ *   dstPortStart?: string,
+ *   dstPortEnd?: string
+ * }
+ * ```
+ *
+ * @output
+ * RecommendationResult[] with:
+ * - type: 'PORT_BLOCKED'
+ * - text: Description of security issue
+ * - actionText: Specific remediation steps
+ * - data: {
+ *     port: number,
+ *     protocol: string,
+ *     processName: string,
+ *     conflictType: 'uncovered' | 'protocol_mismatch' | 'vm_port_disabled' | 'vm_port_missing',
+ *     priority: 'HIGH' | 'MEDIUM',
+ *     category: 'Security' | 'Configuration',
+ *     firewallRuleSuggestion?: string
+ *   }
+ *
+ * @security_checks
+ * 1. **No Firewall**: VM without any firewall rules (HIGH priority)
+ * 2. **Uncovered Ports**: Services running without firewall protection
+ * 3. **Protocol Mismatches**: Firewall allows TCP but service uses UDP
+ * 4. **VM Port Missing**: Services not declared in VM port configuration
+ * 5. **VM Port Disabled**: Services using disabled VM ports
+ *
+ * @system_port_exclusions
+ * Excludes common system ports from analysis:
+ * - Well-known ports: 22 (SSH), 53 (DNS), 80 (HTTP), 443 (HTTPS)
+ * - Windows services: 135, 139, 445 (RPC, NetBIOS, SMB)
+ * - Management: 3389 (RDP), 5985/5986 (WinRM)
+ * - Privileged ports (<1024) except 80 and 443
+ *
+ * @example
+ * ```typescript
+ * // Input: Service on port 8080/tcp with no firewall rule
+ * portUsage: [{ port: 8080, protocol: 'tcp', isListening: true, processName: 'myapp.exe' }]
+ * firewallFilters: [{ rules: [{ action: 'accept', direction: 'in', dstPortStart: '80' }] }]
+ *
+ * // Output:
+ * [{
+ *   type: 'PORT_BLOCKED',
+ *   text: 'Application (myapp.exe) is using port 8080/tcp which is not allowed by firewall rules',
+ *   actionText: 'Add a firewall rule to allow port 8080/tcp or stop the application if not needed',
+ *   data: {
+ *     port: 8080,
+ *     protocol: 'tcp',
+ *     processName: 'myapp.exe',
+ *     conflictType: 'uncovered',
+ *     priority: 'HIGH',
+ *     category: 'Security',
+ *     firewallRuleSuggestion: 'Add rule: allow tcp port 8080 (destination)'
+ *   }
+ * }]
+ * ```
+ */
 export class PortConflictChecker extends RecommendationChecker {
   getName (): string { return 'PortConflictChecker' }
   getCategory (): string { return 'Security' }
