@@ -4,8 +4,13 @@
 # -----------------------------------------------
 
 input AdvancedPortInput {
+  """Description of the port configuration"""
   description: String
+
+  """Type of port configuration"""
   type: PortInputType!
+
+  """Port specification string"""
   value: String!
 }
 
@@ -72,7 +77,10 @@ type ApplicationUpdates {
 }
 
 input ApplyFirewallTemplateInput {
+  """Virtual machine ID"""
   machineId: ID!
+
+  """Firewall template to apply"""
   template: FirewallTemplate!
 }
 
@@ -116,11 +124,22 @@ type CommandResult {
 }
 
 input CreateAdvancedFirewallRuleInput {
+  """Firewall action (accept, drop, reject)"""
   action: String! = "accept"
+
+  """Optional rule description"""
   description: String
+
+  """Traffic direction (in, out, inout)"""
   direction: String! = "in"
+
+  """Virtual machine ID"""
   machineId: ID!
+
+  """Advanced port configuration"""
   ports: AdvancedPortInput!
+
+  """Network protocol (tcp, udp, icmp)"""
   protocol: String! = "tcp"
 }
 
@@ -191,11 +210,22 @@ input CreateNetworkInput {
 }
 
 input CreateSimplifiedFirewallRuleInput {
+  """Firewall action (accept, drop, reject)"""
   action: String! = "accept"
+
+  """Optional rule description"""
   description: String
+
+  """Traffic direction (in, out, inout)"""
   direction: String! = "in"
+
+  """Virtual machine ID"""
   machineId: ID!
+
+  """Port specification (e.g., "80", "443", "all")"""
   port: String!
+
+  """Network protocol (tcp, udp, icmp)"""
   protocol: String! = "tcp"
 }
 
@@ -344,7 +374,7 @@ enum FilterType {
   VM
 }
 
-"""Predefined firewall template configurations"""
+"""Predefined firewall template configurations for common use cases"""
 enum FirewallTemplate {
   DATABASE
   DESKTOP
@@ -353,8 +383,13 @@ enum FirewallTemplate {
 }
 
 type FirewallTemplateInfo {
+  """Human-readable template description"""
   description: String!
+
+  """Template name identifier"""
   name: String!
+
+  """List of rules included in this template"""
   rules: [SimplifiedFirewallRule!]!
 }
 
@@ -707,9 +742,6 @@ enum MaintenanceTrigger {
 }
 
 type Mutation {
-  _placeholderCreateAdvancedFirewallRule(input: CreateAdvancedFirewallRuleInput!): PortValidationResult!
-  _placeholderSimplifiedFirewallRule(input: SimplifiedFirewallRuleInput!): Boolean!
-  _placeholderValidatePortString(portString: String!): PortValidationResult!
   applyFirewallTemplate(input: ApplyFirewallTemplateInput!): VMFirewallState!
 
   """Calculate ISO checksum"""
@@ -717,6 +749,12 @@ type Mutation {
 
   """Control a service on a virtual machine"""
   controlService(input: ServiceControlInput!): ServiceStatusType!
+
+  """Create advanced firewall rule with flexible port configuration"""
+  createAdvancedFirewallRule(
+    """Advanced firewall rule configuration"""
+    input: CreateAdvancedFirewallRuleInput!
+  ): VMFirewallState!
   createApplication(input: CreateApplicationInputType!): ApplicationType!
   createDepartment(name: String!): DepartmentType!
   createFilter(input: CreateFilterInput!): GenericFilter!
@@ -726,6 +764,30 @@ type Mutation {
   createMachineTemplateCategory(input: MachineTemplateCategoryInputType!): MachineTemplateCategoryType!
   createMaintenanceTask(input: CreateMaintenanceTaskInput!): MaintenanceTaskResponse!
   createNetwork(input: CreateNetworkInput!): Boolean!
+
+  """Create firewall rule for a specific port range"""
+  createPortRangeRule(
+    """Firewall action: accept, drop, or reject"""
+    action: String! = "accept"
+
+    """Optional description for the rule"""
+    description: String
+
+    """Traffic direction: in, out, or inout"""
+    direction: String! = "in"
+
+    """Ending port number (1-65535)"""
+    endPort: Int!
+
+    """ID of the virtual machine to configure"""
+    machineId: ID!
+
+    """Network protocol: tcp, udp, or icmp"""
+    protocol: String! = "tcp"
+
+    """Starting port number (1-65535)"""
+    startPort: Int!
+  ): VMFirewallState!
   createSimplifiedFirewallRule(input: CreateSimplifiedFirewallRuleInput!): VMFirewallState!
 
   """Create a snapshot of a virtual machine"""
@@ -934,24 +996,12 @@ input PaginationInputType {
   take: Int = 20
 }
 
-"""Types of port configurations supported in firewall rules"""
+"""Types of port configurations supported in advanced firewall rules"""
 enum PortInputType {
   ALL
   MULTIPLE
   RANGE
   SINGLE
-}
-
-type PortRange {
-  description: String
-  end: Int!
-  start: Int!
-}
-
-type PortValidationResult {
-  errors: [String!]!
-  isValid: Boolean!
-  parsedRanges: [PortRange!]
 }
 
 type ProcessControlResult {
@@ -1273,22 +1323,26 @@ type ServiceStatusType {
 }
 
 type SimplifiedFirewallRule {
+  """Firewall action (accept, drop, reject)"""
   action: String!
-  description: String
-  direction: String!
-  id: ID
-  port: String!
-  protocol: String!
-  sources: [String!]
-}
 
-input SimplifiedFirewallRuleInput {
-  action: String! = "accept"
+  """Rule description"""
   description: String
+
+  """Traffic direction (in, out, inout)"""
   direction: String!
+
+  """Unique rule identifier"""
+  id: ID
+
+  """Port specification (e.g., "80", "80-90", "all")"""
   port: String!
-  portType: PortInputType
+
+  """Network protocol (tcp, udp, icmp)"""
   protocol: String!
+
+  """Rule sources (templates or custom)"""
+  sources: [String!]
 }
 
 type Snapshot {
@@ -1490,9 +1544,16 @@ type UserType {
 }
 
 type VMFirewallState {
+  """Applied firewall templates"""
   appliedTemplates: [String!]!
+
+  """Custom firewall rules"""
   customRules: [SimplifiedFirewallRule!]!
+
+  """All effective firewall rules"""
   effectiveRules: [SimplifiedFirewallRule!]!
+
+  """Last sync with hypervisor"""
   lastSync: DateTimeISO
 }
 
