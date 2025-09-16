@@ -1,7 +1,7 @@
-import { Resolver, Query, Mutation, Arg, Int, Ctx } from 'type-graphql'
+import { Resolver, Mutation, Arg, Int, Ctx } from 'type-graphql'
 import { PrismaClient } from '@prisma/client'
-import { ProcessManager, InternalProcessInfo, InternalProcessControlResult, ProcessSortBy as InternalProcessSortBy } from '@services/ProcessManager'
-import { ProcessInfo, ProcessControlResult, ProcessSortBy } from '../types/ProcessType'
+import { ProcessManager, InternalProcessControlResult } from '@services/ProcessManager'
+import { ProcessControlResult } from '../types/ProcessType'
 import { VirtioSocketWatcherService } from '@services/VirtioSocketWatcherService'
 import { getEventManager } from '@services/EventManager'
 import { getSocketService } from '@services/SocketService'
@@ -33,63 +33,7 @@ export class ProcessResolver {
     return this.processManager
   }
 
-  /**
-   * List all processes running on a VM
-   */
-  @Query(() => [ProcessInfo])
-  async listProcesses (
-    @Arg('machineId') machineId: string,
-    @Arg('limit', () => Int, { nullable: true }) limit?: number,
-    @Ctx() ctx?: Context
-  ): Promise<ProcessInfo[]> {
-    try {
-      if (!ctx) {
-        throw new Error('Context not available')
-      }
 
-      debug(`Listing processes for machine ${machineId}`)
-
-      const manager = this.getProcessManager(ctx)
-      const internalProcesses = await manager.listProcesses(machineId, limit)
-
-      // Map internal types to GraphQL types
-      return this.mapToGraphQLProcesses(internalProcesses)
-    } catch (error) {
-      debug(`Failed to list processes: ${error}`)
-      throw new Error(`Failed to list processes: ${error}`)
-    }
-  }
-
-  /**
-   * Get top processes by CPU or memory usage
-   */
-  @Query(() => [ProcessInfo])
-  async getTopProcesses (
-    @Arg('machineId') machineId: string,
-    @Arg('limit', () => Int, { defaultValue: 10 }) limit: number,
-    @Arg('sortBy', () => ProcessSortBy, { defaultValue: ProcessSortBy.CPU }) sortBy: ProcessSortBy,
-    @Ctx() ctx?: Context
-  ): Promise<ProcessInfo[]> {
-    try {
-      if (!ctx) {
-        throw new Error('Context not available')
-      }
-
-      debug(`Getting top ${limit} processes for machine ${machineId} sorted by ${sortBy}`)
-
-      const manager = this.getProcessManager(ctx)
-
-      // Convert GraphQL enum to internal enum
-      const internalSortBy = this.mapSortBy(sortBy)
-      const internalProcesses = await manager.getTopProcesses(machineId, limit, internalSortBy)
-
-      // Map internal types to GraphQL types
-      return this.mapToGraphQLProcesses(internalProcesses)
-    } catch (error) {
-      debug(`Failed to get top processes: ${error}`)
-      throw new Error(`Failed to get top processes: ${error}`)
-    }
-  }
 
   /**
    * Kill a process on a VM
@@ -213,21 +157,6 @@ export class ProcessResolver {
 
   // Private mapping methods
 
-  /**
-   * Map internal process info to GraphQL type
-   */
-  private mapToGraphQLProcesses (internalProcesses: InternalProcessInfo[]): ProcessInfo[] {
-    return internalProcesses.map(process => ({
-      pid: process.pid,
-      name: process.name,
-      cpuUsage: process.cpuUsage,
-      memoryKb: process.memoryKb,
-      status: process.status,
-      commandLine: process.commandLine,
-      user: process.user,
-      startTime: process.startTime
-    }))
-  }
 
   /**
    * Map internal control result to GraphQL type
@@ -242,21 +171,4 @@ export class ProcessResolver {
     }
   }
 
-  /**
-   * Map GraphQL sort enum to internal enum
-   */
-  private mapSortBy (graphqlSortBy: ProcessSortBy): InternalProcessSortBy {
-    switch (graphqlSortBy) {
-    case ProcessSortBy.CPU:
-      return InternalProcessSortBy.CPU
-    case ProcessSortBy.MEMORY:
-      return InternalProcessSortBy.MEMORY
-    case ProcessSortBy.PID:
-      return InternalProcessSortBy.PID
-    case ProcessSortBy.NAME:
-      return InternalProcessSortBy.NAME
-    default:
-      return InternalProcessSortBy.CPU
-    }
-  }
 }
