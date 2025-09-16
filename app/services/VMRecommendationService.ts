@@ -1,5 +1,6 @@
-import { PrismaClient, Machine, VMHealthSnapshot, SystemMetrics, ProcessSnapshot, PortUsage, VMNWFilter, FWRule, VMRecommendation, RecommendationType, Prisma } from '@prisma/client'
+import { PrismaClient, Machine, VMHealthSnapshot, SystemMetrics, ProcessSnapshot, PortUsage, VMNWFilter, FWRule, VMRecommendation, RecommendationType, Prisma, VmPort, DepartmentNWFilter } from '@prisma/client'
 import { RecommendationFilterInput } from '../graphql/types/RecommendationTypes'
+import { AppError, ErrorCode, ErrorContext } from '../utils/errors/ErrorHandler'
 
 interface AppUpdateInfo {
   name: string | undefined
@@ -17,6 +18,14 @@ interface ThreatTimelineInfo {
 
 export interface RecommendationData {
   [key: string]: string | number | boolean | null | undefined | (string | undefined)[] | AppUpdateInfo[] | ThreatTimelineInfo[] | string[]
+}
+
+export type RecommendationOperationResult = {
+  success: true;
+  recommendations: VMRecommendation[];
+} | {
+  success: false;
+  error: string; // generic, e.g., 'Service unavailable' or 'Failed to generate recommendations'
 }
 
 interface ProcessData {
@@ -132,6 +141,7 @@ export interface RecommendationContext {
   portUsage: PortUsage[]
   firewallFilters: (VMNWFilter & { nwFilter: { rules: FWRule[] } })[]
   machineConfig: Machine | null
+  vmPorts: VmPort[]
 }
 
 export abstract class RecommendationChecker {
@@ -151,7 +161,7 @@ export abstract class RecommendationChecker {
    * @param dateString - The date string to parse
    * @returns Object with isValid, date, and daysSince properties, or null if invalid
    */
-  protected parseAndCalculateDaysSince(dateString: string | null | undefined): { isValid: true; date: Date; daysSince: number } | { isValid: false; date: null; daysSince: null } {
+  protected parseAndCalculateDaysSince (dateString: string | null | undefined): { isValid: true; date: Date; daysSince: number } | { isValid: false; date: null; daysSince: null } {
     if (!dateString) {
       return { isValid: false, date: null, daysSince: null }
     }
@@ -814,14 +824,435 @@ class DiskIOBottleneckChecker extends RecommendationChecker {
   }
 }
 
-class PortBlockedChecker extends RecommendationChecker {
-  getName (): string { return 'PortBlockedChecker' }
+class PortConflictChecker extends RecommendationChecker {
+  getName (): string { return 'PortConflictChecker' }
   getCategory (): string { return 'Security' }
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   async analyze (context: RecommendationContext): Promise<RecommendationResult[]> {
-    // TODO: Implement port blocked analysis using context.portUsage and context.firewallFilters
-    return []
+    const results: RecommendationResult[] = []
+
+    try {
+      // Comment 6: No recommendation when no firewall filters exist
+      if (!context.firewallFilters?.length) {
+        results.push({
+          type: RecommendationType.PORT_BLOCKED,
+          text: 'No firewall rules attached to this VM',
+          actionText: 'Attach appropriate NWFilter or configure department-level firewall policies to secure network access',
+          data: {
+            conflictType: 'no_firewall',
+            priority: 'HIGH',
+            category: 'Security',
+            recommendation: 'Configure network filters for VM security'
+          }
+        })
+        return results
+      }
+
+      // Skip port analysis if no port data available
+      if (!context.portUsage?.length) {
+        return results
+      }
+
+      // Comment 7: De-duplicate listening ports
+      const listeningPorts = this.extractListeningPorts(context.portUsage)
+      if (listeningPorts.length === 0) {
+        return results
+      }
+
+      // Comment 5: Refactor port ranges for scalability
+      const allowedPortRanges = this.extractAllowedPortRanges(context.firewallFilters)
+
+      // Analyze each listening port for conflicts
+      const conflicts = this.detectPortConflicts(listeningPorts, allowedPortRanges, context.vmPorts)
+
+      // Generate recommendations for conflicts
+      results.push(...this.generateConflictRecommendations(conflicts))
+    } catch (error) {
+      console.warn('Error analyzing port conflicts:', error)
+    }
+
+    return results
+  }
+
+  private extractListeningPorts (portUsage: PortUsage[]): Array<{
+    port: number
+    protocol: string
+    processName?: string
+    executablePath?: string
+    processId?: number
+  }> {
+    // Comment 7: De-duplicate listening ports using Map
+    const portMap = new Map<string, {
+      port: number
+      protocol: string
+      processName?: string
+      executablePath?: string
+      processId?: number
+      timestamp?: Date
+    }>()
+
+    for (const p of portUsage) {
+      if (p.isListening && !this.isSystemPort(p.port)) {
+        const key = `${p.port}/${p.protocol.toLowerCase()}`
+        const existing = portMap.get(key)
+        const current = {
+          port: p.port,
+          protocol: p.protocol.toLowerCase(),
+          processName: p.processName || undefined,
+          executablePath: p.executablePath || undefined,
+          processId: p.processId || undefined,
+          timestamp: p.timestamp
+        }
+
+        // Keep the most recent entry or one with richer process info
+        if (!existing ||
+            (current.timestamp && existing.timestamp && current.timestamp > existing.timestamp) ||
+            (!existing.processName && current.processName)) {
+          portMap.set(key, current)
+        }
+      }
+    }
+
+    return Array.from(portMap.values()).map(({ timestamp, ...port }) => port)
+  }
+
+  // Comment 5: Refactor to use port ranges instead of expanding per-port
+  private extractAllowedPortRanges (firewallFilters: (VMNWFilter & { nwFilter: { rules: FWRule[] } })[]): Array<{
+    start: number
+    end: number
+    protocol: string
+    allowAllDestPorts?: boolean
+  }> {
+    const allowedRanges: Array<{
+      start: number
+      end: number
+      protocol: string
+      allowAllDestPorts?: boolean
+    }> = []
+
+    for (const filter of firewallFilters) {
+      for (const rule of filter.nwFilter.rules) {
+        // Only consider 'accept' rules for inbound or bidirectional traffic
+        if (rule.action !== 'accept' || (rule.direction !== 'in' && rule.direction !== 'inout')) {
+          continue
+        }
+
+        const protocol = rule.protocol?.toLowerCase() || 'all'
+
+        // Comment 1 & 2: Handle accept rules without explicit ports (not src-only rules)
+        if (!rule.dstPortStart && !rule.dstPortEnd && !rule.srcPortStart && !rule.srcPortEnd) {
+          allowedRanges.push({
+            start: 0,
+            end: 65535,
+            protocol,
+            allowAllDestPorts: true
+          })
+          continue
+        }
+
+        // Comment 4: Remove srcPortStart consideration for inbound analysis
+        // Handle destination ports (for incoming traffic)
+        if (rule.dstPortStart) {
+          const startPort = Number(rule.dstPortStart)
+          const endPort = rule.dstPortEnd ? Number(rule.dstPortEnd) : startPort
+
+          allowedRanges.push({
+            start: startPort,
+            end: endPort,
+            protocol
+          })
+        }
+      }
+    }
+
+    return allowedRanges
+  }
+
+  private detectPortConflicts (
+    listeningPorts: Array<{
+      port: number
+      protocol: string
+      processName?: string
+      executablePath?: string
+      processId?: number
+    }>,
+    allowedRanges: Array<{
+      start: number
+      end: number
+      protocol: string
+      allowAllDestPorts?: boolean
+    }>,
+    vmPorts: VmPort[]
+  ): Array<{
+    type: 'uncovered' | 'protocol_mismatch' | 'port_blocked' | 'vm_port_missing'
+    port: number
+    protocol: string
+    processName?: string
+    executablePath?: string
+    processId?: number
+    allowedProtocols?: string[]
+    vmPortEnabled?: boolean
+    vmPortToEnable?: boolean
+  }> {
+    const conflicts: Array<{
+      type: 'uncovered' | 'protocol_mismatch' | 'port_blocked' | 'vm_port_missing'
+      port: number
+      protocol: string
+      processName?: string
+      executablePath?: string
+      processId?: number
+      allowedProtocols?: string[]
+      vmPortEnabled?: boolean
+      vmPortToEnable?: boolean
+    }> = []
+
+    for (const listening of listeningPorts) {
+      const { port, protocol } = listening
+
+      // Comment 1: Always check VmPort data for misconfiguration (independent of firewall)
+      const vmPort = vmPorts.find(vp =>
+        (port >= vp.portStart && port <= vp.portEnd) &&
+        vp.protocol.toLowerCase() === protocol
+      )
+
+      if (vmPort && !vmPort.enabled) {
+        conflicts.push({
+          type: 'port_blocked',
+          ...listening,
+          vmPortEnabled: vmPort.enabled,
+          vmPortToEnable: vmPort.toEnable
+        })
+      } else if (!vmPort) {
+        // Missing VmPort entry
+        conflicts.push({
+          type: 'vm_port_missing',
+          ...listening
+        })
+      }
+
+      // Always check firewall rules regardless of VmPort status
+      // Comment 9: Fast path for protocol-only rules
+      if (this.isPortAllowedByRules(port, protocol, allowedRanges)) {
+        continue // Port is allowed by firewall, no firewall conflict
+      }
+
+      // Find matching firewall rules for detailed analysis
+      const matchingRules = allowedRanges.filter(range =>
+        port >= range.start && port <= range.end
+      )
+
+      if (matchingRules.length === 0) {
+        // No firewall rules covering this port
+        conflicts.push({
+          type: 'uncovered',
+          ...listening
+        })
+      } else {
+        // Check for protocol compatibility
+        const compatibleRules = matchingRules.filter(rule =>
+          rule.protocol === 'all' ||
+          rule.protocol === protocol
+        )
+
+        if (compatibleRules.length === 0) {
+          // Port is covered but protocol doesn't match
+          const allowedProtocols = Array.from(new Set(matchingRules.map(r => r.protocol)))
+          conflicts.push({
+            type: 'protocol_mismatch',
+            ...listening,
+            allowedProtocols
+          })
+        }
+      }
+    }
+
+    return conflicts
+  }
+
+  // Comment 5: Implement efficient port checking
+  private isPortAllowedByRules (
+    port: number,
+    protocol: string,
+    allowedRanges: Array<{
+      start: number
+      end: number
+      protocol: string
+      allowAllDestPorts?: boolean
+    }>
+  ): boolean {
+    // Comment 1 & 9: Check for allow-all rules first
+    for (const range of allowedRanges) {
+      if (range.allowAllDestPorts && (range.protocol === 'all' || range.protocol === protocol)) {
+        return true
+      }
+    }
+
+    // Check specific port ranges
+    return allowedRanges.some(range =>
+      port >= range.start &&
+      port <= range.end &&
+      (range.protocol === 'all' || range.protocol === protocol)
+    )
+  }
+
+  private generateConflictRecommendations (conflicts: Array<{
+    type: 'uncovered' | 'protocol_mismatch' | 'port_blocked' | 'vm_port_missing'
+    port: number
+    protocol: string
+    processName?: string
+    executablePath?: string
+    processId?: number
+    allowedProtocols?: string[]
+    vmPortEnabled?: boolean
+    vmPortToEnable?: boolean
+  }>): RecommendationResult[] {
+    const results: RecommendationResult[] = []
+
+    if (conflicts.length === 0) {
+      return results
+    }
+
+    // Group conflicts by type
+    const uncoveredPorts = conflicts.filter(c => c.type === 'uncovered')
+    const protocolMismatches = conflicts.filter(c => c.type === 'protocol_mismatch')
+    const blockedPorts = conflicts.filter(c => c.type === 'port_blocked')
+    const missingVmPorts = conflicts.filter(c => c.type === 'vm_port_missing')
+
+    // Generate recommendations for uncovered ports
+    if (uncoveredPorts.length > 0) {
+      if (uncoveredPorts.length === 1) {
+        const conflict = uncoveredPorts[0]
+        const processInfo = conflict.processName ? ` (${conflict.processName})` : ''
+
+        results.push({
+          type: RecommendationType.PORT_BLOCKED,
+          text: `Application${processInfo} is using port ${conflict.port}/${conflict.protocol} which is not allowed by firewall rules`,
+          actionText: `Add a firewall rule to allow port ${conflict.port}/${conflict.protocol} or stop the application if not needed`,
+          data: {
+            port: conflict.port,
+            protocol: conflict.protocol,
+            processName: conflict.processName || 'Unknown',
+            executablePath: conflict.executablePath || 'Unknown',
+            processId: conflict.processId || 0,
+            conflictType: 'uncovered',
+            priority: 'HIGH',
+            category: 'Security',
+            firewallRuleSuggestion: `Add rule: allow ${conflict.protocol} port ${conflict.port} (destination)`
+          }
+        })
+      } else {
+        const portList = uncoveredPorts.map(c => `${c.port}/${c.protocol}`).join(', ')
+        const uncoveredPortsList = uncoveredPorts.map(c =>
+          `${c.port}/${c.protocol} (${c.processName || 'Unknown'})`
+        ).join(', ')
+
+        results.push({
+          type: RecommendationType.PORT_BLOCKED,
+          text: `${uncoveredPorts.length} applications are using ports not covered by firewall rules: ${portList}`,
+          actionText: 'Review and update firewall configuration to allow necessary ports or stop unused applications',
+          data: {
+            conflictCount: uncoveredPorts.length,
+            conflictType: 'uncovered',
+            uncoveredPortsList,
+            priority: 'HIGH',
+            category: 'Security',
+            firewallRuleSuggestion: 'Review each port and add appropriate firewall rules'
+          }
+        })
+      }
+    }
+
+    // Comment 3: Generate recommendations for VM port blocks
+    for (const conflict of blockedPorts) {
+      const processInfo = conflict.processName ? ` (${conflict.processName})` : ''
+
+      results.push({
+        type: RecommendationType.PORT_BLOCKED,
+        text: `Application${processInfo} is using port ${conflict.port}/${conflict.protocol} but VM port settings don't allow this service`,
+        actionText: `Enable port ${conflict.port}/${conflict.protocol} in VM port configuration or stop the application if not needed`,
+        data: {
+          port: conflict.port,
+          protocol: conflict.protocol,
+          processName: conflict.processName || 'Unknown',
+          executablePath: conflict.executablePath || 'Unknown',
+          processId: conflict.processId || 0,
+          conflictType: 'vm_port_disabled',
+          vmPortEnabled: conflict.vmPortEnabled,
+          vmPortToEnable: conflict.vmPortToEnable,
+          priority: 'HIGH',
+          category: 'Configuration'
+        }
+      })
+    }
+
+    // Comment 1: Generate recommendations for missing VM port entries
+    for (const conflict of missingVmPorts) {
+      const processInfo = conflict.processName ? ` (${conflict.processName})` : ''
+
+      results.push({
+        type: RecommendationType.PORT_BLOCKED,
+        text: `Service${processInfo} is using port ${conflict.port}/${conflict.protocol} but it is not declared in VM port settings`,
+        actionText: `Declare and enable ${conflict.port}/${conflict.protocol} in VM port configuration or stop the service`,
+        data: {
+          port: conflict.port,
+          protocol: conflict.protocol,
+          processName: conflict.processName || 'Unknown',
+          executablePath: conflict.executablePath || 'Unknown',
+          processId: conflict.processId || 0,
+          conflictType: 'vm_port_missing',
+          category: 'Configuration',
+          priority: 'HIGH'
+        }
+      })
+    }
+
+    // Generate recommendations for protocol mismatches
+    for (const conflict of protocolMismatches) {
+      const processInfo = conflict.processName ? ` (${conflict.processName})` : ''
+      const allowedProtocolsText = conflict.allowedProtocols?.join(', ') || 'unknown'
+
+      results.push({
+        type: RecommendationType.PORT_BLOCKED,
+        text: `Port ${conflict.port} has firewall rules for ${allowedProtocolsText} but application${processInfo} is using ${conflict.protocol}`,
+        actionText: `Update firewall rules to allow ${conflict.protocol} protocol or configure application to use ${allowedProtocolsText}`,
+        data: {
+          port: conflict.port,
+          actualProtocol: conflict.protocol,
+          allowedProtocols: conflict.allowedProtocols?.join(', ') || '',
+          processName: conflict.processName || 'Unknown',
+          executablePath: conflict.executablePath || 'Unknown',
+          processId: conflict.processId || 0,
+          conflictType: 'protocol_mismatch',
+          priority: 'MEDIUM',
+          category: 'Security',
+          firewallRuleSuggestion: `Update rule: allow ${conflict.protocol} port ${conflict.port}`
+        }
+      })
+    }
+
+    return results
+  }
+
+  private isSystemPort (port: number): boolean {
+    // Common system ports that should be excluded from conflict analysis
+    const systemPorts = new Set([
+      22, // SSH
+      53, // DNS
+      80, // HTTP
+      443, // HTTPS
+      123, // NTP
+      135, // RPC Endpoint Mapper (Windows)
+      139, // NetBIOS Session Service
+      445, // SMB over IP
+      993, // IMAPS
+      995, // POP3S
+      3389, // RDP
+      5985, // WinRM HTTP
+      5986 // WinRM HTTPS
+    ])
+
+    // Also exclude well-known ports below 1024 (except for common services listed above)
+    return systemPorts.has(port) || (port < 1024 && ![80, 443].includes(port))
   }
 }
 
@@ -1522,8 +1953,9 @@ class OsUpdateChecker extends RecommendationChecker {
 
       // Create consolidated recommendation if any issues found
       if (flags.length > 0) {
-        const text = `Windows Update issues detected: ${issues.join(', ')}`
-        const actionText = `Address Windows Update issues: ${actions.join(', ')} through Settings > Update & Security > Windows Update`
+        const vmName = context.machineConfig?.name || 'VM'
+        const text = `Windows Update issues detected on ${vmName}: ${issues.join(', ')}`
+        const actionText = `Address Windows Update issues on ${vmName}: ${actions.join(', ')} through Settings > Update & Security > Windows Update`
 
         results.push({
           type: 'OS_UPDATE_AVAILABLE',
@@ -1536,7 +1968,6 @@ class OsUpdateChecker extends RecommendationChecker {
           }
         })
       }
-
     } catch (error) {
       console.warn('VMRecommendationService: Failed to parse windowsUpdateInfo:', error)
     }
@@ -1599,7 +2030,7 @@ class AppUpdateChecker extends RecommendationChecker {
       // Generate individual recommendations for top 5 most important apps
       const topApps = [
         ...securityUpdates.slice(0, 3), // Top 3 security updates
-        ...regularUpdates.slice(0, 2)   // Top 2 regular updates
+        ...regularUpdates.slice(0, 2) // Top 2 regular updates
       ].slice(0, 5)
 
       for (const app of topApps) {
@@ -1608,14 +2039,15 @@ class AppUpdateChecker extends RecommendationChecker {
         const currentVersion = app.version || app.current_version || 'Unknown'
         const availableVersion = app.update_available || app.new_version || 'Unknown'
         const updateSource = app.update_source || 'Windows Update'
+        const vmName = context.machineConfig?.name || 'VM'
 
         const text = isSecurityUpdate
-          ? `Security update available for ${appName} (current: ${currentVersion}, available: ${availableVersion})`
-          : `Update available for ${appName} (current: ${currentVersion}, available: ${availableVersion})`
+          ? `Security update available for ${appName} on ${vmName} (current: ${currentVersion}, available: ${availableVersion})`
+          : `Update available for ${appName} on ${vmName} (current: ${currentVersion}, available: ${availableVersion})`
 
         const actionText = isSecurityUpdate
-          ? `Update ${appName} through ${updateSource} to fix security vulnerabilities`
-          : `Update ${appName} through ${updateSource} to get new features and improvements`
+          ? `Update ${appName} on ${vmName} through ${updateSource} to fix security vulnerabilities`
+          : `Update ${appName} on ${vmName} through ${updateSource} to get new features and improvements`
 
         results.push({
           type: 'APP_UPDATE_AVAILABLE',
@@ -1657,7 +2089,6 @@ class AppUpdateChecker extends RecommendationChecker {
           }
         })
       }
-
     } catch (error) {
       console.warn('VMRecommendationService: Failed to parse applicationInventory:', error)
     }
@@ -1706,10 +2137,11 @@ class DefenderDisabledChecker extends RecommendationChecker {
       }
       // Check if real-time protection is disabled (but Defender is enabled)
       else if (defenderData.real_time_protection === false) {
+        const vmName = context.machineConfig?.name || 'VM'
         results.push({
           type: 'DEFENDER_DISABLED',
-          text: 'Windows Defender real-time protection is disabled',
-          actionText: 'Enable real-time protection in Windows Security > Virus & threat protection settings',
+          text: `Windows Defender real-time protection is disabled on ${vmName}`,
+          actionText: `Enable real-time protection on ${vmName} in Windows Security > Virus & threat protection settings`,
           data: {
             realTimeProtectionDisabled: true,
             defenderEnabled: true,
@@ -1724,11 +2156,12 @@ class DefenderDisabledChecker extends RecommendationChecker {
       // Check signature age (skip if unknown - signature_age_days: 999 indicates unknown)
       const signatureAge = defenderData.signature_age_days
       if (typeof signatureAge === 'number' && signatureAge !== 999) {
+        const vmName = context.machineConfig?.name || 'VM'
         if (signatureAge > 7) {
           results.push({
             type: 'DEFENDER_DISABLED',
-            text: `Windows Defender virus signatures are ${signatureAge} days old`,
-            actionText: 'Update virus signatures through Windows Security > Virus & threat protection > Check for updates',
+            text: `Windows Defender virus signatures on ${vmName} are ${signatureAge} days old`,
+            actionText: `Update virus signatures on ${vmName} through Windows Security > Virus & threat protection > Check for updates`,
             data: {
               outdatedSignatures: true,
               signatureAgeDays: signatureAge,
@@ -1740,8 +2173,8 @@ class DefenderDisabledChecker extends RecommendationChecker {
         } else if (signatureAge > 3) {
           results.push({
             type: 'DEFENDER_DISABLED',
-            text: `Windows Defender virus signatures are ${signatureAge} days old`,
-            actionText: 'Update virus signatures through Windows Security > Virus & threat protection > Check for updates',
+            text: `Windows Defender virus signatures on ${vmName} are ${signatureAge} days old`,
+            actionText: `Update virus signatures on ${vmName} through Windows Security > Virus & threat protection > Check for updates`,
             data: {
               outdatedSignatures: true,
               signatureAgeDays: signatureAge,
@@ -1788,7 +2221,6 @@ class DefenderDisabledChecker extends RecommendationChecker {
           })
         }
       }
-
     } catch (error) {
       console.warn('VMRecommendationService: Failed to parse defenderStatus:', error)
     }
@@ -1861,7 +2293,7 @@ class DefenderThreatChecker extends RecommendationChecker {
             data: {
               activeThreats: activeThreats.length,
               totalThreats: threatsDetected,
-              threatNames: threatNames,
+              threatNames,
               highSeverityCount: highSeverityThreats.length,
               detectionDates: activeThreats.slice(0, 5).map((t: ThreatInfo) => t.detection_time || t.detected_at),
               severity: 'critical'
@@ -1927,7 +2359,6 @@ class DefenderThreatChecker extends RecommendationChecker {
           }
         }
       }
-
     } catch (error) {
       console.warn('VMRecommendationService: Failed to parse defenderStatus for threat analysis:', error)
     }
@@ -1936,11 +2367,50 @@ class DefenderThreatChecker extends RecommendationChecker {
   }
 }
 
+interface CacheEntry {
+  data: any
+  timestamp: number
+  ttl: number
+}
+
+interface PerformanceMetrics {
+  totalGenerations: number
+  averageGenerationTime: number
+  cacheHitRate: number
+  cacheHits: number
+  cacheMisses: number
+  contextBuildTime: number
+  checkerTimes: Map<string, number>
+  errorCount: number
+  lastError: string | null
+}
+
+interface ServiceConfiguration {
+  cacheTTLMinutes: number
+  maxCacheSize: number
+  enablePerformanceMonitoring: boolean
+  enableContextCaching: boolean
+  contextCacheTTLMinutes: number
+  performanceLoggingThreshold: number
+  maxRetries: number
+  retryDelayMs: number
+}
+
 export class VMRecommendationService {
   private checkers: RecommendationChecker[] = []
+  private cache = new Map<string, CacheEntry>()
+  private contextCache = new Map<string, CacheEntry>()
+  private performanceMetrics: PerformanceMetrics
+  private config: ServiceConfiguration
+  private maintenanceTimer: NodeJS.Timeout | null = null
+  private isDisposed: boolean = false
 
   constructor (private prisma: PrismaClient) {
+    this.config = this.loadConfiguration()
+    this.performanceMetrics = this.initializePerformanceMetrics()
     this.registerDefaultCheckers()
+    this.validateConfiguration()
+    this.startMaintenanceTimer()
   }
 
   private registerDefaultCheckers (): void {
@@ -1956,7 +2426,19 @@ export class VMRecommendationService {
           enabledCheckers.push(`${checker.getName()} (${checker.getCategory()})`)
           console.debug(`VM Recommendations: ${description} enabled`)
         } catch (error) {
-          console.error(`VM Recommendations: Failed to register ${description}:`, error)
+          const standardizedError = new AppError(
+            `Failed to register VM recommendation checker: ${description}`,
+            ErrorCode.VM_RECOMMENDATION_ERROR,
+            500,
+            true,
+            { checker: description, operation: 'registerChecker' }
+          )
+          console.error(`VM Recommendations: Failed to register ${description}:`, {
+            message: standardizedError.message,
+            code: standardizedError.code,
+            context: standardizedError.context,
+            originalError: (error as Error).message
+          })
         }
       } else {
         disabledCheckers.push(description)
@@ -1974,7 +2456,7 @@ export class VMRecommendationService {
     // Security checkers (prioritized first for security recommendations)
     registerIfEnabled('ENABLE_DEFENDER_DISABLED_CHECKER', DefenderDisabledChecker, 'DefenderDisabledChecker')
     registerIfEnabled('ENABLE_DEFENDER_THREAT_CHECKER', DefenderThreatChecker, 'DefenderThreatChecker')
-    registerIfEnabled('ENABLE_PORT_BLOCKED_CHECKER', PortBlockedChecker, 'PortBlockedChecker')
+    registerIfEnabled('ENABLE_PORT_BLOCKED_CHECKER', PortConflictChecker, 'PortConflictChecker')
 
     // Update and maintenance checkers
     registerIfEnabled('ENABLE_OS_UPDATE_CHECKER', OsUpdateChecker, 'OsUpdateChecker')
@@ -2005,67 +2487,252 @@ export class VMRecommendationService {
     this.checkers.push(checker)
   }
 
-  async generateRecommendations (vmId: string, snapshotId?: string): Promise<VMRecommendation[]> {
-    const context = await this.buildContext(vmId, snapshotId)
-    const results: RecommendationResult[] = []
+  /**
+   * Safe wrapper for generating recommendations with standardized error handling
+   * This method provides a service-level contract that prevents sensitive error details from leaking
+   */
+  public async generateRecommendationsSafe(vmId: string, snapshotId?: string): Promise<RecommendationOperationResult> {
+    try {
+      const recommendations = await this.generateRecommendations(vmId, snapshotId)
+      return {
+        success: true,
+        recommendations
+      }
+    } catch (error) {
+      // Log detailed error information (including context) for debugging
+      if (error instanceof AppError) {
+        console.error('VM Recommendation Service Error:', {
+          message: error.message,
+          code: error.code,
+          context: error.context,
+          vmId,
+          snapshotId,
+          timestamp: new Date().toISOString()
+        })
+      } else {
+        console.error('Unexpected VM Recommendation Service Error:', {
+          message: (error as Error).message,
+          vmId,
+          snapshotId,
+          timestamp: new Date().toISOString(),
+          stack: (error as Error).stack?.substring(0, 500)
+        })
+      }
 
-    for (const checker of this.checkers) {
-      if (checker.isApplicable(context)) {
-        try {
-          const checkerResults = await checker.analyze(context)
-          results.push(...checkerResults)
-        } catch (error) {
-          console.error(`Error running checker ${checker.getName()}:`, error)
-        }
+      // Return generic error message to prevent sensitive information leakage
+      return {
+        success: false,
+        error: 'Failed to generate recommendations'
       }
     }
+  }
 
-    return this.saveRecommendations(vmId, context.latestSnapshot?.id ?? null, results)
+  async generateRecommendations (vmId: string, snapshotId?: string): Promise<VMRecommendation[]> {
+    // Check if service has been disposed
+    if (this.isDisposed) {
+      throw new AppError(
+        'VM recommendation service has been disposed and cannot generate recommendations',
+        ErrorCode.VM_RECOMMENDATION_GENERATION_FAILED,
+        500,
+        true,
+        { vmId, snapshotId, operation: 'generateRecommendations', service: 'VMRecommendationService' }
+      )
+    }
+
+    const startTime = Date.now()
+    const cacheKey = `recommendations:${vmId}:${snapshotId || 'latest'}`
+
+    try {
+      // Check cache first if enabled
+      if (this.config.enableContextCaching) {
+        const cachedResult = this.getFromCache(cacheKey)
+        if (cachedResult) {
+          console.log(`⚡ Cache hit for recommendations ${vmId} (${snapshotId || 'latest'})`)
+          this.updateCacheHitRate(true)
+          return cachedResult
+        }
+        this.updateCacheHitRate(false)
+      }
+
+      console.log(`💡 Generating recommendations for VM ${vmId}${snapshotId ? ` snapshot ${snapshotId}` : ' (latest snapshot)'}`)
+
+      // Build context with performance timing
+      const contextStartTime = Date.now()
+      const context = await this.buildContextWithCaching(vmId, snapshotId)
+      const contextBuildTime = Date.now() - contextStartTime
+      this.performanceMetrics.contextBuildTime = this.updateAverageTime(this.performanceMetrics.contextBuildTime, contextBuildTime)
+
+      if (contextBuildTime > this.config.performanceLoggingThreshold) {
+        console.warn(`⚠️ Context building took ${contextBuildTime}ms for VM ${vmId} (threshold: ${this.config.performanceLoggingThreshold}ms)`)
+      }
+
+      const results: RecommendationResult[] = []
+      const checkerPerformance = new Map<string, number>()
+
+      // Run checkers with individual performance monitoring
+      for (const checker of this.checkers) {
+        if (checker.isApplicable(context)) {
+          const checkerStartTime = Date.now()
+          try {
+            const checkerResults = await this.runCheckerWithRetry(checker, context)
+            results.push(...checkerResults)
+
+            const checkerTime = Date.now() - checkerStartTime
+            checkerPerformance.set(checker.getName(), checkerTime)
+
+            // Update checker performance metrics
+            const existingTime = this.performanceMetrics.checkerTimes.get(checker.getName()) || 0
+            this.performanceMetrics.checkerTimes.set(checker.getName(), this.updateAverageTime(existingTime, checkerTime))
+
+          } catch (error) {
+            const checkerTime = Date.now() - checkerStartTime
+            this.handleCheckerError(checker.getName(), error as Error)
+            console.error(`❌ Checker ${checker.getName()} failed after ${checkerTime}ms:`, error)
+          }
+        }
+      }
+
+      // Save recommendations
+      const savedRecommendations = await this.saveRecommendations(vmId, context.latestSnapshot?.id ?? null, results)
+
+      const totalTime = Date.now() - startTime
+      this.updatePerformanceMetrics(totalTime, results.length)
+
+      // Cache results if enabled
+      if (this.config.enableContextCaching) {
+        this.setCache(cacheKey, savedRecommendations, this.config.cacheTTLMinutes * 60 * 1000)
+      }
+
+      // Log performance summary
+      this.logPerformanceSummary(vmId, totalTime, contextBuildTime, checkerPerformance, results.length)
+
+      return savedRecommendations
+
+    } catch (error) {
+      const totalTime = Date.now() - startTime
+      this.handleServiceError(error as Error, vmId, totalTime)
+      throw error
+    }
   }
 
   async getRecommendations (vmId: string, refresh?: boolean, filter?: RecommendationFilterInput): Promise<VMRecommendation[]> {
-    if (refresh) {
-      return this.generateRecommendations(vmId)
-    }
+    const startTime = Date.now()
 
-    // Build where clause from filter
-    const where: Prisma.VMRecommendationWhereInput = { machineId: vmId }
-
-    if (filter?.types && filter.types.length > 0) {
-      where.type = { in: filter.types }
-    }
-
-    if (filter?.createdAfter || filter?.createdBefore) {
-      const dateFilter: Prisma.DateTimeFilter = {}
-      if (filter.createdAfter) {
-        dateFilter.gte = filter.createdAfter
+    try {
+      // Check if service has been disposed
+      if (this.isDisposed) {
+        throw new AppError(
+          'VM recommendation service has been disposed and cannot process requests',
+          ErrorCode.VM_RECOMMENDATION_SERVICE_ERROR,
+          500,
+          true,
+          { vmId, operation: 'getRecommendations', service: 'VMRecommendationService' }
+        )
       }
-      if (filter.createdBefore) {
-        dateFilter.lte = filter.createdBefore
+
+      if (refresh) {
+        return this.generateRecommendations(vmId)
       }
-      where.createdAt = dateFilter
+
+      // Build where clause from filter
+      const where: Prisma.VMRecommendationWhereInput = { machineId: vmId }
+
+      if (filter?.types && filter.types.length > 0) {
+        where.type = { in: filter.types }
+      }
+
+      if (filter?.createdAfter || filter?.createdBefore) {
+        const dateFilter: Prisma.DateTimeFilter = {}
+        if (filter.createdAfter) {
+          dateFilter.gte = filter.createdAfter
+        }
+        if (filter.createdBefore) {
+          dateFilter.lte = filter.createdBefore
+        }
+        where.createdAt = dateFilter
+      }
+
+      // Determine limit with safety bounds to prevent over-fetch
+      const maxLimit = parseInt(process.env.RECOMMENDATION_MAX_LIMIT || '100')
+      const defaultLimit = 20 // Reduced default limit to prevent over-fetch
+      const take = filter?.limit && filter.limit > 0
+        ? Math.min(filter.limit, maxLimit)
+        : defaultLimit
+
+      // Get existing recommendations with filters applied at DB level
+      const existing = await this.prisma.vMRecommendation.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        take
+      })
+
+      // If no recommendations exist or they're old (>24 hours), generate new ones (unless filtering is active)
+      if (!filter && (existing.length === 0 || this.areRecommendationsStale(existing[0].createdAt))) {
+        return this.generateRecommendations(vmId)
+      }
+
+      return existing
+
+    } catch (error) {
+      const totalTime = Date.now() - startTime
+      this.handleServiceError(error as Error, vmId, totalTime)
+      throw error
     }
+  }
 
-    // Determine limit with safety bounds
-    const maxLimit = parseInt(process.env.RECOMMENDATION_MAX_LIMIT || '100')
-    const defaultLimit = 50
-    const take = filter?.limit && filter.limit > 0
-      ? Math.min(filter.limit, maxLimit)
-      : defaultLimit
+  /**
+   * Safe wrapper for getting recommendations with standardized error handling
+   * This method provides a service-level contract that prevents sensitive error details from leaking
+   */
+  public async getRecommendationsSafe(vmId: string, refresh?: boolean, filter?: RecommendationFilterInput): Promise<RecommendationOperationResult> {
+    try {
+      // Check if service has been disposed
+      if (this.isDisposed) {
+        return {
+          success: false,
+          error: 'Service unavailable'
+        }
+      }
 
-    // Get existing recommendations with filters applied at DB level
-    const existing = await this.prisma.vMRecommendation.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
-      take
-    })
+      if (refresh) {
+        // Use safe generation method for refresh
+        return await this.generateRecommendationsSafe(vmId)
+      }
 
-    // If no recommendations exist or they're old (>24 hours), generate new ones (unless filtering is active)
-    if (!filter && (existing.length === 0 || this.areRecommendationsStale(existing[0].createdAt))) {
-      return this.generateRecommendations(vmId)
+      const recommendations = await this.getRecommendations(vmId, false, filter)
+      return {
+        success: true,
+        recommendations
+      }
+    } catch (error) {
+      // Log detailed error information (including context) for debugging
+      if (error instanceof AppError) {
+        console.error('VM Recommendation Service Error (getRecommendations):', {
+          message: error.message,
+          code: error.code,
+          context: error.context,
+          vmId,
+          refresh,
+          filter: filter ? JSON.stringify(filter) : undefined,
+          timestamp: new Date().toISOString()
+        })
+      } else {
+        console.error('Unexpected VM Recommendation Service Error (getRecommendations):', {
+          message: (error as Error).message,
+          vmId,
+          refresh,
+          filter: filter ? JSON.stringify(filter) : undefined,
+          timestamp: new Date().toISOString(),
+          stack: (error as Error).stack?.substring(0, 500)
+        })
+      }
+
+      // Return generic error message to prevent sensitive information leakage
+      return {
+        success: false,
+        error: 'Service unavailable'
+      }
     }
-
-    return existing
   }
 
   async deleteOldRecommendations (vmId: string, olderThanDays: number): Promise<void> {
@@ -2118,15 +2785,54 @@ export class VMRecommendationService {
       take: portUsageMaxRows
     })
 
-    // Fetch firewall filters with rules
-    const firewallFilters = await this.prisma.vMNWFilter.findMany({
-      where: { vmId },
+    // Comment 2: Fetch VM with department NWFilters and Comment 8: include references
+    const machineWithDepartment = await this.prisma.machine.findUnique({
+      where: { id: vmId },
       include: {
-        nwFilter: {
-          include: { rules: true }
+        department: {
+          include: {
+            nwFilters: {
+              include: {
+                nwFilter: {
+                  include: {
+                    rules: true,
+                    references: {
+                      include: {
+                        targetFilter: {
+                          include: { rules: true }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        nwFilters: {
+          include: {
+            nwFilter: {
+              include: {
+                rules: true,
+                references: {
+                  include: {
+                    targetFilter: {
+                      include: { rules: true }
+                    }
+                  }
+                }
+              }
+            }
+          }
         }
       }
     })
+
+    // Combine VM-level and department-level filters with recursive references
+    const allFilters = await this.gatherAllNWFilters(
+      machineWithDepartment?.nwFilters || [],
+      machineWithDepartment?.department?.nwFilters || []
+    )
 
     // Fetch recent process snapshots (last 15-60 minutes)
     const recentProcessWindow = new Date()
@@ -2141,10 +2847,13 @@ export class VMRecommendationService {
       take: 1000 // Limit for performance
     })
 
-    // Fetch machine configuration
-    const machineConfig = await this.prisma.machine.findUnique({
-      where: { id: vmId }
+    // Fetch VM ports for misconfiguration checks
+    const vmPorts = await this.prisma.vmPort.findMany({
+      where: { vmId }
     })
+
+    // Use the machine config we already fetched
+    const machineConfig = machineWithDepartment
 
     return {
       vmId,
@@ -2152,8 +2861,9 @@ export class VMRecommendationService {
       historicalMetrics,
       recentProcessSnapshots,
       portUsage,
-      firewallFilters,
-      machineConfig
+      firewallFilters: allFilters,
+      machineConfig,
+      vmPorts
     }
   }
 
@@ -2194,6 +2904,41 @@ export class VMRecommendationService {
         take: results.length
       })
 
+      // Update snapshot with recommendation metadata if snapshotId provided
+      // NOTE: Considers future schema fields recommendationCount and recommendationsGeneratedAt
+      if (snapshotId) {
+        try {
+          const recommendationMetadata = {
+            count: results.length,
+            generatedAt: new Date().toISOString(),
+            lastUpdated: new Date().toISOString()
+          }
+
+          await tx.vMHealthSnapshot.update({
+            where: { id: snapshotId },
+            data: {
+              // Store in customCheckResults for now - should be dedicated fields in schema
+              customCheckResults: recommendationMetadata
+            }
+          })
+        } catch (error) {
+          const standardizedError = new AppError(
+            `Failed to update snapshot recommendation metadata for snapshot ${snapshotId}`,
+            ErrorCode.VM_RECOMMENDATION_ERROR,
+            500,
+            true,
+            { snapshotId, operation: 'updateSnapshotMetadata' }
+          )
+          console.error(`❌ Failed to update snapshot recommendation metadata for ${snapshotId}:`, {
+            message: standardizedError.message,
+            code: standardizedError.code,
+            context: standardizedError.context,
+            originalError: (error as Error).message
+          })
+          // Don't throw to avoid breaking recommendation creation
+        }
+      }
+
       return createdRecommendations
     })
   }
@@ -2202,5 +2947,584 @@ export class VMRecommendationService {
     const dayAgo = new Date()
     dayAgo.setHours(dayAgo.getHours() - 24)
     return lastCreated < dayAgo
+  }
+
+  // Comment 8: Recursively gather all NWFilter rules including references
+  private async gatherAllNWFilters (
+    vmFilters: (VMNWFilter & {
+      nwFilter: {
+        rules: FWRule[]
+        references: Array<{
+          targetFilter: {
+            rules: FWRule[]
+          }
+        }>
+      }
+    })[],
+    departmentFilters: (DepartmentNWFilter & {
+      nwFilter: {
+        rules: FWRule[]
+        references: Array<{
+          targetFilter: {
+            rules: FWRule[]
+          }
+        }>
+      }
+    })[]
+  ): Promise<(VMNWFilter & { nwFilter: { rules: FWRule[] } })[]> {
+    const processedFilters = new Set<string>()
+    const result: (VMNWFilter & { nwFilter: { rules: FWRule[] } })[] = []
+
+    // Helper function to recursively collect rules
+    const collectRules = (filter: {
+      rules: FWRule[]
+      references?: Array<{ targetFilter: { rules: FWRule[] } }>
+    }, depth = 0): FWRule[] => {
+      if (depth > 3) return [] // Comment 8: Guard with depth limit to avoid cycles
+
+      const rules = [...filter.rules]
+
+      // Recursively collect from referenced filters
+      if (filter.references) {
+        for (const ref of filter.references) {
+          rules.push(...collectRules(ref.targetFilter, depth + 1))
+        }
+      }
+
+      return rules
+    }
+
+    // Process VM-level filters
+    for (const vmFilter of vmFilters) {
+      if (!processedFilters.has(vmFilter.nwFilterId)) {
+        const allRules = collectRules(vmFilter.nwFilter)
+        processedFilters.add(vmFilter.nwFilterId)
+        result.push({
+          ...vmFilter,
+          nwFilter: {
+            ...vmFilter.nwFilter,
+            rules: allRules
+          }
+        })
+      }
+    }
+
+    // Process department-level filters
+    for (const deptFilter of departmentFilters) {
+      if (!processedFilters.has(deptFilter.nwFilterId)) {
+        const allRules = collectRules(deptFilter.nwFilter)
+        processedFilters.add(deptFilter.nwFilterId)
+        // Convert DepartmentNWFilter to VMNWFilter-like structure
+        result.push({
+          id: `dept-${deptFilter.id}`,
+          vmId: '', // Not applicable for department filters
+          nwFilterId: deptFilter.nwFilterId,
+          createdAt: deptFilter.createdAt,
+          updatedAt: deptFilter.updatedAt,
+          nwFilter: {
+            ...deptFilter.nwFilter,
+            rules: allRules
+          }
+        } as VMNWFilter & { nwFilter: { rules: FWRule[] } })
+      }
+    }
+
+    return result
+  }
+
+  /**
+   * Load service configuration from environment variables
+   */
+  private loadConfiguration(): ServiceConfiguration {
+    return {
+      cacheTTLMinutes: Number(process.env.RECOMMENDATION_CACHE_TTL_MINUTES) || 15,
+      maxCacheSize: Number(process.env.RECOMMENDATION_MAX_CACHE_SIZE) || 100,
+      enablePerformanceMonitoring: process.env.RECOMMENDATION_PERFORMANCE_MONITORING !== 'false',
+      enableContextCaching: process.env.RECOMMENDATION_CONTEXT_CACHING !== 'false',
+      contextCacheTTLMinutes: Number(process.env.RECOMMENDATION_CONTEXT_CACHE_TTL_MINUTES) || 5,
+      performanceLoggingThreshold: Number(process.env.RECOMMENDATION_PERFORMANCE_THRESHOLD) || 5000,
+      maxRetries: Number(process.env.RECOMMENDATION_MAX_RETRIES) || 3,
+      retryDelayMs: Number(process.env.RECOMMENDATION_RETRY_DELAY_MS) || 1000
+    }
+  }
+
+  /**
+   * Initialize performance metrics
+   */
+  private initializePerformanceMetrics(): PerformanceMetrics {
+    return {
+      totalGenerations: 0,
+      averageGenerationTime: 0,
+      cacheHitRate: 0,
+      cacheHits: 0,
+      cacheMisses: 0,
+      contextBuildTime: 0,
+      checkerTimes: new Map<string, number>(),
+      errorCount: 0,
+      lastError: null
+    }
+  }
+
+  /**
+   * Validate configuration and log settings
+   */
+  private validateConfiguration(): void {
+    try {
+      console.log('🔧 VMRecommendationService configuration:')
+      console.log(`   - Context caching: ${this.config.enableContextCaching} (TTL: ${this.config.contextCacheTTLMinutes}min)`)
+      console.log(`   - Result caching: ${this.config.cacheTTLMinutes}min (Max size: ${this.config.maxCacheSize})`)
+      console.log(`   - Performance monitoring: ${this.config.enablePerformanceMonitoring}`)
+      console.log(`   - Performance threshold: ${this.config.performanceLoggingThreshold}ms`)
+      console.log(`   - Max retries: ${this.config.maxRetries} (Delay: ${this.config.retryDelayMs}ms)`)
+
+      if (this.config.cacheTTLMinutes <= 0) {
+        console.warn('⚠️ Cache TTL is disabled or invalid')
+      }
+
+      console.log('✅ VMRecommendationService configuration validated')
+    } catch (error) {
+      const standardizedError = new AppError(
+        'VM recommendation service configuration validation failed',
+        ErrorCode.VM_RECOMMENDATION_ERROR,
+        500,
+        false, // Non-operational error - indicates configuration issue
+        { operation: 'validateConfiguration', service: 'VMRecommendationService' }
+      )
+      console.error('❌ Configuration validation failed:', {
+        message: standardizedError.message,
+        code: standardizedError.code,
+        context: standardizedError.context,
+        originalError: (error as Error).message
+      })
+      throw standardizedError
+    }
+  }
+
+  /**
+   * Start maintenance timer for cache cleanup
+   */
+  private startMaintenanceTimer(): void {
+    // Run maintenance every 5 minutes
+    this.maintenanceTimer = setInterval(() => {
+      this.performMaintenance()
+    }, 5 * 60 * 1000)
+
+    console.log('✅ VMRecommendationService maintenance timer started (5-minute intervals)')
+  }
+
+  /**
+   * Build context with caching support
+   */
+  private async buildContextWithCaching(vmId: string, snapshotId?: string): Promise<RecommendationContext> {
+    const cacheKey = `context:${vmId}:${snapshotId || 'latest'}`
+
+    if (this.config.enableContextCaching) {
+      const cachedContext = this.getFromContextCache(cacheKey)
+      if (cachedContext) {
+        return cachedContext
+      }
+    }
+
+    const context = await this.buildContext(vmId, snapshotId)
+
+    if (this.config.enableContextCaching) {
+      this.setContextCache(cacheKey, context, this.config.contextCacheTTLMinutes * 60 * 1000)
+    }
+
+    return context
+  }
+
+  /**
+   * Run checker with retry logic
+   */
+  private async runCheckerWithRetry(checker: RecommendationChecker, context: RecommendationContext): Promise<RecommendationResult[]> {
+    let lastError: Error | null = null
+
+    for (let attempt = 1; attempt <= this.config.maxRetries; attempt++) {
+      try {
+        return await checker.analyze(context)
+      } catch (error) {
+        lastError = error as Error
+
+        if (attempt < this.config.maxRetries) {
+          const delay = this.config.retryDelayMs * attempt // Linear backoff
+          console.warn(`⚠️ Checker ${checker.getName()} failed (attempt ${attempt}/${this.config.maxRetries}), retrying in ${delay}ms:`, error)
+          await new Promise(resolve => setTimeout(resolve, delay))
+        }
+      }
+    }
+
+    throw lastError || new AppError(
+      'Recommendation checker failed',
+      ErrorCode.VM_RECOMMENDATION_CHECKER_FAILED,
+      500,
+      true,
+      { checker: checker.getName(), maxRetries: this.config.maxRetries.toString() }
+    )
+  }
+
+  /**
+   * Get data from cache
+   */
+  private getFromCache(key: string): any | null {
+    const entry = this.cache.get(key)
+    if (entry && Date.now() - entry.timestamp < entry.ttl) {
+      return entry.data
+    }
+
+    if (entry) {
+      this.cache.delete(key) // Clean up expired entry
+    }
+
+    return null
+  }
+
+  /**
+   * Set data in cache
+   */
+  private setCache(key: string, data: any, ttl: number): void {
+    // Implement cache size limit
+    if (this.cache.size >= this.config.maxCacheSize) {
+      // Remove oldest entry
+      const firstKey = this.cache.keys().next().value
+      if (firstKey) {
+        this.cache.delete(firstKey)
+      }
+    }
+
+    this.cache.set(key, {
+      data,
+      timestamp: Date.now(),
+      ttl
+    })
+  }
+
+  /**
+   * Get data from context cache
+   */
+  private getFromContextCache(key: string): RecommendationContext | null {
+    const entry = this.contextCache.get(key)
+    if (entry && Date.now() - entry.timestamp < entry.ttl) {
+      return entry.data
+    }
+
+    if (entry) {
+      this.contextCache.delete(key) // Clean up expired entry
+    }
+
+    return null
+  }
+
+  /**
+   * Set data in context cache
+   */
+  private setContextCache(key: string, data: RecommendationContext, ttl: number): void {
+    // Context cache has separate size limit
+    if (this.contextCache.size >= 50) { // Fixed limit for context cache
+      const firstKey = this.contextCache.keys().next().value
+      if (firstKey) {
+        this.contextCache.delete(firstKey)
+      }
+    }
+
+    this.contextCache.set(key, {
+      data,
+      timestamp: Date.now(),
+      ttl
+    })
+  }
+
+  /**
+   * Update cache hit rate
+   */
+  private updateCacheHitRate(isHit: boolean): void {
+    if (isHit) {
+      this.performanceMetrics.cacheHits++
+    } else {
+      this.performanceMetrics.cacheMisses++
+    }
+
+    const total = this.performanceMetrics.cacheHits + this.performanceMetrics.cacheMisses
+    this.performanceMetrics.cacheHitRate = this.performanceMetrics.cacheHits / total
+  }
+
+  /**
+   * Update average time metric
+   */
+  private updateAverageTime(currentAverage: number, newTime: number): number {
+    const count = this.performanceMetrics.totalGenerations || 1
+    return ((currentAverage * (count - 1)) + newTime) / count
+  }
+
+  /**
+   * Update performance metrics after recommendation generation
+   */
+  private updatePerformanceMetrics(totalTime: number, recommendationCount: number): void {
+    this.performanceMetrics.totalGenerations++
+    this.performanceMetrics.averageGenerationTime = this.updateAverageTime(
+      this.performanceMetrics.averageGenerationTime,
+      totalTime
+    )
+
+    console.debug(`📊 Generated ${recommendationCount} recommendations in ${totalTime}ms (avg: ${Math.round(this.performanceMetrics.averageGenerationTime)}ms)`)
+  }
+
+  /**
+   * Handle checker-specific errors
+   */
+  private handleCheckerError(checkerName: string, error: Error): void {
+    this.performanceMetrics.errorCount++
+    this.performanceMetrics.lastError = `${checkerName}: ${error.message}`
+
+    const standardizedError = error instanceof AppError
+      ? error
+      : new AppError(
+          'Recommendation checker failed',
+          ErrorCode.VM_RECOMMENDATION_CHECKER_FAILED,
+          500,
+          true,
+          { checker: checkerName, originalError: error.name }
+        )
+
+    console.error(`❌ Checker error in ${checkerName}:`, {
+      originalError: error.message,
+      errorName: error.name,
+      errorStack: error.stack?.substring(0, 200) + '...',
+      checkerName,
+      code: standardizedError.code,
+      context: standardizedError.context
+    })
+  }
+
+  /**
+   * Handle service-level errors
+   */
+  private handleServiceError(error: Error, vmId: string, totalTime: number): void {
+    this.performanceMetrics.errorCount++
+    this.performanceMetrics.lastError = `Service error for VM ${vmId}: ${error.message}`
+
+    const standardizedError = error instanceof AppError
+      ? error
+      : new AppError(
+          'VM recommendation service failed',
+          ErrorCode.VM_RECOMMENDATION_SERVICE_ERROR,
+          500,
+          true,
+          {
+            vmId,
+            totalTime: totalTime.toString(),
+            operation: 'getRecommendations',
+            service: 'VMRecommendationService'
+          }
+        )
+
+    console.error(`❌ VMRecommendationService error for VM ${vmId} after ${totalTime}ms:`, {
+      originalError: error.message,
+      errorName: error.name,
+      errorStack: error.stack?.substring(0, 300) + '...',
+      vmId,
+      totalTime,
+      code: standardizedError.code,
+      context: standardizedError.context
+    })
+
+    // Note: Error is logged but not re-thrown to allow safe wrapper methods to handle normalization
+    // Re-throw the standardized error to propagate it properly (only for non-safe method calls)
+    throw standardizedError
+  }
+
+  /**
+   * Log performance summary
+   */
+  private logPerformanceSummary(vmId: string, totalTime: number, contextTime: number, checkerTimes: Map<string, number>, recommendationCount: number): void {
+    if (!this.config.enablePerformanceMonitoring) return
+
+    const slowCheckers = Array.from(checkerTimes.entries())
+      .filter(([, time]) => time > 1000) // > 1 second
+      .sort((a, b) => b[1] - a[1])
+
+    if (totalTime > this.config.performanceLoggingThreshold || slowCheckers.length > 0) {
+      console.log(`📊 Performance summary for VM ${vmId}:`)
+      console.log(`   - Total time: ${totalTime}ms`)
+      console.log(`   - Context build: ${contextTime}ms`)
+      console.log(`   - Recommendations: ${recommendationCount}`)
+
+      if (slowCheckers.length > 0) {
+        console.log(`   - Slow checkers:`)
+        slowCheckers.forEach(([name, time]) => {
+          console.log(`     • ${name}: ${time}ms`)
+        })
+      }
+    }
+  }
+
+  /**
+   * Perform maintenance tasks
+   */
+  private performMaintenance(): void {
+    try {
+      // Clean expired cache entries
+      let cacheCleanedCount = 0
+      let contextCacheCleanedCount = 0
+
+      const now = Date.now()
+
+      // Clean main cache
+      for (const [key, entry] of this.cache.entries()) {
+        if (now - entry.timestamp >= entry.ttl) {
+          this.cache.delete(key)
+          cacheCleanedCount++
+        }
+      }
+
+      // Clean context cache
+      for (const [key, entry] of this.contextCache.entries()) {
+        if (now - entry.timestamp >= entry.ttl) {
+          this.contextCache.delete(key)
+          contextCacheCleanedCount++
+        }
+      }
+
+      if (cacheCleanedCount > 0 || contextCacheCleanedCount > 0) {
+        console.log(`🧹 Cache maintenance: cleaned ${cacheCleanedCount} main cache entries, ${contextCacheCleanedCount} context cache entries`)
+      }
+
+      // Log performance statistics
+      if (this.config.enablePerformanceMonitoring && this.performanceMetrics.totalGenerations > 0) {
+        console.debug(`📊 VMRecommendationService performance stats:`)
+        console.debug(`   - Total generations: ${this.performanceMetrics.totalGenerations}`)
+        console.debug(`   - Average time: ${Math.round(this.performanceMetrics.averageGenerationTime)}ms`)
+        console.debug(`   - Cache hit rate: ${(this.performanceMetrics.cacheHitRate * 100).toFixed(1)}%`)
+        console.debug(`   - Error count: ${this.performanceMetrics.errorCount}`)
+
+        if (this.performanceMetrics.lastError) {
+          console.debug(`   - Last error: ${this.performanceMetrics.lastError}`)
+        }
+      }
+
+    } catch (error) {
+      const standardizedError = new AppError(
+        'VM recommendation service maintenance task failed',
+        ErrorCode.VM_RECOMMENDATION_ERROR,
+        500,
+        true,
+        { operation: 'performMaintenance', service: 'VMRecommendationService' }
+      )
+      console.error('❌ Maintenance task failed:', {
+        message: standardizedError.message,
+        code: standardizedError.code,
+        context: standardizedError.context,
+        originalError: (error as Error).message
+      })
+    }
+  }
+
+  /**
+   * Get service health status
+   */
+  public getServiceHealth(): {
+    isHealthy: boolean
+    cacheSize: number
+    contextCacheSize: number
+    performanceMetrics: PerformanceMetrics
+    configuration: ServiceConfiguration
+  } {
+    const recentErrorThreshold = 10 // Consider unhealthy if more than 10 errors recently
+    const slowResponseThreshold = 30000 // 30 seconds
+
+    const isHealthy =
+      this.performanceMetrics.errorCount < recentErrorThreshold &&
+      this.performanceMetrics.averageGenerationTime < slowResponseThreshold
+
+    return {
+      isHealthy,
+      cacheSize: this.cache.size,
+      contextCacheSize: this.contextCache.size,
+      performanceMetrics: { ...this.performanceMetrics },
+      configuration: { ...this.config }
+    }
+  }
+
+  /**
+   * Clear all caches
+   */
+  public clearCaches(): void {
+    this.cache.clear()
+    this.contextCache.clear()
+    console.log('🧹 All VMRecommendationService caches cleared')
+  }
+
+  /**
+   * Reset performance metrics
+   */
+  public resetPerformanceMetrics(): void {
+    this.performanceMetrics = this.initializePerformanceMetrics()
+    console.log('📊 VMRecommendationService performance metrics reset')
+  }
+
+  /**
+   * Dispose method for complete service lifecycle cleanup
+   * This should be called when the service is being shut down
+   */
+  public dispose(): void {
+    try {
+      console.log('🔄 Disposing VMRecommendationService...')
+
+      // Stop maintenance timer
+      if (this.maintenanceTimer) {
+        clearInterval(this.maintenanceTimer)
+        this.maintenanceTimer = null
+        console.log('✓ Maintenance timer stopped')
+      }
+
+      // Clear all caches
+      this.clearCaches()
+      console.log('✓ Caches cleared')
+
+      // Clear checkers array
+      this.checkers = []
+      console.log('✓ Checkers cleared')
+
+      // Reset performance metrics
+      this.performanceMetrics = this.initializePerformanceMetrics()
+      console.log('✓ Performance metrics reset')
+
+      // Mark service as disposed
+      this.isDisposed = true
+      console.log('✓ Service marked as disposed')
+
+      console.log('✅ VMRecommendationService disposed successfully')
+    } catch (error) {
+      const standardizedError = new AppError(
+        'Failed to dispose VM recommendation service',
+        ErrorCode.VM_RECOMMENDATION_ERROR,
+        500,
+        true,
+        { operation: 'dispose', service: 'VMRecommendationService' }
+      )
+      console.error('❌ Service disposal failed:', {
+        message: standardizedError.message,
+        code: standardizedError.code,
+        context: standardizedError.context,
+        originalError: (error as Error).message
+      })
+      throw standardizedError
+    }
+  }
+
+  /**
+   * Check if the service has been disposed
+   */
+  public get disposed(): boolean {
+    return this.isDisposed
+  }
+
+  /**
+   * Cleanup method for graceful shutdown (legacy method, use dispose() instead)
+   * @deprecated Use dispose() method instead for complete lifecycle management
+   */
+  public cleanup(): void {
+    console.warn('⚠️ cleanup() method is deprecated, use dispose() instead')
+    this.dispose()
   }
 }
