@@ -32,6 +32,24 @@ export const createApolloServer = async (): Promise<ApolloServer> => {
         })
       }
 
+      // Handle FORBIDDEN errors
+      if (error?.extensions?.code === 'FORBIDDEN') {
+        return new GraphQLError('Access denied', {
+          extensions: {
+            code: 'FORBIDDEN'
+          }
+        })
+      }
+
+      // Handle NOT_FOUND errors
+      if (error?.extensions?.code === 'NOT_FOUND') {
+        return new GraphQLError('Resource not found', {
+          extensions: {
+            code: 'NOT_FOUND'
+          }
+        })
+      }
+
       return error
     }
   })

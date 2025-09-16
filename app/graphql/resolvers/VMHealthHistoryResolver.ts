@@ -1,6 +1,6 @@
 import { Arg, Authorized, Ctx, Query, Resolver, ObjectType, Field, ID, Int } from 'type-graphql'
 import { GraphQLJSONObject } from 'graphql-type-json'
-import { PrismaClient, TaskStatus, TaskPriority, HealthCheckType } from '@prisma/client'
+import { TaskStatus, TaskPriority, HealthCheckType } from '@prisma/client'
 import { InfinibayContext } from '@utils/context'
 
 @ObjectType()
@@ -152,12 +152,6 @@ export class QueueStatsType {
 
 @Resolver()
 export class VMHealthHistoryResolver {
-  private prisma: PrismaClient
-
-  constructor () {
-    this.prisma = new PrismaClient()
-  }
-
   @Query(() => [VMHealthSnapshotType])
   @Authorized(['USER'])
   async vmHealthHistory (
@@ -167,7 +161,7 @@ export class VMHealthHistoryResolver {
     @Ctx() context: InfinibayContext
   ): Promise<VMHealthSnapshotType[]> {
     // Check if user has access to this machine
-    const machine = await this.prisma.machine.findUnique({
+    const machine = await context.prisma.machine.findUnique({
       where: { id: machineId },
       select: { id: true, userId: true }
     })
@@ -181,7 +175,7 @@ export class VMHealthHistoryResolver {
       throw new Error('Access denied')
     }
 
-    const snapshots = await this.prisma.vMHealthSnapshot.findMany({
+    const snapshots = await context.prisma.vMHealthSnapshot.findMany({
       where: { machineId },
       orderBy: { snapshotDate: 'desc' },
       take: limit,
@@ -198,7 +192,7 @@ export class VMHealthHistoryResolver {
     @Ctx() context: InfinibayContext
   ): Promise<VMHealthSnapshotType | null> {
     // Check if user has access to this machine
-    const machine = await this.prisma.machine.findUnique({
+    const machine = await context.prisma.machine.findUnique({
       where: { id: machineId },
       select: { id: true, userId: true }
     })
@@ -212,7 +206,7 @@ export class VMHealthHistoryResolver {
       throw new Error('Access denied')
     }
 
-    const snapshot = await this.prisma.vMHealthSnapshot.findFirst({
+    const snapshot = await context.prisma.vMHealthSnapshot.findFirst({
       where: { machineId },
       orderBy: { snapshotDate: 'desc' }
     })
@@ -236,7 +230,7 @@ export class VMHealthHistoryResolver {
 
     // If machineId is specified, check access
     if (machineId) {
-      const machine = await this.prisma.machine.findUnique({
+      const machine = await context.prisma.machine.findUnique({
         where: { id: machineId },
         select: { id: true, userId: true }
       })
@@ -253,7 +247,7 @@ export class VMHealthHistoryResolver {
       where.machineId = machineId
     } else if (context.user?.role !== 'ADMIN') {
       // Regular users can only see their own machines' queues
-      const userMachines = await this.prisma.machine.findMany({
+      const userMachines = await context.prisma.machine.findMany({
         where: { userId: context.user?.id },
         select: { id: true }
       })
@@ -264,7 +258,7 @@ export class VMHealthHistoryResolver {
       where.status = status as TaskStatus
     }
 
-    const queueItems = await this.prisma.vMHealthCheckQueue.findMany({
+    const queueItems = await context.prisma.vMHealthCheckQueue.findMany({
       where,
       orderBy: { createdAt: 'desc' },
       take: limit,
@@ -281,7 +275,7 @@ export class VMHealthHistoryResolver {
     @Ctx() context: InfinibayContext
   ): Promise<VMHealthSnapshotType | null> {
     // Check if user has access to this machine
-    const machine = await this.prisma.machine.findUnique({
+    const machine = await context.prisma.machine.findUnique({
       where: { id: machineId },
       select: { id: true, userId: true }
     })
@@ -295,7 +289,7 @@ export class VMHealthHistoryResolver {
       throw new Error('Access denied')
     }
 
-    const snapshot = await this.prisma.vMHealthSnapshot.findFirst({
+    const snapshot = await context.prisma.vMHealthSnapshot.findFirst({
       where: { machineId },
       orderBy: { snapshotDate: 'desc' }
     })
@@ -310,7 +304,7 @@ export class VMHealthHistoryResolver {
     @Ctx() context: InfinibayContext
   ): Promise<VMHealthStatsType> {
     // Check if user has access to this machine
-    const machine = await this.prisma.machine.findUnique({
+    const machine = await context.prisma.machine.findUnique({
       where: { id: machineId },
       select: { id: true, userId: true }
     })
@@ -331,19 +325,19 @@ export class VMHealthHistoryResolver {
       errorSnapshots,
       latestSnapshot
     ] = await Promise.all([
-      this.prisma.vMHealthSnapshot.count({
+      context.prisma.vMHealthSnapshot.count({
         where: { machineId }
       }),
-      this.prisma.vMHealthSnapshot.count({
+      context.prisma.vMHealthSnapshot.count({
         where: { machineId, overallStatus: 'healthy' }
       }),
-      this.prisma.vMHealthSnapshot.count({
+      context.prisma.vMHealthSnapshot.count({
         where: { machineId, overallStatus: 'warning' }
       }),
-      this.prisma.vMHealthSnapshot.count({
+      context.prisma.vMHealthSnapshot.count({
         where: { machineId, overallStatus: 'error' }
       }),
-      this.prisma.vMHealthSnapshot.findFirst({
+      context.prisma.vMHealthSnapshot.findFirst({
         where: { machineId },
         orderBy: { snapshotDate: 'desc' },
         select: { snapshotDate: true, overallStatus: true }
@@ -362,27 +356,27 @@ export class VMHealthHistoryResolver {
 
   @Query(() => QueueStatsType)
   @Authorized(['ADMIN'])
-  async healthCheckQueueStats (): Promise<QueueStatsType> {
+  async healthCheckQueueStats (@Ctx() context: InfinibayContext): Promise<QueueStatsType> {
     const today = new Date()
     today.setHours(0, 0, 0, 0)
 
     const [pending, running, completed, failed, retryScheduled, totalToday] = await Promise.all([
-      this.prisma.vMHealthCheckQueue.count({
+      context.prisma.vMHealthCheckQueue.count({
         where: { status: TaskStatus.PENDING }
       }),
-      this.prisma.vMHealthCheckQueue.count({
+      context.prisma.vMHealthCheckQueue.count({
         where: { status: TaskStatus.RUNNING }
       }),
-      this.prisma.vMHealthCheckQueue.count({
+      context.prisma.vMHealthCheckQueue.count({
         where: { status: TaskStatus.COMPLETED }
       }),
-      this.prisma.vMHealthCheckQueue.count({
+      context.prisma.vMHealthCheckQueue.count({
         where: { status: TaskStatus.FAILED }
       }),
-      this.prisma.vMHealthCheckQueue.count({
+      context.prisma.vMHealthCheckQueue.count({
         where: { status: TaskStatus.RETRY_SCHEDULED }
       }),
-      this.prisma.vMHealthCheckQueue.count({
+      context.prisma.vMHealthCheckQueue.count({
         where: {
           createdAt: {
             gte: today

@@ -23,6 +23,8 @@ import { VMHealthHistoryResolver } from './VMHealthHistoryResolver'
 import { BackgroundHealthResolver } from './health/BackgroundHealthResolver'
 import { MaintenanceResolver } from './MaintenanceResolver'
 import { VMRecommendationResolver } from './VMRecommendationResolver'
+// Import recommendation types to ensure they're registered
+import '../types/RecommendationTypes'
 
 const resolvers: NonEmptyArray<Function> = [
   UserResolver,

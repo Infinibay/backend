@@ -62,9 +62,52 @@ export class VMHealthQueueManager {
     private prisma: PrismaClient,
     private eventManager: EventManager
   ) {
-    this.recommendationService = new VMRecommendationService(this.prisma)
-    // Load existing queues from database on startup
-    this.loadQueuesFromDatabase()
+    try {
+      this.recommendationService = new VMRecommendationService(this.prisma)
+      console.log('✅ VMRecommendationService initialized successfully')
+
+      // Validate configuration on startup
+      this.validateConfiguration()
+
+      // Load existing queues from database on startup
+      this.loadQueuesFromDatabase()
+    } catch (error) {
+      console.error('❌ Failed to initialize VMHealthQueueManager:', error)
+      throw error
+    }
+  }
+
+  /**
+   * Validate configuration on startup
+   */
+  private validateConfiguration(): void {
+    try {
+      // Validate VMRecommendationService
+      if (!this.recommendationService) {
+        throw new Error('VMRecommendationService initialization failed')
+      }
+
+      // Validate required environment variables
+      const requiredEnvVars = ['DATABASE_URL', 'RPC_URL', 'APP_HOST']
+      const missingEnvVars = requiredEnvVars.filter(envVar => !process.env[envVar])
+
+      if (missingEnvVars.length > 0) {
+        console.warn(`⚠️ Missing environment variables: ${missingEnvVars.join(', ')}`)}
+
+      // Log configuration status
+      const enabledCheckTypes = this.getEnabledCheckTypes()
+      console.log(`🔧 Health check configuration:`)
+      console.log(`   - Enabled check types: ${enabledCheckTypes.join(', ')}`)
+      console.log(`   - Max concurrent checks per VM: ${this.MAX_CONCURRENT_CHECKS_PER_VM}`)
+      console.log(`   - Max heavy checks per VM: ${this.MAX_HEAVY_CHECKS_PER_VM}`)
+      console.log(`   - System-wide concurrent limit: ${this.MAX_SYSTEM_WIDE_CONCURRENT}`)
+      console.log(`   - Overall scan interval: ${OVERALL_SCAN_INTERVAL_MINUTES} minutes`)
+
+      console.log(`✅ VMHealthQueueManager configuration validated successfully`)
+    } catch (error) {
+      console.error(`❌ Configuration validation failed:`, error)
+      throw error
+    }
   }
 
   /**
@@ -115,8 +158,11 @@ export class VMHealthQueueManager {
       'APPLICATION_INVENTORY'
     ]
 
+    // Create or get today's snapshot and set expected checks for snapshot-scoped tracking
+    const snapshot = await this.getOrCreateTodaySnapshot(machineId, standardChecks.length, standardChecks)
+
     const queuePromises = standardChecks.map(checkType =>
-      this.queueHealthCheck(machineId, checkType, 'MEDIUM', undefined, vm)
+      this.queueHealthCheckForSnapshot(machineId, checkType, 'MEDIUM', snapshot.id, undefined, vm)
     )
 
     const results = await Promise.allSettled(queuePromises)
@@ -432,7 +478,7 @@ export class VMHealthQueueManager {
           success: result.success
         }
       })
-      console.log(`🩺 Completed health check ${task.checkType} for VM ${task.machineId} (${executionTime}ms)`)
+      console.log(`🩺 Completed health check ${task.checkType} for VM ${task.machineId} (${executionTime}ms) - Success: ${result.success}`)
     } catch (error) {
       const executionTime = Date.now() - startTime
       const err = error as unknown
@@ -579,16 +625,24 @@ export class VMHealthQueueManager {
     })
 
     if (!snapshot) {
-      // Create new snapshot
+      // Create new snapshot - note: this is a fallback creation without expectedChecks
+      // The main entry point should be through getOrCreateTodaySnapshot() for snapshot-scoped tracking
       snapshot = await this.prisma.vMHealthSnapshot.create({
         data: {
           machineId,
           snapshotDate: new Date(),
           overallStatus: 'PENDING', // Will be updated when all checks complete
           checksCompleted: 0,
-          checksFailed: 0
+          checksFailed: 0,
+          // Add minimal metadata to indicate this wasn't created via snapshot-scoped method
+          customCheckResults: {
+            createdBy: 'storeHealthSnapshot-fallback',
+            timestamp: new Date().toISOString(),
+            note: 'Created without snapshot-scoped expectedChecks - may need backfill'
+          }
         }
       })
+      console.log(`⚠️ Created fallback snapshot ${snapshot.id} for VM ${machineId} via storeHealthSnapshot - consider using getOrCreateTodaySnapshot()`)
     }
 
     // Prepare update data
@@ -693,63 +747,192 @@ export class VMHealthQueueManager {
   }
 
   /**
-   * Update snapshot overall status based on completed and failed checks
+   * Update snapshot overall status based on completed and failed checks with enhanced logging
    */
-  private async updateSnapshotOverallStatus (snapshotId: string, _machineId: string): Promise<void> {
-    const snapshot = await this.prisma.vMHealthSnapshot.findUnique({
-      where: { id: snapshotId }
-    })
+  private async updateSnapshotOverallStatus (snapshotId: string, machineId: string): Promise<void> {
+    try {
+      const snapshot = await this.prisma.vMHealthSnapshot.findUnique({
+        where: { id: snapshotId }
+      })
 
-    if (!snapshot) return
-
-    const totalChecks = snapshot.checksCompleted + snapshot.checksFailed
-
-    // Calculate expected checks dynamically based on enabled check types
-    const enabledCheckTypes = this.getEnabledCheckTypes()
-    const expectedChecks = enabledCheckTypes.length || 6 // fallback to 6 if no specific config
-
-    let overallStatus = 'PENDING'
-    if (totalChecks >= expectedChecks) {
-      if (snapshot.checksFailed === 0) {
-        overallStatus = 'HEALTHY'
-      } else if (snapshot.checksFailed < snapshot.checksCompleted) {
-        overallStatus = 'WARNING'
-      } else {
-        overallStatus = 'CRITICAL'
+      if (!snapshot) {
+        console.warn(`⚠️ Snapshot ${snapshotId} not found for status update`)
+        return
       }
-    }
 
-    await this.prisma.vMHealthSnapshot.update({
-      where: { id: snapshotId },
-      data: { overallStatus }
-    })
+      const totalChecks = snapshot.checksCompleted + snapshot.checksFailed
 
-    // Generate recommendations when all health checks are complete
-    if (totalChecks >= expectedChecks) {
-      await this.generateRecommendationsForSnapshot(snapshotId, _machineId)
+      // Snapshot-scoped expected check computation - prioritizes snapshot-stored data
+      let expectedChecks: number
+      let expectedChecksSource: string
+
+      // Step 1: Try to read expectedChecks from snapshot metadata (preferred approach)
+      const snapshotMetadata = snapshot.customCheckResults as any
+      if (snapshotMetadata?.expectedChecks && typeof snapshotMetadata.expectedChecks === 'number') {
+        expectedChecks = snapshotMetadata.expectedChecks
+        expectedChecksSource = 'snapshot-metadata'
+        console.log(`📊 Using snapshot-scoped expectedChecks: ${expectedChecks} for snapshot ${snapshotId}`)
+      } else {
+        // Step 2: Fallback to queue-based computation (TODO: enhance with snapshotId when schema updated)
+        // Note: This is still day-scoped but better than static config
+        const today = new Date()
+        today.setHours(0, 0, 0, 0)
+        const tomorrow = new Date(today.getTime() + 24 * 60 * 60 * 1000)
+
+        const scheduledChecksCount = await this.prisma.vMHealthCheckQueue.groupBy({
+          by: ['checkType'],
+          where: {
+            machineId,
+            createdAt: {
+              gte: today,
+              lt: tomorrow
+            },
+            status: { in: ['PENDING', 'RETRY_SCHEDULED', 'RUNNING', 'COMPLETED', 'FAILED'] }
+          }
+        })
+
+        if (scheduledChecksCount.length > 0) {
+          expectedChecks = scheduledChecksCount.length
+          expectedChecksSource = 'queue-grouped-by-day'
+          console.log(`📊 Using day-scoped queue expectedChecks: ${expectedChecks} for snapshot ${snapshotId}`)
+        } else {
+          // Step 3: Final fallback to configuration
+          expectedChecks = this.getEnabledCheckTypes().length || 6
+          expectedChecksSource = 'fallback-config'
+          console.log(`📊 Using fallback expectedChecks: ${expectedChecks} for snapshot ${snapshotId}`)
+        }
+
+        // Backfill expectedChecks in snapshot metadata for future consistency
+        if (expectedChecks > 0 && expectedChecksSource !== 'snapshot-metadata') {
+          await this.backfillSnapshotExpectedChecks(snapshotId, expectedChecks, expectedChecksSource)
+        }
+      }
+
+      let overallStatus = 'PENDING'
+      if (totalChecks >= expectedChecks) {
+        if (snapshot.checksFailed === 0) {
+          overallStatus = 'HEALTHY'
+        } else if (snapshot.checksFailed < snapshot.checksCompleted) {
+          overallStatus = 'WARNING'
+        } else {
+          overallStatus = 'CRITICAL'
+        }
+      }
+
+      await this.prisma.vMHealthSnapshot.update({
+        where: { id: snapshotId },
+        data: { overallStatus }
+      })
+
+      console.log(`📊 Updated snapshot ${snapshotId} status to ${overallStatus} (${totalChecks}/${expectedChecks} checks complete, ${snapshot.checksFailed} failed) [source: ${expectedChecksSource}]`)
+
+      // Generate recommendations when all health checks are complete
+      if (totalChecks >= expectedChecks) {
+        console.log(`🏁 All health checks complete for VM ${machineId} snapshot ${snapshotId}, triggering recommendation generation [expectedChecks source: ${expectedChecksSource}]`)
+        await this.generateRecommendationsForSnapshot(snapshotId, machineId)
+      }
+    } catch (error) {
+      console.error(`❌ Failed to update snapshot overall status for ${snapshotId}:`, error)
+      // Continue execution to avoid breaking the health check workflow
     }
   }
 
   /**
-   * Generate recommendations for a completed health snapshot
+   * Generate recommendations for a completed health snapshot with enhanced error handling and monitoring
    */
   private async generateRecommendationsForSnapshot(snapshotId: string, machineId: string): Promise<void> {
+    const startTime = Date.now()
+    const correlationId = `${machineId}-${snapshotId}-${Date.now()}`
+
     try {
+      console.log(`💡 [${correlationId}] Starting recommendation generation for VM ${machineId} snapshot ${snapshotId}`)
+
+      // Validate recommendation service initialization
+      if (!this.recommendationService) {
+        throw new Error('VMRecommendationService not initialized')
+      }
+
       // Check if recommendations already exist for this snapshot
       const existingCount = await this.prisma.vMRecommendation.count({
         where: { snapshotId }
       })
 
       if (existingCount > 0) {
-        console.log(`📋 Recommendations already exist for snapshot ${snapshotId}, skipping generation`)
+        console.log(`📋 [${correlationId}] Recommendations already exist for snapshot ${snapshotId} (${existingCount} found), skipping generation`)
         return
       }
 
-      await this.recommendationService.generateRecommendations(machineId, snapshotId)
-      console.log(`💡 Generated recommendations for VM ${machineId} snapshot ${snapshotId}`)
+      // Emit recommendation generation start event
+      await this.eventManager.dispatchEvent('recommendations', 'started', {
+        correlationId,
+        machineId,
+        snapshotId,
+        startTime: new Date()
+      })
+
+      // Generate recommendations with performance timing
+      const recommendations = await this.recommendationService.generateRecommendations(machineId, snapshotId)
+      const generationTime = Date.now() - startTime
+
+      const recommendationCount = recommendations ? recommendations.length : 0
+      const recommendationTypes = recommendations ? [...new Set(recommendations.map(r => r.type))] : []
+
+      console.log(`💡 [${correlationId}] Generated ${recommendationCount} recommendations for VM ${machineId} snapshot ${snapshotId} (${generationTime}ms)`)
+      console.log(`💡 [${correlationId}] Recommendation types: ${recommendationTypes.join(', ')}`)
+
+      // Emit recommendation generation success event
+      await this.eventManager.dispatchEvent('recommendations', 'completed', {
+        correlationId,
+        machineId,
+        snapshotId,
+        recommendationCount,
+        recommendationTypes,
+        generationTimeMs: generationTime,
+        completedAt: new Date()
+      })
+
+      // Update snapshot with recommendation metadata for quick reads
+      await this.updateSnapshotRecommendationMetadata(snapshotId, recommendationCount)
+
+      // Log performance warning if generation took too long
+      if (generationTime > 10000) { // 10 seconds threshold
+        console.warn(`⚠️ [${correlationId}] Recommendation generation took longer than expected: ${generationTime}ms`)
+      }
+
     } catch (error) {
-      console.error(`❌ Failed to generate recommendations for VM ${machineId}:`, error)
+      const generationTime = Date.now() - startTime
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+
+      // Categorize error types
+      let errorCategory = 'unknown'
+      if (errorMessage.includes('database') || errorMessage.includes('connection')) {
+        errorCategory = 'database'
+      } else if (errorMessage.includes('network') || errorMessage.includes('timeout')) {
+        errorCategory = 'network'
+      } else if (errorMessage.includes('analysis') || errorMessage.includes('checker')) {
+        errorCategory = 'analysis'
+      }
+
+      console.error(`❌ [${correlationId}] Failed to generate recommendations for VM ${machineId} [${errorCategory}]:`, error)
+      console.error(`❌ [${correlationId}] Generation time before failure: ${generationTime}ms`)
+
+      // Emit recommendation generation failure event
+      await this.eventManager.dispatchEvent('recommendations', 'failed', {
+        correlationId,
+        machineId,
+        snapshotId,
+        error: errorMessage,
+        errorCategory,
+        generationTimeMs: generationTime,
+        failedAt: new Date()
+      })
+
       // Don't throw error to prevent breaking health check workflow
+      // Instead, implement graceful degradation
+      console.log(`🔄 [${correlationId}] Continuing health check workflow despite recommendation generation failure`)
+
+      // TODO: Implement retry logic with exponential backoff for transient failures
+      // TODO: Add circuit breaker pattern for repeated recommendation failures
     }
   }
 
@@ -1119,6 +1302,168 @@ export class VMHealthQueueManager {
       }
     } catch (error) {
       console.error('🗂️ Failed to sync from database:', error)
+    }
+  }
+
+  /**
+   * Get or create today's snapshot with snapshot-scoped expected checks
+   */
+  private async getOrCreateTodaySnapshot(machineId: string, expectedChecks: number, scheduledCheckTypes: HealthCheckType[]): Promise<{ id: string }> {
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+
+    let snapshot = await this.prisma.vMHealthSnapshot.findFirst({
+      where: {
+        machineId,
+        snapshotDate: {
+          gte: today,
+          lt: new Date(today.getTime() + 24 * 60 * 60 * 1000)
+        }
+      }
+    })
+
+    if (!snapshot) {
+      // Create new snapshot with snapshot-scoped expected checks and scheduled check types
+      const snapshotMetadata = {
+        expectedChecks,
+        scheduledCheckTypes,
+        createdFor: 'snapshot-scoped-tracking',
+        timestamp: new Date().toISOString()
+      }
+
+      snapshot = await this.prisma.vMHealthSnapshot.create({
+        data: {
+          machineId,
+          snapshotDate: new Date(),
+          overallStatus: 'PENDING',
+          checksCompleted: 0,
+          checksFailed: 0,
+          // Store snapshot-scoped metadata in customCheckResults until schema extension
+          customCheckResults: snapshotMetadata
+        }
+      })
+
+      console.log(`📊 Created snapshot ${snapshot.id} for VM ${machineId} with ${expectedChecks} expected checks: ${scheduledCheckTypes.join(', ')}`)
+    } else {
+      // Update existing snapshot with new expected checks if not already set
+      const existingMetadata = snapshot.customCheckResults as any
+      if (!existingMetadata?.expectedChecks) {
+        const snapshotMetadata = {
+          ...existingMetadata,
+          expectedChecks,
+          scheduledCheckTypes,
+          updatedFor: 'snapshot-scoped-tracking',
+          timestamp: new Date().toISOString()
+        }
+
+        await this.prisma.vMHealthSnapshot.update({
+          where: { id: snapshot.id },
+          data: {
+            customCheckResults: snapshotMetadata
+          }
+        })
+
+        console.log(`📊 Updated snapshot ${snapshot.id} for VM ${machineId} with ${expectedChecks} expected checks: ${scheduledCheckTypes.join(', ')}`)
+      }
+    }
+
+    return { id: snapshot.id }
+  }
+
+  /**
+   * Queue health check for a specific snapshot (snapshot-scoped version)
+   */
+  private async queueHealthCheckForSnapshot(
+    machineId: string,
+    checkType: HealthCheckType,
+    priority: TaskPriority = 'MEDIUM',
+    snapshotId: string,
+    payload?: HealthCheckPayload,
+    vm?: { id: string; name: string; status: string }
+  ): Promise<string> {
+    // Use the existing queueHealthCheck logic but associate with snapshot
+    // For now, we'll use the existing method and add snapshot association in a comment
+    // In the future, this should add snapshotId to the queue entry
+
+    const taskId = await this.queueHealthCheck(machineId, checkType, priority, payload, vm)
+
+    // TODO: Add snapshotId field to VMHealthCheckQueue schema and associate here
+    // This would enable precise snapshot-scoped queue queries
+    console.log(`📋 Queued health check ${checkType} for VM ${machineId} associated with snapshot ${snapshotId}`)
+
+    return taskId
+  }
+
+  /**
+   * Update snapshot with recommendation metadata for quick reads
+   * NOTE: This method assumes VMHealthSnapshot schema includes recommendationCount (int)
+   * and recommendationsGeneratedAt (DateTime) fields. If not available, implement via
+   * a separate metadata table or JSON field until schema can be updated.
+   */
+  private async updateSnapshotRecommendationMetadata(snapshotId: string, recommendationCount: number): Promise<void> {
+    try {
+      // Get existing metadata to preserve snapshot-scoped data
+      const snapshot = await this.prisma.vMHealthSnapshot.findUnique({
+        where: { id: snapshotId },
+        select: { customCheckResults: true }
+      })
+
+      const existingMetadata = (snapshot?.customCheckResults as any) || {}
+
+      // Merge recommendation metadata with existing snapshot-scoped data
+      const updatedMetadata = {
+        ...existingMetadata,
+        recommendationCount: recommendationCount,
+        recommendationsGeneratedAt: new Date().toISOString(),
+        lastUpdated: new Date().toISOString()
+      }
+
+      await this.prisma.vMHealthSnapshot.update({
+        where: { id: snapshotId },
+        data: {
+          customCheckResults: updatedMetadata
+        }
+      })
+
+      console.log(`📊 Updated snapshot ${snapshotId} with recommendation metadata: ${recommendationCount} recommendations generated`)
+    } catch (error) {
+      console.error(`❌ Failed to update snapshot recommendation metadata for ${snapshotId}:`, error)
+      // Don't throw to avoid breaking recommendation workflow
+    }
+  }
+
+  /**
+   * Backfill expectedChecks in snapshot metadata for consistency
+   */
+  private async backfillSnapshotExpectedChecks(snapshotId: string, expectedChecks: number, source: string): Promise<void> {
+    try {
+      const snapshot = await this.prisma.vMHealthSnapshot.findUnique({
+        where: { id: snapshotId },
+        select: { customCheckResults: true }
+      })
+
+      if (!snapshot) return
+
+      const existingMetadata = (snapshot.customCheckResults as any) || {}
+
+      const updatedMetadata = {
+        ...existingMetadata,
+        expectedChecks,
+        backfilledFrom: source,
+        backfilledAt: new Date().toISOString()
+      }
+
+      await this.prisma.vMHealthSnapshot.update({
+        where: { id: snapshotId },
+        data: {
+          customCheckResults: updatedMetadata
+        }
+      })
+
+      console.log(`📋 Backfilled snapshot ${snapshotId} with expectedChecks: ${expectedChecks} (source: ${source})`)
+    } catch (error) {
+      console.error(`❌ Failed to backfill snapshot ${snapshotId}:`, error)
+      // Don't throw to avoid breaking workflow
     }
   }
 }
