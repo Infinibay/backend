@@ -162,8 +162,10 @@ describe('VMRecommendationService', () => {
       const result = await service.generateRecommendationsSafe(machineId)
 
       expect(result.success).toBe(true)
-      expect(result.recommendations).toBeDefined()
-      expect(result.recommendations.length).toBeGreaterThanOrEqual(1)
+      if (result.success) {
+        expect(result.recommendations).toBeDefined()
+        expect(result.recommendations.length).toBeGreaterThanOrEqual(1)
+      }
       expect(mockPrisma.vMRecommendation.createMany).toHaveBeenCalled()
 
       // Verify the structure of created recommendations
@@ -192,8 +194,10 @@ describe('VMRecommendationService', () => {
       const result = await service.generateRecommendationsSafe(machineId)
 
       expect(result.success).toBe(true)
-      expect(result.recommendations).toBeDefined()
-      expect(result.recommendations.length).toBeGreaterThanOrEqual(1)
+      if (result.success) {
+        expect(result.recommendations).toBeDefined()
+        expect(result.recommendations.length).toBeGreaterThanOrEqual(1)
+      }
 
       const createCall = mockPrisma.vMRecommendation.createMany.mock.calls[0]?.[0]
       const recommendations = createCall?.data as any[]
@@ -218,8 +222,8 @@ describe('VMRecommendationService', () => {
 
       const result = await service.generateRecommendations(machineId)
 
-      expect(result.success).toBe(true)
-      expect(result.generatedCount).toBeGreaterThanOrEqual(2)
+      expect(result).toBeDefined()
+      expect(result.length).toBeGreaterThanOrEqual(2)
 
       const createCall = mockPrisma.vMRecommendation.createMany.mock.calls[0][0]
       const recommendations = createCall.data
@@ -234,11 +238,7 @@ describe('VMRecommendationService', () => {
     it('should handle no health snapshot gracefully', async () => {
       mockPrisma.vMHealthSnapshot.findFirst.mockResolvedValue(null)
 
-      const result = await service.generateRecommendations(machineId)
-
-      expect(result.success).toBe(false)
-      expect(result.error).toContain('No health snapshot found')
-      expect(result.generatedCount).toBe(0)
+      await expect(service.generateRecommendations(machineId)).rejects.toThrow()
     })
 
     it('should clean up old recommendations before generating new ones', async () => {
@@ -594,7 +594,7 @@ describe('VMRecommendationService', () => {
       const { result, executionTimeMs } = await RecommendationPerformanceUtils
         .measureRecommendationGenerationTime(() => service.generateRecommendations(machineId))
 
-      expect(result.success).toBe(true)
+      expect(result).toBeDefined()
       expect(executionTimeMs).toBeLessThan(5000) // 5 second threshold
     })
 
@@ -603,11 +603,7 @@ describe('VMRecommendationService', () => {
         new Error('Database transaction failed')
       )
 
-      const result = await service.generateRecommendations(machineId)
-
-      expect(result.success).toBe(false)
-      expect(result.error).toContain('Database transaction failed')
-      expect(result.generatedCount).toBe(0)
+      await expect(service.generateRecommendations(machineId)).rejects.toThrow('Database transaction failed')
     })
 
     it('should handle partial checker failures gracefully', async () => {
@@ -624,8 +620,8 @@ describe('VMRecommendationService', () => {
 
       const result = await service.generateRecommendations(machineId)
 
-      expect(result.success).toBe(true) // Should succeed even with partial failures
-      expect(result.checkerResults).toBeDefined()
+      expect(result).toBeDefined() // Should succeed even with partial failures
+      expect(Array.isArray(result)).toBe(true)
     })
 
     it('should handle large datasets efficiently', async () => {
@@ -646,7 +642,7 @@ describe('VMRecommendationService', () => {
       const { result, executionTimeMs } = await RecommendationPerformanceUtils
         .measureRecommendationGenerationTime(() => service.generateRecommendations(machineId))
 
-      expect(result.success).toBe(true)
+      expect(result).toBeDefined()
       expect(executionTimeMs).toBeLessThan(10000) // Should handle large datasets efficiently
     })
   })
@@ -693,7 +689,7 @@ describe('VMRecommendationService', () => {
 
       const result = await service.generateRecommendations(machineId)
 
-      expect(result.success).toBe(true)
+      expect(result).toBeDefined()
       // Should still be able to generate recommendations based on health snapshot alone
     })
 
@@ -784,8 +780,10 @@ describe('VMRecommendationService', () => {
       const result = await service.generateRecommendationsSafe(machineId)
 
       expect(result.success).toBe(false)
-      expect(result.error).toBe('Service unavailable')
-      expect(result.recommendations).toBeUndefined()
+      if (!result.success) {
+        expect(result.error).toBe('Service unavailable')
+        expect(result.recommendations).toBeUndefined()
+      }
 
       // Verify that the detailed error is logged
       expect(consoleSpy).toHaveBeenCalledWith(

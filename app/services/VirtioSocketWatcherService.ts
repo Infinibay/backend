@@ -498,7 +498,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   private readonly pingInterval = Number(process.env.VIRTIO_PING_INTERVAL_MS) || 300000 // 5 minutes (was 2min)
   private debug: Debugger
 
-  constructor (prisma: PrismaClient) {
+  constructor(prisma: PrismaClient) {
     super()
     this.prisma = prisma
     this.socketDir = path.join(process.env.INFINIBAY_BASE_DIR || '/opt/infinibay', 'sockets')
@@ -509,13 +509,13 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Initialize the service with optional dependencies
-  initialize (vmEventManager?: VmEventManager, queueManager?: VMHealthQueueManager): void {
+  initialize(vmEventManager?: VmEventManager, queueManager?: VMHealthQueueManager): void {
     this.vmEventManager = vmEventManager
     this.queueManager = queueManager
   }
 
   // Start watching for socket files
-  async start (): Promise<void> {
+  async start(): Promise<void> {
     if (this.isRunning) {
       this.debug.log('info', 'VirtioSocketWatcherService is already running')
       return
@@ -551,7 +551,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Stop the service and clean up
-  async stop (): Promise<void> {
+  async stop(): Promise<void> {
     if (!this.isRunning) {
       return
     }
@@ -574,7 +574,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Handle new socket file detected
-  private async handleSocketFileAdded (socketPath: string): Promise<void> {
+  private async handleSocketFileAdded(socketPath: string): Promise<void> {
     const filename = path.basename(socketPath)
     const match = filename.match(/^(.+)\.socket$/)
 
@@ -606,7 +606,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Handle socket file removal
-  private handleSocketFileRemoved (socketPath: string): void {
+  private handleSocketFileRemoved(socketPath: string): void {
     const filename = path.basename(socketPath)
     const match = filename.match(/^(.+)\.socket$/)
 
@@ -622,7 +622,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Connect to a VM's Unix domain socket
-  private async connectToVm (vmId: string, socketPath: string): Promise<void> {
+  private async connectToVm(vmId: string, socketPath: string): Promise<void> {
     // Close existing connection if any
     if (this.connections.has(vmId)) {
       this.debug.log('debug', `🔌 Closing existing connection for VM ${vmId}`)
@@ -820,7 +820,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Handle incoming data from socket with enhanced diagnostics
-  private handleSocketData (connection: VmConnection, data: Buffer): void {
+  private handleSocketData(connection: VmConnection, data: Buffer): void {
     const receiveTime = new Date()
     const dataSize = data.length
 
@@ -870,7 +870,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Process a complete message
-  private async processMessage (connection: VmConnection, messageStr: string): Promise<void> {
+  private async processMessage(connection: VmConnection, messageStr: string): Promise<void> {
     try {
       const message = JSON.parse(messageStr) as BaseMessage | MetricsMessage | ErrorMessage | ResponseMessage | Record<string, unknown>
 
@@ -905,93 +905,93 @@ export class VirtioSocketWatcherService extends EventEmitter {
       }
 
       switch (msgType) {
-      case 'metrics':
-        // Store metrics in database
-        await this.storeMetrics(connection.vmId, message as MetricsMessage)
-        break
+        case 'metrics':
+          // Store metrics in database
+          await this.storeMetrics(connection.vmId, message as MetricsMessage)
+          break
 
-      case 'error':
-        // Log error from VM
-        const errorMsg = message as ErrorMessage
-        this.debug.log('error', `Error from VM ${connection.vmId}: ${errorMsg.error} ${errorMsg.details ? JSON.stringify(errorMsg.details) : ''}`)
-        break
+        case 'error':
+          // Log error from VM
+          const errorMsg = message as ErrorMessage
+          this.debug.log('error', `Error from VM ${connection.vmId}: ${errorMsg.error} ${errorMsg.details ? JSON.stringify(errorMsg.details) : ''}`)
+          break
 
-      case 'error_report':
-        // Handle detailed error report from Rust side
-        const errorReport = message as ErrorReportMessage
-        await this.handleErrorReport(connection, errorReport)
-        break
+        case 'error_report':
+          // Handle detailed error report from Rust side
+          const errorReport = message as ErrorReportMessage
+          await this.handleErrorReport(connection, errorReport)
+          break
 
-      case 'response':
-        // Handle command response
-        const response = message as ResponseMessage
-        const pendingCommand = connection.pendingCommands.get(response.id)
-        if (pendingCommand) {
-          clearTimeout(pendingCommand.timeout)
+        case 'response':
+          // Handle command response
+          const response = message as ResponseMessage
+          const pendingCommand = connection.pendingCommands.get(response.id)
+          if (pendingCommand) {
+            clearTimeout(pendingCommand.timeout)
 
-          // Try to parse stdout as JSON data for certain command types
-          let data = response.data
-          if (!data && response.stdout && response.command_type) {
-            try {
-              // For process-related commands, try to parse stdout as JSON
-              if (['ProcessList', 'ProcessTop', 'ProcessKill'].includes(response.command_type)) {
-                data = JSON.parse(response.stdout)
-                this.debug.log('debug', `Parsed stdout for ${response.command_type}, got ${Array.isArray(data) ? data.length : 0} items`)
-                if (Array.isArray(data) && data.length > 0) {
-                  this.debug.log('debug', `First item structure: ${JSON.stringify(data[0], null, 2)}`)
+            // Try to parse stdout as JSON data for certain command types
+            let data = response.data
+            if (!data && response.stdout && response.command_type) {
+              try {
+                // For process-related commands, try to parse stdout as JSON
+                if (['ProcessList', 'ProcessTop', 'ProcessKill'].includes(response.command_type)) {
+                  data = JSON.parse(response.stdout)
+                  this.debug.log('debug', `Parsed stdout for ${response.command_type}, got ${Array.isArray(data) ? data.length : 0} items`)
+                  if (Array.isArray(data) && data.length > 0) {
+                    this.debug.log('debug', `First item structure: ${JSON.stringify(data[0], null, 2)}`)
+                  }
                 }
+              } catch (parseError) {
+                this.debug.log('debug', `Could not parse stdout as JSON for ${response.command_type}: ${parseError}`)
               }
-            } catch (parseError) {
-              this.debug.log('debug', `Could not parse stdout as JSON for ${response.command_type}: ${parseError}`)
             }
+
+            // Build complete response object
+            const commandResponse: CommandResponse = {
+              id: response.id,
+              success: response.success,
+              exit_code: response.exit_code,
+              stdout: response.stdout || '',
+              stderr: response.stderr || '',
+              execution_time_ms: response.execution_time_ms,
+              command_type: response.command_type,
+              data: data || response.data,
+              error: response.error
+            }
+
+            pendingCommand.resolve(commandResponse)
+            connection.pendingCommands.delete(response.id)
+
+            // Log with execution time if available
+            const execTime = response.execution_time_ms ? ` (${response.execution_time_ms}ms)` : ''
+            this.debug.log('debug', `Command ${response.id} completed for VM ${connection.vmId}${execTime}`)
+
+            // Log error details if command failed
+            if (!response.success) {
+              this.debug.log('warn', `Command ${response.id} failed: ${response.error || response.stderr || 'Unknown error'}`)
+            }
+
+            // Check if this is an auto-check related command and emit events if needed
+            await this.handleAutoCheckResponse(connection.vmId, response, data || null)
+          } else {
+            this.debug.log('warn', `Received response for unknown command ${response.id} from VM ${connection.vmId}`)
           }
+          break
 
-          // Build complete response object
-          const commandResponse: CommandResponse = {
-            id: response.id,
-            success: response.success,
-            exit_code: response.exit_code,
-            stdout: response.stdout || '',
-            stderr: response.stderr || '',
-            execution_time_ms: response.execution_time_ms,
-            command_type: response.command_type,
-            data: data || response.data,
-            error: response.error
-          }
+        case 'circuit_breaker_state':
+          // Handle circuit breaker state changes from Rust side
+          const circuitBreakerMsg = message as CircuitBreakerStateMessage
+          await this.handleCircuitBreakerStateChange(connection, circuitBreakerMsg)
+          break
 
-          pendingCommand.resolve(commandResponse)
-          connection.pendingCommands.delete(response.id)
+        case 'keep_alive':
+          // Handle keep-alive messages from InfiniService
+          const keepAliveMsg = message as KeepAliveMessage
+          await this.handleKeepAliveMessage(connection, keepAliveMsg)
+          break
 
-          // Log with execution time if available
-          const execTime = response.execution_time_ms ? ` (${response.execution_time_ms}ms)` : ''
-          this.debug.log('debug', `Command ${response.id} completed for VM ${connection.vmId}${execTime}`)
-
-          // Log error details if command failed
-          if (!response.success) {
-            this.debug.log('warn', `Command ${response.id} failed: ${response.error || response.stderr || 'Unknown error'}`)
-          }
-
-          // Check if this is an auto-check related command and emit events if needed
-          await this.handleAutoCheckResponse(connection.vmId, response, data || null)
-        } else {
-          this.debug.log('warn', `Received response for unknown command ${response.id} from VM ${connection.vmId}`)
-        }
-        break
-
-      case 'circuit_breaker_state':
-        // Handle circuit breaker state changes from Rust side
-        const circuitBreakerMsg = message as CircuitBreakerStateMessage
-        await this.handleCircuitBreakerStateChange(connection, circuitBreakerMsg)
-        break
-
-      case 'keep_alive':
-        // Handle keep-alive messages from InfiniService
-        const keepAliveMsg = message as KeepAliveMessage
-        await this.handleKeepAliveMessage(connection, keepAliveMsg)
-        break
-
-      default:
-        this.debug.log('warn', `Unknown message type from VM ${connection.vmId}: ${typeof message === 'object' && message && 'type' in message ? message.type : 'unknown'}`)
+        default:
+          this.debug.log('warn', `Unknown message type from VM ${connection.vmId}: ${typeof message === 'object' && message && 'type' in message ? message.type : 'unknown'}`)
       }
     } catch (error) {
       this.debug.log('error', `Failed to process message from VM ${connection.vmId}: ${error}`)
@@ -1006,7 +1006,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Handle auto-check related command responses and emit appropriate events
-  private async handleAutoCheckResponse (vmId: string, response: ResponseMessage, data: ResponseData | null): Promise<void> {
+  private async handleAutoCheckResponse(vmId: string, response: ResponseMessage, data: ResponseData | null): Promise<void> {
     try {
       if (!response.command_type || !this.vmEventManager) {
         return
@@ -1051,7 +1051,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Analyze auto-check command data to determine if issues or remediations should be reported
-  private async analyzeAutoCheckData (
+  private async analyzeAutoCheckData(
     vmId: string,
     commandType: string,
     data: ResponseData | null,
@@ -1064,40 +1064,40 @@ export class VirtioSocketWatcherService extends EventEmitter {
 
       // Analyze different types of auto-check responses
       switch (commandType) {
-      case 'CheckWindowsUpdates':
-        await this.analyzeWindowsUpdatesResponse(vmId, data, response)
-        break
+        case 'CheckWindowsUpdates':
+          await this.analyzeWindowsUpdatesResponse(vmId, data, response)
+          break
 
-      case 'CheckWindowsDefender':
-        await this.analyzeDefenderResponse(vmId, data, response)
-        break
+        case 'CheckWindowsDefender':
+          await this.analyzeDefenderResponse(vmId, data, response)
+          break
 
-      case 'CheckDiskSpace':
-        await this.analyzeDiskSpaceResponse(vmId, data, response)
-        break
+        case 'CheckDiskSpace':
+          await this.analyzeDiskSpaceResponse(vmId, data, response)
+          break
 
-      case 'CheckResourceOptimization':
-        await this.analyzeResourceOptimizationResponse(vmId, data, response)
-        break
+        case 'CheckResourceOptimization':
+          await this.analyzeResourceOptimizationResponse(vmId, data, response)
+          break
 
-      case 'RunAllHealthChecks':
-      case 'RunHealthCheck':
-        await this.analyzeHealthCheckResponse(vmId, data, response)
-        break
+        case 'RunAllHealthChecks':
+        case 'RunHealthCheck':
+          await this.analyzeHealthCheckResponse(vmId, data, response)
+          break
 
-      case 'AutoFixWindowsUpdates':
-      case 'AutoFixDefender':
-      case 'AutoOptimizeDisk':
-      case 'DiskCleanup':
-        await this.analyzeRemediationResponse(vmId, commandType, data, response)
-        break
+        case 'AutoFixWindowsUpdates':
+        case 'AutoFixDefender':
+        case 'AutoOptimizeDisk':
+        case 'DiskCleanup':
+          await this.analyzeRemediationResponse(vmId, commandType, data, response)
+          break
 
-      case 'RunDefenderQuickScan':
-        await this.analyzeDefenderScanResponse(vmId, data, response)
-        break
+        case 'RunDefenderQuickScan':
+          await this.analyzeDefenderScanResponse(vmId, data, response)
+          break
 
-      default:
-        this.debug.log('debug', `No specific analysis for command type: ${commandType}`)
+        default:
+          this.debug.log('debug', `No specific analysis for command type: ${commandType}`)
       }
     } catch (error) {
       this.debug.log('error', `Error analyzing auto-check data for VM ${vmId}: ${error}`)
@@ -1105,7 +1105,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Analyze Windows Updates response for issues
-  private async analyzeWindowsUpdatesResponse (vmId: string, data: ResponseData | null, response: ResponseMessage): Promise<void> {
+  private async analyzeWindowsUpdatesResponse(vmId: string, data: ResponseData | null, response: ResponseMessage): Promise<void> {
     if (!this.vmEventManager || !data) return
 
     try {
@@ -1155,7 +1155,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Analyze Windows Defender response for issues
-  private async analyzeDefenderResponse (vmId: string, data: ResponseData | null, response: ResponseMessage): Promise<void> {
+  private async analyzeDefenderResponse(vmId: string, data: ResponseData | null, response: ResponseMessage): Promise<void> {
     if (!this.vmEventManager || !data) return
 
     try {
@@ -1205,7 +1205,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Analyze disk space response for issues
-  private async analyzeDiskSpaceResponse (vmId: string, data: ResponseData | null, response: ResponseMessage): Promise<void> {
+  private async analyzeDiskSpaceResponse(vmId: string, data: ResponseData | null, response: ResponseMessage): Promise<void> {
     if (!this.vmEventManager || !data) return
 
     try {
@@ -1260,7 +1260,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Analyze resource optimization response
-  private async analyzeResourceOptimizationResponse (vmId: string, data: ResponseData | null, response: ResponseMessage): Promise<void> {
+  private async analyzeResourceOptimizationResponse(vmId: string, data: ResponseData | null, response: ResponseMessage): Promise<void> {
     if (!this.vmEventManager || !data) return
 
     try {
@@ -1294,7 +1294,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Analyze general health check response
-  private async analyzeHealthCheckResponse (vmId: string, data: ResponseData | null, response: ResponseMessage): Promise<void> {
+  private async analyzeHealthCheckResponse(vmId: string, data: ResponseData | null, response: ResponseMessage): Promise<void> {
     if (!this.vmEventManager || !data) return
 
     try {
@@ -1326,7 +1326,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Analyze remediation command responses
-  private async analyzeRemediationResponse (vmId: string, commandType: string, data: ResponseData | null, response: ResponseMessage): Promise<void> {
+  private async analyzeRemediationResponse(vmId: string, commandType: string, data: ResponseData | null, response: ResponseMessage): Promise<void> {
     if (!this.vmEventManager) return
 
     try {
@@ -1349,7 +1349,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Analyze Defender scan response
-  private async analyzeDefenderScanResponse (vmId: string, data: ResponseData | null, response: ResponseMessage): Promise<void> {
+  private async analyzeDefenderScanResponse(vmId: string, data: ResponseData | null, response: ResponseMessage): Promise<void> {
     if (!this.vmEventManager || !data) return
 
     try {
@@ -1381,7 +1381,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Helper method to map remediation commands to their check types
-  private getCheckTypeFromRemediationCommand (commandType: string): string {
+  private getCheckTypeFromRemediationCommand(commandType: string): string {
     const mapping: Record<string, string> = {
       AutoFixWindowsUpdates: 'WindowsUpdates',
       AutoFixDefender: 'WindowsDefender',
@@ -1392,7 +1392,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Store metrics in database
-  private async storeMetrics (vmId: string, message: MetricsMessage): Promise<void> {
+  private async storeMetrics(vmId: string, message: MetricsMessage): Promise<void> {
     try {
       const { data } = message
 
@@ -1633,7 +1633,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Send message to VM with enhanced transmission tracking
-  private sendMessage (connection: VmConnection, message: OutgoingMessage): void {
+  private sendMessage(connection: VmConnection, message: OutgoingMessage): void {
     const sendStartTime = Date.now()
 
     if (!connection.isConnected) {
@@ -1677,7 +1677,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Public method to send safe commands to a VM
-  public async sendSafeCommand (
+  public async sendSafeCommand(
     vmId: string,
     commandType: SafeCommandType,
     timeout: number = 30000
@@ -1729,115 +1729,115 @@ export class VirtioSocketWatcherService extends EventEmitter {
       let commandTypeFormatted: FormattedCommandType
 
       switch (commandType.action) {
-      case 'PackageSearch':
-        commandTypeFormatted = {
-          action: 'PackageSearch',
-          query: commandType.params?.query || ''
-        }
-        break
-      case 'PackageInstall':
-        commandTypeFormatted = {
-          action: 'PackageInstall',
-          package: commandType.params?.package || ''
-        }
-        break
-      case 'PackageRemove':
-        commandTypeFormatted = {
-          action: 'PackageRemove',
-          package: commandType.params?.package || ''
-        }
-        break
-      case 'PackageUpdate':
-        commandTypeFormatted = {
-          action: 'PackageUpdate',
-          package: commandType.params?.package || ''
-        }
-        break
-      case 'PackageList':
-        commandTypeFormatted = { action: 'PackageList' }
-        break
-      case 'ServiceList':
-        commandTypeFormatted = { action: 'ServiceList' }
-        break
-      case 'SystemInfo':
-        commandTypeFormatted = { action: 'SystemInfo' }
-        break
-      case 'OsInfo':
-        commandTypeFormatted = { action: 'OsInfo' }
-        break
-      case 'ProcessList':
-        commandTypeFormatted = {
-          action: 'ProcessList',
-          limit: commandType.params?.limit || null
-        }
-        break
-      case 'ProcessKill':
-        commandTypeFormatted = {
-          action: 'ProcessKill',
-          pid: commandType.params?.pid,
-          force: commandType.params?.force || null
-        }
-        break
-      case 'ProcessTop':
-        commandTypeFormatted = {
-          action: 'ProcessTop',
-          limit: commandType.params?.limit || null,
-          sort_by: commandType.params?.sort_by || null
-        }
-        break
-      // Maintenance commands
-      case 'ExecutePowerShellScript':
-        commandTypeFormatted = {
-          action: 'ExecutePowerShellScript',
-          script: commandType.params?.script || '',
-          script_type: commandType.params?.script_type || 'inline',
-          timeout_seconds: commandType.params?.timeout_seconds || undefined,
-          working_directory: commandType.params?.working_directory || undefined,
-          environment_vars: commandType.params?.environment_vars || undefined,
-          run_as_admin: commandType.params?.run_as_admin || false
-        }
-        break
-      case 'RunMaintenanceTask':
-        commandTypeFormatted = {
-          action: 'RunMaintenanceTask',
-          task_type: commandType.params?.task_type || '',
-          task_name: commandType.params?.task_name || '',
-          parameters: commandType.params?.parameters || undefined,
-          validate_before: commandType.params?.validate_before || false,
-          validate_after: commandType.params?.validate_after || false
-        }
-        break
-      case 'ValidateSystemHealth':
-        commandTypeFormatted = {
-          action: 'ValidateSystemHealth',
-          check_name: commandType.params?.check_name || undefined
-        }
-        break
-      case 'CleanTemporaryFiles':
-        commandTypeFormatted = {
-          action: 'CleanTemporaryFiles',
-          targets: commandType.params?.targets || undefined
-        }
-        break
-      case 'UpdateSystemSoftware':
-        commandTypeFormatted = {
-          action: 'UpdateSystemSoftware',
-          package: commandType.params?.package || undefined
-        }
-        break
-      case 'RestartServices':
-        commandTypeFormatted = {
-          action: 'RestartServices',
-          service_name: commandType.params?.service_name || undefined
-        }
-        break
-      case 'CheckSystemIntegrity':
-        commandTypeFormatted = {
-          action: 'CheckSystemIntegrity'
-        }
-        break
-      default:
-        commandTypeFormatted = { action: commandType.action }
+        case 'PackageSearch':
+          commandTypeFormatted = {
+            action: 'PackageSearch',
+            query: commandType.params?.query || ''
+          }
+          break
+        case 'PackageInstall':
+          commandTypeFormatted = {
+            action: 'PackageInstall',
+            package: commandType.params?.package || ''
+          }
+          break
+        case 'PackageRemove':
+          commandTypeFormatted = {
+            action: 'PackageRemove',
+            package: commandType.params?.package || ''
+          }
+          break
+        case 'PackageUpdate':
+          commandTypeFormatted = {
+            action: 'PackageUpdate',
+            package: commandType.params?.package || ''
+          }
+          break
+        case 'PackageList':
+          commandTypeFormatted = { action: 'PackageList' }
+          break
+        case 'ServiceList':
+          commandTypeFormatted = { action: 'ServiceList' }
+          break
+        case 'SystemInfo':
+          commandTypeFormatted = { action: 'SystemInfo' }
+          break
+        case 'OsInfo':
+          commandTypeFormatted = { action: 'OsInfo' }
+          break
+        case 'ProcessList':
+          commandTypeFormatted = {
+            action: 'ProcessList',
+            limit: commandType.params?.limit || null
+          }
+          break
+        case 'ProcessKill':
+          commandTypeFormatted = {
+            action: 'ProcessKill',
+            pid: commandType.params?.pid,
+            force: commandType.params?.force || null
+          }
+          break
+        case 'ProcessTop':
+          commandTypeFormatted = {
+            action: 'ProcessTop',
+            limit: commandType.params?.limit || null,
+            sort_by: commandType.params?.sort_by || null
+          }
+          break
+        // Maintenance commands
+        case 'ExecutePowerShellScript':
+          commandTypeFormatted = {
+            action: 'ExecutePowerShellScript',
+            script: commandType.params?.script || '',
+            script_type: commandType.params?.script_type || 'inline',
+            timeout_seconds: commandType.params?.timeout_seconds || undefined,
+            working_directory: commandType.params?.working_directory || undefined,
+            environment_vars: commandType.params?.environment_vars || undefined,
+            run_as_admin: commandType.params?.run_as_admin || false
+          }
+          break
+        case 'RunMaintenanceTask':
+          commandTypeFormatted = {
+            action: 'RunMaintenanceTask',
+            task_type: commandType.params?.task_type || '',
+            task_name: commandType.params?.task_name || '',
+            parameters: commandType.params?.parameters || undefined,
+            validate_before: commandType.params?.validate_before || false,
+            validate_after: commandType.params?.validate_after || false
+          }
+          break
+        case 'ValidateSystemHealth':
+          commandTypeFormatted = {
+            action: 'ValidateSystemHealth',
+            check_name: commandType.params?.check_name || undefined
+          }
+          break
+        case 'CleanTemporaryFiles':
+          commandTypeFormatted = {
+            action: 'CleanTemporaryFiles',
+            targets: commandType.params?.targets || undefined
+          }
+          break
+        case 'UpdateSystemSoftware':
+          commandTypeFormatted = {
+            action: 'UpdateSystemSoftware',
+            package: commandType.params?.package || undefined
+          }
+          break
+        case 'RestartServices':
+          commandTypeFormatted = {
+            action: 'RestartServices',
+            service_name: commandType.params?.service_name || undefined
+          }
+          break
+        case 'CheckSystemIntegrity':
+          commandTypeFormatted = {
+            action: 'CheckSystemIntegrity'
+          }
+          break
+        default:
+          commandTypeFormatted = { action: commandType.action }
       }
 
       // Build the complete message with IncomingMessage structure
@@ -1857,7 +1857,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Public method to send unsafe (raw) commands to a VM
-  public async sendUnsafeCommand (
+  public async sendUnsafeCommand(
     vmId: string,
     rawCommand: string,
     options: Partial<UnsafeCommandRequest> = {},
@@ -1923,7 +1923,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Helper method specifically for package management commands
-  public async sendPackageCommand (
+  public async sendPackageCommand(
     vmId: string,
     action: 'PackageList' | 'PackageInstall' | 'PackageRemove' | 'PackageUpdate' | 'PackageSearch',
     packageName?: string,
@@ -1942,7 +1942,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Helper method specifically for process control commands
-  public async sendProcessCommand (
+  public async sendProcessCommand(
     vmId: string,
     action: 'ProcessList' | 'ProcessKill' | 'ProcessTop',
     params?: { pid?: number; force?: boolean; limit?: number; sort_by?: string },
@@ -1957,7 +1957,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Enhanced connection health monitoring with detailed diagnostics
-  private startHealthMonitoring (connection: VmConnection): void {
+  private startHealthMonitoring(connection: VmConnection): void {
     // Clear existing timer
     if (connection.pingTimer) {
       clearInterval(connection.pingTimer)
@@ -2054,7 +2054,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Handle detailed error report from InfiniService
-  private async handleErrorReport (connection: VmConnection, errorReport: ErrorReportMessage): Promise<void> {
+  private async handleErrorReport(connection: VmConnection, errorReport: ErrorReportMessage): Promise<void> {
     connection.lastErrorReport = errorReport
     connection.errorClassificationHistory.push(errorReport)
 
@@ -2096,7 +2096,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
     // Add alternative socket paths for the VM
     const vmId = connection.vmId
     const alternativePaths = [
-      `/opt/infinibay/sockets/${vmId}-backup.sock`,
+      `/opt/infinibay/sockets/${vmId}.sock`,
       `/tmp/infinibay/${vmId}.sock`,
       `/run/infinibay/${vmId}.sock`
     ]
@@ -2121,7 +2121,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Adjust reconnection strategy based on error classification
-  private adjustReconnectionStrategy (connection: VmConnection, errorReport: ErrorReportMessage): void {
+  private adjustReconnectionStrategy(connection: VmConnection, errorReport: ErrorReportMessage): void {
     // Adjust timeouts and retry counts based on error type
     if (errorReport.error_type === 'ACCESS_DENIED') {
       // Longer delays for permission issues
@@ -2156,7 +2156,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Handle connection error
-  private handleConnectionError (connection: VmConnection): void {
+  private handleConnectionError(connection: VmConnection): void {
     connection.isConnected = false
 
     // Clear ping timer
@@ -2221,7 +2221,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Handle connection closed
-  private handleConnectionClosed (connection: VmConnection): void {
+  private handleConnectionClosed(connection: VmConnection): void {
     // If this was an intentional close, don't reconnect
     if (!this.isRunning) {
       this.closeConnection(connection.vmId, 'cleanup or error')
@@ -2233,7 +2233,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Close and clean up a connection with enhanced diagnostics
-  private closeConnection (vmId: string, reason: string = 'unknown'): void {
+  private closeConnection(vmId: string, reason: string = 'unknown'): void {
     const connection = this.connections.get(vmId)
     if (!connection) {
       return
@@ -2294,7 +2294,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Get comprehensive connection statistics with enhanced diagnostics
-  getConnectionStats (): {
+  getConnectionStats(): {
     totalConnections: number
     activeConnections: number
     connections: Array<{
@@ -2345,7 +2345,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
       recoverySuccessRate: number
       averageRetryAttempts: number
     }
-    } {
+  } {
     const now = Date.now()
     const connections = Array.from(this.connections.values()).map(conn => ({
       vmId: conn.vmId,
@@ -2438,7 +2438,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Get pending commands for a VM
-  public getPendingCommands (vmId: string): string[] {
+  public getPendingCommands(vmId: string): string[] {
     const connection = this.connections.get(vmId)
     if (!connection) {
       return []
@@ -2447,7 +2447,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Cancel a specific pending command
-  public cancelCommand (vmId: string, commandId: string): boolean {
+  public cancelCommand(vmId: string, commandId: string): boolean {
     const connection = this.connections.get(vmId)
     if (!connection) {
       return false
@@ -2466,7 +2466,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Cancel all pending commands for a VM
-  public cancelAllCommands (vmId: string): number {
+  public cancelAllCommands(vmId: string): number {
     const connection = this.connections.get(vmId)
     if (!connection) {
       return 0
@@ -2483,7 +2483,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Execute command with retry logic
-  public async executeCommandWithRetry (
+  public async executeCommandWithRetry(
     vmId: string,
     commandBuilder: () => Promise<CommandResponse>,
     maxRetries: number = 3,
@@ -2518,18 +2518,18 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Check if VM has active connection
-  public isVmConnected (vmId: string): boolean {
+  public isVmConnected(vmId: string): boolean {
     const connection = this.connections.get(vmId)
     return connection?.isConnected || false
   }
 
   // Check if the service is currently running
-  public getServiceStatus (): boolean {
+  public getServiceStatus(): boolean {
     return this.isRunning
   }
 
   // Get connection details for a VM
-  public getConnectionDetails (vmId: string): { isConnected: boolean; socketPath?: string; lastMessageTime?: Date; errorCount?: number } | null {
+  public getConnectionDetails(vmId: string): { isConnected: boolean; socketPath?: string; lastMessageTime?: Date; errorCount?: number } | null {
     const connection = this.connections.get(vmId)
     if (!connection) {
       return null
@@ -2543,7 +2543,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Clean up connections for a deleted VM
-  async cleanupVmConnection (vmId: string): Promise<void> {
+  async cleanupVmConnection(vmId: string): Promise<void> {
     this.debug.log('debug', `Cleaning up connection for deleted VM ${vmId}`)
     this.closeConnection(vmId, 'manual cleanup')
 
@@ -2561,7 +2561,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Process health check queue when VM connects
-  private processHealthCheckQueue (connection: VmConnection): void {
+  private processHealthCheckQueue(connection: VmConnection): void {
     if (!this.queueManager) {
       this.debug.log('debug', `⚕️ No queue manager available for VM ${connection.vmId}, skipping health check queue processing`)
       return
@@ -2580,7 +2580,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Helper method for executing PowerShell scripts
-  public async sendMaintenancePowerShellScript (
+  public async sendMaintenancePowerShellScript(
     vmId: string,
     script: string,
     options: {
@@ -2608,7 +2608,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Helper method for running maintenance tasks
-  public async sendMaintenanceTask (
+  public async sendMaintenanceTask(
     vmId: string,
     taskType: string,
     taskName: string,
@@ -2634,7 +2634,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Helper method for system health validation
-  public async sendValidateSystemHealth (
+  public async sendValidateSystemHealth(
     vmId: string,
     checkName?: string,
     timeout: number = 30000
@@ -2650,7 +2650,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Helper method for cleaning temporary files
-  public async sendCleanTemporaryFiles (
+  public async sendCleanTemporaryFiles(
     vmId: string,
     targets?: string[],
     timeout: number = 45000
@@ -2666,7 +2666,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Helper method for updating system software
-  public async sendUpdateSystemSoftware (
+  public async sendUpdateSystemSoftware(
     vmId: string,
     packageName?: string,
     timeout: number = 180000 // 3 minutes for software updates
@@ -2682,7 +2682,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Helper method for restarting services
-  public async sendRestartServices (
+  public async sendRestartServices(
     vmId: string,
     serviceName?: string,
     timeout: number = 60000
@@ -2698,7 +2698,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   // Helper method for checking system integrity
-  public async sendCheckSystemIntegrity (
+  public async sendCheckSystemIntegrity(
     vmId: string,
     timeout: number = 120000 // 2 minutes for integrity checks
   ): Promise<CommandResponse> {
@@ -3089,7 +3089,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
 
     // Link-local addresses: fe80::/10
     if (cleanIP.toLowerCase().startsWith('fe8') || cleanIP.toLowerCase().startsWith('fe9') ||
-        cleanIP.toLowerCase().startsWith('fea') || cleanIP.toLowerCase().startsWith('feb')) {
+      cleanIP.toLowerCase().startsWith('fea') || cleanIP.toLowerCase().startsWith('feb')) {
       return true
     }
 
@@ -3100,7 +3100,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
 
     // Site-local addresses (deprecated but still used): fec0::/10
     if (cleanIP.toLowerCase().startsWith('fec') || cleanIP.toLowerCase().startsWith('fed') ||
-        cleanIP.toLowerCase().startsWith('fee') || cleanIP.toLowerCase().startsWith('fef')) {
+      cleanIP.toLowerCase().startsWith('fee') || cleanIP.toLowerCase().startsWith('fef')) {
       return true
     }
 
@@ -3174,7 +3174,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
 
       // Link-local: fe80::/10
       if (cleanIP.startsWith('fe8') || cleanIP.startsWith('fe9') ||
-          cleanIP.startsWith('fea') || cleanIP.startsWith('feb')) {
+        cleanIP.startsWith('fea') || cleanIP.startsWith('feb')) {
         return 'ipv6-link-local'
       }
 

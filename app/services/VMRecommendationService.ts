@@ -1,4 +1,5 @@
 import { PrismaClient, Machine, VMHealthSnapshot, SystemMetrics, ProcessSnapshot, PortUsage, VMNWFilter, FWRule, VMRecommendation, RecommendationType, Prisma, VmPort, DepartmentNWFilter } from '@prisma/client'
+import { createHash } from 'crypto'
 import { RecommendationFilterInput } from '../graphql/types/RecommendationTypes'
 import { AppError, ErrorCode, ErrorContext } from '../utils/errors/ErrorHandler'
 import {
@@ -72,6 +73,11 @@ export class VMRecommendationService {
     this.registerDefaultCheckers()
     this.validateConfiguration()
     this.startMaintenanceTimer()
+
+    // Run initial maintenance on startup
+    setTimeout(() => {
+      this.performMaintenance()
+    }, 1000) // Small delay to ensure service is fully initialized
   }
 
   private registerDefaultCheckers (): void {
@@ -548,6 +554,60 @@ export class VMRecommendationService {
     }
   }
 
+  /**
+   * Generate a hash of recommendation results for change detection
+   */
+  private generateRecommendationHash(results: RecommendationResult[]): string {
+    // Sort results by type and text to ensure consistent hashing
+    const sortedResults = results
+      .map(result => ({
+        type: result.type,
+        text: result.text,
+        actionText: result.actionText,
+        data: result.data ? JSON.stringify(result.data, Object.keys(result.data).sort()) : null
+      }))
+      .sort((a, b) => a.type.localeCompare(b.type) || a.text.localeCompare(b.text))
+
+    const hashContent = JSON.stringify(sortedResults)
+    return createHash('sha256').update(hashContent).digest('hex')
+  }
+
+  /**
+   * Check if recommendations have changed by comparing hashes
+   */
+  private async hasRecommendationsChanged(
+    vmId: string,
+    snapshotId: string | null,
+    newHash: string
+  ): Promise<boolean> {
+    if (!snapshotId) {
+      return true // Always save if no snapshot
+    }
+
+    try {
+      const snapshot = await this.prisma.vMHealthSnapshot.findUnique({
+        where: { id: snapshotId },
+        select: { customCheckResults: true }
+      })
+
+      if (!snapshot?.customCheckResults) {
+        return true // No previous recommendations
+      }
+
+      const metadata = snapshot.customCheckResults as any
+      const previousHash = metadata.recommendationHash
+
+      if (!previousHash) {
+        return true // No previous hash stored
+      }
+
+      return previousHash !== newHash
+    } catch (error) {
+      console.warn(`Failed to check recommendation changes for snapshot ${snapshotId}:`, error)
+      return true // Default to saving on error
+    }
+  }
+
   private async saveRecommendations (
     vmId: string,
     snapshotId: string | null,
@@ -556,6 +616,31 @@ export class VMRecommendationService {
     if (results.length === 0) {
       return []
     }
+
+    // Generate hash for change detection
+    const recommendationHash = this.generateRecommendationHash(results)
+
+    // Check if recommendations have changed
+    const hasChanged = await this.hasRecommendationsChanged(vmId, snapshotId, recommendationHash)
+
+    if (!hasChanged) {
+      console.log(`📋 Recommendations unchanged for VM ${vmId}, skipping database write`)
+
+      // Return existing recommendations instead of creating new ones
+      if (snapshotId) {
+        const existingRecommendations = await this.prisma.vMRecommendation.findMany({
+          where: {
+            machineId: vmId,
+            snapshotId
+          },
+          orderBy: { createdAt: 'desc' }
+        })
+        return existingRecommendations
+      }
+      return []
+    }
+
+    console.log(`📝 Recommendations changed for VM ${vmId}, saving to database`)
 
     // Prepare bulk data for createMany
     const bulkData = results.map(result => ({
@@ -592,7 +677,8 @@ export class VMRecommendationService {
           const recommendationMetadata = {
             count: results.length,
             generatedAt: new Date().toISOString(),
-            lastUpdated: new Date().toISOString()
+            lastUpdated: new Date().toISOString(),
+            recommendationHash
           }
 
           await tx.vMHealthSnapshot.update({
@@ -785,12 +871,12 @@ export class VMRecommendationService {
    * Start maintenance timer for cache cleanup
    */
   private startMaintenanceTimer(): void {
-    // Run maintenance every 5 minutes
+    // Run maintenance every hour
     this.maintenanceTimer = setInterval(() => {
       this.performMaintenance()
-    }, 5 * 60 * 1000)
+    }, 60 * 60 * 1000)
 
-    console.log('✅ VMRecommendationService maintenance timer started (5-minute intervals)')
+    console.log('✅ VMRecommendationService maintenance timer started (1-hour intervals)')
   }
 
   /**
