@@ -29,6 +29,7 @@ export interface VMFirewallState {
 }
 
 interface TemplateDefinition {
+  template: string
   name: string
   description: string
   rules: SimplifiedRule[]
@@ -43,6 +44,7 @@ export class FirewallSimplifierService {
   // Template definitions
   private readonly templates: Map<FirewallTemplate, TemplateDefinition> = new Map([
     [FirewallTemplate.WEB_SERVER, {
+      template: 'WEB_SERVER',
       name: 'Web Server',
       description: 'Allow HTTP, HTTPS and SSH access',
       rules: [
@@ -52,6 +54,7 @@ export class FirewallSimplifierService {
       ]
     }],
     [FirewallTemplate.DATABASE, {
+      template: 'DATABASE',
       name: 'Database Server',
       description: 'Allow database connections and SSH',
       rules: [
@@ -61,6 +64,7 @@ export class FirewallSimplifierService {
       ]
     }],
     [FirewallTemplate.DESKTOP, {
+      template: 'DESKTOP',
       name: 'Desktop',
       description: 'Allow RDP and all outbound traffic',
       rules: [
@@ -69,6 +73,7 @@ export class FirewallSimplifierService {
       ]
     }],
     [FirewallTemplate.DEVELOPMENT, {
+      template: 'DEVELOPMENT',
       name: 'Development',
       description: 'Allow common development ports',
       rules: [

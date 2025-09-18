@@ -104,6 +104,10 @@ export class VMFirewallState {
  */
 @ObjectType()
 export class FirewallTemplateInfo {
+  /** Template identifier (e.g., WEB_SERVER, DATABASE) */
+  @Field({ description: 'Template identifier (e.g., WEB_SERVER, DATABASE)' })
+    template!: string
+
   /** Template name identifier */
   @Field({ description: 'Template name identifier' })
     name!: string

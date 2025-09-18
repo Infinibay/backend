@@ -18,9 +18,26 @@ import { VmEventManager } from './VmEventManager'
 import { VMHealthQueueManager } from './VMHealthQueueManager'
 import { Debugger } from '../utils/debug'
 
+// Payload logging configuration and helpers
+const LOG_PREVIEW_LEN = Number(process.env.INFINIBAY_LOG_PREVIEW_LEN ?? 300);
+const SENSITIVE_KEYS = [/(password|token|secret|authorization|bearer)/i];
+
+function redactSensitive(obj: any): any {
+  if (obj && typeof obj === 'object') {
+    if (Array.isArray(obj)) return obj.map(redactSensitive);
+    const out: any = {};
+    for (const [k, v] of Object.entries(obj)) {
+      if (SENSITIVE_KEYS.some(rx => rx.test(k))) out[k] = '**redacted**';
+      else out[k] = redactSensitive(v);
+    }
+    return out;
+  }
+  return obj;
+}
+
 // Message types from InfiniService
 interface BaseMessage {
-  type: 'metrics' | 'error' | 'handshake' | 'command' | 'response'
+  type: 'metrics' | 'error' | 'handshake' | 'command' | 'response' | 'error_report' | 'circuit_breaker_state' | 'keep_alive'
   timestamp: string
 }
 
@@ -67,6 +84,8 @@ interface MetricsMessage extends BaseMessage {
           bytes_sent: number
           packets_received: number
           packets_sent: number
+          ip_addresses?: string[]
+          is_up?: boolean
         }>
       }
       uptime_seconds: number
@@ -127,6 +146,17 @@ interface MetricsMessage extends BaseMessage {
   }
 }
 
+interface ErrorReportMessage extends BaseMessage {
+  type: 'error_report'
+  error_type: string
+  severity: 'Temporary' | 'Recoverable' | 'Fatal' | 'Unknown'
+  windows_error_code?: number
+  retry_attempt: number
+  max_retries: number
+  recovery_suggestion?: string
+  vm_id: string
+}
+
 // Command-related message types
 interface CommandMessage extends BaseMessage {
   type: 'command'
@@ -145,6 +175,20 @@ interface ResponseMessage extends BaseMessage {
   command_type?: string
   data?: ResponseData
   error?: string
+}
+
+// Circuit Breaker and Keep-Alive message types
+interface CircuitBreakerStateMessage extends BaseMessage {
+  type: 'circuit_breaker_state'
+  state: 'Closed' | 'Open' | 'HalfOpen'
+  failure_count: number
+  last_failure_time?: string
+  recovery_eta_seconds?: number
+}
+
+interface KeepAliveMessage extends BaseMessage {
+  type: 'keep_alive'
+  sequence_number: number
 }
 
 // Define types for different response data structures
@@ -326,7 +370,32 @@ export interface CommandResponse {
   error?: string
 }
 
-// Connection state for each VM
+// Health check result structure for detailed tracking
+interface HealthCheckResult {
+  timestamp: Date
+  success: boolean
+  latency?: number
+  error?: string
+}
+
+// Message statistics for connection diagnostics
+interface MessageStats {
+  sent: number
+  received: number
+  errors: number
+  totalBytes: number
+  averageLatency: number
+}
+
+// Disconnection history tracking
+interface DisconnectionRecord {
+  timestamp: Date
+  reason: string
+  duration: number
+  wasUnexpected: boolean
+}
+
+// Connection state for each VM with enhanced diagnostics
 interface VmConnection {
   vmId: string
   socket: net.Socket
@@ -344,6 +413,40 @@ interface VmConnection {
     reject: (error: Error) => void
     timeout: NodeJS.Timeout
   }> // Track pending commands awaiting responses
+  // Enhanced connection diagnostics
+  connectionStartTime: Date
+  lastHealthCheckTime?: Date
+  healthCheckResults: HealthCheckResult[]
+  messageStats: MessageStats
+  connectionQuality: 'excellent' | 'good' | 'poor' | 'critical'
+  disconnectionHistory: DisconnectionRecord[]
+  transmissionFailureCount: number
+  lastSuccessfulTransmission?: Date
+  connectionStabilityScore: number // 0-100 score based on connection health
+  messageTypeCounts: Record<string, number> // Track message type frequency
+  // Enhanced error tracking for intelligent retry logic
+  lastErrorReport?: ErrorReportMessage // Last detailed error received from Rust side
+  errorClassificationHistory: ErrorReportMessage[] // History of classified errors
+  recoverableErrorCount: number // Count of recoverable errors
+  fatalErrorCount: number // Count of fatal errors
+  lastRecoveryAttempt?: Date // When last recovery was attempted
+  // Circuit Breaker fields
+  circuitBreakerState: 'Closed' | 'Open' | 'HalfOpen' // Current circuit breaker state
+  circuitBreakerFailureCount: number // Failure count for circuit breaker
+  circuitBreakerLastStateChange: Date // When state last changed
+  // Keep-Alive fields
+  keepAliveSequence: number // Track keep-alive message sequence
+  keepAliveLastSent?: Date // Last keep-alive sent time
+  keepAliveLastReceived?: Date // Last keep-alive response time
+  keepAliveFailureCount: number // Count of missed keep-alive responses
+  // Graceful Degradation fields
+  isDegraded: boolean // Whether connection is in degraded mode
+  degradationReason?: string // Why connection was degraded
+  // Per-connection reconnect delay (can be adjusted based on error patterns)
+  reconnectBaseDelayMs: number // Mutable reconnect delay for this connection
+  // Connection pooling for alternative endpoints
+  socketPaths: string[] // Alternative socket paths to try
+  currentSocketIndex: number // Index of the currently used socket path
 }
 
 // Define message structure types for outgoing messages
@@ -386,12 +489,13 @@ export class VirtioSocketWatcherService extends EventEmitter {
   private watcher?: chokidar.FSWatcher
   private socketDir: string
   private isRunning: boolean = false
-  private readonly maxReconnectAttempts = 10
-  private readonly reconnectBaseDelay = 1000 // Base delay in ms
+  private readonly maxReconnectAttempts = Number(process.env.VIRTIO_MAX_RECONNECT_ATTEMPTS) || 15
+  private readonly reconnectBaseDelay = Number(process.env.VIRTIO_RECONNECT_BASE_DELAY_MS) || 3000 // 3 seconds (was 1s)
+  private readonly maxReconnectDelay = Number(process.env.VIRTIO_MAX_RECONNECT_DELAY_MS) || 120000
   // Connection monitoring constants
   // Set high to accommodate long-running health checks (up to 5+ minutes)
-  private readonly messageTimeout = Number(process.env.VIRTIO_MESSAGE_TIMEOUT_MS) || 600000 // 10 minutes
-  private readonly pingInterval = Number(process.env.VIRTIO_PING_INTERVAL_MS) || 120000 // 2 minutes
+  private readonly messageTimeout = Number(process.env.VIRTIO_MESSAGE_TIMEOUT_MS) || 900000 // 15 minutes (was 10min)
+  private readonly pingInterval = Number(process.env.VIRTIO_PING_INTERVAL_MS) || 300000 // 5 minutes (was 2min)
   private debug: Debugger
 
   constructor (prisma: PrismaClient) {
@@ -399,6 +503,9 @@ export class VirtioSocketWatcherService extends EventEmitter {
     this.prisma = prisma
     this.socketDir = path.join(process.env.INFINIBAY_BASE_DIR || '/opt/infinibay', 'sockets')
     this.debug = new Debugger('infinibay:virtio-socket')
+
+    // Log timeout configuration for debugging
+    this.debug.log('info', `VirtIO timeout configuration: messageTimeout=${this.messageTimeout}ms, pingInterval=${this.pingInterval}ms, reconnectBaseDelay=${this.reconnectBaseDelay}ms, maxReconnectDelay=${this.maxReconnectDelay}ms, maxReconnectAttempts=${this.maxReconnectAttempts}`)
   }
 
   // Initialize the service with optional dependencies
@@ -523,29 +630,86 @@ export class VirtioSocketWatcherService extends EventEmitter {
     }
 
     const socket = new net.Socket()
+    const now = new Date()
     const connection: VmConnection = {
       vmId,
       socket,
       socketPath,
       buffer: '',
       reconnectAttempts: 0,
-      lastMessageTime: new Date(),
+      lastMessageTime: now,
       isConnected: false,
       errorCount: 0,
-      pendingCommands: new Map()
+      pendingCommands: new Map(),
+      // Enhanced connection diagnostics
+      connectionStartTime: now,
+      healthCheckResults: [],
+      messageStats: {
+        sent: 0,
+        received: 0,
+        errors: 0,
+        totalBytes: 0,
+        averageLatency: 0
+      },
+      connectionQuality: 'good',
+      disconnectionHistory: [],
+      transmissionFailureCount: 0,
+      connectionStabilityScore: 100,
+      messageTypeCounts: Object.create(null) as Record<string, number>,
+      // Enhanced error tracking for intelligent retry logic
+      errorClassificationHistory: [],
+      recoverableErrorCount: 0,
+      fatalErrorCount: 0,
+      // Circuit Breaker initialization
+      circuitBreakerState: 'Closed',
+      circuitBreakerFailureCount: 0,
+      circuitBreakerLastStateChange: now,
+      // Keep-Alive initialization
+      keepAliveSequence: 0,
+      keepAliveFailureCount: 0,
+      // Graceful Degradation initialization
+      isDegraded: false,
+      // Initialize per-connection reconnect delay from class default
+      reconnectBaseDelayMs: this.reconnectBaseDelay,
+      // Connection pooling initialization
+      socketPaths: [socketPath], // Start with primary socket path, can add alternatives
+      currentSocketIndex: 0
     }
+
+    this.debug.log('info', `🔌 Initiating connection to VM ${vmId} at ${socketPath} (attempt timestamp: ${now.toISOString()})`)
+    this.debug.log('debug', `Connection configuration: timeout=${this.messageTimeout}ms, pingInterval=${this.pingInterval}ms, maxReconnects=${this.maxReconnectAttempts}`)
 
     this.connections.set(vmId, connection)
 
     // Set up socket event handlers
     socket.on('connect', () => {
-      this.debug.log('info', `✅ Connected to VM ${vmId}`)
+      const connectTime = new Date()
+      const connectionDuration = connectTime.getTime() - connection.connectionStartTime.getTime()
+
+      this.debug.log('info', `✅ Connected to VM ${vmId} (duration: ${connectionDuration}ms)`)
+      this.debug.log('debug', `Connection established: socketPath=${socketPath}, attempts=${connection.reconnectAttempts}, quality=${connection.connectionQuality}`)
+
       connection.isConnected = true
       connection.reconnectAttempts = 0
-      connection.lastMessageTime = new Date()
+      connection.lastMessageTime = connectTime
       // Reset error tracking on successful connection
       connection.errorCount = 0
       connection.lastErrorType = undefined
+      connection.transmissionFailureCount = 0
+
+      // Update connection quality based on establishment speed
+      if (connectionDuration < 1000) {
+        connection.connectionQuality = 'excellent'
+      } else if (connectionDuration < 3000) {
+        connection.connectionQuality = 'good'
+      } else {
+        connection.connectionQuality = 'poor'
+      }
+
+      // Reset stability score on successful connection
+      connection.connectionStabilityScore = 100
+
+      this.debug.log('info', `Connection quality assessed as '${connection.connectionQuality}' based on ${connectionDuration}ms establishment time`)
 
       // Connection established successfully
       // Start connection health monitoring (pings, timeouts)
@@ -573,32 +737,66 @@ export class VirtioSocketWatcherService extends EventEmitter {
         errorType = 'ENOENT'
       }
 
+      // Enhanced error tracking and classification
+      const errorTimestamp = new Date()
+      connection.messageStats.errors++
+
+      // Update connection quality based on error frequency
+      const errorRate = connection.messageStats.errors / Math.max(connection.messageStats.received + connection.messageStats.sent, 1)
+      if (errorRate > 0.1) {
+        connection.connectionQuality = 'critical'
+        connection.connectionStabilityScore = Math.max(0, connection.connectionStabilityScore - 10)
+      } else if (errorRate > 0.05) {
+        connection.connectionQuality = 'poor'
+        connection.connectionStabilityScore = Math.max(20, connection.connectionStabilityScore - 5)
+      }
+
       // Only log if this is a new error type or first occurrence
       if (connection.lastErrorType !== errorType || connection.errorCount === 0) {
         connection.lastErrorType = errorType
         connection.errorCount = 1
 
-        // Log specific error details based on type
+        // Log specific error details based on type with enhanced context
         if (errorType === 'EACCES') {
           this.debug.log('warn', `❌ Socket permission denied for VM ${vmId}. InfiniService may not be installed or running.`)
+          this.debug.log('debug', `Error context: attempts=${connection.reconnectAttempts}, quality=${connection.connectionQuality}, stability=${connection.connectionStabilityScore}`)
           // Only show diagnostic help on first error
           if (connection.reconnectAttempts === 0) {
             this.debug.log('info', `💡 To diagnose: virsh qemu-agent-command ${vmId} '{"execute":"guest-exec","arguments":{"path":"systemctl","arg":["status","infiniservice"]}}'`)
           }
         } else if (errorType === 'ECONNREFUSED') {
           this.debug.log('warn', `Connection refused for VM ${vmId}. InfiniService may not be listening on the socket.`)
+          this.debug.log('debug', `Connection stats: uptime=${Date.now() - connection.connectionStartTime.getTime()}ms, msgs_received=${connection.messageStats.received}`)
         } else if (errorType === 'ENOENT') {
           this.debug.log('debug', `Socket file not found for VM ${vmId}. VM may be shutting down or InfiniService not started.`)
         } else {
           this.debug.log('error', `Socket error for VM ${vmId}: ${error.message.toString().slice(0, 100)}`)
+          this.debug.log('debug', `Error details: type=${errorType}, timestamp=${errorTimestamp.toISOString()}, quality=${connection.connectionQuality}`)
+        }
+
+        // Log recent error classification history if available
+        if (connection.errorClassificationHistory.length > 0) {
+          const recentErrorReport = connection.lastErrorReport
+          if (recentErrorReport) {
+            this.debug.log('debug', `📋 Last error report from InfiniService: ${recentErrorReport.error_type} (${recentErrorReport.severity}) - retry ${recentErrorReport.retry_attempt}/${recentErrorReport.max_retries}`)
+            if (recentErrorReport.recovery_suggestion) {
+              this.debug.log('info', `💡 InfiniService recovery suggestion: ${recentErrorReport.recovery_suggestion}`)
+            }
+          }
+
+          // Show error pattern summary
+          const recentErrors = connection.errorClassificationHistory.slice(-5)
+          const errorTypes = recentErrors.map(e => e.error_type).join(', ')
+          this.debug.log('debug', `📊 Recent error patterns: recoverable=${connection.recoverableErrorCount}, fatal=${connection.fatalErrorCount}, types=[${errorTypes}]`)
         }
       } else {
         // Same error type, increment counter but only log periodically
         connection.errorCount++
 
-        // Log every 10th occurrence of the same error
+        // Log every 10th occurrence of the same error with enhanced metrics
         if (connection.errorCount % 10 === 0) {
-          this.debug.log('debug', `Still experiencing ${errorType} errors for VM ${vmId} (${connection.errorCount} occurrences)`)
+          const timeSinceStart = Date.now() - connection.connectionStartTime.getTime()
+          this.debug.log('debug', `Still experiencing ${errorType} errors for VM ${vmId} (${connection.errorCount} occurrences over ${timeSinceStart}ms, stability=${connection.connectionStabilityScore}%)`)
         }
       }
 
@@ -621,20 +819,53 @@ export class VirtioSocketWatcherService extends EventEmitter {
     }
   }
 
-  // Handle incoming data from socket
+  // Handle incoming data from socket with enhanced diagnostics
   private handleSocketData (connection: VmConnection, data: Buffer): void {
+    const receiveTime = new Date()
+    const dataSize = data.length
+
     connection.buffer += data.toString()
-    connection.lastMessageTime = new Date()
+    connection.lastMessageTime = receiveTime
+
+    // Update message statistics
+    connection.messageStats.received++
+    connection.messageStats.totalBytes += dataSize
+
+    this.debug.log('debug', `📥 Received ${dataSize} bytes from VM ${connection.vmId} (buffer size: ${connection.buffer.length}, total received: ${connection.messageStats.received})`)
+
+    // Monitor buffer size for potential issues
+    if (connection.buffer.length > 100000) { // 100KB buffer warning
+      this.debug.log('warn', `Large buffer detected for VM ${connection.vmId}: ${connection.buffer.length} bytes - possible message parsing issue`)
+    }
 
     // Process complete messages (delimited by newlines)
     let newlineIndex: number
+    let messagesProcessed = 0
     while ((newlineIndex = connection.buffer.indexOf('\n')) !== -1) {
       const messageStr = connection.buffer.slice(0, newlineIndex)
       connection.buffer = connection.buffer.slice(newlineIndex + 1)
 
       if (messageStr.trim()) {
+        const messageStartTime = Date.now()
         this.processMessage(connection, messageStr.trim())
+        const processingTime = Date.now() - messageStartTime
+        messagesProcessed++
+
+        // Update average latency (simple moving average)
+        if (connection.messageStats.averageLatency === 0) {
+          connection.messageStats.averageLatency = processingTime
+        } else {
+          connection.messageStats.averageLatency = (connection.messageStats.averageLatency * 0.9) + (processingTime * 0.1)
+        }
+
+        if (processingTime > 1000) { // Log slow message processing
+          this.debug.log('warn', `Slow message processing for VM ${connection.vmId}: ${processingTime}ms`)
+        }
       }
+    }
+
+    if (messagesProcessed > 0) {
+      this.debug.log('debug', `Processed ${messagesProcessed} messages from VM ${connection.vmId} (avg latency: ${connection.messageStats.averageLatency.toFixed(1)}ms)`)
     }
   }
 
@@ -650,11 +881,29 @@ export class VirtioSocketWatcherService extends EventEmitter {
 
       this.debug.log('debug', `📥 Received ${('type' in message ? message.type : 'unknown')} message from VM ${connection.vmId}`)
 
-      // Add detailed logging to debug message structure
-      this.debug.log('debug', `📋 Full message: ${JSON.stringify(message, null, 2).slice(0, 1000)}`)
+      // Add redacted message preview
+      const redacted = redactSensitive(message);
+      const preview = JSON.stringify(redacted, null, 2).slice(0, LOG_PREVIEW_LEN);
+      this.debug.log('debug', `📋 Message preview: ${preview}${preview.length === LOG_PREVIEW_LEN ? '…' : ''}`);
 
-      const msgType = 'type' in message ? message.type : undefined
-      console.log(`Processing ${messageStr}`)
+      const msgType = 'type' in message && typeof message.type === 'string' ? message.type : undefined
+
+      // Track message type frequency (bounded to avoid memory growth)
+      const typeKey: string = msgType || 'unknown'
+      connection.messageTypeCounts[typeKey] = (connection.messageTypeCounts[typeKey] || 0) + 1
+
+      // Keep only most recent 1000 message types to prevent unbounded growth
+      const totalMessages = Object.values(connection.messageTypeCounts).reduce((sum, count) => sum + count, 0)
+      if (totalMessages > 1000) {
+        // Simple cleanup: reduce all counts by half
+        for (const key in connection.messageTypeCounts) {
+          connection.messageTypeCounts[key] = Math.floor(connection.messageTypeCounts[key] / 2)
+          if (connection.messageTypeCounts[key] === 0) {
+            delete connection.messageTypeCounts[key]
+          }
+        }
+      }
+
       switch (msgType) {
       case 'metrics':
         // Store metrics in database
@@ -665,6 +914,12 @@ export class VirtioSocketWatcherService extends EventEmitter {
         // Log error from VM
         const errorMsg = message as ErrorMessage
         this.debug.log('error', `Error from VM ${connection.vmId}: ${errorMsg.error} ${errorMsg.details ? JSON.stringify(errorMsg.details) : ''}`)
+        break
+
+      case 'error_report':
+        // Handle detailed error report from Rust side
+        const errorReport = message as ErrorReportMessage
+        await this.handleErrorReport(connection, errorReport)
         break
 
       case 'response':
@@ -721,6 +976,18 @@ export class VirtioSocketWatcherService extends EventEmitter {
         } else {
           this.debug.log('warn', `Received response for unknown command ${response.id} from VM ${connection.vmId}`)
         }
+        break
+
+      case 'circuit_breaker_state':
+        // Handle circuit breaker state changes from Rust side
+        const circuitBreakerMsg = message as CircuitBreakerStateMessage
+        await this.handleCircuitBreakerStateChange(connection, circuitBreakerMsg)
+        break
+
+      case 'keep_alive':
+        // Handle keep-alive messages from InfiniService
+        const keepAliveMsg = message as KeepAliveMessage
+        await this.handleKeepAliveMessage(connection, keepAliveMsg)
         break
 
       default:
@@ -1172,6 +1439,9 @@ export class VirtioSocketWatcherService extends EventEmitter {
         }
       })
 
+      // Extract and update VM IP addresses from network interfaces
+      await this.updateVmIpAddresses(vmId, data.system.network.interfaces)
+
       // Store process snapshots
       if (data.processes && data.processes.length > 0) {
         await this.prisma.processSnapshot.createMany({
@@ -1362,20 +1632,47 @@ export class VirtioSocketWatcherService extends EventEmitter {
     }
   }
 
-  // Send message to VM
+  // Send message to VM with enhanced transmission tracking
   private sendMessage (connection: VmConnection, message: OutgoingMessage): void {
+    const sendStartTime = Date.now()
+
     if (!connection.isConnected) {
-      this.debug.log('warn', `Cannot send message to disconnected VM ${connection.vmId}`)
+      this.debug.log('warn', `Cannot send message to disconnected VM ${connection.vmId} (quality=${connection.connectionQuality}, stability=${connection.connectionStabilityScore}%)`)
+      connection.messageStats.errors++
       return
     }
 
     try {
       const messageStr = JSON.stringify(message) + '\n'
-      this.debug.log('debug', `📤 Sending message to VM ${connection.vmId}: ${messageStr.trim()}`)
-      console.log(`Sending ${messageStr}`)
+      const messageSize = Buffer.byteLength(messageStr, 'utf8')
+
+      this.debug.log('debug', `📤 Sending message to VM ${connection.vmId}: size=${messageSize} bytes, type=${message.type || 'unknown'}`)
+      this.debug.log('debug', `Message preview: ${messageStr.slice(0, 200)}${messageStr.length > 200 ? '...' : ''}`)
+
       connection.socket.write(messageStr)
+
+      // Update transmission statistics
+      connection.messageStats.sent++
+      connection.messageStats.totalBytes += messageSize
+      connection.lastSuccessfulTransmission = new Date()
+
+      const transmissionTime = Date.now() - sendStartTime
+      if (transmissionTime > 100) { // Log slow transmissions
+        this.debug.log('warn', `Slow message transmission to VM ${connection.vmId}: ${transmissionTime}ms for ${messageSize} bytes`)
+      }
+
+      this.debug.log('debug', `✅ Message sent to VM ${connection.vmId} in ${transmissionTime}ms (total sent: ${connection.messageStats.sent})`)
+
     } catch (error) {
-      this.debug.log('error', `Failed to send message to VM ${connection.vmId}: ${error}`)
+      connection.messageStats.errors++
+      connection.transmissionFailureCount++
+
+      // Update connection quality on transmission failure
+      connection.connectionQuality = 'poor'
+      connection.connectionStabilityScore = Math.max(0, connection.connectionStabilityScore - 15)
+
+      this.debug.log('error', `Failed to send message to VM ${connection.vmId}: ${error} (failures: ${connection.transmissionFailureCount}, quality: ${connection.connectionQuality})`)
+      this.debug.log('debug', `Transmission failure context: uptime=${Date.now() - connection.connectionStartTime.getTime()}ms, stability=${connection.connectionStabilityScore}%`)
     }
   }
 
@@ -1659,21 +1956,203 @@ export class VirtioSocketWatcherService extends EventEmitter {
     return this.sendSafeCommand(vmId, commandType, timeout)
   }
 
-  // Monitor connection health (no active pinging, just monitoring)
+  // Enhanced connection health monitoring with detailed diagnostics
   private startHealthMonitoring (connection: VmConnection): void {
     // Clear existing timer
     if (connection.pingTimer) {
       clearInterval(connection.pingTimer)
     }
 
+    this.debug.log('info', `🔍 Starting health monitoring for VM ${connection.vmId} (timeout=${this.messageTimeout}ms, interval=${this.pingInterval}ms)`)
+
     connection.pingTimer = setInterval(() => {
+      const now = Date.now()
+      const healthCheckStartTime = Date.now()
+      connection.lastHealthCheckTime = new Date()
+
       // Check if connection is stale
-      const timeSinceLastMessage = Date.now() - connection.lastMessageTime.getTime()
-      if (timeSinceLastMessage > this.messageTimeout) {
-        this.debug.log('warn', `Connection to VM ${connection.vmId} appears stale (${Math.round(timeSinceLastMessage / 1000)}s since last message), reconnecting...`)
-        this.handleConnectionError(connection)
+      const timeSinceLastMessage = now - connection.lastMessageTime.getTime()
+      const connectionUptime = now - connection.connectionStartTime.getTime()
+
+      // Perform comprehensive health assessment
+      let healthCheckSuccess = true
+      let healthLatency: number | undefined
+      let healthError: string | undefined
+
+      // Increase staleness threshold multiplier from 1x to 1.5x messageTimeout
+      const stalenessThreshold = this.messageTimeout * 1.5
+
+      // Add grace period for first health check after connection establishment (5 minutes)
+      const graceTimeAfterConnection = 300000
+      const inGracePeriod = connectionUptime < graceTimeAfterConnection
+
+      if (timeSinceLastMessage > stalenessThreshold && !inGracePeriod) {
+        healthCheckSuccess = false
+        healthError = `Message timeout: ${Math.round(timeSinceLastMessage / 1000)}s since last message`
+
+        // Implement progressive quality degradation instead of immediate critical marking
+        if (timeSinceLastMessage > stalenessThreshold * 2) {
+          connection.connectionQuality = 'critical'
+          connection.connectionStabilityScore = Math.max(0, connection.connectionStabilityScore - 15) // Reduced penalty
+        } else if (timeSinceLastMessage > stalenessThreshold * 1.5) {
+          connection.connectionQuality = 'poor'
+          connection.connectionStabilityScore = Math.max(10, connection.connectionStabilityScore - 8) // Reduced penalty
+        } else {
+          connection.connectionQuality = 'good' // Progressive degradation
+          connection.connectionStabilityScore = Math.max(20, connection.connectionStabilityScore - 5) // Minimal penalty
+        }
+
+        this.debug.log('warn', `Connection to VM ${connection.vmId} appears stale (${Math.round(timeSinceLastMessage / 1000)}s since last message), quality=${connection.connectionQuality}, stability=${connection.connectionStabilityScore}%`)
+        this.debug.log('debug', `Health check context: uptime=${connectionUptime}ms, msgs_sent=${connection.messageStats.sent}, msgs_received=${connection.messageStats.received}, errors=${connection.messageStats.errors}`)
+
+        // Only trigger reconnection for critical state
+        if (connection.connectionQuality === 'critical') {
+          this.handleConnectionError(connection)
+        }
+      } else {
+        // Connection appears healthy
+        healthLatency = Date.now() - healthCheckStartTime
+
+        // Update connection quality based on responsiveness
+        if (timeSinceLastMessage < this.pingInterval / 2) {
+          connection.connectionQuality = 'excellent'
+          connection.connectionStabilityScore = Math.min(100, connection.connectionStabilityScore + 2)
+        } else if (timeSinceLastMessage < this.pingInterval) {
+          connection.connectionQuality = 'good'
+          connection.connectionStabilityScore = Math.min(100, connection.connectionStabilityScore + 1)
+        }
+
+        this.debug.log('debug', `Health check passed for VM ${connection.vmId}: last_msg=${Math.round(timeSinceLastMessage / 1000)}s ago, quality=${connection.connectionQuality}, stability=${connection.connectionStabilityScore}%`)
+      }
+
+      // Record health check result
+      const healthResult: HealthCheckResult = {
+        timestamp: new Date(),
+        success: healthCheckSuccess,
+        latency: healthLatency,
+        error: healthError
+      }
+
+      connection.healthCheckResults.push(healthResult)
+
+      // Keep only last 50 health check results
+      if (connection.healthCheckResults.length > 50) {
+        connection.healthCheckResults = connection.healthCheckResults.slice(-50)
+      }
+
+      // Log periodic health summary
+      const recentResults = connection.healthCheckResults.slice(-10) // Last 10 checks
+      const successRate = recentResults.filter(r => r.success).length / recentResults.length
+      const avgLatency = recentResults
+        .filter(r => r.latency !== undefined)
+        .reduce((sum, r) => sum + (r.latency || 0), 0) / Math.max(1, recentResults.filter(r => r.latency !== undefined).length)
+
+      if (connection.healthCheckResults.length % 10 === 0) { // Every 10th check
+        this.debug.log('info', `📊 Health summary for VM ${connection.vmId}: success_rate=${(successRate * 100).toFixed(1)}%, avg_latency=${avgLatency.toFixed(1)}ms, stability=${connection.connectionStabilityScore}%`)
       }
     }, this.pingInterval)
+  }
+
+  // Handle detailed error report from InfiniService
+  private async handleErrorReport (connection: VmConnection, errorReport: ErrorReportMessage): Promise<void> {
+    connection.lastErrorReport = errorReport
+    connection.errorClassificationHistory.push(errorReport)
+
+    // Keep only last 50 error reports
+    if (connection.errorClassificationHistory.length > 50) {
+      connection.errorClassificationHistory = connection.errorClassificationHistory.slice(-50)
+    }
+
+    // Update error counters
+    if (errorReport.severity === 'Fatal') {
+      connection.fatalErrorCount++
+    } else {
+      connection.recoverableErrorCount++
+    }
+
+    // Log the error report with appropriate level based on severity
+    const logLevel = errorReport.severity === 'Fatal' ? 'error' : 'warn'
+    this.debug.log(logLevel, `🔧 Error report from VM ${connection.vmId}: ${errorReport.error_type} (${errorReport.severity}) - retry ${errorReport.retry_attempt}/${errorReport.max_retries}`)
+
+    if (errorReport.recovery_suggestion) {
+      this.debug.log('info', `💡 Recovery suggestion for VM ${connection.vmId}: ${errorReport.recovery_suggestion}`)
+    }
+
+    // Make intelligent reconnection decisions based on error type
+    if (errorReport.severity === 'Fatal') {
+      this.debug.log('error', `💀 Fatal error reported by VM ${connection.vmId}: ${errorReport.error_type}. Stopping reconnection attempts.`)
+      this.closeConnection(connection.vmId, 'fatal_error')
+    } else if (errorReport.severity === 'Recoverable') {
+      // Adjust reconnection strategy based on error type
+      this.adjustReconnectionStrategy(connection, errorReport)
+    }
+
+    // Track last recovery attempt time
+    connection.lastRecoveryAttempt = new Date()
+  }
+
+  // Connection pooling management
+  private expandConnectionPool(connection: VmConnection): void {
+    // Add alternative socket paths for the VM
+    const vmId = connection.vmId
+    const alternativePaths = [
+      `/opt/infinibay/sockets/${vmId}-backup.sock`,
+      `/tmp/infinibay/${vmId}.sock`,
+      `/run/infinibay/${vmId}.sock`
+    ]
+
+    // Add paths that don't already exist in the pool
+    for (const path of alternativePaths) {
+      if (!connection.socketPaths.includes(path)) {
+        connection.socketPaths.push(path)
+      }
+    }
+
+    this.debug.log('debug', `📡 Connection pool for VM ${vmId} expanded to ${connection.socketPaths.length} paths`)
+  }
+
+  private rotateToNextSocket(connection: VmConnection): string {
+    // Rotate to the next socket path in the pool
+    connection.currentSocketIndex = (connection.currentSocketIndex + 1) % connection.socketPaths.length
+    const nextPath = connection.socketPaths[connection.currentSocketIndex]
+
+    this.debug.log('debug', `🔄 Rotating to socket path ${connection.currentSocketIndex + 1}/${connection.socketPaths.length} for VM ${connection.vmId}: ${nextPath}`)
+    return nextPath
+  }
+
+  // Adjust reconnection strategy based on error classification
+  private adjustReconnectionStrategy (connection: VmConnection, errorReport: ErrorReportMessage): void {
+    // Adjust timeouts and retry counts based on error type
+    if (errorReport.error_type === 'ACCESS_DENIED') {
+      // Longer delays for permission issues
+      connection.reconnectBaseDelayMs = Math.max(connection.reconnectBaseDelayMs, 5000)
+      this.debug.log('info', `🔧 Adjusting reconnection delay to ${connection.reconnectBaseDelayMs}ms for ACCESS_DENIED errors on VM ${connection.vmId}`)
+    } else if (errorReport.error_type === 'BROKEN_PIPE' || errorReport.error_type === 'IO_BROKEN_PIPE') {
+      // Shorter delays for connection issues
+      connection.reconnectBaseDelayMs = Math.min(connection.reconnectBaseDelayMs, 2000)
+      this.debug.log('info', `🔧 Adjusting reconnection delay to ${connection.reconnectBaseDelayMs}ms for pipe errors on VM ${connection.vmId}`)
+    } else if (errorReport.error_type === 'FILE_NOT_FOUND' || errorReport.error_type === 'IO_NOT_FOUND') {
+      // Medium delays for device availability issues
+      connection.reconnectBaseDelayMs = Math.min(Math.max(connection.reconnectBaseDelayMs, 3000), 8000)
+      this.debug.log('info', `🔧 Adjusting reconnection delay to ${connection.reconnectBaseDelayMs}ms for device not found errors on VM ${connection.vmId}`)
+    }
+
+    // Update connection quality based on error patterns
+    const recentErrors = connection.errorClassificationHistory.slice(-10)
+    const recentFatalErrors = recentErrors.filter(e => e.severity === 'Fatal').length
+    const recentRecoverableErrors = recentErrors.filter(e => e.severity === 'Recoverable').length
+
+    if (recentFatalErrors >= 3) {
+      connection.connectionQuality = 'critical'
+    } else if (recentRecoverableErrors >= 5) {
+      connection.connectionQuality = 'poor'
+    } else if (recentRecoverableErrors >= 2) {
+      connection.connectionQuality = 'good'
+    } else if (connection.connectionQuality !== 'critical') {
+      connection.connectionQuality = 'excellent'
+    }
+
+    this.debug.log('debug', `🔧 Connection quality for VM ${connection.vmId} updated to: ${connection.connectionQuality}`)
   }
 
   // Handle connection error
@@ -1699,24 +2178,43 @@ export class VirtioSocketWatcherService extends EventEmitter {
       return
     }
 
-    // Calculate exponential backoff delay
+    // Calculate exponential backoff delay with smaller multiplier (1.5 instead of 2)
     const delay = Math.min(
-      this.reconnectBaseDelay * Math.pow(2, connection.reconnectAttempts),
-      30000 // Max 30 seconds
+      connection.reconnectBaseDelayMs * Math.pow(1.5, connection.reconnectAttempts),
+      this.maxReconnectDelay
     )
 
     connection.reconnectAttempts++
     this.debug.log('debug', `🔄 Will attempt reconnection ${connection.reconnectAttempts}/${this.maxReconnectAttempts} for VM ${connection.vmId} in ${delay}ms`)
 
     connection.reconnectTimer = setTimeout(() => {
-      // Check if socket file still exists
-      fs.access(connection.socketPath, fs.constants.F_OK, (err) => {
-        if (err) {
+      // Connection pooling: Try alternative socket paths on consecutive failures
+      if (connection.reconnectAttempts > 1 && connection.socketPaths.length === 1) {
+        this.expandConnectionPool(connection)
+      }
+
+      // Get the current socket path (might be rotated)
+      let currentSocketPath = connection.socketPaths[connection.currentSocketIndex]
+
+      // Check if current socket file exists
+      fs.access(currentSocketPath, fs.constants.F_OK, (err) => {
+        if (err && connection.socketPaths.length > 1) {
+          // Current socket failed, try the next one in the pool
+          currentSocketPath = this.rotateToNextSocket(connection)
+          this.debug.log('debug', `Socket file not accessible, rotating to alternative: ${currentSocketPath}`)
+
+          // Update the connection's socketPath to the new one
+          connection.socketPath = currentSocketPath
+
+          // Try the new socket
+          this.debug.log('debug', `🔄 Attempting reconnection for VM ${connection.vmId} with alternative socket`)
+          this.connectToVm(connection.vmId, currentSocketPath)
+        } else if (err) {
           this.debug.log('debug', `Socket file no longer exists for VM ${connection.vmId}, stopping reconnection`)
           this.closeConnection(connection.vmId, 'cleanup or error')
         } else {
           this.debug.log('debug', `🔄 Attempting reconnection for VM ${connection.vmId}`)
-          this.connectToVm(connection.vmId, connection.socketPath)
+          this.connectToVm(connection.vmId, currentSocketPath)
         }
       })
     }, delay)
@@ -1734,14 +2232,34 @@ export class VirtioSocketWatcherService extends EventEmitter {
     this.handleConnectionError(connection)
   }
 
-  // Close and clean up a connection
+  // Close and clean up a connection with enhanced diagnostics
   private closeConnection (vmId: string, reason: string = 'unknown'): void {
     const connection = this.connections.get(vmId)
     if (!connection) {
       return
     }
 
-    this.debug.log('debug', `🔌 Closing connection for VM ${vmId} (reason: ${reason})`)
+    const disconnectTime = new Date()
+    const connectionDuration = disconnectTime.getTime() - connection.connectionStartTime.getTime()
+    const wasUnexpected = !['cleanup or error', 'manual cleanup', 'service shutdown'].includes(reason)
+
+    // Record disconnection in history
+    const disconnectionRecord: DisconnectionRecord = {
+      timestamp: disconnectTime,
+      reason,
+      duration: connectionDuration,
+      wasUnexpected
+    }
+
+    connection.disconnectionHistory.push(disconnectionRecord)
+
+    // Keep only last 20 disconnection records
+    if (connection.disconnectionHistory.length > 20) {
+      connection.disconnectionHistory = connection.disconnectionHistory.slice(-20)
+    }
+
+    this.debug.log('info', `🔌 Closing connection for VM ${vmId} (reason: ${reason}, duration: ${connectionDuration}ms, unexpected: ${wasUnexpected})`)
+    this.debug.log('debug', `Connection summary: sent=${connection.messageStats.sent}, received=${connection.messageStats.received}, errors=${connection.messageStats.errors}, quality=${connection.connectionQuality}, stability=${connection.connectionStabilityScore}%`)
 
     // Only reject pending commands if this is unexpected
     const pendingCount = connection.pendingCommands.size
@@ -1775,7 +2293,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
     this.connections.delete(vmId)
   }
 
-  // Get connection statistics
+  // Get comprehensive connection statistics with enhanced diagnostics
   getConnectionStats (): {
     totalConnections: number
     activeConnections: number
@@ -1784,19 +2302,138 @@ export class VirtioSocketWatcherService extends EventEmitter {
       isConnected: boolean
       reconnectAttempts: number
       lastMessageTime: Date
+      errorCount: number
+      lastErrorType?: string
+      pendingCommands: number
+      // Enhanced diagnostics
+      connectionDuration: number
+      messageStats: MessageStats
+      connectionQuality: string
+      connectionStabilityScore: number
+      recentHealthChecks: HealthCheckResult[]
+      transmissionFailures: number
+      lastSuccessfulTransmission?: Date
+      disconnectionCount: number
+      messageTypeCounts: Record<string, number>
+      // Enhanced error tracking statistics
+      errorClassificationHistory: ErrorReportMessage[]
+      recoverableErrorCount: number
+      fatalErrorCount: number
+      lastErrorReport?: ErrorReportMessage
+      lastRecoveryAttempt?: Date
     }>
+    ipDetectionStats: {
+      totalVmsWithIPs: number
+      recentIPUpdates: number
+    }
+    qualityDistribution: {
+      excellent: number
+      good: number
+      poor: number
+      critical: number
+    }
+    overallHealth: {
+      averageStabilityScore: number
+      totalMessages: number
+      totalErrors: number
+      errorRate: number
+    }
+    errorClassification: {
+      totalRecoverableErrors: number
+      totalFatalErrors: number
+      errorPatternAnalysis: Record<string, number>
+      recoverySuccessRate: number
+      averageRetryAttempts: number
+    }
     } {
+    const now = Date.now()
     const connections = Array.from(this.connections.values()).map(conn => ({
       vmId: conn.vmId,
       isConnected: conn.isConnected,
       reconnectAttempts: conn.reconnectAttempts,
-      lastMessageTime: conn.lastMessageTime
+      lastMessageTime: conn.lastMessageTime,
+      errorCount: conn.errorCount,
+      lastErrorType: conn.lastErrorType,
+      pendingCommands: conn.pendingCommands.size,
+      // Enhanced diagnostics
+      connectionDuration: now - conn.connectionStartTime.getTime(),
+      messageStats: conn.messageStats,
+      connectionQuality: conn.connectionQuality,
+      connectionStabilityScore: conn.connectionStabilityScore,
+      recentHealthChecks: conn.healthCheckResults.slice(-5), // Last 5 health checks
+      transmissionFailures: conn.transmissionFailureCount,
+      lastSuccessfulTransmission: conn.lastSuccessfulTransmission,
+      disconnectionCount: conn.disconnectionHistory.length,
+      messageTypeCounts: conn.messageTypeCounts,
+      // Enhanced error tracking statistics
+      errorClassificationHistory: conn.errorClassificationHistory.slice(-10), // Last 10 error reports
+      recoverableErrorCount: conn.recoverableErrorCount,
+      fatalErrorCount: conn.fatalErrorCount,
+      lastErrorReport: conn.lastErrorReport,
+      lastRecoveryAttempt: conn.lastRecoveryAttempt
     }))
+
+    // Calculate quality distribution
+    const qualityDistribution = {
+      excellent: connections.filter(c => c.connectionQuality === 'excellent').length,
+      good: connections.filter(c => c.connectionQuality === 'good').length,
+      poor: connections.filter(c => c.connectionQuality === 'poor').length,
+      critical: connections.filter(c => c.connectionQuality === 'critical').length
+    }
+
+    // Calculate overall health metrics
+    const totalMessages = connections.reduce((sum, c) => sum + c.messageStats.sent + c.messageStats.received, 0)
+    const totalErrors = connections.reduce((sum, c) => sum + c.messageStats.errors, 0)
+    const averageStabilityScore = connections.length > 0
+      ? connections.reduce((sum, c) => sum + c.connectionStabilityScore, 0) / connections.length
+      : 0
+    const errorRate = totalMessages > 0 ? totalErrors / totalMessages : 0
+
+    // Calculate error classification statistics
+    const allConnections = Array.from(this.connections.values())
+    const totalRecoverableErrors = allConnections.reduce((sum, conn) => sum + conn.recoverableErrorCount, 0)
+    const totalFatalErrors = allConnections.reduce((sum, conn) => sum + conn.fatalErrorCount, 0)
+
+    // Analyze error patterns across all connections
+    const errorPatternAnalysis: Record<string, number> = {}
+    allConnections.forEach(conn => {
+      conn.errorClassificationHistory.forEach(errorReport => {
+        errorPatternAnalysis[errorReport.error_type] = (errorPatternAnalysis[errorReport.error_type] || 0) + 1
+      })
+    })
+
+    // Calculate recovery success rate and average retry attempts
+    const allErrorReports = allConnections.flatMap(conn => conn.errorClassificationHistory)
+    const successfulRecoveries = allErrorReports.filter(report => report.retry_attempt < report.max_retries).length
+    const totalRecoveryAttempts = allErrorReports.length
+    const recoverySuccessRate = totalRecoveryAttempts > 0 ? successfulRecoveries / totalRecoveryAttempts : 0
+
+    const averageRetryAttempts = allErrorReports.length > 0
+      ? allErrorReports.reduce((sum, report) => sum + report.retry_attempt, 0) / allErrorReports.length
+      : 0
 
     return {
       totalConnections: connections.length,
       activeConnections: connections.filter(c => c.isConnected).length,
-      connections
+      connections,
+      ipDetectionStats: {
+        totalVmsWithIPs: 0, // Would be enhanced with actual tracking
+        recentIPUpdates: 0  // Would be enhanced with actual tracking
+      },
+      qualityDistribution,
+      overallHealth: {
+        averageStabilityScore,
+        totalMessages,
+        totalErrors,
+        errorRate
+      },
+      errorClassification: {
+        totalRecoverableErrors,
+        totalFatalErrors,
+        errorPatternAnalysis,
+        recoverySuccessRate,
+        averageRetryAttempts
+      }
     }
   }
 
@@ -2070,6 +2707,501 @@ export class VirtioSocketWatcherService extends EventEmitter {
     }
 
     return this.sendSafeCommand(vmId, commandType, timeout)
+  }
+
+  /**
+   * Extract and update VM IP addresses from network interfaces with enhanced diagnostics
+   */
+  private async updateVmIpAddresses(vmId: string, interfaces: Array<{
+    name: string
+    bytes_received: number
+    bytes_sent: number
+    packets_received: number
+    packets_sent: number
+    ip_addresses?: string[]
+    is_up?: boolean
+  }>): Promise<void> {
+    try {
+      const totalInterfaces = interfaces.length
+      const interfacesWithIPs = interfaces.filter(iface =>
+        (iface.ip_addresses?.length || 0) > 0
+      ).length
+      const upInterfaces = interfaces.filter(iface =>
+        (iface.is_up ?? true) // Treat undefined as true for backward compatibility
+      ).length
+      const upInterfacesWithIPs = interfaces.filter(iface =>
+        (iface.is_up ?? true) && (iface.ip_addresses?.length || 0) > 0
+      ).length
+
+      this.debug.log('info', `Processing IP addresses for VM ${vmId}: ${totalInterfaces} total interfaces, ${interfacesWithIPs} with IPs, ${upInterfaces} UP, ${upInterfacesWithIPs} UP with IPs`)
+
+      // Log individual interface details for diagnostics
+      interfaces.forEach(iface => {
+        const ipCount = iface.ip_addresses?.length || 0
+        const isUp = iface.is_up ?? true
+        this.debug.log('debug', `Interface ${iface.name}: is_up=${isUp}, ip_count=${ipCount}, ips=[${iface.ip_addresses?.join(', ') || 'none'}]`)
+      })
+
+      if (upInterfacesWithIPs === 0 && totalInterfaces > 0) {
+        this.debug.log('warn', `No UP interfaces with IP addresses detected for VM ${vmId} (${totalInterfaces} total interfaces)`)
+      }
+
+      let localIP: string | null = null
+      let publicIP: string | null = null
+      let selectedInterface: string | null = null
+      const allDetectedIPs: string[] = []
+
+      // Enhanced IP extraction with prioritization
+      for (const iface of interfaces) {
+        // Handle undefined ip_addresses gracefully
+        const ipAddresses = iface.ip_addresses || []
+        const isUp = iface.is_up ?? true // Treat undefined as true for backward compatibility
+
+        if (ipAddresses.length === 0 || !isUp) {
+          continue
+        }
+
+        for (const ip of ipAddresses) {
+          // Validate IP address format
+          if (!this.isValidIPAddress(ip)) {
+            this.debug.log('debug', `Skipping invalid IP address format: ${this.maskIP(ip)}`)
+            continue
+          }
+
+          allDetectedIPs.push(ip)
+
+          // Skip loopback and other special addresses
+          if (this.isLoopbackAddress(ip)) {
+            this.debug.log('debug', `Skipping loopback address: ${ip}`)
+            continue
+          }
+
+          // Check if it's a private IP (local)
+          if (this.isPrivateIP(ip)) {
+            if (!localIP || this.shouldPreferIP(ip, localIP)) {
+              localIP = ip
+              selectedInterface = iface.name
+              this.debug.log('debug', `Selected local IP ${this.maskIP(ip)} from interface ${iface.name}`)
+            }
+          } else {
+            // Public IP
+            if (!publicIP || this.shouldPreferIP(ip, publicIP)) {
+              publicIP = ip
+              selectedInterface = iface.name
+              this.debug.log('debug', `Selected public IP ${this.maskIP(ip)} from interface ${iface.name}`)
+            }
+          }
+        }
+      }
+
+      // Check if IPs have actually changed before updating
+      const currentMachine = await this.prisma.machine.findUnique({
+        where: { id: vmId },
+        select: { localIP: true, publicIP: true }
+      })
+
+      if (!currentMachine) {
+        this.debug.log('error', `VM ${vmId} not found in database during IP update`)
+        return
+      }
+
+      const ipChanged = currentMachine.localIP !== localIP || currentMachine.publicIP !== publicIP
+
+      if (!ipChanged) {
+        this.debug.log('debug', `No IP changes detected for VM ${vmId}, skipping database update`)
+        return
+      }
+
+      // Update the machine record with the detected IPs
+      await this.prisma.machine.update({
+        where: { id: vmId },
+        data: {
+          localIP,
+          publicIP
+        }
+      }).catch(error => {
+        // Handle database constraint errors gracefully
+        if (error.code === 'P2025') {
+          this.debug.log('warn', `VM ${vmId} no longer exists in database during IP update`)
+        } else {
+          throw error
+        }
+      })
+
+      this.debug.log('info', `Updated IP addresses for VM ${vmId}: local=${this.maskIP(localIP)} (was ${this.maskIP(currentMachine.localIP)}), public=${this.maskIP(publicIP)} (was ${this.maskIP(currentMachine.publicIP)}), selected_interface=${selectedInterface}`)
+      this.debug.log('info', `All detected IPs for VM ${vmId}: [${allDetectedIPs.map(ip => this.maskIP(ip)).join(', ')}]`)
+
+      // Emit event for real-time updates only when IPs actually change
+      if (this.vmEventManager) {
+        // Determine if this is first IP detection or change
+        const isFirstDetection = !currentMachine.localIP && !currentMachine.publicIP
+        const eventType = isFirstDetection ? 'ip_first_detection' : 'ip_change'
+
+        await this.vmEventManager.handleEvent('update', {
+          id: vmId,
+          oldLocalIP: currentMachine.localIP,
+          oldPublicIP: currentMachine.publicIP,
+          newLocalIP: localIP,
+          newPublicIP: publicIP,
+          selectedInterface,
+          allDetectedIPs
+        }, eventType)
+      }
+
+    } catch (error) {
+      this.debug.log('error', `Failed to update IP addresses for VM ${vmId}: ${error}`)
+
+      // Add context about which interface caused the error
+      if (error instanceof Error) {
+        this.debug.log('error', `Error details: ${error.stack}`)
+      }
+
+      // Log the interface data for debugging
+      this.debug.log('error', `Interface data that caused error: ${JSON.stringify(interfaces, null, 2)}`)
+    }
+  }
+
+  /**
+   * Check if an IP address is private/local
+   */
+  private isPrivateIP(ip: string): boolean {
+    // IPv4 private ranges:
+    // 10.0.0.0/8 (10.0.0.0 - 10.255.255.255)
+    // 172.16.0.0/12 (172.16.0.0 - 172.31.255.255)
+    // 192.168.0.0/16 (192.168.0.0 - 192.168.255.255)
+    // 169.254.0.0/16 (169.254.0.0 - 169.254.255.255) - Link-local
+
+    if (ip.includes(':')) {
+      // Enhanced IPv6 classification
+      return this.isIPv6Private(ip)
+    }
+
+    const parts = ip.split('.').map(Number)
+    if (parts.length !== 4) return false
+
+    // 10.0.0.0/8
+    if (parts[0] === 10) return true
+
+    // 172.16.0.0/12
+    if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return true
+
+    // 192.168.0.0/16
+    if (parts[0] === 192 && parts[1] === 168) return true
+
+    // 169.254.0.0/16 (Link-local)
+    if (parts[0] === 169 && parts[1] === 254) return true
+
+    return false
+  }
+
+  /**
+   * Validate that an IP address is properly formatted
+   */
+  private isValidIPAddress(ip: string): boolean {
+    // Basic IPv4 validation
+    if (!ip.includes(':')) {
+      const parts = ip.split('.')
+      if (parts.length !== 4) return false
+
+      for (const part of parts) {
+        const num = parseInt(part, 10)
+        if (isNaN(num) || num < 0 || num > 255) return false
+      }
+      return true
+    } else {
+      // Enhanced IPv6 validation
+      return this.isValidIPv6(ip)
+    }
+  }
+
+  /**
+   * Determine if one IP should be preferred over another
+   * Prioritizes non-link-local addresses and globally routable addresses
+   */
+  private shouldPreferIP(newIP: string, currentIP: string): boolean {
+    // Enhanced IP preference logic supporting IPv6
+
+    // Get IP types for both addresses
+    const newType = this.getIPAddressType(newIP)
+    const currentType = this.getIPAddressType(currentIP)
+
+    // Define preference order (higher number = more preferred)
+    const preferenceOrder: Record<string, number> = {
+      'ipv4-link-local': 1,      // 169.254.x.x
+      'ipv6-link-local': 2,      // fe80::/10
+      'ipv4-private': 3,         // 10.x.x.x, 192.168.x.x, 172.16-31.x.x
+      'ipv6-ula': 4,             // fc00::/7 (Unique Local Address)
+      'ipv4-public': 5,          // Public IPv4
+      'ipv6-global': 6           // Global unicast IPv6
+    }
+
+    const newPreference = preferenceOrder[newType] || 0
+    const currentPreference = preferenceOrder[currentType] || 0
+
+    // Prefer higher preference values
+    return newPreference > currentPreference
+  }
+
+  /**
+   * Mask IP addresses for logging to reduce sensitive data exposure
+   */
+  private maskIP(ip: string | null | undefined): string {
+    if (!ip) return 'null'
+
+    // Keep first and last octets, mask middle ones for IPv4
+    if (ip.includes('.')) {
+      const parts = ip.split('.')
+      if (parts.length === 4) {
+        return `${parts[0]}.xxx.xxx.${parts[3]}`
+      }
+    }
+
+    // For IPv6, show only prefix and suffix
+    if (ip.includes(':')) {
+      const parts = ip.split(':')
+      if (parts.length > 2) {
+        return `${parts[0]}:xxxx:xxxx:${parts[parts.length - 1]}`
+      }
+    }
+
+    // For other formats, show only first 3 and last 3 chars
+    if (ip.length > 6) {
+      return `${ip.substring(0, 3)}...${ip.substring(ip.length - 3)}`
+    }
+
+    return 'xxx'
+  }
+
+  /**
+   * Get diagnostic information about IP detection for troubleshooting
+   */
+  public getIpDetectionDiagnostics(vmId: string): {
+    lastUpdateTime?: Date
+    updateCount: number
+    lastInterfaces?: any[]
+    lastError?: string
+  } {
+    // This would be enhanced with actual tracking in a production implementation
+    // For now, return basic diagnostic structure
+    return {
+      updateCount: 0,
+      lastError: undefined
+    }
+  }
+
+  // Circuit Breaker Helper Methods
+  private async handleCircuitBreakerStateChange(connection: VmConnection, message: CircuitBreakerStateMessage): Promise<void> {
+    const oldState = connection.circuitBreakerState
+    connection.circuitBreakerState = message.state
+    connection.circuitBreakerFailureCount = message.failure_count
+    connection.circuitBreakerLastStateChange = new Date()
+
+    this.debug.log('info', `🔴 Circuit breaker state changed for VM ${connection.vmId}: ${oldState} -> ${message.state} (failures: ${message.failure_count})`)
+
+    // Update connection quality and degradation status based on circuit breaker state
+    switch (message.state) {
+      case 'Open':
+        connection.connectionQuality = 'critical'
+        connection.isDegraded = true
+        connection.degradationReason = 'Circuit breaker open - too many failures'
+        this.debug.log('warn', `VM ${connection.vmId} entering degraded mode due to circuit breaker opening`)
+        break
+
+      case 'HalfOpen':
+        connection.connectionQuality = 'poor'
+        this.debug.log('info', `VM ${connection.vmId} circuit breaker testing recovery`)
+        break
+
+      case 'Closed':
+        if (oldState === 'Open' || oldState === 'HalfOpen') {
+          connection.connectionQuality = 'good'
+          connection.isDegraded = false
+          connection.degradationReason = undefined
+          this.debug.log('info', `VM ${connection.vmId} circuit breaker recovered - normal operation resumed`)
+        }
+        break
+    }
+
+    // Update connection stability score
+    this.updateConnectionStabilityScore(connection)
+  }
+
+  private async handleKeepAliveMessage(connection: VmConnection, message: KeepAliveMessage): Promise<void> {
+    connection.keepAliveLastReceived = new Date()
+    connection.keepAliveSequence = message.sequence_number
+
+    this.debug.log('debug', `💓 Keep-alive received from VM ${connection.vmId} (seq: ${message.sequence_number})`)
+
+    // Send keep-alive response immediately
+    const keepAliveResponse = {
+      type: 'keep_alive_response',
+      sequence_number: message.sequence_number,
+      timestamp: new Date().toISOString()
+    }
+
+    try {
+      // Send keep-alive response using the raw socket write method
+      connection.socket.write(JSON.stringify(keepAliveResponse) + '\n')
+      this.debug.log('debug', `💓 Keep-alive response sent to VM ${connection.vmId} (seq: ${message.sequence_number})`)
+    } catch (error) {
+      this.debug.log('error', `Failed to send keep-alive response to VM ${connection.vmId}: ${error}`)
+      connection.keepAliveFailureCount++
+    }
+  }
+
+  private updateConnectionStabilityScore(connection: VmConnection): void {
+    let score = 100
+
+    // Deduct points for circuit breaker state
+    switch (connection.circuitBreakerState) {
+      case 'Open':
+        score -= 50
+        break
+      case 'HalfOpen':
+        score -= 25
+        break
+      case 'Closed':
+        // No deduction
+        break
+    }
+
+    // Deduct points for keep-alive failures
+    score -= connection.keepAliveFailureCount * 5
+
+    // Deduct points for transmission failures
+    score -= connection.transmissionFailureCount * 2
+
+    // Deduct points for degraded mode
+    if (connection.isDegraded) {
+      score -= 20
+    }
+
+    // Ensure score doesn't go below 0
+    connection.connectionStabilityScore = Math.max(0, score)
+  }
+
+  /**
+   * Enhanced IPv6 private address classification
+   */
+  private isIPv6Private(ip: string): boolean {
+    // Remove any zone identifier (e.g., %eth0)
+    const cleanIP = ip.split('%')[0]
+
+    // Link-local addresses: fe80::/10
+    if (cleanIP.toLowerCase().startsWith('fe8') || cleanIP.toLowerCase().startsWith('fe9') ||
+        cleanIP.toLowerCase().startsWith('fea') || cleanIP.toLowerCase().startsWith('feb')) {
+      return true
+    }
+
+    // Unique Local Addresses (ULA): fc00::/7 (fc00:: to fdff::)
+    if (cleanIP.toLowerCase().startsWith('fc') || cleanIP.toLowerCase().startsWith('fd')) {
+      return true
+    }
+
+    // Site-local addresses (deprecated but still used): fec0::/10
+    if (cleanIP.toLowerCase().startsWith('fec') || cleanIP.toLowerCase().startsWith('fed') ||
+        cleanIP.toLowerCase().startsWith('fee') || cleanIP.toLowerCase().startsWith('fef')) {
+      return true
+    }
+
+    // Global unicast addresses (2000::/3) are considered public
+    // All other IPv6 addresses are considered private by default
+    return !cleanIP.toLowerCase().startsWith('2')
+  }
+
+  /**
+   * Enhanced IPv6 validation
+   */
+  private isValidIPv6(ip: string): boolean {
+    // Remove any zone identifier (e.g., %eth0)
+    const cleanIP = ip.split('%')[0]
+
+    // Basic IPv6 format validation
+    // Must contain at least one colon
+    if (!cleanIP.includes(':')) return false
+
+    // Can't start or end with more than two colons
+    if (cleanIP.startsWith(':::') || cleanIP.endsWith(':::')) return false
+
+    // Can't have more than one double colon sequence
+    const doubleColonCount = (cleanIP.match(/::/g) || []).length
+    if (doubleColonCount > 1) return false
+
+    // Split by double colon to handle compressed zeros
+    const parts = cleanIP.split('::')
+    if (parts.length > 2) return false
+
+    // Validate each part
+    for (const part of parts) {
+      if (part === '') continue // Empty part is OK for compressed notation
+
+      const groups = part.split(':')
+      for (const group of groups) {
+        if (group === '') continue // Empty group is OK
+
+        // Each group should be 1-4 hex digits
+        if (group.length > 4) return false
+        if (!/^[0-9a-fA-F]+$/.test(group)) return false
+      }
+
+      // Check total number of groups doesn't exceed 8
+      if (groups.length > 8) return false
+    }
+
+    return true
+  }
+
+  /**
+   * Check if an IP address is a loopback address
+   */
+  private isLoopbackAddress(ip: string): boolean {
+    // IPv4 loopback: 127.x.x.x
+    if (ip.startsWith('127.')) return true
+
+    // IPv6 loopback: ::1
+    if (ip === '::1' || ip.toLowerCase() === '0:0:0:0:0:0:0:1') return true
+
+    return false
+  }
+
+  /**
+   * Get the type classification of an IP address for preference ordering
+   */
+  private getIPAddressType(ip: string): string {
+    if (ip.includes(':')) {
+      // IPv6 address
+      const cleanIP = ip.split('%')[0].toLowerCase()
+
+      // Link-local: fe80::/10
+      if (cleanIP.startsWith('fe8') || cleanIP.startsWith('fe9') ||
+          cleanIP.startsWith('fea') || cleanIP.startsWith('feb')) {
+        return 'ipv6-link-local'
+      }
+
+      // ULA: fc00::/7
+      if (cleanIP.startsWith('fc') || cleanIP.startsWith('fd')) {
+        return 'ipv6-ula'
+      }
+
+      // Global unicast: 2000::/3
+      if (cleanIP.startsWith('2')) {
+        return 'ipv6-global'
+      }
+
+      // Other IPv6 (site-local, etc.) - treat as ULA
+      return 'ipv6-ula'
+    } else {
+      // IPv4 address
+      if (ip.startsWith('169.254.')) {
+        return 'ipv4-link-local'
+      }
+
+      if (this.isPrivateIP(ip)) {
+        return 'ipv4-private'
+      }
+
+      return 'ipv4-public'
+    }
   }
 }
 

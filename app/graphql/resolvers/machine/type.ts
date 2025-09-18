@@ -42,6 +42,12 @@ export class Machine {
     @Field(() => String, { nullable: true })
       gpuPciAddress: string | null = null
 
+    @Field(() => String, { nullable: true })
+      localIP: string | null = null
+
+    @Field(() => String, { nullable: true })
+      publicIP: string | null = null
+
     @Field(() => GraphQLJSONObject, { nullable: true })
       configuration: Record<string, unknown> | null = null
 

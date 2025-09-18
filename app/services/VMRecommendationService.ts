@@ -295,8 +295,28 @@ export class VMRecommendationService {
         return this.generateRecommendations(vmId)
       }
 
-      // Build where clause from filter
-      const where: Prisma.VMRecommendationWhereInput = { machineId: vmId }
+      // Before fetching latest snapshot
+      const machine = await this.prisma.machine.findUnique({ where: { id: vmId }, select: { id: true } })
+      if (!machine) {
+        throw new AppError('Machine not found', ErrorCode.VM_RECOMMENDATION_SERVICE_ERROR, 404, true, { vmId, operation: 'getRecommendations' })
+      }
+
+      // Fetch the latest snapshot for this VM to filter recommendations
+      const latestSnapshot = await this.prisma.vMHealthSnapshot.findFirst({
+        where: { machineId: vmId },
+        orderBy: { snapshotDate: 'desc' }
+      })
+
+      // If no latest snapshot exists, return empty array (no recommendations can exist without snapshots)
+      if (!latestSnapshot) {
+        return []
+      }
+
+      // Build where clause from filter, including snapshot filtering
+      const where: Prisma.VMRecommendationWhereInput = {
+        machineId: vmId,
+        snapshotId: latestSnapshot.id
+      }
 
       if (filter?.types && filter.types.length > 0) {
         where.type = { in: filter.types }
@@ -320,7 +340,7 @@ export class VMRecommendationService {
         ? Math.min(filter.limit, maxLimit)
         : defaultLimit
 
-      // Get existing recommendations with filters applied at DB level
+      // Get existing recommendations with filters applied at DB level (now filtered by latest snapshot)
       const existing = await this.prisma.vMRecommendation.findMany({
         where,
         orderBy: { createdAt: 'desc' },

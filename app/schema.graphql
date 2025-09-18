@@ -391,6 +391,9 @@ type FirewallTemplateInfo {
 
   """List of rules included in this template"""
   rules: [SimplifiedFirewallRule!]!
+
+  """Template identifier (e.g., WEB_SERVER, DATABASE)"""
+  template: String!
 }
 
 type GPU {
@@ -554,8 +557,10 @@ type Machine {
   gpuPciAddress: String
   id: ID!
   internalName: String!
+  localIP: String
   name: String!
   os: String!
+  publicIP: String
   ramGB: Int
   status: String!
   template: MachineTemplateType

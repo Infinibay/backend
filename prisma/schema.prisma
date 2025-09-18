@@ -75,6 +75,8 @@ model Machine {
   updatedAt         DateTime              @updatedAt
   departmentId      String?
   firewallTemplates Json?
+  localIP           String?               // VM local/private IP address
+  publicIP          String?               // VM public IP address (if available)
   applicationUsage  ApplicationUsage[]
   department        Department?           @relation(fields: [departmentId], references: [id])
   template          MachineTemplate?      @relation(fields: [templateId], references: [id])
@@ -791,4 +793,5 @@ model VMRecommendation {
   snapshot    VMHealthSnapshot?  @relation(fields: [snapshotId], references: [id], onDelete: SetNull)
 
   @@index([machineId, createdAt])
+  @@index([machineId, snapshotId])
 }
