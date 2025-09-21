@@ -34,7 +34,7 @@ export class SimplifiedFirewallResolver {
     return this.firewallSimplifierService
   }
 
-  private getPortValidationService(): PortValidationService {
+  private getPortValidationService (): PortValidationService {
     if (!this.portValidationService) {
       this.portValidationService = new PortValidationService()
     }

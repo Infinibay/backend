@@ -332,7 +332,7 @@ describe('PortValidationService', () => {
       ]
       const newRanges: PortRange[] = [
         { start: 90, end: 100 }, // Adjacent touching
-        { start: 70, end: 80 }   // Adjacent touching
+        { start: 70, end: 80 } // Adjacent touching
       ]
 
       const result = service.detectPortConflicts(existing, newRanges)

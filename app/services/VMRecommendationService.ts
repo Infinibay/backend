@@ -158,7 +158,7 @@ export class VMRecommendationService {
    * Safe wrapper for generating recommendations with standardized error handling
    * This method provides a service-level contract that prevents sensitive error details from leaking
    */
-  public async generateRecommendationsSafe(vmId: string, snapshotId?: string): Promise<RecommendationOperationResult> {
+  public async generateRecommendationsSafe (vmId: string, snapshotId?: string): Promise<RecommendationOperationResult> {
     try {
       const recommendations = await this.generateRecommendations(vmId, snapshotId)
       return {
@@ -250,7 +250,6 @@ export class VMRecommendationService {
             // Update checker performance metrics
             const existingTime = this.performanceMetrics.checkerTimes.get(checker.getName()) || 0
             this.performanceMetrics.checkerTimes.set(checker.getName(), this.updateAverageTime(existingTime, checkerTime))
-
           } catch (error) {
             const checkerTime = Date.now() - checkerStartTime
             this.handleCheckerError(checker.getName(), error as Error)
@@ -274,7 +273,6 @@ export class VMRecommendationService {
       this.logPerformanceSummary(vmId, totalTime, contextBuildTime, checkerPerformance, results.length)
 
       return savedRecommendations
-
     } catch (error) {
       const totalTime = Date.now() - startTime
       this.handleServiceError(error as Error, vmId, totalTime)
@@ -359,7 +357,6 @@ export class VMRecommendationService {
       }
 
       return existing
-
     } catch (error) {
       const totalTime = Date.now() - startTime
       this.handleServiceError(error as Error, vmId, totalTime)
@@ -371,7 +368,7 @@ export class VMRecommendationService {
    * Safe wrapper for getting recommendations with standardized error handling
    * This method provides a service-level contract that prevents sensitive error details from leaking
    */
-  public async getRecommendationsSafe(vmId: string, refresh?: boolean, filter?: RecommendationFilterInput): Promise<RecommendationOperationResult> {
+  public async getRecommendationsSafe (vmId: string, refresh?: boolean, filter?: RecommendationFilterInput): Promise<RecommendationOperationResult> {
     try {
       // Check if service has been disposed
       if (this.isDisposed) {
@@ -557,7 +554,7 @@ export class VMRecommendationService {
   /**
    * Generate a hash of recommendation results for change detection
    */
-  private generateRecommendationHash(results: RecommendationResult[]): string {
+  private generateRecommendationHash (results: RecommendationResult[]): string {
     // Sort results by type and text to ensure consistent hashing
     const sortedResults = results
       .map(result => ({
@@ -575,7 +572,7 @@ export class VMRecommendationService {
   /**
    * Check if recommendations have changed by comparing hashes
    */
-  private async hasRecommendationsChanged(
+  private async hasRecommendationsChanged (
     vmId: string,
     snapshotId: string | null,
     newHash: string
@@ -802,7 +799,7 @@ export class VMRecommendationService {
   /**
    * Load service configuration from environment variables
    */
-  private loadConfiguration(): ServiceConfiguration {
+  private loadConfiguration (): ServiceConfiguration {
     return {
       cacheTTLMinutes: Number(process.env.RECOMMENDATION_CACHE_TTL_MINUTES) || 15,
       maxCacheSize: Number(process.env.RECOMMENDATION_MAX_CACHE_SIZE) || 100,
@@ -818,7 +815,7 @@ export class VMRecommendationService {
   /**
    * Initialize performance metrics
    */
-  private initializePerformanceMetrics(): PerformanceMetrics {
+  private initializePerformanceMetrics (): PerformanceMetrics {
     return {
       totalGenerations: 0,
       averageGenerationTime: 0,
@@ -835,7 +832,7 @@ export class VMRecommendationService {
   /**
    * Validate configuration and log settings
    */
-  private validateConfiguration(): void {
+  private validateConfiguration (): void {
     try {
       console.log('🔧 VMRecommendationService configuration:')
       console.log(`   - Context caching: ${this.config.enableContextCaching} (TTL: ${this.config.contextCacheTTLMinutes}min)`)
@@ -870,7 +867,7 @@ export class VMRecommendationService {
   /**
    * Start maintenance timer for cache cleanup
    */
-  private startMaintenanceTimer(): void {
+  private startMaintenanceTimer (): void {
     // Run maintenance every hour
     this.maintenanceTimer = setInterval(() => {
       this.performMaintenance()
@@ -882,7 +879,7 @@ export class VMRecommendationService {
   /**
    * Build context with caching support
    */
-  private async buildContextWithCaching(vmId: string, snapshotId?: string): Promise<RecommendationContext> {
+  private async buildContextWithCaching (vmId: string, snapshotId?: string): Promise<RecommendationContext> {
     const cacheKey = `context:${vmId}:${snapshotId || 'latest'}`
 
     if (this.config.enableContextCaching) {
@@ -904,7 +901,7 @@ export class VMRecommendationService {
   /**
    * Run checker with retry logic
    */
-  private async runCheckerWithRetry(checker: RecommendationChecker, context: RecommendationContext): Promise<RecommendationResult[]> {
+  private async runCheckerWithRetry (checker: RecommendationChecker, context: RecommendationContext): Promise<RecommendationResult[]> {
     let lastError: Error | null = null
 
     for (let attempt = 1; attempt <= this.config.maxRetries; attempt++) {
@@ -933,7 +930,7 @@ export class VMRecommendationService {
   /**
    * Get data from cache
    */
-  private getFromCache(key: string): any | null {
+  private getFromCache (key: string): any | null {
     const entry = this.cache.get(key)
     if (entry && Date.now() - entry.timestamp < entry.ttl) {
       return entry.data
@@ -949,7 +946,7 @@ export class VMRecommendationService {
   /**
    * Set data in cache
    */
-  private setCache(key: string, data: any, ttl: number): void {
+  private setCache (key: string, data: any, ttl: number): void {
     // Implement cache size limit
     if (this.cache.size >= this.config.maxCacheSize) {
       // Remove oldest entry
@@ -969,7 +966,7 @@ export class VMRecommendationService {
   /**
    * Get data from context cache
    */
-  private getFromContextCache(key: string): RecommendationContext | null {
+  private getFromContextCache (key: string): RecommendationContext | null {
     const entry = this.contextCache.get(key)
     if (entry && Date.now() - entry.timestamp < entry.ttl) {
       return entry.data
@@ -985,7 +982,7 @@ export class VMRecommendationService {
   /**
    * Set data in context cache
    */
-  private setContextCache(key: string, data: RecommendationContext, ttl: number): void {
+  private setContextCache (key: string, data: RecommendationContext, ttl: number): void {
     // Context cache has separate size limit
     if (this.contextCache.size >= 50) { // Fixed limit for context cache
       const firstKey = this.contextCache.keys().next().value
@@ -1004,7 +1001,7 @@ export class VMRecommendationService {
   /**
    * Update cache hit rate
    */
-  private updateCacheHitRate(isHit: boolean): void {
+  private updateCacheHitRate (isHit: boolean): void {
     if (isHit) {
       this.performanceMetrics.cacheHits++
     } else {
@@ -1018,7 +1015,7 @@ export class VMRecommendationService {
   /**
    * Update average time metric
    */
-  private updateAverageTime(currentAverage: number, newTime: number): number {
+  private updateAverageTime (currentAverage: number, newTime: number): number {
     const count = this.performanceMetrics.totalGenerations || 1
     return ((currentAverage * (count - 1)) + newTime) / count
   }
@@ -1026,7 +1023,7 @@ export class VMRecommendationService {
   /**
    * Update performance metrics after recommendation generation
    */
-  private updatePerformanceMetrics(totalTime: number, recommendationCount: number): void {
+  private updatePerformanceMetrics (totalTime: number, recommendationCount: number): void {
     this.performanceMetrics.totalGenerations++
     this.performanceMetrics.averageGenerationTime = this.updateAverageTime(
       this.performanceMetrics.averageGenerationTime,
@@ -1039,19 +1036,19 @@ export class VMRecommendationService {
   /**
    * Handle checker-specific errors
    */
-  private handleCheckerError(checkerName: string, error: Error): void {
+  private handleCheckerError (checkerName: string, error: Error): void {
     this.performanceMetrics.errorCount++
     this.performanceMetrics.lastError = `${checkerName}: ${error.message}`
 
     const standardizedError = error instanceof AppError
       ? error
       : new AppError(
-          'Recommendation checker failed',
-          ErrorCode.VM_RECOMMENDATION_CHECKER_FAILED,
-          500,
-          true,
-          { checker: checkerName, originalError: error.name }
-        )
+        'Recommendation checker failed',
+        ErrorCode.VM_RECOMMENDATION_CHECKER_FAILED,
+        500,
+        true,
+        { checker: checkerName, originalError: error.name }
+      )
 
     console.error(`❌ Checker error in ${checkerName}:`, {
       originalError: error.message,
@@ -1066,24 +1063,24 @@ export class VMRecommendationService {
   /**
    * Handle service-level errors
    */
-  private handleServiceError(error: Error, vmId: string, totalTime: number): void {
+  private handleServiceError (error: Error, vmId: string, totalTime: number): void {
     this.performanceMetrics.errorCount++
     this.performanceMetrics.lastError = `Service error for VM ${vmId}: ${error.message}`
 
     const standardizedError = error instanceof AppError
       ? error
       : new AppError(
-          'VM recommendation service failed',
-          ErrorCode.VM_RECOMMENDATION_SERVICE_ERROR,
-          500,
-          true,
-          {
-            vmId,
-            totalTime: totalTime.toString(),
-            operation: 'getRecommendations',
-            service: 'VMRecommendationService'
-          }
-        )
+        'VM recommendation service failed',
+        ErrorCode.VM_RECOMMENDATION_SERVICE_ERROR,
+        500,
+        true,
+        {
+          vmId,
+          totalTime: totalTime.toString(),
+          operation: 'getRecommendations',
+          service: 'VMRecommendationService'
+        }
+      )
 
     console.error(`❌ VMRecommendationService error for VM ${vmId} after ${totalTime}ms:`, {
       originalError: error.message,
@@ -1103,7 +1100,7 @@ export class VMRecommendationService {
   /**
    * Log performance summary
    */
-  private logPerformanceSummary(vmId: string, totalTime: number, contextTime: number, checkerTimes: Map<string, number>, recommendationCount: number): void {
+  private logPerformanceSummary (vmId: string, totalTime: number, contextTime: number, checkerTimes: Map<string, number>, recommendationCount: number): void {
     if (!this.config.enablePerformanceMonitoring) return
 
     const slowCheckers = Array.from(checkerTimes.entries())
@@ -1117,7 +1114,7 @@ export class VMRecommendationService {
       console.log(`   - Recommendations: ${recommendationCount}`)
 
       if (slowCheckers.length > 0) {
-        console.log(`   - Slow checkers:`)
+        console.log('   - Slow checkers:')
         slowCheckers.forEach(([name, time]) => {
           console.log(`     • ${name}: ${time}ms`)
         })
@@ -1128,7 +1125,7 @@ export class VMRecommendationService {
   /**
    * Perform maintenance tasks
    */
-  private performMaintenance(): void {
+  private performMaintenance (): void {
     try {
       // Clean expired cache entries
       let cacheCleanedCount = 0
@@ -1158,7 +1155,7 @@ export class VMRecommendationService {
 
       // Log performance statistics
       if (this.config.enablePerformanceMonitoring && this.performanceMetrics.totalGenerations > 0) {
-        console.debug(`📊 VMRecommendationService performance stats:`)
+        console.debug('📊 VMRecommendationService performance stats:')
         console.debug(`   - Total generations: ${this.performanceMetrics.totalGenerations}`)
         console.debug(`   - Average time: ${Math.round(this.performanceMetrics.averageGenerationTime)}ms`)
         console.debug(`   - Cache hit rate: ${(this.performanceMetrics.cacheHitRate * 100).toFixed(1)}%`)
@@ -1168,7 +1165,6 @@ export class VMRecommendationService {
           console.debug(`   - Last error: ${this.performanceMetrics.lastError}`)
         }
       }
-
     } catch (error) {
       const standardizedError = new AppError(
         'VM recommendation service maintenance task failed',
@@ -1189,13 +1185,13 @@ export class VMRecommendationService {
   /**
    * Get service health status
    */
-  public getServiceHealth(): {
+  public getServiceHealth (): {
     isHealthy: boolean
     cacheSize: number
     contextCacheSize: number
     performanceMetrics: PerformanceMetrics
     configuration: ServiceConfiguration
-  } {
+    } {
     const recentErrorThreshold = 10 // Consider unhealthy if more than 10 errors recently
     const slowResponseThreshold = 30000 // 30 seconds
 
@@ -1215,7 +1211,7 @@ export class VMRecommendationService {
   /**
    * Clear all caches
    */
-  public clearCaches(): void {
+  public clearCaches (): void {
     this.cache.clear()
     this.contextCache.clear()
     console.log('🧹 All VMRecommendationService caches cleared')
@@ -1224,7 +1220,7 @@ export class VMRecommendationService {
   /**
    * Reset performance metrics
    */
-  public resetPerformanceMetrics(): void {
+  public resetPerformanceMetrics (): void {
     this.performanceMetrics = this.initializePerformanceMetrics()
     console.log('📊 VMRecommendationService performance metrics reset')
   }
@@ -1233,7 +1229,7 @@ export class VMRecommendationService {
    * Dispose method for complete service lifecycle cleanup
    * This should be called when the service is being shut down
    */
-  public dispose(): void {
+  public dispose (): void {
     try {
       console.log('🔄 Disposing VMRecommendationService...')
 
@@ -1282,7 +1278,7 @@ export class VMRecommendationService {
   /**
    * Check if the service has been disposed
    */
-  public get disposed(): boolean {
+  public get disposed (): boolean {
     return this.isDisposed
   }
 
@@ -1290,7 +1286,7 @@ export class VMRecommendationService {
    * Cleanup method for graceful shutdown (legacy method, use dispose() instead)
    * @deprecated Use dispose() method instead for complete lifecycle management
    */
-  public cleanup(): void {
+  public cleanup (): void {
     console.warn('⚠️ cleanup() method is deprecated, use dispose() instead')
     this.dispose()
   }

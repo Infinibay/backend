@@ -479,7 +479,7 @@ export interface TransactionTestParams {
 }
 
 // Shared transaction helper for integration tests
-export async function withTransaction(
+export async function withTransaction (
   prisma: PrismaClient,
   testFn: (params: TransactionTestParams) => Promise<void>
 ): Promise<void> {

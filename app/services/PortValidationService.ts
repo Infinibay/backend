@@ -284,17 +284,17 @@ export class PortValidationService {
    */
   getCommonPorts (protocol: 'tcp' | 'udp' | 'all' = 'all'): CommonPort[] {
     switch (protocol) {
-      case 'tcp':
-        return [...PortValidationService.COMMON_TCP_PORTS]
-      case 'udp':
-        return [...PortValidationService.COMMON_UDP_PORTS]
-      case 'all':
-        return [
-          ...PortValidationService.COMMON_TCP_PORTS,
-          ...PortValidationService.COMMON_UDP_PORTS
-        ]
-      default:
-        return []
+    case 'tcp':
+      return [...PortValidationService.COMMON_TCP_PORTS]
+    case 'udp':
+      return [...PortValidationService.COMMON_UDP_PORTS]
+    case 'all':
+      return [
+        ...PortValidationService.COMMON_TCP_PORTS,
+        ...PortValidationService.COMMON_UDP_PORTS
+      ]
+    default:
+      return []
     }
   }
 

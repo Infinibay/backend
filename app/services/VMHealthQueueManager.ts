@@ -80,7 +80,7 @@ export class VMHealthQueueManager {
   /**
    * Validate configuration on startup
    */
-  private validateConfiguration(): void {
+  private validateConfiguration (): void {
     try {
       // Validate VMRecommendationService
       if (!this.recommendationService) {
@@ -92,20 +92,21 @@ export class VMHealthQueueManager {
       const missingEnvVars = requiredEnvVars.filter(envVar => !process.env[envVar])
 
       if (missingEnvVars.length > 0) {
-        console.warn(`⚠️ Missing environment variables: ${missingEnvVars.join(', ')}`)}
+        console.warn(`⚠️ Missing environment variables: ${missingEnvVars.join(', ')}`)
+      }
 
       // Log configuration status
       const enabledCheckTypes = this.getEnabledCheckTypes()
-      console.log(`🔧 Health check configuration:`)
+      console.log('🔧 Health check configuration:')
       console.log(`   - Enabled check types: ${enabledCheckTypes.join(', ')}`)
       console.log(`   - Max concurrent checks per VM: ${this.MAX_CONCURRENT_CHECKS_PER_VM}`)
       console.log(`   - Max heavy checks per VM: ${this.MAX_HEAVY_CHECKS_PER_VM}`)
       console.log(`   - System-wide concurrent limit: ${this.MAX_SYSTEM_WIDE_CONCURRENT}`)
       console.log(`   - Overall scan interval: ${OVERALL_SCAN_INTERVAL_MINUTES} minutes`)
 
-      console.log(`✅ VMHealthQueueManager configuration validated successfully`)
+      console.log('✅ VMHealthQueueManager configuration validated successfully')
     } catch (error) {
-      console.error(`❌ Configuration validation failed:`, error)
+      console.error('❌ Configuration validation failed:', error)
       throw error
     }
   }
@@ -730,7 +731,7 @@ export class VMHealthQueueManager {
   /**
    * Get list of enabled check types for health monitoring
    */
-  private getEnabledCheckTypes(): string[] {
+  private getEnabledCheckTypes (): string[] {
     // Standard health check types - can be made configurable via environment
     const defaultCheckTypes = [
       'OVERALL_STATUS',
@@ -840,7 +841,7 @@ export class VMHealthQueueManager {
   /**
    * Generate recommendations for a completed health snapshot with enhanced error handling and monitoring
    */
-  private async generateRecommendationsForSnapshot(snapshotId: string, machineId: string): Promise<void> {
+  private async generateRecommendationsForSnapshot (snapshotId: string, machineId: string): Promise<void> {
     const startTime = Date.now()
     const correlationId = `${machineId}-${snapshotId}-${Date.now()}`
 
@@ -898,7 +899,6 @@ export class VMHealthQueueManager {
       if (generationTime > 10000) { // 10 seconds threshold
         console.warn(`⚠️ [${correlationId}] Recommendation generation took longer than expected: ${generationTime}ms`)
       }
-
     } catch (error) {
       const generationTime = Date.now() - startTime
       const errorMessage = error instanceof Error ? error.message : 'Unknown error'
@@ -1308,7 +1308,7 @@ export class VMHealthQueueManager {
   /**
    * Get or create today's snapshot with snapshot-scoped expected checks
    */
-  private async getOrCreateTodaySnapshot(machineId: string, expectedChecks: number, scheduledCheckTypes: HealthCheckType[]): Promise<{ id: string }> {
+  private async getOrCreateTodaySnapshot (machineId: string, expectedChecks: number, scheduledCheckTypes: HealthCheckType[]): Promise<{ id: string }> {
     const today = new Date()
     today.setHours(0, 0, 0, 0)
 
@@ -1373,7 +1373,7 @@ export class VMHealthQueueManager {
   /**
    * Queue health check for a specific snapshot (snapshot-scoped version)
    */
-  private async queueHealthCheckForSnapshot(
+  private async queueHealthCheckForSnapshot (
     machineId: string,
     checkType: HealthCheckType,
     priority: TaskPriority = 'MEDIUM',
@@ -1400,7 +1400,7 @@ export class VMHealthQueueManager {
    * and recommendationsGeneratedAt (DateTime) fields. If not available, implement via
    * a separate metadata table or JSON field until schema can be updated.
    */
-  private async updateSnapshotRecommendationMetadata(snapshotId: string, recommendationCount: number): Promise<void> {
+  private async updateSnapshotRecommendationMetadata (snapshotId: string, recommendationCount: number): Promise<void> {
     try {
       // Get existing metadata to preserve snapshot-scoped data
       const snapshot = await this.prisma.vMHealthSnapshot.findUnique({
@@ -1413,7 +1413,7 @@ export class VMHealthQueueManager {
       // Merge recommendation metadata with existing snapshot-scoped data
       const updatedMetadata = {
         ...existingMetadata,
-        recommendationCount: recommendationCount,
+        recommendationCount,
         recommendationsGeneratedAt: new Date().toISOString(),
         lastUpdated: new Date().toISOString()
       }
@@ -1435,7 +1435,7 @@ export class VMHealthQueueManager {
   /**
    * Backfill expectedChecks in snapshot metadata for consistency
    */
-  private async backfillSnapshotExpectedChecks(snapshotId: string, expectedChecks: number, source: string): Promise<void> {
+  private async backfillSnapshotExpectedChecks (snapshotId: string, expectedChecks: number, source: string): Promise<void> {
     try {
       const snapshot = await this.prisma.vMHealthSnapshot.findUnique({
         where: { id: snapshotId },

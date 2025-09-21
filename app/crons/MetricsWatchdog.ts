@@ -9,9 +9,9 @@ export class MetricsWatchdogJob {
   private job: CronJob | null = null
   private isRunning = false
 
-  constructor(private prisma: PrismaClient) { }
+  constructor (private prisma: PrismaClient) { }
 
-  start(): void {
+  start (): void {
     if (this.job) {
       debug.log('MetricsWatchdog job is already running')
       return
@@ -43,7 +43,7 @@ export class MetricsWatchdogJob {
     console.log('🗂️ MetricsWatchdog job started (every 3 minutes)')
   }
 
-  stop(): void {
+  stop (): void {
     if (this.job) {
       this.job.stop()
       this.job = null
@@ -51,7 +51,7 @@ export class MetricsWatchdogJob {
     }
   }
 
-  private async checkStaleMetrics(): Promise<void> {
+  private async checkStaleMetrics (): Promise<void> {
     try {
       debug.log('Starting stale metrics check')
 
@@ -130,7 +130,7 @@ export class MetricsWatchdogJob {
 // Export factory function for singleton pattern
 let metricsWatchdogJobInstance: MetricsWatchdogJob | null = null
 
-export function createMetricsWatchdogJob(prisma: PrismaClient): MetricsWatchdogJob {
+export function createMetricsWatchdogJob (prisma: PrismaClient): MetricsWatchdogJob {
   if (!metricsWatchdogJobInstance) {
     metricsWatchdogJobInstance = new MetricsWatchdogJob(prisma)
   }

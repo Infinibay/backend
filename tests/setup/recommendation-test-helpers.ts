@@ -50,7 +50,7 @@ export interface SystemMetricsInputOverrides {
 /**
  * Create mock VM recommendation with realistic data
  */
-export function createMockVMRecommendation(overrides: RecommendationInputOverrides = {}): VMRecommendation {
+export function createMockVMRecommendation (overrides: RecommendationInputOverrides = {}): VMRecommendation {
   const id = overrides.id || randomBytes(12).toString('hex')
   const machineId = overrides.machineId || randomBytes(12).toString('hex')
 
@@ -75,7 +75,7 @@ export function createMockVMRecommendation(overrides: RecommendationInputOverrid
 /**
  * Create mock health snapshot with comprehensive test data
  */
-export function createMockHealthSnapshot(overrides: HealthSnapshotInputOverrides = {}): VMHealthSnapshot {
+export function createMockHealthSnapshot (overrides: HealthSnapshotInputOverrides = {}): VMHealthSnapshot {
   const id = overrides.id || randomBytes(12).toString('hex')
   const machineId = overrides.machineId || randomBytes(12).toString('hex')
 
@@ -162,7 +162,7 @@ export function createMockHealthSnapshot(overrides: HealthSnapshotInputOverrides
 /**
  * Create mock system metrics for recommendation context
  */
-export function createMockSystemMetrics(overrides: SystemMetricsInputOverrides = {}): SystemMetrics {
+export function createMockSystemMetrics (overrides: SystemMetricsInputOverrides = {}): SystemMetrics {
   const id = overrides.id || randomBytes(12).toString('hex')
   const machineId = overrides.machineId || randomBytes(12).toString('hex')
 
@@ -202,7 +202,7 @@ export function createMockSystemMetrics(overrides: SystemMetricsInputOverrides =
 /**
  * Create mock disk space data for testing disk space checker
  */
-export function createMockDiskSpaceInfo(scenario: 'healthy' | 'warning' | 'critical' = 'healthy') {
+export function createMockDiskSpaceInfo (scenario: 'healthy' | 'warning' | 'critical' = 'healthy') {
   const scenarios = {
     healthy: {
       drives: [
@@ -236,7 +236,7 @@ export function createMockDiskSpaceInfo(scenario: 'healthy' | 'warning' | 'criti
 /**
  * Create mock resource optimization data
  */
-export function createMockResourceOptInfo(scenario: 'over_provisioned' | 'under_provisioned' | 'optimal' = 'optimal') {
+export function createMockResourceOptInfo (scenario: 'over_provisioned' | 'under_provisioned' | 'optimal' = 'optimal') {
   const scenarios = {
     over_provisioned: {
       recommendations: [
@@ -295,7 +295,7 @@ export function createMockResourceOptInfo(scenario: 'over_provisioned' | 'under_
 /**
  * Create mock Windows update data
  */
-export function createMockWindowsUpdateInfo(scenario: 'up_to_date' | 'updates_available' | 'critical_updates' = 'up_to_date') {
+export function createMockWindowsUpdateInfo (scenario: 'up_to_date' | 'updates_available' | 'critical_updates' = 'up_to_date') {
   const scenarios = {
     up_to_date: {
       pendingUpdatesCount: 0,
@@ -337,7 +337,7 @@ export function createMockWindowsUpdateInfo(scenario: 'up_to_date' | 'updates_av
 /**
  * Create mock Windows Defender status
  */
-export function createMockDefenderStatus(scenario: 'healthy' | 'disabled' | 'threats' | 'outdated' = 'healthy') {
+export function createMockDefenderStatus (scenario: 'healthy' | 'disabled' | 'threats' | 'outdated' = 'healthy') {
   const scenarios = {
     healthy: {
       antivirusEnabled: true,
@@ -399,7 +399,7 @@ export function createMockDefenderStatus(scenario: 'healthy' | 'disabled' | 'thr
 /**
  * Create mock application inventory for testing
  */
-export function createMockApplicationInventory() {
+export function createMockApplicationInventory () {
   return {
     applications: [
       {
@@ -448,7 +448,7 @@ export class RecommendationTestUtils {
   /**
    * Assert that a recommendation has the expected type and structure
    */
-  static assertRecommendationType(recommendation: any, expectedType: RecommendationType) {
+  static assertRecommendationType (recommendation: any, expectedType: RecommendationType) {
     expect(recommendation).toHaveProperty('type', expectedType)
     expect(recommendation).toHaveProperty('text')
     expect(recommendation).toHaveProperty('actionText')
@@ -463,7 +463,7 @@ export class RecommendationTestUtils {
   /**
    * Assert that recommendation data contains expected fields
    */
-  static assertRecommendationData(recommendation: any, expectedDataKeys: string[]) {
+  static assertRecommendationData (recommendation: any, expectedDataKeys: string[]) {
     expect(recommendation).toHaveProperty('data')
     expect(recommendation.data).toBeTruthy()
 
@@ -475,7 +475,7 @@ export class RecommendationTestUtils {
   /**
    * Create a complete test scenario with related data
    */
-  static createRecommendationTestScenario(scenarioName: string) {
+  static createRecommendationTestScenario (scenarioName: string) {
     const machineId = randomBytes(12).toString('hex')
     const snapshotId = randomBytes(12).toString('hex')
 
@@ -580,7 +580,7 @@ export class RecommendationPerformanceUtils {
   /**
    * Measure execution time of recommendation generation
    */
-  static async measureRecommendationGenerationTime<T>(
+  static async measureRecommendationGenerationTime<T> (
     operation: () => Promise<T>
   ): Promise<{ result: T; executionTimeMs: number }> {
     const startTime = process.hrtime.bigint()
@@ -594,7 +594,7 @@ export class RecommendationPerformanceUtils {
   /**
    * Generate large dataset for performance testing
    */
-  static createLargeDatasetScenario(vmCount: number = 100, recommendationsPerVm: number = 10) {
+  static createLargeDatasetScenario (vmCount: number = 100, recommendationsPerVm: number = 10) {
     const vms = []
     const recommendations = []
 

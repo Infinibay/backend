@@ -9,19 +9,19 @@ datasource db {
 }
 
 model User {
-  id                  String               @id @default(uuid())
-  email               String               @unique
-  password            String
-  deleted             Boolean
-  token               String               @default("null")
-  firstName           String
-  lastName            String
-  userImage           String?              @unique
-  role                String
-  createdAt           DateTime             @default(now())
-  VM                  Machine[]
-  maintenanceTasks    MaintenanceTask[]
-  maintenanceHistory  MaintenanceHistory[]
+  id                 String               @id @default(uuid())
+  email              String               @unique
+  password           String
+  deleted            Boolean
+  token              String               @default("null")
+  firstName          String
+  lastName           String
+  userImage          String?              @unique
+  role               String
+  createdAt          DateTime             @default(now())
+  VM                 Machine[]
+  maintenanceHistory MaintenanceHistory[]
+  maintenanceTasks   MaintenanceTask[]
 }
 
 model Node {
@@ -60,45 +60,45 @@ model ISO {
 }
 
 model Machine {
-  id                String                @id @default(uuid())
-  name              String
-  internalName      String
-  status            String
-  userId            String?
-  templateId        String?
-  os                String
-  cpuCores          Int                   @default(0)
-  ramGB             Int                   @default(0)
-  diskSizeGB        Int                   @default(0)
-  gpuPciAddress     String?
-  createdAt         DateTime              @default(now())
-  updatedAt         DateTime              @updatedAt
-  departmentId      String?
-  firewallTemplates Json?
-  localIP           String?               // VM local/private IP address
-  publicIP          String?               // VM public IP address (if available)
-  applicationUsage  ApplicationUsage[]
-  department        Department?           @relation(fields: [departmentId], references: [id])
-  template          MachineTemplate?      @relation(fields: [templateId], references: [id])
-  user              User?                 @relation(fields: [userId], references: [id])
-  applications      MachineApplication[]
-  healthAlerts      VMHealthAlert[]
-  healthConfig      VMHealthConfig?
-  healthSnapshots   VMHealthSnapshot[]
-  healthCheckQueue  VMHealthCheckQueue[]
-  systemEvents      SystemEvent[]
-  configuration     MachineConfiguration?
-  pendingCommands   PendingCommand[]
-  portUsage         PortUsage[]
-  processSnapshots  ProcessSnapshot[]
-  systemMetrics     SystemMetrics[]
-  nwFilters         VMNWFilter[]
-  serviceConfigs    VMServiceConfig[]
-  ports             VmPort[]
-  windowsServices   WindowsService[]
-  maintenanceTasks  MaintenanceTask[]
+  id                 String                @id @default(uuid())
+  name               String
+  internalName       String
+  status             String
+  userId             String?
+  templateId         String?
+  os                 String
+  cpuCores           Int                   @default(0)
+  ramGB              Int                   @default(0)
+  diskSizeGB         Int                   @default(0)
+  gpuPciAddress      String?
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
+  departmentId       String?
+  firewallTemplates  Json?
+  localIP            String?
+  publicIP           String?
+  applicationUsage   ApplicationUsage[]
+  department         Department?           @relation(fields: [departmentId], references: [id])
+  template           MachineTemplate?      @relation(fields: [templateId], references: [id])
+  user               User?                 @relation(fields: [userId], references: [id])
+  applications       MachineApplication[]
+  configuration      MachineConfiguration?
   maintenanceHistory MaintenanceHistory[]
-  recommendations   VMRecommendation[]
+  maintenanceTasks   MaintenanceTask[]
+  pendingCommands    PendingCommand[]
+  portUsage          PortUsage[]
+  processSnapshots   ProcessSnapshot[]
+  systemEvents       SystemEvent[]
+  systemMetrics      SystemMetrics[]
+  healthAlerts       VMHealthAlert[]
+  healthCheckQueue   VMHealthCheckQueue[]
+  healthConfig       VMHealthConfig?
+  healthSnapshots    VMHealthSnapshot[]
+  nwFilters          VMNWFilter[]
+  recommendations    VMRecommendation[]
+  serviceConfigs     VMServiceConfig[]
+  ports              VmPort[]
+  windowsServices    WindowsService[]
 }
 
 model MachineConfiguration {
@@ -459,11 +459,11 @@ model ErrorLog {
   message   String
   stack     String?
   code      String
-  severity  String   // LOW, MEDIUM, HIGH, CRITICAL
+  severity  String
   context   Json?
   timestamp DateTime @default(now())
   resolved  Boolean  @default(false)
-  
+
   @@index([timestamp])
   @@index([severity, timestamp])
   @@index([code, timestamp])
@@ -475,7 +475,7 @@ model PerformanceMetric {
   value     Float
   tags      Json?
   timestamp DateTime @default(now())
-  
+
   @@index([name, timestamp])
   @@index([timestamp])
 }
@@ -483,14 +483,14 @@ model PerformanceMetric {
 model PerformanceAggregate {
   id        String   @id @default(uuid())
   name      String
-  period    String   // hourly, daily, weekly
+  period    String
   count     Int
   sum       Float
   min       Float
   max       Float
   avg       Float
   timestamp DateTime @default(now())
-  
+
   @@index([name, period, timestamp])
   @@index([timestamp])
 }
@@ -498,12 +498,12 @@ model PerformanceAggregate {
 model HealthCheck {
   id           String   @id @default(uuid())
   service      String
-  status       String   // healthy, degraded, unhealthy
+  status       String
   message      String?
   details      Json?
-  responseTime Int?     // in milliseconds
+  responseTime Int?
   timestamp    DateTime @default(now())
-  
+
   @@index([service, timestamp])
   @@index([status, timestamp])
   @@index([timestamp])
@@ -513,7 +513,7 @@ model BackgroundTaskLog {
   id         String    @id @default(uuid())
   taskId     String    @unique
   taskName   String
-  status     String    // pending, running, completed, failed, cancelled
+  status     String
   startTime  DateTime
   endTime    DateTime?
   retryCount Int       @default(0)
@@ -521,101 +521,92 @@ model BackgroundTaskLog {
   result     Json?
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
-  
+
   @@index([status, createdAt])
   @@index([taskName, createdAt])
   @@index([createdAt])
 }
 
-// VM Health Management Models
 model VMHealthAlert {
-  id            String   @id @default(uuid())
-  machineId     String
-  type          String   // AlertType enum value
-  severity      String   // AlertSeverity enum value
-  title         String
-  description   String
-  resolved      Boolean  @default(false)
-  resolvedAt    DateTime?
-  metadata      Json?    // Additional alert data
-  remediation   Json?    // Remediation steps
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  machine       Machine  @relation(fields: [machineId], references: [id], onDelete: Cascade)
-  
+  id          String    @id @default(uuid())
+  machineId   String
+  type        String
+  severity    String
+  title       String
+  description String
+  resolved    Boolean   @default(false)
+  resolvedAt  DateTime?
+  metadata    Json?
+  remediation Json?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  machine     Machine   @relation(fields: [machineId], references: [id], onDelete: Cascade)
+
   @@index([machineId, resolved])
   @@index([machineId, severity])
   @@index([createdAt])
 }
 
 model VMHealthConfig {
-  id                     String   @id @default(uuid())
-  machineId              String   @unique
-  checkIntervalMinutes   Int      @default(5)
-  metricsRetentionDays   Int      @default(7)
-  thresholds             Json     // Threshold configuration
-  enabledModules         String[] // List of enabled module IDs
-  createdAt              DateTime @default(now())
-  updatedAt              DateTime @updatedAt
-  machine                Machine  @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  id                   String   @id @default(uuid())
+  machineId            String   @unique
+  checkIntervalMinutes Int      @default(5)
+  metricsRetentionDays Int      @default(7)
+  thresholds           Json
+  enabledModules       String[]
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  machine              Machine  @relation(fields: [machineId], references: [id], onDelete: Cascade)
 }
 
 model KnownService {
-  id            String   @id @default(uuid())
-  name          String   @unique
-  displayName   String
-  description   String
-  category      String   // gaming, database, web, development, etc.
-  ports         Json     // Array of { port: number, protocol: string, direction: string }
-  executable    String?  // Common executable names
-  os            String[] // ['windows', 'linux', 'all']
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id          String   @id @default(uuid())
+  name        String   @unique
+  displayName String
+  description String
+  category    String
+  ports       Json
+  executable  String?
+  os          String[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }
 
 model SystemEvent {
   id          String   @id @default(uuid())
   machineId   String
-  eventType   String   // reboot, service_crash, login_failed, etc.
-  severity    String   // critical, warning, info
+  eventType   String
+  severity    String
   title       String
   description String
-  metadata    Json?    // Additional event data
+  metadata    Json?
   timestamp   DateTime
   createdAt   DateTime @default(now())
   machine     Machine  @relation(fields: [machineId], references: [id], onDelete: Cascade)
-  
+
   @@index([machineId, timestamp])
   @@index([machineId, eventType])
 }
 
-// Background VM Health Monitoring System Models
-
 model VMHealthSnapshot {
-  id                   String      @id @default(uuid())
+  id                   String             @id @default(uuid())
   machineId            String
-  snapshotDate         DateTime    @default(now())
-  overallStatus        String      // Overall health status
-  
-  // Health Check Results (JSON for flexibility across different check types)
-  diskSpaceInfo        Json?       // Disk space check results
-  resourceOptInfo      Json?       // Resource optimization data
-  windowsUpdateInfo    Json?       // Windows update status
-  defenderStatus       Json?       // Windows Defender status
-  applicationInventory Json?       // Application inventory data
-  customCheckResults   Json?       // Custom health check results
-  
-  // Metadata and execution info
-  osType               String?     // Windows/Linux
-  checksCompleted      Int         @default(0)
-  checksFailed         Int         @default(0)
-  executionTimeMs      Int?        // Total execution time
-  errorSummary         String?     // Summary of any errors
-  
-  createdAt            DateTime    @default(now())
-  updatedAt            DateTime    @updatedAt
-
-  machine              Machine             @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  snapshotDate         DateTime           @default(now())
+  overallStatus        String
+  diskSpaceInfo        Json?
+  resourceOptInfo      Json?
+  windowsUpdateInfo    Json?
+  defenderStatus       Json?
+  applicationInventory Json?
+  customCheckResults   Json?
+  osType               String?
+  checksCompleted      Int                @default(0)
+  checksFailed         Int                @default(0)
+  executionTimeMs      Int?
+  errorSummary         String?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+  machine              Machine            @relation(fields: [machineId], references: [id], onDelete: Cascade)
   recommendations      VMRecommendation[]
 
   @@index([machineId, snapshotDate])
@@ -624,39 +615,106 @@ model VMHealthSnapshot {
 }
 
 model VMHealthCheckQueue {
-  id           String          @id @default(uuid())
-  machineId    String
-  checkType    HealthCheckType
-  priority     TaskPriority    @default(MEDIUM)
-  status       TaskStatus      @default(PENDING)
-  
-  // Task execution details
-  payload      Json?           // Parameters for the health check
-  attempts     Int             @default(0)
-  maxAttempts  Int             @default(3)
-  
-  // Scheduling information
-  scheduledFor DateTime        @default(now())
-  executedAt   DateTime?       // When execution started
-  completedAt  DateTime?       // When execution finished
-  
-  // Results and error handling
-  error        String?         // Error message if failed
-  result       Json?           // Health check results
-  executionTimeMs Int?         // How long the check took
-  
-  createdAt    DateTime        @default(now())
-  updatedAt    DateTime        @updatedAt
-  
-  machine      Machine         @relation(fields: [machineId], references: [id], onDelete: Cascade)
-  
+  id              String          @id @default(uuid())
+  machineId       String
+  checkType       HealthCheckType
+  priority        TaskPriority    @default(MEDIUM)
+  status          TaskStatus      @default(PENDING)
+  payload         Json?
+  attempts        Int             @default(0)
+  maxAttempts     Int             @default(3)
+  scheduledFor    DateTime        @default(now())
+  executedAt      DateTime?
+  completedAt     DateTime?
+  error           String?
+  result          Json?
+  executionTimeMs Int?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  machine         Machine         @relation(fields: [machineId], references: [id], onDelete: Cascade)
+
   @@index([machineId, status])
   @@index([status, priority, scheduledFor])
   @@index([scheduledFor, status])
   @@index([machineId, checkType, status])
 }
 
-// Enums for Background Health Monitoring System
+model MaintenanceTask {
+  id              String               @id @default(uuid())
+  machineId       String
+  taskType        MaintenanceTaskType
+  name            String
+  description     String?
+  isEnabled       Boolean              @default(true)
+  isRecurring     Boolean              @default(false)
+  cronSchedule    String?
+  runAt           DateTime?
+  nextRunAt       DateTime?
+  lastRunAt       DateTime?
+  parameters      Json?
+  createdByUserId String
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+  executionStatus String               @default("IDLE")
+  history         MaintenanceHistory[]
+  createdBy       User                 @relation(fields: [createdByUserId], references: [id])
+  machine         Machine              @relation(fields: [machineId], references: [id], onDelete: Cascade)
+
+  @@index([machineId, isEnabled])
+  @@index([machineId, taskType])
+  @@index([nextRunAt, isEnabled])
+  @@index([taskType, isEnabled])
+}
+
+model MaintenanceHistory {
+  id               String              @id @default(uuid())
+  taskId           String?
+  machineId        String
+  taskType         MaintenanceTaskType
+  status           MaintenanceStatus
+  duration         Int?
+  result           Json?
+  error            String?
+  triggeredBy      MaintenanceTrigger
+  executedByUserId String?
+  executedAt       DateTime            @default(now())
+  executedBy       User?               @relation(fields: [executedByUserId], references: [id])
+  machine          Machine             @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  task             MaintenanceTask?    @relation(fields: [taskId], references: [id])
+
+  @@index([machineId, executedAt])
+  @@index([machineId, status])
+  @@index([taskType, status])
+  @@index([executedAt])
+}
+
+model VMRecommendation {
+  id         String             @id @default(uuid())
+  machineId  String
+  snapshotId String?
+  type       RecommendationType
+  text       String
+  actionText String
+  data       Json?
+  createdAt  DateTime           @default(now())
+  machine    Machine            @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  snapshot   VMHealthSnapshot?  @relation(fields: [snapshotId], references: [id])
+
+  @@index([machineId, createdAt])
+  @@index([machineId, snapshotId])
+}
+
+model AppSettings {
+  id            String   @id @default(uuid())
+  theme         String   @default("system")
+  wallpaper     String   @default("wallpaper1.jpg")
+  logoUrl       String?
+  interfaceSize String   @default("xl")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([id])
+}
 
 enum HealthCheckType {
   OVERALL_STATUS
@@ -682,63 +740,10 @@ enum TaskStatus {
 }
 
 enum TaskPriority {
-  URGENT      // 1 - Critical security issues, failures
-  HIGH        // 2 - Performance degradation, warnings
-  MEDIUM      // 3 - Regular health checks (default)
-  LOW         // 4 - Background maintenance
-}
-
-// Maintenance System Models
-
-model MaintenanceTask {
-  id              String                @id @default(uuid())
-  machineId       String
-  taskType        MaintenanceTaskType
-  name            String
-  description     String?
-  isEnabled       Boolean               @default(true)
-  isRecurring     Boolean               @default(false)
-  cronSchedule    String?               // Cron pattern for recurring tasks
-  runAt           DateTime?             // Specific run time for one-time tasks
-  nextRunAt       DateTime?
-  lastRunAt       DateTime?
-  executionStatus String                @default("IDLE") // IDLE, RUNNING, LOCKED
-  parameters      Json?                 // Task-specific parameters
-  createdByUserId String
-  createdAt       DateTime              @default(now())
-  updatedAt       DateTime              @updatedAt
-
-  machine         Machine               @relation(fields: [machineId], references: [id], onDelete: Cascade)
-  createdBy       User                  @relation(fields: [createdByUserId], references: [id])
-  history         MaintenanceHistory[]
-
-  @@index([machineId, isEnabled])
-  @@index([machineId, taskType])
-  @@index([nextRunAt, isEnabled])
-  @@index([taskType, isEnabled])
-}
-
-model MaintenanceHistory {
-  id              String               @id @default(uuid())
-  taskId          String?              // Null for immediate executions
-  machineId       String
-  taskType        MaintenanceTaskType
-  status          MaintenanceStatus
-  duration        Int?                 // Execution duration in milliseconds
-  result          Json?                // Detailed results
-  error           String?              // Error message if failed
-  triggeredBy     MaintenanceTrigger
-  executedByUserId String?
-  executedAt      DateTime             @default(now())
-
-  task            MaintenanceTask?     @relation(fields: [taskId], references: [id], onDelete: SetNull)
-  machine         Machine              @relation(fields: [machineId], references: [id], onDelete: Cascade)
-  executedBy      User?                @relation(fields: [executedByUserId], references: [id])
-
-  @@index([machineId, executedAt])
-  @@index([machineId, status])
-  @@index([taskType, status])
-  @@index([executedAt])
+  URGENT
+  HIGH
+  MEDIUM
+  LOW
 }
 
 enum MaintenanceTaskType {
@@ -777,21 +782,4 @@ enum RecommendationType {
   DEFENDER_DISABLED
   DEFENDER_THREAT
   OTHER
-}
-
-model VMRecommendation {
-  id          String             @id @default(uuid())
-  machineId   String
-  snapshotId  String?
-  type        RecommendationType
-  text        String
-  actionText  String
-  data        Json?
-  createdAt   DateTime           @default(now())
-
-  machine     Machine            @relation(fields: [machineId], references: [id], onDelete: Cascade)
-  snapshot    VMHealthSnapshot?  @relation(fields: [snapshotId], references: [id], onDelete: SetNull)
-
-  @@index([machineId, createdAt])
-  @@index([machineId, snapshotId])
 }

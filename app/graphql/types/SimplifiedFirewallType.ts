@@ -206,15 +206,15 @@ export class ApplyFirewallTemplateInput {
 export class AdvancedPortInput {
   /** Type of port configuration (single, range, multiple, or all) */
   @Field(() => PortInputType, { description: 'Type of port configuration' })
-  type!: PortInputType
+    type!: PortInputType
 
   /** Port value string (e.g., "80", "80-90", "80,443,8080", "all") */
   @Field(() => String, { description: 'Port specification string' })
-  value!: string
+    value!: string
 
   /** Optional description for this port configuration */
   @Field({ nullable: true, description: 'Description of the port configuration' })
-  description?: string
+    description?: string
 }
 
 /**
@@ -225,27 +225,27 @@ export class AdvancedPortInput {
 export class CreateAdvancedFirewallRuleInput {
   /** ID of the virtual machine to apply the rule to */
   @Field(() => ID, { description: 'Virtual machine ID' })
-  machineId!: string
+    machineId!: string
 
   /** Port configuration (supports ranges, multiple ports, etc.) */
   @Field(() => AdvancedPortInput, { description: 'Advanced port configuration' })
-  ports!: AdvancedPortInput
+    ports!: AdvancedPortInput
 
   /** Network protocol (tcp, udp, icmp) */
   @Field({ defaultValue: 'tcp', description: 'Network protocol (tcp, udp, icmp)' })
-  protocol!: string
+    protocol!: string
 
   /** Traffic direction (in, out, inout) */
   @Field({ defaultValue: 'in', description: 'Traffic direction (in, out, inout)' })
-  direction!: string
+    direction!: string
 
   /** Firewall action (accept, drop, reject) */
   @Field({ defaultValue: 'accept', description: 'Firewall action (accept, drop, reject)' })
-  action!: string
+    action!: string
 
   /** Optional description for the firewall rule */
   @Field({ nullable: true, description: 'Optional rule description' })
-  description?: string
+    description?: string
 }
 
 /**
@@ -256,15 +256,15 @@ export class CreateAdvancedFirewallRuleInput {
 export class PortValidationResult {
   /** Whether the port specification is valid */
   @Field(() => Boolean, { description: 'Whether the port specification is valid' })
-  isValid!: boolean
+    isValid!: boolean
 
   /** List of validation errors if invalid */
   @Field(() => [String], { description: 'List of validation errors if invalid' })
-  errors!: string[]
+    errors!: string[]
 
   /** Parsed port ranges if valid */
   @Field(() => [PortRange], { nullable: true, description: 'Parsed port ranges if valid' })
-  parsedRanges?: PortRange[]
+    parsedRanges?: PortRange[]
 }
 
 /**
@@ -275,14 +275,13 @@ export class PortValidationResult {
 export class PortRange {
   /** Starting port number (1-65535) */
   @Field(() => Int, { description: 'Starting port number (1-65535)' })
-  start!: number
+    start!: number
 
   /** Ending port number (1-65535) */
   @Field(() => Int, { description: 'Ending port number (1-65535)' })
-  end!: number
+    end!: number
 
   /** Optional description for this port range */
   @Field({ nullable: true, description: 'Optional description for this port range' })
-  description?: string
+    description?: string
 }
-

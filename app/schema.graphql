@@ -14,6 +14,23 @@ input AdvancedPortInput {
   value: String!
 }
 
+type AppSettings {
+  createdAt: DateTimeISO!
+  id: ID!
+  interfaceSize: String!
+  logoUrl: String
+  theme: String!
+  updatedAt: DateTimeISO!
+  wallpaper: String!
+}
+
+input AppSettingsInput {
+  interfaceSize: String
+  logoUrl: String
+  theme: String
+  wallpaper: String
+}
+
 type ApplicationInfo {
   installDate: DateTimeISO
   installLocation: String
@@ -868,6 +885,7 @@ type Mutation {
   toggleMaintenanceTask(enabled: Boolean!, id: ID!): MaintenanceTaskResponse!
   toggleVmService(input: ToggleVmServiceInput!): VmServiceStatus!
   triggerHealthCheckRound: HealthCheckRoundResult!
+  updateAppSettings(input: AppSettingsInput!): AppSettings!
   updateApplication(id: String!, input: CreateApplicationInputType!): ApplicationType!
   updateFilter(id: ID!, input: UpdateFilterInput!): GenericFilter!
   updateFilterRule(id: ID!, input: UpdateFilterRuleInput!): FWRule!
@@ -1059,6 +1077,7 @@ type Query {
   departments: [DepartmentType!]!
   dueMaintenanceTasks: [MaintenanceTask!]!
   findDepartmentByName(name: String!): DepartmentType
+  getAppSettings: AppSettings!
   getAvailableFirewallTemplates: [FirewallTemplateInfo!]!
   getDepartmentServiceStatus(departmentId: ID!, serviceId: ID): [DepartmentServiceStatus!]!
   getFilter(id: ID!): GenericFilter

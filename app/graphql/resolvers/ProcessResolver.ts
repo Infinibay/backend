@@ -33,8 +33,6 @@ export class ProcessResolver {
     return this.processManager
   }
 
-
-
   /**
    * Kill a process on a VM
    */
@@ -157,7 +155,6 @@ export class ProcessResolver {
 
   // Private mapping methods
 
-
   /**
    * Map internal control result to GraphQL type
    */
@@ -170,5 +167,4 @@ export class ProcessResolver {
       error: internalResult.error
     }
   }
-
 }

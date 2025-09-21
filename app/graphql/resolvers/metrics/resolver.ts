@@ -2,17 +2,8 @@ import { Resolver } from 'type-graphql'
 // import { Subscription, Root, PubSub } from 'type-graphql' // TODO: Enable when PubSub is configured
 import { SystemMetrics } from './type'
 
-
 @Resolver()
 export class MetricsResolver {
-
-
-
-
-
-
-
-
 
   // Subscription for real-time metrics updates
   // TODO: Enable when PubSub is configured

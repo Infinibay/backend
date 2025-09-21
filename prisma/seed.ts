@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client'
+import { PrismaClient, Prisma } from '@prisma/client'
 import bcrypt from 'bcrypt'
 import dotenv from 'dotenv'
 import { installNetworkFilters } from '../scripts/installation/networkFilters'
@@ -89,6 +89,32 @@ async function createDefaultMachineTemplate (defaultCategoryId: string) {
   console.log('Skipping default template creation - users will use custom hardware')
 }
 
+async function createDefaultAppSettings (prisma: Prisma.TransactionClient | PrismaClient) {
+  try {
+    await prisma.appSettings.upsert({
+      where: {
+        id: 'default-settings'
+      },
+      update: {
+        theme: 'system',
+        wallpaper: 'wallpaper1.jpg',
+        logoUrl: null,
+        interfaceSize: 'xl'
+      },
+      create: {
+        id: 'default-settings',
+        theme: 'system',
+        wallpaper: 'wallpaper1.jpg',
+        logoUrl: null,
+        interfaceSize: 'xl'
+      }
+    })
+    console.log('Default app settings created/updated successfully')
+  } catch (error) {
+    console.error('Error creating default app settings:', error)
+  }
+}
+
 async function main () {
   try {
     installCallbacks(prisma)
@@ -108,6 +134,9 @@ async function main () {
 
       // Seed global service configurations
       await seedGlobalServiceConfigs(transactionPrisma)
+
+      // Create default app settings
+      await createDefaultAppSettings(transactionPrisma)
     })
     console.log('Seeding completed successfully')
   } catch (error) {

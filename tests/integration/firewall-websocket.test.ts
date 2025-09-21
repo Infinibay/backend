@@ -162,17 +162,17 @@ describe('Firewall WebSocket Events', () => {
               startPort: 8000,
               endPort: 8001,
               rules: expect.arrayContaining([
-              expect.objectContaining({ port: '8000-8001' })
-            ]),
-            state: expect.objectContaining({
-              appliedTemplates: expect.any(Array),
-              customRules: expect.any(Array),
-              effectiveRules: expect.any(Array),
-              lastSync: expect.any(String)
-            })
+                expect.objectContaining({ port: '8000-8001' })
+              ]),
+              state: expect.objectContaining({
+                appliedTemplates: expect.any(Array),
+                customRules: expect.any(Array),
+                effectiveRules: expect.any(Array),
+                lastSync: expect.any(String)
+              })
+            }
           }
-        }
-      )
+        )
       })
     })
 
@@ -180,41 +180,41 @@ describe('Firewall WebSocket Events', () => {
       await withTransaction(prisma, async ({ testUser, testMachine, context }) => {
         const input = {
           machineId: testMachine.id,
-        ports: {
-          type: 'MULTIPLE',
-          value: '80,443',
-          description: 'Web ports'
-        },
-        protocol: 'tcp',
-        direction: 'in',
-        action: 'accept'
-      }
+          ports: {
+            type: 'MULTIPLE',
+            value: '80,443',
+            description: 'Web ports'
+          },
+          protocol: 'tcp',
+          direction: 'in',
+          action: 'accept'
+        }
 
-      await graphql({
-        schema,
-        source: CREATE_ADVANCED_RULE_MUTATION,
-        contextValue: context,
-        variableValues: { input }
-      })
+        await graphql({
+          schema,
+          source: CREATE_ADVANCED_RULE_MUTATION,
+          contextValue: context,
+          variableValues: { input }
+        })
 
-      const eventCall = mockSocketService.sendToUser.mock.calls[0]
-      const eventData = eventCall[3].data
+        const eventCall = mockSocketService.sendToUser.mock.calls[0]
+        const eventData = eventCall[3].data
 
-      // Verify all required fields are present
-      expect(eventData).toHaveProperty('machineId')
-      expect(eventData).toHaveProperty('rules')
-      expect(eventData).toHaveProperty('state')
-      expect(eventData.state).toHaveProperty('appliedTemplates')
-      expect(eventData.state).toHaveProperty('customRules')
-      expect(eventData.state).toHaveProperty('effectiveRules')
-      expect(eventData.state).toHaveProperty('lastSync')
+        // Verify all required fields are present
+        expect(eventData).toHaveProperty('machineId')
+        expect(eventData).toHaveProperty('rules')
+        expect(eventData).toHaveProperty('state')
+        expect(eventData.state).toHaveProperty('appliedTemplates')
+        expect(eventData.state).toHaveProperty('customRules')
+        expect(eventData.state).toHaveProperty('effectiveRules')
+        expect(eventData.state).toHaveProperty('lastSync')
 
-      // Verify data types
-      expect(typeof eventData.machineId).toBe('string')
-      expect(Array.isArray(eventData.rules)).toBe(true)
-      expect(Array.isArray(eventData.state.appliedTemplates)).toBe(true)
-      expect(Array.isArray(eventData.state.customRules)).toBe(true)
-      expect(Array.isArray(eventData.state.effectiveRules)).toBe(true)
+        // Verify data types
+        expect(typeof eventData.machineId).toBe('string')
+        expect(Array.isArray(eventData.rules)).toBe(true)
+        expect(Array.isArray(eventData.state.appliedTemplates)).toBe(true)
+        expect(Array.isArray(eventData.state.customRules)).toBe(true)
+        expect(Array.isArray(eventData.state.effectiveRules)).toBe(true)
       })
     })
   })

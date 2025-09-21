@@ -385,7 +385,7 @@ describe('VMRecommendationResolver', () => {
       it('should validate filter input types', async () => {
         const invalidFilter = {
           types: 'invalid' as any, // Should be array
-          limit: 'invalid' as any   // Should be number
+          limit: 'invalid' as any // Should be number
         }
 
         mockService.getRecommendations.mockResolvedValue([])

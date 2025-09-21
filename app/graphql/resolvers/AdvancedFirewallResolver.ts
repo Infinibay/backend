@@ -179,9 +179,9 @@ export class AdvancedFirewallResolver {
 
       // Convert port ranges to SimplifiedRule objects
       rules = portRanges.map((range, index) => {
-        const portString = range.start === range.end ?
-          range.start.toString() :
-          `${range.start}-${range.end}`
+        const portString = range.start === range.end
+          ? range.start.toString()
+          : `${range.start}-${range.end}`
 
         const ruleDescription = input.description ||
           (portRanges.length > 1 ? `${input.ports.description || 'Advanced rule'} (${index + 1}/${portRanges.length})` : input.ports.description)
@@ -311,9 +311,9 @@ export class AdvancedFirewallResolver {
     }
 
     // Create the port string (single port or range)
-    const portString = startPort === endPort ?
-      startPort.toString() :
-      `${startPort}-${endPort}`
+    const portString = startPort === endPort
+      ? startPort.toString()
+      : `${startPort}-${endPort}`
 
     // Create the rule
     const rule: SimplifiedRule = {

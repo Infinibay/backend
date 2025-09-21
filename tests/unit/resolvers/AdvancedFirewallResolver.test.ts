@@ -463,8 +463,8 @@ describe('AdvancedFirewallResolver', () => {
       const resolver = new AdvancedFirewallResolver()
 
       // Services should be null initially
-      expect(resolver['firewallSimplifierService']).toBeNull()
-      expect(resolver['portValidationService']).toBeNull()
+      expect(resolver.firewallSimplifierService).toBeNull()
+      expect(resolver.portValidationService).toBeNull()
     })
 
     it('should handle service failures gracefully', async () => {

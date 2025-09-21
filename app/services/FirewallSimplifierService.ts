@@ -361,7 +361,7 @@ export class FirewallSimplifierService {
   /**
    * Add multiple custom firewall rules at once with optimization
    */
-  async addMultipleCustomRules(vmId: string, rules: SimplifiedRule[]): Promise<VMFirewallState> {
+  async addMultipleCustomRules (vmId: string, rules: SimplifiedRule[]): Promise<VMFirewallState> {
     this.debug.log(`Adding ${rules.length} custom rules to VM ${vmId}`)
 
     // Validate all rules before processing
@@ -418,7 +418,7 @@ export class FirewallSimplifierService {
   /**
    * Optimize custom rules by merging adjacent ranges and eliminating duplicates
    */
-  private optimizeCustomRules(rules: SimplifiedRule[]): SimplifiedRule[] {
+  private optimizeCustomRules (rules: SimplifiedRule[]): SimplifiedRule[] {
     this.debug.log(`Optimizing ${rules.length} custom rules`)
 
     // Group rules by protocol, direction, and action
@@ -477,7 +477,7 @@ export class FirewallSimplifierService {
   /**
    * Extract port ranges from simplified rules
    */
-  private extractPortRanges(rules: SimplifiedRule[]): PortRange[] {
+  private extractPortRanges (rules: SimplifiedRule[]): PortRange[] {
     const ranges: PortRange[] = []
 
     rules.forEach(rule => {
@@ -503,7 +503,7 @@ export class FirewallSimplifierService {
   /**
    * Merge adjacent and overlapping port ranges
    */
-  private mergeAdjacentRanges(ranges: PortRange[]): PortRange[] {
+  private mergeAdjacentRanges (ranges: PortRange[]): PortRange[] {
     if (ranges.length === 0) return []
 
     // Sort ranges by start port
@@ -540,7 +540,7 @@ export class FirewallSimplifierService {
 
   // Private helper methods
 
-  private groupRulesByKey(rules: SimplifiedRule[]): Map<string, SimplifiedRule[]> {
+  private groupRulesByKey (rules: SimplifiedRule[]): Map<string, SimplifiedRule[]> {
     const groups = new Map<string, SimplifiedRule[]>()
 
     rules.forEach(rule => {

@@ -248,7 +248,7 @@ export class BackgroundHealthService {
   /**
    * Validate recommendation service initialization
    */
-  private validateRecommendationService(): void {
+  private validateRecommendationService (): void {
     try {
       if (!this.recommendationService) {
         throw new Error('VMRecommendationService initialization failed')
@@ -263,7 +263,7 @@ export class BackgroundHealthService {
   /**
    * Execute weekly maintenance tasks
    */
-  private async executeWeeklyMaintenance(): Promise<void> {
+  private async executeWeeklyMaintenance (): Promise<void> {
     const startTime = Date.now()
     console.log('🔧 Starting weekly maintenance tasks')
 
@@ -295,7 +295,7 @@ export class BackgroundHealthService {
   /**
    * Clean up old recommendations (older than configurable threshold)
    */
-  public async cleanupOldRecommendations(): Promise<void> {
+  public async cleanupOldRecommendations (): Promise<void> {
     try {
       const cleanupThresholdDays = Number(process.env.RECOMMENDATION_CLEANUP_DAYS) || 30
       const thresholdDate = new Date(Date.now() - (cleanupThresholdDays * 24 * 60 * 60 * 1000))
@@ -320,7 +320,7 @@ export class BackgroundHealthService {
   /**
    * Validate recommendation integrity - check for orphaned recommendations
    */
-  public async validateRecommendationIntegrity(): Promise<void> {
+  public async validateRecommendationIntegrity (): Promise<void> {
     try {
       // Find recommendations with invalid snapshot references
       const orphanedRecommendations = await this.prisma.vMRecommendation.findMany({
@@ -378,7 +378,7 @@ export class BackgroundHealthService {
   /**
    * Generate missing recommendations for recent snapshots
    */
-  public async generateMissingRecommendations(): Promise<void> {
+  public async generateMissingRecommendations (): Promise<void> {
     try {
       const recentDays = Number(process.env.RECOMMENDATION_REGENERATION_DAYS) || 7
       const recentDate = new Date(Date.now() - (recentDays * 24 * 60 * 60 * 1000))
@@ -425,7 +425,7 @@ export class BackgroundHealthService {
   /**
    * Manually trigger recommendation regeneration for specific VM
    */
-  public async regenerateRecommendationsForVM(machineId: string): Promise<void> {
+  public async regenerateRecommendationsForVM (machineId: string): Promise<void> {
     try {
       // Get the latest snapshot for the VM
       const latestSnapshot = await this.prisma.vMHealthSnapshot.findFirst({
@@ -466,7 +466,7 @@ export class BackgroundHealthService {
   /**
    * Manually trigger recommendation regeneration for all VMs
    */
-  public async regenerateAllRecommendations(): Promise<void> {
+  public async regenerateAllRecommendations (): Promise<void> {
     try {
       const runningVMs = await this.prisma.machine.findMany({
         where: {
@@ -489,7 +489,7 @@ export class BackgroundHealthService {
         }
       }
 
-      console.log(`✅ Completed recommendation regeneration for all VMs`)
+      console.log('✅ Completed recommendation regeneration for all VMs')
     } catch (error) {
       console.error('❌ Failed to regenerate all recommendations:', error)
       throw error
@@ -499,7 +499,7 @@ export class BackgroundHealthService {
   /**
    * Get recommendation maintenance statistics
    */
-  public async getRecommendationStats(): Promise<{
+  public async getRecommendationStats (): Promise<{
     totalRecommendations: number
     recentRecommendations: number
     snapshotsWithoutRecommendations: number

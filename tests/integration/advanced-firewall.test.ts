@@ -182,16 +182,16 @@ describe('AdvancedFirewallResolver Integration', () => {
       await runTestInTransaction(async ({ testUser, testMachine, context }) => {
         const input = {
           machineId: testMachine.id,
-        ports: {
-          type: 'MULTIPLE',
-          value: '80,443,8080',
-          description: 'Web services'
-        },
-        protocol: 'tcp',
-        direction: 'in',
-        action: 'accept',
-        description: 'Web server ports'
-      }
+          ports: {
+            type: 'MULTIPLE',
+            value: '80,443,8080',
+            description: 'Web services'
+          },
+          protocol: 'tcp',
+          direction: 'in',
+          action: 'accept',
+          description: 'Web server ports'
+        }
 
         const result: ExecutionResult = await graphql({
           schema,
@@ -220,16 +220,16 @@ describe('AdvancedFirewallResolver Integration', () => {
       await runTestInTransaction(async ({ testUser, testMachine, context }) => {
         const input = {
           machineId: testMachine.id,
-        ports: {
-          type: 'ALL',
-          value: 'all',
-          description: 'All ports'
-        },
-        protocol: 'tcp',
-        direction: 'in',
-        action: 'accept',
-        description: 'Allow all TCP traffic'
-      }
+          ports: {
+            type: 'ALL',
+            value: 'all',
+            description: 'All ports'
+          },
+          protocol: 'tcp',
+          direction: 'in',
+          action: 'accept',
+          description: 'Allow all TCP traffic'
+        }
 
         const result: ExecutionResult = await graphql({
           schema,
@@ -251,16 +251,16 @@ describe('AdvancedFirewallResolver Integration', () => {
       await runTestInTransaction(async ({ testUser, testMachine, context }) => {
         const input = {
           machineId: testMachine.id,
-        ports: {
-          type: 'SINGLE',
-          value: '22',
-          description: 'SSH port'
-        },
-        protocol: 'tcp',
-        direction: 'in',
-        action: 'accept',
-        description: 'SSH access'
-      }
+          ports: {
+            type: 'SINGLE',
+            value: '22',
+            description: 'SSH port'
+          },
+          protocol: 'tcp',
+          direction: 'in',
+          action: 'accept',
+          description: 'SSH access'
+        }
 
         await graphql({
           schema,
