@@ -431,7 +431,7 @@ export class XMLGenerator {
     // TODO: Add ip address
   }
 
-  addNWFilter (filterName: string) {
+  addNWFilter (filterName: string, priority?: number) {
     // find the network interface and add the filterref
     if (!this.xml.domain.devices[0].interface) {
       throw new Error('No network interface found')
@@ -439,9 +439,27 @@ export class XMLGenerator {
     this.xml.domain.devices[0].interface.forEach((iface: any) => {
       // Support both network and bridge interface types
       if (iface.$.type === 'network' || iface.$.type === 'bridge') {
-        iface.filterref = [{ $: { filter: filterName } }]
+        const filterRef: any = { $: { filter: filterName } }
+        if (priority !== undefined) {
+          filterRef.$.priority = priority.toString()
+        }
+
+        if (!iface.filterref) {
+          iface.filterref = []
+        }
+        iface.filterref.push(filterRef)
       }
     })
+  }
+
+  addDepartmentNWFilter (departmentFilterName: string) {
+    // Apply department filter with higher priority (lower priority number)
+    this.addNWFilter(departmentFilterName, 100)
+  }
+
+  addVMNWFilter (vmFilterName: string) {
+    // Apply VM filter with lower priority (higher priority number) than department filters
+    this.addNWFilter(vmFilterName, 200)
   }
 
   enableTPM (version: '1.2' | '2.0' = '2.0'): void {

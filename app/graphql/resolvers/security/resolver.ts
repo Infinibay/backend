@@ -36,11 +36,11 @@ export class SecurityResolver {
   }
 
   /**
-   * List all available services with their definitions
+   * List all available security services with their definitions
    */
   @Query(() => [GraphQLServiceDefinition])
   @Authorized(['ADMIN'])
-  async listServices (
+  async listSecurityServices (
     @Ctx() { prisma }: InfinibayContext
   ): Promise<GraphQLServiceDefinition[]> {
     return this.getFirewallService(prisma).getServices()

@@ -23,12 +23,13 @@ import { getEventManager } from '../../../services/EventManager'
 import { VMOperationsService } from '../../../services/VMOperationsService'
 import { getSocketService } from '../../../services/SocketService'
 import { Machine as PrismaMachine, User as PrismaUser, MachineTemplate as PrismaMachineTemplate, Department as PrismaDepartment, MachineConfiguration, PrismaClient } from '@prisma/client'
+import { SafeUser } from '@utils/context'
 
 type MachineWithRelations = PrismaMachine & {
   configuration?: MachineConfiguration | null
   department?: PrismaDepartment | null
   template?: PrismaMachineTemplate | null
-  user?: PrismaUser | null
+  user?: SafeUser | null
 }
 
 async function transformMachine (prismaMachine: MachineWithRelations, prisma: PrismaClient): Promise<Machine> {
@@ -339,7 +340,7 @@ export class MachineMutations {
   private async changeMachineState (
     id: string,
     prisma: PrismaClient,
-    user: PrismaUser | null,
+    user: SafeUser | null,
     action: 'powerOn' | 'destroy' | 'shutdown' | 'suspend',
     newStatus: 'running' | 'off' | 'suspended'
   ): Promise<SuccessType> {

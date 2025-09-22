@@ -1,4 +1,5 @@
 import { PrismaClient, Department, Machine, User, Prisma } from '@prisma/client'
+import { SafeUser } from '../utils/context'
 import { v4 as uuidv4 } from 'uuid'
 import { Debugger } from '../utils/debug'
 import VirtManager from '../utils/VirtManager'
@@ -11,10 +12,10 @@ import { CreateMachineInputType, UpdateMachineHardwareInput, SuccessType } from 
 
 export class MachineLifecycleService {
   private prisma: PrismaClient
-  private user: User | null
+  private user: SafeUser | null
   private debug: Debugger
 
-  constructor (prisma: PrismaClient, user: User | null) {
+  constructor (prisma: PrismaClient, user: SafeUser | null) {
     this.prisma = prisma
     this.user = user
     this.debug = new Debugger('machine-lifecycle-service')

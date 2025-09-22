@@ -221,3 +221,42 @@ export class UpdateFilterInput {
   @Field({ nullable: true })
     type?: FilterType
 }
+
+@ObjectType()
+export class DepartmentFirewallState {
+  @Field(() => ID)
+    departmentId: string = ''
+
+  @Field(() => [String])
+    appliedTemplates: string[] = []
+
+  @Field(() => [FWRule])
+    customRules: FWRule[] = []
+
+  @Field(() => [FWRule])
+    effectiveRules: FWRule[] = []
+
+  @Field(() => Int)
+    vmCount: number = 0
+
+  @Field(() => Date)
+    lastSync: Date = new Date()
+}
+
+@InputType()
+export class AddFilterReferenceInput {
+  @Field(() => ID)
+    sourceFilterId: string = ''
+
+  @Field(() => ID)
+    targetFilterId: string = ''
+}
+
+@InputType()
+export class ApplyDepartmentTemplateInput {
+  @Field(() => ID)
+    departmentId: string = ''
+
+  @Field(() => ID)
+    templateFilterId: string = ''
+}

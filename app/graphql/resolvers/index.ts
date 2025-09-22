@@ -26,6 +26,7 @@ import { VMRecommendationResolver } from './VMRecommendationResolver'
 // Import recommendation types to ensure they're registered
 import '../types/RecommendationTypes'
 import { AdvancedFirewallResolver } from './AdvancedFirewallResolver'
+import { DepartmentFirewallResolver } from './DepartmentFirewallResolver'
 import { AppSettingsResolver } from './AppSettingsResolver'
 
 const resolvers: NonEmptyArray<Function> = [
@@ -49,13 +50,14 @@ const resolvers: NonEmptyArray<Function> = [
   PackageResolver,
   ProcessResolver,
   SimplifiedFirewallResolver,
+  AdvancedFirewallResolver,
+  DepartmentFirewallResolver,
   MetricsResolver,
   AutoCheckResolver,
   VMHealthHistoryResolver,
   VMRecommendationResolver,
   BackgroundHealthResolver,
   MaintenanceResolver,
-  AdvancedFirewallResolver,
   AppSettingsResolver
 ]
 

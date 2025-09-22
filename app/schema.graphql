@@ -93,6 +93,11 @@ type ApplicationUpdates {
   windowsUpdatesCount: Int
 }
 
+input ApplyDepartmentTemplateInput {
+  departmentId: ID! = ""
+  templateFilterId: ID! = ""
+}
+
 input ApplyFirewallTemplateInput {
   """Virtual machine ID"""
   machineId: ID!
@@ -284,6 +289,15 @@ input DeleteNetworkInput {
 input DeleteSnapshotInput {
   machineId: String!
   snapshotName: String!
+}
+
+type DepartmentFirewallState {
+  appliedTemplates: [String!]!
+  customRules: [FWRule!]!
+  departmentId: ID!
+  effectiveRules: [FWRule!]!
+  lastSync: DateTimeISO!
+  vmCount: Int!
 }
 
 type DepartmentServiceStatus {
@@ -564,6 +578,12 @@ The `JSONObject` scalar type represents JSON objects as specified by [ECMA-404](
 """
 scalar JSONObject
 
+"""Login response with user data and token"""
+type LoginResponse {
+  token: String!
+  user: UserType!
+}
+
 type Machine {
   configuration: JSONObject
   cpuCores: Int
@@ -764,6 +784,9 @@ enum MaintenanceTrigger {
 }
 
 type Mutation {
+  """Add a filter reference for template application"""
+  addFilterReference(sourceFilterId: ID!, targetFilterId: ID!): Boolean!
+  applyDepartmentFirewallTemplate(input: ApplyDepartmentTemplateInput!): Boolean!
   applyFirewallTemplate(input: ApplyFirewallTemplateInput!): VMFirewallState!
 
   """Calculate ISO checksum"""
@@ -779,6 +802,7 @@ type Mutation {
   ): VMFirewallState!
   createApplication(input: CreateApplicationInputType!): ApplicationType!
   createDepartment(name: String!): DepartmentType!
+  createDepartmentFirewallRule(departmentId: ID!, input: CreateFilterRuleInput!): FWRule!
   createFilter(input: CreateFilterInput!): GenericFilter!
   createFilterRule(filterId: ID!, input: CreateFilterRuleInput!): FWRule!
   createMachine(input: CreateMachineInputType!): Machine!
@@ -816,6 +840,7 @@ type Mutation {
   createSnapshot(input: CreateSnapshotInput!): SnapshotResult!
   createUser(input: CreateUserInputType!): UserType!
   deleteApplication(id: String!): Boolean!
+  deleteDepartmentFirewallRule(ruleId: ID!): Boolean!
   deleteFilter(id: ID!): Boolean!
   deleteFilterRule(id: ID!): Boolean!
   deleteMaintenanceTask(id: ID!): MaintenanceTaskResponse!
@@ -830,6 +855,7 @@ type Mutation {
   executeCommand(command: String!, id: String!): CommandExecutionResponseType!
   executeImmediateMaintenance(input: ExecuteMaintenanceInput!): MaintenanceExecutionResponse!
   executeMaintenanceTask(taskId: ID!): MaintenanceExecutionResponse!
+  flushDepartmentFirewall(departmentId: ID!): Boolean!
 
   """Apply a network filter inmediatly"""
   flushFilter(filterId: ID!): Boolean!
@@ -842,6 +868,7 @@ type Mutation {
   installPackage(machineId: ID!, packageName: String!): CommandResult!
   killProcess(force: Boolean! = false, machineId: String!, pid: Int!): ProcessControlResult!
   killProcesses(force: Boolean! = false, machineId: String!, pids: [Int!]!): [ProcessControlResult!]!
+  login(email: String!, password: String!): LoginResponse
 
   """Install, remove, or update a package on a virtual machine"""
   managePackage(input: PackageManagementInput!): PackageManagementResult!
@@ -852,9 +879,14 @@ type Mutation {
   powerOff(id: String!): SuccessType!
   powerOn(id: String!): SuccessType!
   queueAllVMHealthChecks: HealthCheckRoundResult!
+  refreshDepartmentVMFilters(departmentId: ID!): Boolean!
 
   """Register uploaded ISO"""
   registerISO(filename: String!, os: String!, path: String!, size: Float!): ISO!
+  removeDepartmentFirewallTemplate(departmentId: ID!, templateFilterId: ID!): Boolean!
+
+  """Remove a filter reference"""
+  removeFilterReference(sourceFilterId: ID!, targetFilterId: ID!): Boolean!
   removeFirewallTemplate(machineId: ID!, template: FirewallTemplate!): VMFirewallState!
 
   """Remove ISO file"""
@@ -879,6 +911,7 @@ type Mutation {
 
   """Sync ISOs with filesystem"""
   syncISOs: Boolean!
+  toggleDepartmentFirewallTemplate(departmentId: ID!, templateFilterId: ID!): Boolean!
   toggleDepartmentService(input: ToggleDepartmentServiceInput!): DepartmentServiceStatus!
   toggleFirewallTemplate(machineId: ID!, template: FirewallTemplate!): VMFirewallState!
   toggleGlobalService(input: ToggleServiceInput!): GlobalServiceStatus!
@@ -887,6 +920,7 @@ type Mutation {
   triggerHealthCheckRound: HealthCheckRoundResult!
   updateAppSettings(input: AppSettingsInput!): AppSettings!
   updateApplication(id: String!, input: CreateApplicationInputType!): ApplicationType!
+  updateDepartmentFirewallRule(input: UpdateFilterRuleInput!, ruleId: ID!): FWRule!
   updateFilter(id: ID!, input: UpdateFilterInput!): GenericFilter!
   updateFilterRule(id: ID!, input: UpdateFilterRuleInput!): FWRule!
   updateMachineHardware(input: UpdateMachineHardwareInput!): Machine!
@@ -1079,6 +1113,9 @@ type Query {
   findDepartmentByName(name: String!): DepartmentType
   getAppSettings: AppSettings!
   getAvailableFirewallTemplates: [FirewallTemplateInfo!]!
+  getAvailableTemplatesForDepartment(departmentId: ID!): [GenericFilter!]!
+  getDepartmentFirewallRules(departmentId: ID!): [FWRule!]!
+  getDepartmentFirewallState(departmentId: ID!): DepartmentFirewallState!
   getDepartmentServiceStatus(departmentId: ID!, serviceId: ID): [DepartmentServiceStatus!]!
   getFilter(id: ID!): GenericFilter
   getFirewallTemplateInfo(template: FirewallTemplate!): FirewallTemplateInfo
@@ -1129,10 +1166,10 @@ type Query {
 
   """List all installed packages on a virtual machine"""
   listInstalledPackages(machineId: ID!): [PackageInfo!]!
+  listSecurityServices: [ServiceDefinition!]!
 
   """List all services running on a virtual machine"""
   listServices(machineId: String!): [ServiceInfo!]!
-  login(email: String!, password: String!): UserToken
   machine(id: String!): Machine
 
   """List all snapshots for a virtual machine"""
@@ -1297,6 +1334,29 @@ input ServiceControlInput {
   serviceName: String!
 }
 
+type ServiceDefinition {
+  """Description of the service"""
+  description: String!
+
+  """Human-readable name of the service"""
+  displayName: String!
+
+  """Unique identifier for the service"""
+  id: ID!
+
+  """Internal name of the service"""
+  name: String!
+
+  """Port configurations for the service"""
+  ports: [ServicePort!]!
+
+  """Description of the risk"""
+  riskDescription: String!
+
+  """Risk level of the service"""
+  riskLevel: ServiceRiskLevel!
+}
+
 type ServiceInfo {
   description: String
   displayName: String
@@ -1304,6 +1364,24 @@ type ServiceInfo {
   pid: Float
   startType: ServiceStartType
   status: ServiceStatus!
+}
+
+type ServicePort {
+  """Ending port number"""
+  portEnd: Float!
+
+  """Starting port number"""
+  portStart: Float!
+
+  """Protocol (TCP or UDP)"""
+  protocol: String!
+}
+
+"""Risk level of a service"""
+enum ServiceRiskLevel {
+  HIGH
+  LOW
+  MEDIUM
 }
 
 """The startup type of a system service"""
@@ -1547,11 +1625,6 @@ input UserOrderByInputType {
 enum UserRole {
   ADMIN
   USER
-}
-
-"""Token used to log in"""
-type UserToken {
-  token: String!
 }
 
 """User model"""

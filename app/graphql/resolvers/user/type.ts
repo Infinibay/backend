@@ -39,6 +39,15 @@ export class UserToken {
     token: string = ''
 }
 
+@ObjectType({ description: 'Login response with user data and token' })
+export class LoginResponse {
+  @Field(() => UserType, { nullable: false })
+    user: UserType = new UserType()
+
+  @Field({ nullable: false })
+    token: string = ''
+}
+
 // UserOrderByField enum
 export enum UserOrderByField {
   ID = 'id',

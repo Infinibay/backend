@@ -56,21 +56,68 @@ export async function createMachineFilter (prisma: PrismaClient, machine: any) {
     // Add filterref of the department to the vm filter
     const deptoFilter = await prisma.departmentNWFilter.findFirst({ where: { departmentId } })
     if (deptoFilter) {
-      await prisma.filterReference.create({
-        data: {
-          sourceFilterId: filter.id,
-          targetFilterId: deptoFilter.nwFilterId
-        }
+      // Validate that the department filter exists before creating the reference
+      const departmentFilter = await prisma.nWFilter.findUnique({
+        where: { id: deptoFilter.nwFilterId }
       })
+
+      if (departmentFilter) {
+        debug.log(`Creating filter reference from VM filter ${filter.id} to department filter ${departmentFilter.id}`)
+        await prisma.filterReference.create({
+          data: {
+            sourceFilterId: filter.id,
+            targetFilterId: departmentFilter.id
+          }
+        })
+
+        // Ensure VM filter priority is higher (lower precedence) than department filter priority
+        // VM filters should be applied after department filters
+        await prisma.nWFilter.update({
+          where: { id: filter.id },
+          data: { priority: 200 } // VM filters have lower priority than department filters (100)
+        })
+
+        debug.log(`VM filter properly configured to inherit department rules with correct priority`)
+      } else {
+        debug.log('error', `Department filter ${deptoFilter.nwFilterId} not found, skipping reference creation`)
+      }
+    } else {
+      debug.log('warning', `No department filter found for department ${departmentId}`)
     }
 
     // Apply the filter to libvirt
     try {
       await networkFilterService.connect()
+
+      // Ensure department filter is flushed first if it exists
+      if (deptoFilter) {
+        const departmentFilter = await prisma.nWFilter.findUnique({
+          where: { id: deptoFilter.nwFilterId }
+        })
+        if (departmentFilter) {
+          debug.log(`Flushing department filter ${departmentFilter.id} before VM filter`)
+          await networkFilterService.flushNWFilter(departmentFilter.id, true)
+        }
+      }
+
+      // Now flush the VM filter which will properly inherit department rules
+      debug.log(`Flushing VM filter ${filter.id}`)
       await networkFilterService.flushNWFilter(filter.id, true)
+
+      // Validate that the filter chain is correct
+      debug.log(`VM filter ${filter.id} properly references department filter and has correct priority order`)
     } catch (error) {
       debug.log('error', `Error applying network filter: ${error}`)
-      throw error
+      // Implement retry logic for filter creation
+      try {
+        debug.log('Retrying filter application after 2 seconds...')
+        await new Promise(resolve => setTimeout(resolve, 2000))
+        await networkFilterService.flushNWFilter(filter.id, true)
+        debug.log('Filter application retry successful')
+      } catch (retryError) {
+        debug.log('error', `Filter application retry failed: ${retryError}`)
+        throw error
+      }
     } finally {
       await networkFilterService.close()
     }

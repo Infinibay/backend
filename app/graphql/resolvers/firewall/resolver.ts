@@ -1,6 +1,7 @@
 import { Resolver, Query, Mutation, Arg, ID, Ctx, Authorized } from 'type-graphql'
 import { UserInputError } from 'apollo-server-core'
 import { InfinibayContext } from '@utils/context'
+import { getUserAccessibleDepartments, validateDepartmentAccess, validateResourceDepartmentAccess, getDepartmentScopedWhereClause } from '@utils/authChecker'
 import {
   FilterType,
   GenericFilter,
@@ -18,10 +19,49 @@ import { NetworkFilterService } from '@services/networkFilterService'
 export class FirewallResolver {
   constructor (private networkFilterService: NetworkFilterService) {}
 
+  private async checkCircularReference (
+    prisma: any,
+    currentFilterId: string,
+    targetFilterId: string,
+    visitedFilters: Set<string>
+  ): Promise<boolean> {
+    // If we've reached the target filter, we have a circular reference
+    if (currentFilterId === targetFilterId) {
+      return true
+    }
+
+    // If we've already visited this filter, avoid infinite recursion
+    if (visitedFilters.has(currentFilterId)) {
+      return false
+    }
+
+    visitedFilters.add(currentFilterId)
+
+    // Get all filters that this current filter references
+    const references = await prisma.filterReference.findMany({
+      where: { sourceFilterId: currentFilterId }
+    })
+
+    // Recursively check each referenced filter
+    for (const reference of references) {
+      const hasCircle = await this.checkCircularReference(
+        prisma,
+        reference.targetFilterId,
+        targetFilterId,
+        visitedFilters
+      )
+      if (hasCircle) {
+        return true
+      }
+    }
+
+    return false
+  }
+
   @Query(() => [GenericFilter])
-  @Authorized('ADMIN')
+  @Authorized('USER')
   async listFilters (
-    @Ctx() { prisma }: InfinibayContext,
+    @Ctx() { prisma, user }: InfinibayContext,
     @Arg('departmentId', () => ID, { nullable: true }) departmentId?: string | null,
     @Arg('vmId', () => ID, { nullable: true }) vmId?: string | null
   ): Promise<GenericFilter[]> {
@@ -29,51 +69,55 @@ export class FirewallResolver {
       // Error
       throw new UserInputError('Both departmentId and vmId cannot be specified')
     }
-    let filters: any[] = []
-    if (departmentId) {
-      filters = await prisma.nWFilter.findMany({
-        include: {
-          vms: true,
-          departments: true,
-          rules: true,
-          references: true
-        },
-        where: {
-          departments: {
-            some: {
-              id: departmentId
-            }
-          }
-        }
-      })
-    } else if (vmId) {
-      filters = await prisma.nWFilter.findMany({
-        include: {
-          vms: true,
-          rules: true,
-          references: true
-        },
-        where: {
-          vms: {
-            some: {
-              id: vmId
-            }
-          }
-        }
-      })
-    } else {
-      filters = await prisma.nWFilter.findMany({
-        include: {
-          vms: true,
-          departments: true,
-          rules: true,
-          references: true
-        },
-        where: {
-          type: 'generic'
-        }
-      })
+
+    // Validate department access for non-admin users
+    if (user && user.role !== 'ADMIN' && departmentId) {
+      const hasAccess = await validateDepartmentAccess(prisma, user, departmentId)
+      if (!hasAccess) {
+        throw new UserInputError('Unauthorized: You do not have access to this department')
+      }
     }
+
+    // Validate VM access for non-admin users
+    if (user && user.role !== 'ADMIN' && vmId) {
+      const hasAccess = await validateResourceDepartmentAccess(prisma, user, vmId, 'vm')
+      if (!hasAccess) {
+        throw new UserInputError('Unauthorized: You do not have access to this VM')
+      }
+    }
+
+    let filters: any[] = []
+    let baseWhere: any = {}
+
+    if (departmentId) {
+      baseWhere = {
+        departments: {
+          some: {
+            departmentId: departmentId
+          }
+        }
+      }
+    } else if (vmId) {
+      baseWhere = {
+        vms: {
+          some: {
+            vmId: vmId
+          }
+        }
+      }
+    }
+
+    const whereClause = await getDepartmentScopedWhereClause(prisma, user, 'filter', baseWhere)
+
+    filters = await prisma.nWFilter.findMany({
+      include: {
+        vms: true,
+        departments: true,
+        rules: true,
+        references: true
+      },
+      where: whereClause
+    })
 
     return filters.map((filter:any) => {
       return {
@@ -112,11 +156,19 @@ export class FirewallResolver {
   }
 
   @Query(() => GenericFilter, { nullable: true })
-  @Authorized('ADMIN')
+  @Authorized('USER')
   async getFilter (
     @Arg('id', () => ID) id: string,
-    @Ctx() { prisma }: InfinibayContext
+    @Ctx() { prisma, user }: InfinibayContext
   ): Promise<GenericFilter | null> {
+    // Check department access for non-admin users
+    if (user && user.role !== 'ADMIN') {
+      const hasAccess = await validateResourceDepartmentAccess(prisma, user, id, 'filter', { includeGeneric: true })
+      if (!hasAccess) {
+        throw new UserInputError('Unauthorized: You do not have access to this filter')
+      }
+    }
+
     const result = await prisma.nWFilter.findUnique({
       where: { id },
       include: {
@@ -163,14 +215,39 @@ export class FirewallResolver {
   }
 
   @Query(() => [FWRule])
-  @Authorized('ADMIN')
+  @Authorized('USER')
   async listFilterRules (
     @Arg('filterId', () => ID, { nullable: true }) filterId: string | null,
-    @Ctx() { prisma }: InfinibayContext
+    @Ctx() { prisma, user }: InfinibayContext
   ): Promise<FWRule[]> {
+    // Check department access for non-admin users when filterId is specified
+    if (user && user.role !== 'ADMIN' && filterId) {
+      const hasAccess = await validateResourceDepartmentAccess(prisma, user, filterId, 'filter', { includeGeneric: true })
+      if (!hasAccess) {
+        throw new UserInputError('Unauthorized: You do not have access to this filter')
+      }
+    }
+
     if (!filterId) {
-      // Cast the result to FWRule[] to handle null vs undefined differences
-      return (await prisma.fWRule.findMany()).map(rule => ({
+      // Get all filter IDs that user can access using consolidated scoping logic
+      const filterWhereClause = await getDepartmentScopedWhereClause(prisma, user, 'filter')
+      const accessibleFilters = await prisma.nWFilter.findMany({
+        where: filterWhereClause,
+        select: { id: true }
+      })
+
+      const filterIds = accessibleFilters.map(f => f.id)
+      if (filterIds.length === 0) {
+        return []
+      }
+
+      return (await prisma.fWRule.findMany({
+        where: {
+          nwFilterId: {
+            in: filterIds
+          }
+        }
+      })).map(rule => ({
         ...rule
         // Ensure all fields match the FWRule type definition
       } as unknown as FWRule))
@@ -184,7 +261,7 @@ export class FirewallResolver {
   }
 
   @Mutation(() => GenericFilter)
-  @Authorized()
+  @Authorized('ADMIN')
   async createFilter (
     @Arg('input') input: CreateFilterInput
   ): Promise<GenericFilter> {
@@ -290,15 +367,16 @@ export class FirewallResolver {
     @Arg('input') input: UpdateFilterRuleInput,
     @Ctx() { prisma }: InfinibayContext
   ): Promise<FWRule> {
-    const rule = prisma.fWRule.findUnique({
-      where: { id }
+    const rule = await prisma.fWRule.findUnique({
+      where: { id },
+      include: { nwFilter: true }
     })
 
     if (!rule) {
       throw new UserInputError(`Rule with id ${id} not found`)
     }
 
-    return await prisma.fWRule.update({
+    const updatedRule = await prisma.fWRule.update({
       where: { id },
       data: {
         action: input.action,
@@ -315,8 +393,10 @@ export class FirewallResolver {
       }
     })
 
-    // Cast to FWRule to handle null vs undefined differences
-    return rule as unknown as FWRule
+    // Flush the parent filter after rule update
+    await this.networkFilterService.flushNWFilter(rule.nwFilterId)
+
+    return updatedRule as unknown as FWRule
   }
 
   @Mutation(() => Boolean)
@@ -325,17 +405,23 @@ export class FirewallResolver {
     @Arg('id', () => ID) id: string,
     @Ctx() { prisma }: InfinibayContext
   ): Promise<boolean> {
-    const rule = prisma.fWRule.findUnique({
-      where: { id }
+    const rule = await prisma.fWRule.findUnique({
+      where: { id },
+      include: { nwFilter: true }
     })
 
     if (!rule) {
       throw new UserInputError(`Rule with id ${id} not found`)
     }
 
-    return (await prisma.fWRule.delete({
+    const deleted = await prisma.fWRule.delete({
       where: { id }
-    })) !== null
+    })
+
+    // Flush the parent filter after rule deletion
+    await this.networkFilterService.flushNWFilter(rule.nwFilterId)
+
+    return deleted !== null
   }
 
   @Mutation(() => Boolean, { description: 'Apply a network filter inmediatly' })
@@ -354,4 +440,97 @@ export class FirewallResolver {
 
     return this.networkFilterService.flushNWFilter(filterId)
   }
+
+  @Mutation(() => Boolean, { description: 'Add a filter reference for template application' })
+  @Authorized('ADMIN')
+  async addFilterReference (
+    @Arg('sourceFilterId', () => ID) sourceFilterId: string,
+    @Arg('targetFilterId', () => ID) targetFilterId: string,
+    @Ctx() { prisma }: InfinibayContext
+  ): Promise<boolean> {
+    const sourceFilter = await prisma.nWFilter.findUnique({
+      where: { id: sourceFilterId }
+    })
+
+    const targetFilter = await prisma.nWFilter.findUnique({
+      where: { id: targetFilterId }
+    })
+
+    if (!sourceFilter) {
+      throw new UserInputError(`Source filter with id ${sourceFilterId} not found`)
+    }
+
+    if (!targetFilter) {
+      throw new UserInputError(`Target filter with id ${targetFilterId} not found`)
+    }
+
+    // Check for existing filter reference to make this operation idempotent
+    const existingReference = await prisma.filterReference.findFirst({
+      where: {
+        sourceFilterId,
+        targetFilterId
+      }
+    })
+
+    if (existingReference) {
+      // Reference already exists, return true (idempotent)
+      return true
+    }
+
+    // Check for cyclic references by traversing from targetFilterId back to sourceFilterId
+    const visitedFilters = new Set<string>()
+    const hasCircularReference = await this.checkCircularReference(
+      prisma,
+      targetFilterId,
+      sourceFilterId,
+      visitedFilters
+    )
+
+    if (hasCircularReference) {
+      throw new UserInputError(`Adding this filter reference would create a circular dependency`)
+    }
+
+    await prisma.filterReference.create({
+      data: {
+        sourceFilterId,
+        targetFilterId
+      }
+    })
+
+    // TODO: Enforce unique composite constraint at DB level for (sourceFilterId, targetFilterId)
+
+    // Flush the source filter to apply the changes immediately
+    await this.networkFilterService.flushNWFilter(sourceFilterId)
+
+    return true
+  }
+
+  @Mutation(() => Boolean, { description: 'Remove a filter reference' })
+  @Authorized('ADMIN')
+  async removeFilterReference (
+    @Arg('sourceFilterId', () => ID) sourceFilterId: string,
+    @Arg('targetFilterId', () => ID) targetFilterId: string,
+    @Ctx() { prisma }: InfinibayContext
+  ): Promise<boolean> {
+    const reference = await prisma.filterReference.findFirst({
+      where: {
+        sourceFilterId,
+        targetFilterId
+      }
+    })
+
+    if (!reference) {
+      throw new UserInputError(`Filter reference not found`)
+    }
+
+    await prisma.filterReference.delete({
+      where: { id: reference.id }
+    })
+
+    // Flush the source filter to apply the changes immediately
+    await this.networkFilterService.flushNWFilter(sourceFilterId)
+
+    return true
+  }
+
 }

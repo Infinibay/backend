@@ -14,7 +14,8 @@ import { configureServer } from './config/server'
 import { createApolloServer } from './config/apollo'
 import { configureRoutes } from './config/routes'
 import { expressMiddleware } from '@apollo/server/express4'
-import { InfinibayContext } from './utils/context'
+import { InfinibayContext, createUserValidationHelpers, SafeUser } from './utils/context'
+import { verifyRequestAuth } from './utils/jwtAuth'
 
 import installCallbacks from './utils/modelsCallbacks'
 import { checkGpuAffinity } from './utils/checkGpuAffinity'
@@ -71,43 +72,37 @@ async function bootstrap (): Promise<void> {
       }),
       expressMiddleware(apolloServer, {
         context: async ({ req, res }): Promise<InfinibayContext> => {
-          // Try to extract user from the authorization token
-          let user = null
-          const token = req.headers.authorization
+          const debugAuth = process.env.DEBUG_AUTH === '1' || process.env.NODE_ENV !== 'production'
 
-          if (token) {
-            try {
-              const decoded = jwt.verify(token, process.env.TOKENKEY || 'secret') as { userId: string; userRole: string }
-              if (decoded.userId) {
-                user = await prisma.user.findUnique({
-                  where: { id: decoded.userId },
-                  select: {
-                    id: true,
-                    email: true,
-                    password: true,
-                    deleted: true,
-                    token: true,
-                    firstName: true,
-                    lastName: true,
-                    userImage: true,
-                    role: true,
-                    createdAt: true
-                  }
-                })
-              }
-            } catch (error) {
-              // Invalid token, user remains null
-              console.error('Token verification failed:', error)
-            }
+          // Use shared JWT verification utility
+          const authResult = await verifyRequestAuth(req, {
+            method: 'context',
+            debugAuth
+          })
+
+          // Create user validation helpers
+          const userHelpers = createUserValidationHelpers(authResult.user, authResult.meta)
+
+          if (debugAuth) {
+            console.log('🔑 JWT Debug - Context result:', {
+              hasUser: !!authResult.user,
+              userId: authResult.user?.id,
+              userRole: authResult.user?.role,
+              userDeleted: authResult.user?.deleted,
+              authenticationStatus: authResult.meta.status,
+              authMethod: authResult.meta.method
+            })
           }
 
           return {
             prisma,
             req,
             res,
-            user,
+            user: authResult.user,
             setupMode: false,
-            virtioSocketWatcher
+            virtioSocketWatcher,
+            auth: authResult.meta,
+            userHelpers
           }
         }
       })

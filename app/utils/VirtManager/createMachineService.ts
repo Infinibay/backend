@@ -317,11 +317,36 @@ export class CreateMachineService {
     xmlGenerator.setStorage(storage)
     xmlGenerator.setUEFI()
     xmlGenerator.addNetworkInterface(process.env.BRIDGE_NAME ?? 'default', 'virtio')
+    // Apply department filter first (if exists), then VM filter
+    if (machine.departmentId) {
+      const department = await this.prisma.department.findUnique({ where: { id: machine.departmentId } })
+      if (department) {
+        const departmentFilter = await this.prisma.departmentNWFilter.findFirst({
+          where: { departmentId: department.id },
+          include: { nwFilter: true }
+        })
+        if (departmentFilter) {
+          try {
+            const { NetworkFilterService } = await import('@services/networkFilterService')
+            const networkFilterService = new NetworkFilterService(this.prisma)
+            await networkFilterService.connect()
+            await networkFilterService.flushNWFilter(departmentFilter.nwFilter.id, true)
+            await networkFilterService.close()
+            // Apply department filter with high priority (100)
+            xmlGenerator.addDepartmentNWFilter(departmentFilter.nwFilter.internalName)
+          } catch (error) {
+            console.error('Error ensuring department network filter exists in libvirt:', error)
+            // Continue without department filter if it fails
+          }
+        }
+      }
+    }
+
     const vmFilter = await this.prisma.vMNWFilter.findFirst({ where: { vmId: machine.id } })
     if (vmFilter) {
       const filter = await this.prisma.nWFilter.findFirst({ where: { id: vmFilter.nwFilterId } })
       if (!filter) {
-        console.error('Filter not found')
+        console.error('VM Filter not found')
       } else {
         // Ensure the filter exists in libvirt before using it
         try {
@@ -330,9 +355,10 @@ export class CreateMachineService {
           await networkFilterService.connect()
           await networkFilterService.flushNWFilter(filter.id, true)
           await networkFilterService.close()
-          xmlGenerator.addNWFilter(filter.internalName)
+          // Apply VM filter with lower priority (200) than department filter
+          xmlGenerator.addVMNWFilter(filter.internalName)
         } catch (error) {
-          console.error('Error ensuring network filter exists in libvirt:', error)
+          console.error('Error ensuring VM network filter exists in libvirt:', error)
           // Continue without filter if it fails
         }
       }

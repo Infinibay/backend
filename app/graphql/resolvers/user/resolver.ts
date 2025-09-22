@@ -10,7 +10,7 @@ import {
   Resolver
 } from 'type-graphql'
 import { UserInputError, AuthenticationError } from 'apollo-server-errors'
-import { UserType, UserToken, UserOrderByInputType, CreateUserInputType, UpdateUserInputType } from './type'
+import { UserType, UserToken, LoginResponse, UserOrderByInputType, CreateUserInputType, UpdateUserInputType } from './type'
 import { PaginationInputType } from '@utils/pagination'
 import { InfinibayContext } from '@utils/context'
 import { getEventManager } from '../../../services/EventManager'
@@ -22,7 +22,7 @@ export interface UserResolverInterface {
     orderBy: UserOrderByInputType,
     pagination: PaginationInputType
   ): Promise<UserType[]>;
-  login(email: string, password: string): Promise<UserToken | null>;
+  login(email: string, password: string): Promise<LoginResponse | null>;
   createUser(
     input: CreateUserInputType
   ): Promise<UserType>
@@ -116,12 +116,12 @@ export class UserResolver implements UserResolverInterface {
     return (users || []) as unknown as UserType[]
   }
 
-  // Login query, requires email and password, returns { token: string }
-  @Query(() => UserToken, { nullable: true })
+  // Login mutation, requires email and password, returns { user, token }
+  @Mutation(() => LoginResponse, { nullable: true })
   async login (
     @Arg('email') email: string,
     @Arg('password') password: string
-  ): Promise<UserToken | null> {
+  ): Promise<LoginResponse | null> {
     const prisma = new PrismaClient()
     const user = await prisma.user.findFirst({ where: { email } })
     if (!user) {
@@ -133,7 +133,12 @@ export class UserResolver implements UserResolverInterface {
     }
     // Now that we know the user is valid, we can generate a token
     const token = jwt.sign({ userId: user.id, userRole: user.role }, process.env.TOKENKEY ?? 'secret')
-    return { token }
+
+    // Return both user data and token
+    return {
+      user: user as unknown as UserType,
+      token
+    }
   }
 
   /*
