@@ -47,6 +47,16 @@ export class NetworkFilterService {
     chain: string | null,
     type: 'generic' | 'department' | 'vm' = 'generic'
   ): Promise<NWFilter> {
+    // Check if a filter with the same name already exists
+    const existingFilter = await this.prisma.nWFilter.findUnique({
+      where: { name }
+    })
+
+    if (existingFilter) {
+      // Return the existing filter instead of creating a duplicate
+      return existingFilter
+    }
+
     const nwFilter = await this.prisma.nWFilter.create({
       data: {
         name,

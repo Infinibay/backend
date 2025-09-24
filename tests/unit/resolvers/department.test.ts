@@ -1,15 +1,14 @@
 import 'reflect-metadata'
 import { describe, it, expect, beforeEach, jest } from '@jest/globals'
 import { DepartmentResolver } from '../../../app/graphql/resolvers/department/resolver'
+import { getEventManager } from '../../../app/services/EventManager'
 import { mockPrisma } from '../../setup/jest.setup'
 import {
   createMockDepartment,
   createMockDepartmentConfiguration,
   createMockDepartmentInput,
   createMockMachines,
-  createMockNetworkFilterWithRules,
-  createMockDepartments,
-  createMockNWFilter
+  createMockDepartments
 } from '../../setup/mock-factories'
 import {
   createAdminContext,
@@ -18,6 +17,14 @@ import {
 import { InfinibayContext } from '../../../app/utils/context'
 import { UserInputError } from 'apollo-server-errors'
 
+const mockEventManager = {
+  dispatchEvent: jest.fn()
+}
+
+jest.mock('../../../app/services/EventManager', () => ({
+  getEventManager: () => mockEventManager
+}))
+
 describe('DepartmentResolver', () => {
   let resolver: DepartmentResolver
   const ctx = createAdminContext() as InfinibayContext
@@ -25,6 +32,9 @@ describe('DepartmentResolver', () => {
   beforeEach(() => {
     resolver = new DepartmentResolver()
     jest.clearAllMocks()
+
+    // Reset event manager mock
+    mockEventManager.dispatchEvent.mockReset()
   })
 
   describe('Query: department', () => {
@@ -151,6 +161,12 @@ describe('DepartmentResolver', () => {
         ipSubnet: createdDepartment.ipSubnet || undefined,
         totalMachines: 0
       })
+      expect(mockEventManager.dispatchEvent).toHaveBeenCalledWith(
+        'departments',
+        'create',
+        { id: createdDepartment.id },
+        ctx.user?.id
+      )
     })
 
     it('should create department with minimal data', async () => {
@@ -170,11 +186,17 @@ describe('DepartmentResolver', () => {
         ipSubnet: createdDepartment.ipSubnet || undefined,
         totalMachines: 0
       })
+      expect(mockEventManager.dispatchEvent).toHaveBeenCalledWith(
+        'departments',
+        'create',
+        { id: createdDepartment.id },
+        ctx.user?.id
+      )
     })
   })
 
   describe('Mutation: destroyDepartment', () => {
-    it('should delete department successfully', async () => {
+    it('should delete department successfully when no machines exist', async () => {
       const department = createMockDepartment()
 
       mockPrisma.department.findUnique.mockResolvedValue(department)
@@ -183,6 +205,7 @@ describe('DepartmentResolver', () => {
 
       const result = await resolver.destroyDepartment(department.id, ctx)
 
+      // Verify proper sequence of operations
       expect(mockPrisma.department.findUnique).toHaveBeenCalledWith({
         where: { id: department.id }
       })
@@ -192,6 +215,16 @@ describe('DepartmentResolver', () => {
       expect(mockPrisma.department.delete).toHaveBeenCalledWith({
         where: { id: department.id }
       })
+
+      // Verify event dispatch for deletion
+      expect(mockEventManager.dispatchEvent).toHaveBeenCalledWith(
+        'departments',
+        'delete',
+        { id: department.id },
+        ctx.user?.id
+      )
+
+      // Verify returned department data
       expect(result).toEqual({
         id: department.id,
         name: department.name,
@@ -222,4 +255,5 @@ describe('DepartmentResolver', () => {
       ).rejects.toThrow(UserInputError)
     })
   })
+
 })

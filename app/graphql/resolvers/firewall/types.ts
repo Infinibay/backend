@@ -205,6 +205,9 @@ export class CreateFilterInput {
 
   @Field(() => String, { nullable: true })
     chain: string = 'root'
+
+  @Field(() => ID, { nullable: true })
+    departmentId?: string
 }
 
 @InputType()

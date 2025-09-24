@@ -1,6 +1,10 @@
 import { PrismaClient, NWFilter, FWRule } from '@prisma/client'
 import { NetworkFilterService } from './networkFilterService'
 import { DepartmentFirewallState } from '../graphql/resolvers/firewall/types'
+import { NotFoundError, ConflictError, CircularDependencyError } from '@utils/errors'
+import Debug from 'debug'
+
+const debug = Debug('infinibay:department-firewall-service')
 
 export class DepartmentFirewallService {
   constructor (
@@ -54,7 +58,9 @@ export class DepartmentFirewallService {
     })
 
     if (!department) {
-      throw new Error(`Department with id ${departmentId} not found`)
+      const errorMsg = `Department with id ${departmentId} not found`
+      debug(`❌ Department lookup failed: ${errorMsg}`)
+      throw new NotFoundError(errorMsg)
     }
 
     const departmentFilter = await this.getDepartmentFilter(departmentId)
@@ -115,10 +121,14 @@ export class DepartmentFirewallService {
     })
   }
 
-  async applyTemplateToDepart (departmentId: string, templateFilterId: string): Promise<boolean> {
+  async applyTemplateToDepartment (departmentId: string, templateFilterId: string): Promise<boolean> {
+    debug(`🔄 Starting template application: templateId=${templateFilterId} to departmentId=${departmentId}`)
+
     const departmentFilter = await this.getDepartmentFilter(departmentId)
     if (!departmentFilter) {
-      throw new Error(`Department filter not found for department ${departmentId}`)
+      const errorMsg = `Department filter not found for department ${departmentId}`
+      debug(`❌ Department filter lookup failed: ${errorMsg}`)
+      throw new NotFoundError(errorMsg)
     }
 
     const templateFilter = await this.prisma.nWFilter.findUnique({
@@ -126,7 +136,9 @@ export class DepartmentFirewallService {
     })
 
     if (!templateFilter) {
-      throw new Error(`Template filter with id ${templateFilterId} not found`)
+      const errorMsg = `Template filter with id ${templateFilterId} not found`
+      debug(`❌ Template filter lookup failed: ${errorMsg}`)
+      throw new NotFoundError(errorMsg)
     }
 
     const existingReference = await this.prisma.filterReference.findFirst({
@@ -137,10 +149,12 @@ export class DepartmentFirewallService {
     })
 
     if (existingReference) {
+      debug(`✅ Template already applied: templateId=${templateFilterId} to departmentId=${departmentId}`)
       return true
     }
 
     // Check for cyclic references before creating the new reference
+    debug(`🔍 Checking for circular dependencies...`)
     const visitedFilters = new Set<string>()
     const hasCircularReference = await this.checkCircularReference(
       templateFilterId,
@@ -149,9 +163,12 @@ export class DepartmentFirewallService {
     )
 
     if (hasCircularReference) {
-      throw new Error(`Applying this template would create a circular dependency`)
+      const errorMsg = `Applying this template would create a circular dependency`
+      debug(`❌ Circular dependency detected: ${errorMsg}`)
+      throw new CircularDependencyError(errorMsg)
     }
 
+    debug(`📝 Creating filter reference...`)
     await this.prisma.filterReference.create({
       data: {
         sourceFilterId: departmentFilter.id,
@@ -159,15 +176,26 @@ export class DepartmentFirewallService {
       }
     })
 
+    debug(`🔄 Flushing network filter: ${departmentFilter.id}`)
     await this.networkFilterService.flushNWFilter(departmentFilter.id)
 
+    debug(`✅ Template applied successfully: templateId=${templateFilterId} to departmentId=${departmentId}`)
     return true
   }
 
+  /** @deprecated Use applyTemplateToDepartment */
+  async applyTemplateToDepart (departmentId: string, templateFilterId: string): Promise<boolean> {
+    return this.applyTemplateToDepartment(departmentId, templateFilterId)
+  }
+
   async removeTemplateFromDepartment (departmentId: string, templateFilterId: string): Promise<boolean> {
+    debug(`🔄 Starting template removal: templateId=${templateFilterId} from departmentId=${departmentId}`)
+
     const departmentFilter = await this.getDepartmentFilter(departmentId)
     if (!departmentFilter) {
-      throw new Error(`Department filter not found for department ${departmentId}`)
+      const errorMsg = `Department filter not found for department ${departmentId}`
+      debug(`❌ Department filter lookup failed: ${errorMsg}`)
+      throw new NotFoundError(errorMsg)
     }
 
     const reference = await this.prisma.filterReference.findFirst({
@@ -178,15 +206,19 @@ export class DepartmentFirewallService {
     })
 
     if (!reference) {
+      debug(`⚠️ Template reference not found: templateId=${templateFilterId} from departmentId=${departmentId}`)
       return false
     }
 
+    debug(`📝 Deleting filter reference: ${reference.id}`)
     await this.prisma.filterReference.delete({
       where: { id: reference.id }
     })
 
+    debug(`🔄 Flushing network filter: ${departmentFilter.id}`)
     await this.networkFilterService.flushNWFilter(departmentFilter.id)
 
+    debug(`✅ Template removed successfully: templateId=${templateFilterId} from departmentId=${departmentId}`)
     return true
   }
 
@@ -207,11 +239,16 @@ export class DepartmentFirewallService {
   }
 
   async addDepartmentRule (departmentId: string, rule: Partial<FWRule>): Promise<FWRule> {
+    debug(`🔄 Starting rule addition to departmentId=${departmentId}: action=${rule.action || 'accept'}, direction=${rule.direction || 'inout'}`)
+
     const departmentFilter = await this.getDepartmentFilter(departmentId)
     if (!departmentFilter) {
-      throw new Error(`Department filter not found for department ${departmentId}`)
+      const errorMsg = `Department filter not found for department ${departmentId}`
+      debug(`❌ Department filter lookup failed: ${errorMsg}`)
+      throw new NotFoundError(errorMsg)
     }
 
+    debug(`📝 Creating rule for filter: ${departmentFilter.id}`)
     const createdRule = await this.networkFilterService.createRule(
       departmentFilter.id,
       rule.action || 'accept',
@@ -230,13 +267,18 @@ export class DepartmentFirewallService {
       }
     )
 
+    debug(`✅ Rule added successfully: ruleId=${createdRule.id} to departmentId=${departmentId}`)
     return createdRule
   }
 
   async removeDepartmentRule (departmentId: string, ruleId: string): Promise<boolean> {
+    debug(`🔄 Starting rule removal: ruleId=${ruleId} from departmentId=${departmentId}`)
+
     const departmentFilter = await this.getDepartmentFilter(departmentId)
     if (!departmentFilter) {
-      throw new Error(`Department filter not found for department ${departmentId}`)
+      const errorMsg = `Department filter not found for department ${departmentId}`
+      debug(`❌ Department filter lookup failed: ${errorMsg}`)
+      throw new NotFoundError(errorMsg)
     }
 
     const rule = await this.prisma.fWRule.findFirst({
@@ -247,15 +289,19 @@ export class DepartmentFirewallService {
     })
 
     if (!rule) {
+      debug(`⚠️ Rule not found: ruleId=${ruleId} in departmentId=${departmentId}`)
       return false
     }
 
+    debug(`📝 Deleting rule: ${ruleId}`)
     await this.prisma.fWRule.delete({
       where: { id: ruleId }
     })
 
+    debug(`🔄 Flushing network filter: ${departmentFilter.id}`)
     await this.networkFilterService.flushNWFilter(departmentFilter.id)
 
+    debug(`✅ Rule removed successfully: ruleId=${ruleId} from departmentId=${departmentId}`)
     return true
   }
 

@@ -7,6 +7,7 @@ import {
   MachineTemplateCategory,
   NWFilter,
   FWRule,
+  FilterReference,
   Node,
   Disk,
   MachineConfiguration,
@@ -163,7 +164,9 @@ export function createMockMachine (overrides?: Partial<Machine>): Machine {
     firewallTemplates: overrides?.firewallTemplates || null,
     createdAt: overrides?.createdAt || new Date(),
     updatedAt: overrides?.updatedAt || new Date(),
-    departmentId: overrides?.departmentId || null
+    departmentId: overrides?.departmentId || null,
+    localIP: overrides?.localIP || null,
+    publicIP: overrides?.publicIP || null
   }
 }
 
@@ -244,6 +247,17 @@ export function createMockFWRule (overrides?: Partial<FWRule>): FWRule {
     comment: overrides?.comment || null,
     createdAt: overrides?.createdAt || new Date(),
     updatedAt: overrides?.updatedAt || new Date()
+  }
+}
+
+// Filter Reference factory
+export function createMockFilterReference (overrides?: Partial<FilterReference>): FilterReference {
+  const id = overrides?.id || generateId()
+  return {
+    id,
+    sourceFilterId: overrides?.sourceFilterId || generateId(),
+    targetFilterId: overrides?.targetFilterId || generateId(),
+    createdAt: overrides?.createdAt || new Date()
   }
 }
 

@@ -17,7 +17,6 @@ import { NetworkFilterService } from '@services/networkFilterService'
 
 @Resolver()
 export class FirewallResolver {
-  constructor (private networkFilterService: NetworkFilterService) {}
 
   private async checkCircularReference (
     prisma: any,
@@ -263,17 +262,37 @@ export class FirewallResolver {
   @Mutation(() => GenericFilter)
   @Authorized('ADMIN')
   async createFilter (
-    @Arg('input') input: CreateFilterInput
+    @Arg('input') input: CreateFilterInput,
+    @Ctx() ctx: InfinibayContext
   ): Promise<GenericFilter> {
-    const fitler:any = this.networkFilterService.createFilter(
+    const networkFilterService = new NetworkFilterService(ctx.prisma)
+    const filter = await networkFilterService.createFilter(
       input.name,
       input.description,
-      input.chain,
+      input.chain || 'root',
       input.type
     )
-    fitler.rules = []
-    fitler.references = []
-    return fitler
+
+    // If departmentId is provided and type is DEPARTMENT, create the relationship
+    if (input.departmentId && input.type === FilterType.DEPARTMENT) {
+      await ctx.prisma.departmentNWFilter.create({
+        data: {
+          departmentId: input.departmentId,
+          nwFilterId: filter.id
+        }
+      })
+    }
+
+    return {
+      id: filter.id,
+      name: filter.name,
+      description: filter.description || undefined,
+      type: filter.type as FilterType,
+      rules: [],
+      references: [],
+      createdAt: filter.createdAt,
+      updatedAt: filter.updatedAt
+    }
   }
 
   @Mutation(() => GenericFilter)
@@ -283,7 +302,8 @@ export class FirewallResolver {
     @Arg('input') input: UpdateFilterInput,
     @Ctx() { prisma }: InfinibayContext
   ): Promise<GenericFilter> {
-    const result:any = this.networkFilterService.updateFilter(id, {
+    const networkFilterService = new NetworkFilterService(prisma)
+    const result:any = await networkFilterService.updateFilter(id, {
       name: input.name,
       description: input.description,
       chain: input.chain,
@@ -338,7 +358,8 @@ export class FirewallResolver {
     @Arg('input') input: CreateFilterRuleInput,
     @Ctx() { prisma }: InfinibayContext
   ): Promise<FWRule> {
-    const rule = await this.networkFilterService.createRule(
+    const networkFilterService = new NetworkFilterService(prisma)
+    const rule = await networkFilterService.createRule(
       filterId,
       input.action,
       input.direction,
@@ -394,7 +415,8 @@ export class FirewallResolver {
     })
 
     // Flush the parent filter after rule update
-    await this.networkFilterService.flushNWFilter(rule.nwFilterId)
+    const networkFilterService = new NetworkFilterService(prisma)
+    await networkFilterService.flushNWFilter(rule.nwFilterId)
 
     return updatedRule as unknown as FWRule
   }
@@ -419,7 +441,8 @@ export class FirewallResolver {
     })
 
     // Flush the parent filter after rule deletion
-    await this.networkFilterService.flushNWFilter(rule.nwFilterId)
+    const networkFilterService = new NetworkFilterService(prisma)
+    await networkFilterService.flushNWFilter(rule.nwFilterId)
 
     return deleted !== null
   }
@@ -438,7 +461,8 @@ export class FirewallResolver {
       throw new UserInputError(`Filter with id ${filterId} not found`)
     }
 
-    return this.networkFilterService.flushNWFilter(filterId)
+    const networkFilterService = new NetworkFilterService(prisma)
+    return networkFilterService.flushNWFilter(filterId)
   }
 
   @Mutation(() => Boolean, { description: 'Add a filter reference for template application' })
@@ -500,7 +524,8 @@ export class FirewallResolver {
     // TODO: Enforce unique composite constraint at DB level for (sourceFilterId, targetFilterId)
 
     // Flush the source filter to apply the changes immediately
-    await this.networkFilterService.flushNWFilter(sourceFilterId)
+    const networkFilterService = new NetworkFilterService(prisma)
+    await networkFilterService.flushNWFilter(sourceFilterId)
 
     return true
   }
@@ -528,7 +553,8 @@ export class FirewallResolver {
     })
 
     // Flush the source filter to apply the changes immediately
-    await this.networkFilterService.flushNWFilter(sourceFilterId)
+    const networkFilterService = new NetworkFilterService(prisma)
+    await networkFilterService.flushNWFilter(sourceFilterId)
 
     return true
   }

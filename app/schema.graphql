@@ -175,6 +175,7 @@ input CreateApplicationInputType {
 
 input CreateFilterInput {
   chain: String = "root"
+  departmentId: ID
   description: String! = ""
   name: String! = ""
   type: FilterType = GENERIC
