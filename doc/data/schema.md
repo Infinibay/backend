@@ -61,7 +61,7 @@ model User {
   token     String   @default("null")
   firstName String
   lastName  String
-  userImage String?  @unique
+  avatar    String?
   role      String   // 'ADMIN' or 'USER'
   createdAt DateTime @default(now())
   

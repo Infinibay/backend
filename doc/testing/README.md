@@ -608,7 +608,7 @@ export const mockUser: User = {
   role: 'USER',
   deleted: false,
   token: 'null',
-  userImage: null,
+  avatar: null,
   createdAt: new Date()
 }
 

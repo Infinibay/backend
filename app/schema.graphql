@@ -1599,11 +1599,13 @@ input UpdateMaintenanceTaskInput {
 }
 
 input UpdateUserInputType {
-  firstName: String = ""
-  lastName: String = ""
-  password: String = ""
-  passwordConfirmation: String = ""
-  role: UserRole = USER
+  """User avatar image path"""
+  avatar: String
+  firstName: String
+  lastName: String
+  password: String
+  passwordConfirmation: String
+  role: UserRole
 }
 
 """The field to order users by"""
@@ -1625,11 +1627,14 @@ input UserOrderByInputType {
 """The basic roles of users"""
 enum UserRole {
   ADMIN
+  SUPER_ADMIN
   USER
 }
 
 """User model"""
 type UserType {
+  """User avatar image path"""
+  avatar: String
   createdAt: DateTimeISO!
   email: String!
   firstName: String!

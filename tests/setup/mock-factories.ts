@@ -89,7 +89,7 @@ export function createMockUser (overrides?: Partial<User>): User {
     token: overrides?.token || `token-${id}`,
     firstName: overrides?.firstName || 'Test',
     lastName: overrides?.lastName || 'User',
-    userImage: overrides?.userImage || null,
+    avatar: overrides?.avatar || null,
     role: overrides?.role || 'USER',
     createdAt: overrides?.createdAt || new Date()
   }

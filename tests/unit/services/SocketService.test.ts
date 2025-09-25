@@ -140,7 +140,7 @@ describe('SocketService', () => {
         deleted: false,
         firstName: 'Test',
         lastName: 'User',
-        userImage: null,
+        avatar: null,
         role: 'USER',
         createdAt: new Date()
       }

@@ -120,7 +120,7 @@ export class MachineLifecycleService {
   }
 
   async destroyMachine (id: string): Promise<SuccessType> {
-    const isAdmin = this.user?.role === 'ADMIN'
+    const isAdmin = this.user?.role === 'ADMIN' || this.user?.role === 'SUPER_ADMIN'
     const whereClause = isAdmin ? { id } : { id, userId: this.user?.id }
     const machine = await this.prisma.machine.findFirst({
       where: whereClause,

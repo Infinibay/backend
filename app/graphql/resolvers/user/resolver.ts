@@ -10,10 +10,11 @@ import {
   Resolver
 } from 'type-graphql'
 import { UserInputError, AuthenticationError } from 'apollo-server-errors'
-import { UserType, UserToken, LoginResponse, UserOrderByInputType, CreateUserInputType, UpdateUserInputType } from './type'
+import { UserType, UserToken, LoginResponse, UserOrderByInputType, CreateUserInputType, UpdateUserInputType, UserRole } from './type'
 import { PaginationInputType } from '@utils/pagination'
 import { InfinibayContext } from '@utils/context'
 import { getEventManager } from '../../../services/EventManager'
+import { validateAvatarPath, avatarExists, normalizeAvatarPath, DEFAULT_AVATAR_PATH } from '../../../utils/avatarValidation'
 
 export interface UserResolverInterface {
   currentUser(context: InfinibayContext): Promise<UserType | null>;
@@ -24,11 +25,13 @@ export interface UserResolverInterface {
   ): Promise<UserType[]>;
   login(email: string, password: string): Promise<LoginResponse | null>;
   createUser(
-    input: CreateUserInputType
+    input: CreateUserInputType,
+    context: InfinibayContext
   ): Promise<UserType>
   updateUser(
     id: string,
-    input: UpdateUserInputType
+    input: UpdateUserInputType,
+    context: InfinibayContext
   ): Promise<UserType>
 }
 
@@ -110,6 +113,7 @@ export class UserResolver implements UserResolverInterface {
         firstName: true,
         lastName: true,
         role: true,
+        avatar: true,
         createdAt: true
       }
     })
@@ -155,9 +159,15 @@ export class UserResolver implements UserResolverInterface {
   @Mutation(() => UserType)
   @Authorized('ADMIN')
   async createUser (
-    @Arg('input', { nullable: false }) input: CreateUserInputType
+    @Arg('input', { nullable: false }) input: CreateUserInputType,
+    @Ctx() context: InfinibayContext
   ): Promise<UserType> {
     const prisma = new PrismaClient()
+
+    // Protection: Only SUPER_ADMIN can create SUPER_ADMIN users
+    if (input.role === UserRole.SUPER_ADMIN && context.user?.role !== 'SUPER_ADMIN') {
+      throw new UserInputError('Only SUPER_ADMIN users can create other SUPER_ADMIN users.')
+    }
 
     // Check if password and password confirmation match
     if (input.password !== input.passwordConfirmation) {
@@ -181,6 +191,7 @@ export class UserResolver implements UserResolverInterface {
         firstName: input.firstName,
         lastName: input.lastName,
         role: input.role,
+        avatar: DEFAULT_AVATAR_PATH, // Database stores relative path format, frontend converts to API URLs
         deleted: false
       }
     })
@@ -214,27 +225,103 @@ export class UserResolver implements UserResolverInterface {
   @Authorized('ADMIN')
   async updateUser (
     @Arg('id') id: string,
-    @Arg('input', { nullable: false }) input: UpdateUserInputType
+    @Arg('input', { nullable: false }) input: UpdateUserInputType,
+    @Ctx() context: InfinibayContext
   ): Promise<UserType> {
+    // Temporarily bypass SUPER_ADMIN protection for avatar-only updates
+    const isAvatarOnlyUpdate = Object.keys(input).length === 1 && 'avatar' in input;
+    console.log('🔧 Backend updateUser called:', {
+      id,
+      input,
+      inputKeys: Object.keys(input),
+      hasRole: 'role' in input,
+      roleValue: input.role,
+      hasAvatar: 'avatar' in input,
+      avatarValue: input.avatar,
+      isAvatarOnlyUpdate,
+      willUpdateFields: Object.keys(input).filter(key => (input as any)[key] !== undefined)
+    })
+
     const prisma = new PrismaClient()
     const user = await prisma.user.findUnique({ where: { id } })
     if (!user) {
       throw new UserInputError('User not found')
+    }
+
+    // Only apply SUPER_ADMIN role protection if this is NOT an avatar-only update
+    if (!isAvatarOnlyUpdate) {
+      // Protection: Prevent changing SUPER_ADMIN role
+      if (user.role === 'SUPER_ADMIN' && input.role && input.role !== UserRole.SUPER_ADMIN) {
+        throw new UserInputError('Cannot modify SUPER_ADMIN role. SUPER_ADMIN users cannot be demoted.')
+      }
+
+      // Protection: Only SUPER_ADMIN can create other SUPER_ADMIN users
+      if (input.role === UserRole.SUPER_ADMIN && context.user?.role !== 'SUPER_ADMIN') {
+        throw new UserInputError('Only SUPER_ADMIN users can assign SUPER_ADMIN role to other users.')
+      }
     }
     if (input.password && input.passwordConfirmation) {
       if (input.password !== input.passwordConfirmation) {
         throw new UserInputError('Password and password confirmation do not match')
       }
     }
-    const hashedPassword = input.password ? await bcrypt.hash(input.password, parseInt(process.env.BCRYPT_ROUNDS || '10')) : undefined
+
+    // Normalize and validate avatar
+    let normalizedAvatar: string | undefined
+    if (input.avatar !== undefined) {
+      // Handle null avatar by setting to default
+      if (input.avatar === null) {
+        normalizedAvatar = DEFAULT_AVATAR_PATH
+      } else {
+        // Normalize the avatar path
+        normalizedAvatar = normalizeAvatarPath(input.avatar)
+
+        // Validate normalized path
+        if (!validateAvatarPath(normalizedAvatar)) {
+          throw new UserInputError('Invalid avatar path format. Avatar path must start with "images/avatars/" and have a valid extension.')
+        }
+
+        // Check if avatar file exists
+        const avatarFileExists = await avatarExists(normalizedAvatar)
+        if (!avatarFileExists) {
+          throw new UserInputError('Selected avatar does not exist. Please choose from available avatars.')
+        }
+      }
+    }
+
+    // Build update data object with only the fields that were provided
+    const updateData: any = {}
+
+    // Only update password if provided
+    if (input.password) {
+      updateData.password = await bcrypt.hash(input.password, parseInt(process.env.BCRYPT_ROUNDS || '10'))
+    }
+
+    // Only update fields that are explicitly provided (not undefined)
+    if (input.firstName !== undefined) {
+      updateData.firstName = input.firstName
+    }
+    if (input.lastName !== undefined) {
+      updateData.lastName = input.lastName
+    }
+    if (input.role !== undefined) {
+      updateData.role = input.role
+    }
+    if (normalizedAvatar !== undefined) {
+      updateData.avatar = normalizedAvatar
+    }
+
+    console.log('📦 Final update data to be sent to database:', updateData)
+
     const updatedUser = await prisma.user.update({
       where: { id },
-      data: {
-        password: hashedPassword || user.password,
-        firstName: input.firstName || user.firstName,
-        lastName: input.lastName || user.lastName,
-        role: input.role || user.role
-      }
+      data: updateData
+    })
+
+    console.log('✅ User updated successfully:', {
+      userId: updatedUser.id,
+      updatedFields: Object.keys(updateData),
+      avatar: updatedUser.avatar
     })
 
     // Trigger real-time event for user update

@@ -25,7 +25,7 @@ describe('JWT Authentication Security Tests', () => {
     lastName: 'User',
     role: 'ADMIN',
     deleted: false,
-    userImage: null,
+    avatar: null,
     createdAt: new Date('2024-01-01')
     // Note: password and token fields are intentionally excluded to simulate Prisma select behavior
   }
@@ -78,7 +78,7 @@ describe('JWT Authentication Security Tests', () => {
         lastName: mockSafeUser.lastName,
         role: mockSafeUser.role,
         deleted: mockSafeUser.deleted,
-        userImage: mockSafeUser.userImage,
+        avatar: mockSafeUser.avatar,
         createdAt: mockSafeUser.createdAt
       })
 
@@ -149,7 +149,7 @@ describe('JWT Authentication Security Tests', () => {
         lastName: 'User',
         role: 'USER',
         deleted: false,
-        userImage: null,
+        avatar: null,
         createdAt: new Date()
         // password and token should not be assignable to SafeUser
       }

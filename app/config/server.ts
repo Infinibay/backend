@@ -1,4 +1,6 @@
 import { Express, Request, Response, NextFunction } from 'express'
+import express from 'express'
+import path from 'path'
 import bodyParser from 'body-parser'
 import cors from 'cors'
 import timeout from 'connect-timeout'
@@ -55,6 +57,15 @@ const configureMiddleware = (app: Express): void => {
     maxAge: ONE_HOUR_MS / 1000, // Convert to seconds for CORS
     credentials: true
   }))
+
+  // Configure static file serving from public directory
+  const publicPath = path.resolve(process.cwd(), 'public')
+  app.use(express.static(publicPath, {
+    maxAge: '7d', // Cache static files for 7 days (immutable assets)
+    index: false, // Prevent directory listing
+    dotfiles: 'ignore' // Ignore dotfiles for security
+  }))
+  console.log(`[${new Date().toISOString()}] Static file serving configured: ${publicPath}`)
 
   // Configure express for large file uploads
   app.use(bodyParser.json({ limit: MAX_UPLOAD_SIZE }))

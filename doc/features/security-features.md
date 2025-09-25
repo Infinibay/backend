@@ -144,7 +144,7 @@ export const authChecker: AuthChecker<{ req: any; user: User; setupMode: boolean
           token: true,
           firstName: true,
           lastName: true,
-          userImage: true,
+          avatar: true,
           role: true,
           createdAt: true
         }

@@ -164,8 +164,8 @@ function checkAccess (decoded: DecodedToken, roles: string[], context: Infinibay
 
 function checkAdminAccess (decoded: DecodedToken): boolean {
   const roleField = decoded.userRole || decoded.role
-  if (roleField === 'ADMIN') {
-    debug.log('Access granted for ADMIN.')
+  if (roleField === 'ADMIN' || roleField === 'SUPER_ADMIN') {
+    debug.log('Access granted for ADMIN/SUPER_ADMIN.')
     return true
   }
   debug.log('Access denied for ADMIN.')
@@ -227,8 +227,8 @@ export async function validateDepartmentAccess(
     return false
   }
 
-  if (user.role === 'ADMIN') {
-    debug.log(`Department access granted: Admin user ${user.id}`)
+  if (user.role === 'ADMIN' || user.role === 'SUPER_ADMIN') {
+    debug.log(`Department access granted: Admin/Super admin user ${user.id}`)
     return true
   }
 
@@ -255,8 +255,8 @@ export async function validateResourceDepartmentAccess(
     return false
   }
 
-  if (user.role === 'ADMIN') {
-    debug.log(`Resource access granted: Admin user ${user.id} for ${resourceType} ${resourceId}`)
+  if (user.role === 'ADMIN' || user.role === 'SUPER_ADMIN') {
+    debug.log(`Resource access granted: Admin/Super admin user ${user.id} for ${resourceType} ${resourceId}`)
     return true
   }
 
@@ -334,8 +334,8 @@ export async function filterAccessibleDepartments(
     return []
   }
 
-  if (user.role === 'ADMIN') {
-    return departmentIds // Admin can access all departments
+  if (user.role === 'ADMIN' || user.role === 'SUPER_ADMIN') {
+    return departmentIds // Admin/Super admin can access all departments
   }
 
   const userDepartmentIds = await getUserAccessibleDepartments(prisma, user.id)
@@ -357,8 +357,8 @@ export async function getDepartmentScopedWhereClause(
     return { ...baseWhere, id: 'impossible' }
   }
 
-  if (user.role === 'ADMIN') {
-    // Admin can access everything
+  if (user.role === 'ADMIN' || user.role === 'SUPER_ADMIN') {
+    // Admin/Super admin can access everything
     return baseWhere
   }
 

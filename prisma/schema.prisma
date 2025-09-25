@@ -16,8 +16,8 @@ model User {
   token              String               @default("null")
   firstName          String
   lastName           String
-  userImage          String?              @unique
-  role               String
+  avatar             String?
+  role               UserRole             @default(USER)
   createdAt          DateTime             @default(now())
   VM                 Machine[]
   maintenanceHistory MaintenanceHistory[]
@@ -782,4 +782,10 @@ enum RecommendationType {
   DEFENDER_DISABLED
   DEFENDER_THREAT
   OTHER
+}
+
+enum UserRole {
+  USER
+  ADMIN
+  SUPER_ADMIN
 }

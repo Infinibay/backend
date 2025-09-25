@@ -26,6 +26,9 @@ export class UserType {
   @Field({ nullable: false })
     email: string = ''
 
+  @Field({ nullable: true, description: 'User avatar image path' })
+    avatar?: string
+
   @Field({ nullable: false })
     createdAt: Date = new Date()
 
@@ -74,8 +77,9 @@ export class UserOrderByInputType {
 }
 
 export enum UserRole {
-  ADMIN = 'admin',
-  USER = 'user'
+  USER = 'USER',
+  ADMIN = 'ADMIN',
+  SUPER_ADMIN = 'SUPER_ADMIN'
 }
 
 registerEnumType(UserRole, {
@@ -107,17 +111,20 @@ export class CreateUserInputType {
 @InputType()
 export class UpdateUserInputType {
   @Field(() => String, { nullable: true })
-    firstName: string | undefined = ''
+    firstName?: string
 
   @Field(() => String, { nullable: true })
-    lastName: string | undefined = ''
+    lastName?: string
 
   @Field(() => String, { nullable: true })
-    password: string | undefined = ''
+    password?: string
 
   @Field(() => String, { nullable: true })
-    passwordConfirmation: string | undefined = ''
+    passwordConfirmation?: string
 
   @Field(() => UserRole, { nullable: true })
-    role: UserRole | undefined = UserRole.USER
+    role?: UserRole
+
+  @Field(() => String, { nullable: true, description: 'User avatar image path' })
+    avatar?: string
 }

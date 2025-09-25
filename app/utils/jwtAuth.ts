@@ -138,7 +138,7 @@ async function fetchAndValidateUser(decoded: DecodedToken, debugAuth?: boolean):
       deleted: true,
       firstName: true,
       lastName: true,
-      userImage: true,
+      avatar: true,
       role: true,
       createdAt: true
       // Explicitly exclude 'password' and 'token' fields for security

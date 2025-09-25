@@ -20,7 +20,7 @@ export const adminAuthMiddleware = async (req: Request, res: Response, next: Nex
   try {
     const decoded = jwt.verify(token, process.env.TOKENKEY || 'secret') as DecodedToken
 
-    if (decoded.userRole !== 'ADMIN') {
+    if (decoded.userRole !== 'ADMIN' && decoded.userRole !== 'SUPER_ADMIN') {
       debug.log('Access denied for non-admin user.')
       return res.status(403).json({ error: 'Unauthorized: Admin access required' })
     }

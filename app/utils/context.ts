@@ -97,7 +97,7 @@ export function createUserValidationHelpers(
     },
 
     isAdmin(): boolean {
-      return this.hasRole('ADMIN')
+      return this.hasRole('ADMIN') || this.hasRole('SUPER_ADMIN')
     },
 
     getDisplayName(): string {
