@@ -216,13 +216,17 @@ export class UserResolver implements UserResolverInterface {
       email: String
       password: String
       passwordConfirmation: String
+      currentPassword: String
       firstName: String
       lastName: String
       role: 'USER' | 'ADMIN'
-  Require auth('ADMIN')
+  Require auth('USER' | 'ADMIN')
+  - Users can update their own profile (except role)
+  - Admins can update any user profile
+  - Current password required for self-updates when changing password
   */
   @Mutation(() => UserType)
-  @Authorized('ADMIN')
+  @Authorized('USER', 'ADMIN')
   async updateUser (
     @Arg('id') id: string,
     @Arg('input', { nullable: false }) input: UpdateUserInputType,
@@ -230,22 +234,34 @@ export class UserResolver implements UserResolverInterface {
   ): Promise<UserType> {
     // Temporarily bypass SUPER_ADMIN protection for avatar-only updates
     const isAvatarOnlyUpdate = Object.keys(input).length === 1 && 'avatar' in input;
+    const { password, passwordConfirmation, currentPassword, ...safeInput } = input
     console.log('🔧 Backend updateUser called:', {
       id,
-      input,
-      inputKeys: Object.keys(input),
-      hasRole: 'role' in input,
-      roleValue: input.role,
-      hasAvatar: 'avatar' in input,
-      avatarValue: input.avatar,
+      inputKeys: Object.keys(safeInput),
+      hasRole: 'role' in safeInput,
+      roleValue: safeInput.role,
+      hasAvatar: 'avatar' in safeInput,
+      avatarValue: safeInput.avatar !== undefined,
       isAvatarOnlyUpdate,
-      willUpdateFields: Object.keys(input).filter(key => (input as any)[key] !== undefined)
+      willUpdateFields: Object.keys(safeInput).filter(key => (safeInput as any)[key] !== undefined)
     })
 
     const prisma = new PrismaClient()
     const user = await prisma.user.findUnique({ where: { id } })
     if (!user) {
       throw new UserInputError('User not found')
+    }
+
+    // Check if this is a self-update
+    const isSelfUpdate = context.user?.id === id
+    const isPrivileged = context.user?.role === 'ADMIN' || context.user?.role === 'SUPER_ADMIN'
+    if (!isSelfUpdate && !isPrivileged) {
+      throw new AuthenticationError('Not authorized to update this user')
+    }
+
+    // Self-update restrictions
+    if (isSelfUpdate && input.role !== undefined) {
+      throw new UserInputError('You cannot change your own role')
     }
 
     // Only apply SUPER_ADMIN role protection if this is NOT an avatar-only update
@@ -260,9 +276,25 @@ export class UserResolver implements UserResolverInterface {
         throw new UserInputError('Only SUPER_ADMIN users can assign SUPER_ADMIN role to other users.')
       }
     }
-    if (input.password && input.passwordConfirmation) {
+
+    // Current password validation for password updates
+    if (input.password) {
+      if (!input.passwordConfirmation) {
+        throw new UserInputError('Password confirmation is required')
+      }
       if (input.password !== input.passwordConfirmation) {
         throw new UserInputError('Password and password confirmation do not match')
+      }
+
+      if (isSelfUpdate && !input.currentPassword) {
+        throw new UserInputError('Current password is required when updating your own password')
+      }
+
+      if (input.currentPassword) {
+        const currentPasswordMatch = await bcrypt.compare(input.currentPassword, user.password)
+        if (!currentPasswordMatch) {
+          throw new AuthenticationError('Current password is incorrect')
+        }
       }
     }
 

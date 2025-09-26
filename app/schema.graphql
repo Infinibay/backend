@@ -1601,6 +1601,9 @@ input UpdateMaintenanceTaskInput {
 input UpdateUserInputType {
   """User avatar image path"""
   avatar: String
+
+  """Current password required when updating password"""
+  currentPassword: String
   firstName: String
   lastName: String
   password: String

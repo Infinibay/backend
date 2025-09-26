@@ -122,6 +122,9 @@ export class UpdateUserInputType {
   @Field(() => String, { nullable: true })
     passwordConfirmation?: string
 
+  @Field(() => String, { nullable: true, description: 'Current password required when updating password' })
+    currentPassword?: string
+
   @Field(() => UserRole, { nullable: true })
     role?: UserRole
 
