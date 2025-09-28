@@ -17,30 +17,35 @@ model User {
   firstName          String
   lastName           String
   avatar             String?
-  role               UserRole             @default(USER)
   createdAt          DateTime             @default(now())
+  role               UserRole             @default(USER)
+  updatedAt          DateTime             @updatedAt
   VM                 Machine[]
   maintenanceHistory MaintenanceHistory[]
   maintenanceTasks   MaintenanceTask[]
 }
 
 model Node {
-  id          String  @id @default(uuid())
+  id          String   @id @default(uuid())
   name        String
   currentRaid String
   nextRaid    String?
   cpuFlags    Json
   ram         Int
   cores       Int
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
   disks       Disk[]
 }
 
 model Disk {
-  id     String @id @default(uuid())
-  path   String
-  nodeId String
-  status String
-  node   Node   @relation(fields: [nodeId], references: [id])
+  id        String   @id @default(uuid())
+  path      String
+  nodeId    String
+  status    String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  node      Node     @relation(fields: [nodeId], references: [id])
 }
 
 model ISO {
@@ -102,15 +107,17 @@ model Machine {
 }
 
 model MachineConfiguration {
-  id              String  @id @default(uuid())
+  id              String   @id @default(uuid())
   xml             Json?
   graphicProtocol String?
   graphicPort     Int?
   graphicPassword String?
   graphicHost     String?
   assignedGpuBus  String?
-  machineId       String  @unique
-  machine         Machine @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  machineId       String   @unique
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  machine         Machine  @relation(fields: [machineId], references: [id], onDelete: Cascade)
 }
 
 model MachineTemplate {
@@ -124,6 +131,7 @@ model MachineTemplate {
   storage     Int
   createdAt   DateTime                 @default(now())
   categoryId  String?
+  updatedAt   DateTime                 @updatedAt
   machines    Machine[]
   category    MachineTemplateCategory? @relation(fields: [categoryId], references: [id])
 }
@@ -133,6 +141,7 @@ model MachineTemplateCategory {
   name        String
   description String?
   createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
   templates   MachineTemplate[]
 }
 
@@ -147,6 +156,7 @@ model Application {
   installCommand Json
   parameters     Json
   createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
   machines       MachineApplication[]
 }
 
@@ -154,6 +164,8 @@ model MachineApplication {
   machineId     String
   applicationId String
   parameters    Json
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
   application   Application @relation(fields: [applicationId], references: [id])
   machine       Machine     @relation(fields: [machineId], references: [id])
 
@@ -166,14 +178,17 @@ model PendingCommand {
   command    String
   parameters Json
   createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
   machine    Machine  @relation(fields: [machineId], references: [id])
 
   @@index([machineId])
 }
 
 model Notification {
-  id      String  @id @default(uuid())
-  message String?
+  id        String   @id @default(uuid())
+  message   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model Department {
@@ -182,6 +197,7 @@ model Department {
   createdAt      DateTime                  @default(now())
   internetSpeed  Int?
   ipSubnet       String?
+  updatedAt      DateTime                  @updatedAt
   configuration  DepartmentConfiguration?
   nwFilters      DepartmentNWFilter[]
   serviceConfigs DepartmentServiceConfig[]
@@ -213,6 +229,7 @@ model FilterReference {
   sourceFilterId String
   targetFilterId String
   createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
   sourceFilter   NWFilter @relation("ReferencingFilters", fields: [sourceFilterId], references: [id], onDelete: Cascade)
   targetFilter   NWFilter @relation("ReferencedFilters", fields: [targetFilterId], references: [id], onDelete: Cascade)
 
@@ -345,6 +362,8 @@ model SystemMetrics {
   uptime            BigInt
   loadAverage       Json?
   timestamp         DateTime @default(now())
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
   machine           Machine  @relation(fields: [machineId], references: [id], onDelete: Cascade)
 
   @@index([machineId, timestamp])
@@ -365,6 +384,8 @@ model ProcessSnapshot {
   status          String
   startTime       DateTime?
   timestamp       DateTime  @default(now())
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
   machine         Machine   @relation(fields: [machineId], references: [id], onDelete: Cascade)
 
   @@index([machineId, timestamp])
@@ -389,6 +410,7 @@ model ApplicationUsage {
   firstSeen         DateTime  @default(now())
   lastSeen          DateTime  @default(now())
   isActive          Boolean   @default(true)
+  updatedAt         DateTime  @updatedAt
   machine           Machine   @relation(fields: [machineId], references: [id], onDelete: Cascade)
 
   @@unique([machineId, executablePath])
@@ -409,6 +431,8 @@ model PortUsage {
   connectionCount Int      @default(0)
   lastActivity    DateTime @default(now())
   timestamp       DateTime @default(now())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
   machine         Machine  @relation(fields: [machineId], references: [id], onDelete: Cascade)
 
   @@index([machineId, port, protocol])
@@ -434,6 +458,8 @@ model WindowsService {
   usageScore       Float?                @default(0)
   firstSeen        DateTime              @default(now())
   lastSeen         DateTime              @default(now())
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
   stateHistory     ServiceStateHistory[]
   machine          Machine               @relation(fields: [machineId], references: [id], onDelete: Cascade)
 
@@ -449,6 +475,8 @@ model ServiceStateHistory {
   toState   String
   reason    String?
   timestamp DateTime       @default(now())
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
   service   WindowsService @relation(fields: [serviceId], references: [id], onDelete: Cascade)
 
   @@index([serviceId, timestamp])
@@ -463,6 +491,8 @@ model ErrorLog {
   context   Json?
   timestamp DateTime @default(now())
   resolved  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([timestamp])
   @@index([severity, timestamp])
@@ -475,6 +505,8 @@ model PerformanceMetric {
   value     Float
   tags      Json?
   timestamp DateTime @default(now())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([name, timestamp])
   @@index([timestamp])
@@ -490,6 +522,8 @@ model PerformanceAggregate {
   max       Float
   avg       Float
   timestamp DateTime @default(now())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([name, period, timestamp])
   @@index([timestamp])
@@ -503,6 +537,8 @@ model HealthCheck {
   details      Json?
   responseTime Int?
   timestamp    DateTime @default(now())
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   @@index([service, timestamp])
   @@index([status, timestamp])
@@ -582,6 +618,7 @@ model SystemEvent {
   metadata    Json?
   timestamp   DateTime
   createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
   machine     Machine  @relation(fields: [machineId], references: [id], onDelete: Cascade)
 
   @@index([machineId, timestamp])
@@ -678,6 +715,8 @@ model MaintenanceHistory {
   triggeredBy      MaintenanceTrigger
   executedByUserId String?
   executedAt       DateTime            @default(now())
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
   executedBy       User?               @relation(fields: [executedByUserId], references: [id])
   machine          Machine             @relation(fields: [machineId], references: [id], onDelete: Cascade)
   task             MaintenanceTask?    @relation(fields: [taskId], references: [id])
@@ -697,6 +736,7 @@ model VMRecommendation {
   actionText String
   data       Json?
   createdAt  DateTime           @default(now())
+  updatedAt  DateTime           @updatedAt
   machine    Machine            @relation(fields: [machineId], references: [id], onDelete: Cascade)
   snapshot   VMHealthSnapshot?  @relation(fields: [snapshotId], references: [id])
 
