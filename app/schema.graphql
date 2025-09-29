@@ -925,6 +925,7 @@ type Mutation {
   updateFilter(id: ID!, input: UpdateFilterInput!): GenericFilter!
   updateFilterRule(id: ID!, input: UpdateFilterRuleInput!): FWRule!
   updateMachineHardware(input: UpdateMachineHardwareInput!): Machine!
+  updateMachineName(input: UpdateMachineNameInput!): Machine!
   updateMachineTemplate(id: String!, input: MachineTemplateInputType!): MachineTemplateType!
   updateMachineTemplateCategory(id: String!, input: MachineTemplateCategoryInputType!): MachineTemplateCategoryType!
   updateMaintenanceTask(input: UpdateMaintenanceTaskInput!): MaintenanceTaskResponse!
@@ -1585,6 +1586,13 @@ input UpdateMachineHardwareInput {
 
   """New RAM in GB"""
   ramGB: Int
+}
+
+input UpdateMachineNameInput {
+  id: ID! = ""
+
+  """New name for the machine"""
+  name: String! = ""
 }
 
 input UpdateMaintenanceTaskInput {
