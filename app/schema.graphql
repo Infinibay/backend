@@ -259,6 +259,8 @@ input CreateSnapshotInput {
 }
 
 input CreateUserInputType {
+  """User avatar image path"""
+  avatar: String
   email: String! = ""
   firstName: String! = ""
   lastName: String! = ""
@@ -928,6 +930,7 @@ type Mutation {
   updateMachineName(input: UpdateMachineNameInput!): Machine!
   updateMachineTemplate(id: String!, input: MachineTemplateInputType!): MachineTemplateType!
   updateMachineTemplateCategory(id: String!, input: MachineTemplateCategoryInputType!): MachineTemplateCategoryType!
+  updateMachineUser(input: UpdateMachineUserInput!): Machine!
   updateMaintenanceTask(input: UpdateMaintenanceTaskInput!): MaintenanceTaskResponse!
 
   """Update a package on a virtual machine (legacy compatibility)"""
@@ -1593,6 +1596,13 @@ input UpdateMachineNameInput {
 
   """New name for the machine"""
   name: String! = ""
+}
+
+input UpdateMachineUserInput {
+  id: ID! = ""
+
+  """User ID to assign to the machine. Set to null to unassign."""
+  userId: String = null
 }
 
 input UpdateMaintenanceTaskInput {

@@ -106,6 +106,9 @@ export class CreateUserInputType {
 
   @Field(() => UserRole)
     role: UserRole = UserRole.USER
+
+  @Field(() => String, { nullable: true, description: 'User avatar image path' })
+    avatar?: string
 }
 
 @InputType()

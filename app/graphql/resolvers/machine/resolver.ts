@@ -9,7 +9,8 @@ import {
   MachineStatus,
   CommandExecutionResponseType,
   UpdateMachineHardwareInput,
-  UpdateMachineNameInput
+  UpdateMachineNameInput,
+  UpdateMachineUserInput
 } from './type'
 import { UserType } from '../user/type'
 import { MachineTemplateType } from '../machine_template/type'
@@ -221,6 +222,28 @@ export class MachineMutations {
       const eventManager = getEventManager()
       await eventManager.dispatchEvent('vms', 'update', updatedMachine, user?.id)
       console.log(`🎯 Triggered real-time event: vms:update for machine ${input.id} (name update)`)
+    } catch (eventError) {
+      console.error('Failed to trigger real-time event:', eventError)
+      // Don't fail the main operation if event triggering fails
+    }
+
+    return transformMachine(updatedMachine, prisma)
+  }
+
+  @Mutation(() => Machine)
+  @Authorized('ADMIN')
+  async updateMachineUser (
+    @Arg('input') input: UpdateMachineUserInput,
+    @Ctx() { prisma, user }: InfinibayContext
+  ): Promise<Machine> {
+    const lifecycleService = new MachineLifecycleService(prisma, user)
+    const updatedMachine = await lifecycleService.updateMachineUser(input)
+
+    // Trigger real-time event for VM user assignment update
+    try {
+      const eventManager = getEventManager()
+      await eventManager.dispatchEvent('vms', 'update', updatedMachine, user?.id)
+      console.log(`🎯 Triggered real-time event: vms:update for machine ${input.id} (user assignment update)`)
     } catch (eventError) {
       console.error('Failed to trigger real-time event:', eventError)
       // Don't fail the main operation if event triggering fails

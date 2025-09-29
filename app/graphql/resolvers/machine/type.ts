@@ -239,3 +239,12 @@ export class UpdateMachineNameInput {
     @Field(() => String, { description: 'New name for the machine' })
       name: string = ''
 }
+
+@InputType()
+export class UpdateMachineUserInput {
+    @Field(() => ID)
+      id: string = '' // ID of the machine to update
+
+    @Field(() => String, { nullable: true, description: 'User ID to assign to the machine. Set to null to unassign.' })
+      userId: string | null = null
+}

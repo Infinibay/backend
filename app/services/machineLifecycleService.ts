@@ -8,7 +8,7 @@ import si from 'systeminformation'
 import { MachineCleanupService } from './cleanup/machineCleanupService'
 import { HardwareUpdateService } from './vm/hardwareUpdateService'
 import { getEventManager } from '../services/EventManager'
-import { CreateMachineInputType, UpdateMachineHardwareInput, UpdateMachineNameInput, SuccessType } from '../graphql/resolvers/machine/type'
+import { CreateMachineInputType, UpdateMachineHardwareInput, UpdateMachineNameInput, UpdateMachineUserInput, SuccessType } from '../graphql/resolvers/machine/type'
 
 export class MachineLifecycleService {
   private prisma: PrismaClient
@@ -263,6 +263,54 @@ export class MachineLifecycleService {
     })
 
     this.debug.log(`Machine ${id} name updated to "${name.trim()}"`)
+
+    return updatedMachine
+  }
+
+  async updateMachineUser (input: UpdateMachineUserInput): Promise<Machine> {
+    const { id, userId } = input
+
+    const machine = await this.prisma.machine.findUnique({
+      where: { id },
+      include: { configuration: true, user: true }
+    })
+
+    if (!machine) {
+      throw new ApolloError(`Machine with ID ${id} not found`)
+    }
+
+    // If userId is provided, validate that the user exists
+    if (userId) {
+      const user = await this.prisma.user.findUnique({
+        where: { id: userId }
+      })
+
+      if (!user) {
+        throw new ApolloError(`User with ID ${userId} not found`)
+      }
+    }
+
+    const updatedMachine = await this.prisma.machine.update({
+      where: { id },
+      data: { userId },
+      include: {
+        configuration: true,
+        department: true,
+        template: true,
+        user: true
+      }
+    })
+
+    this.debug.log(`Machine ${id} user assignment updated: ${userId ? `assigned to user ${userId}` : 'unassigned'}`)
+
+    // Emit real-time event for machine update
+    try {
+      const eventManager = getEventManager()
+      await eventManager.dispatchEvent('vms', 'update', updatedMachine)
+      this.debug.log(`🎯 VM user assignment updated: ${updatedMachine.name} (${id})`)
+    } catch (eventError) {
+      this.debug.log(`Failed to emit update event for VM ${id}: ${String(eventError)}`)
+    }
 
     return updatedMachine
   }
