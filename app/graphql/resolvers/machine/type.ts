@@ -230,3 +230,12 @@ export class UpdateMachineHardwareInput {
     @Field(() => String, { nullable: true, description: 'New GPU PCI address (e.g., 0000:01:00.0). Set to null to remove GPU.' })
       gpuPciAddress?: string | null
 }
+
+@InputType()
+export class UpdateMachineNameInput {
+    @Field(() => ID)
+      id: string = '' // ID of the machine to update
+
+    @Field(() => String, { description: 'New name for the machine' })
+      name: string = ''
+}

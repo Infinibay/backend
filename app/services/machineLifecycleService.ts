@@ -8,7 +8,7 @@ import si from 'systeminformation'
 import { MachineCleanupService } from './cleanup/machineCleanupService'
 import { HardwareUpdateService } from './vm/hardwareUpdateService'
 import { getEventManager } from '../services/EventManager'
-import { CreateMachineInputType, UpdateMachineHardwareInput, SuccessType } from '../graphql/resolvers/machine/type'
+import { CreateMachineInputType, UpdateMachineHardwareInput, UpdateMachineNameInput, SuccessType } from '../graphql/resolvers/machine/type'
 
 export class MachineLifecycleService {
   private prisma: PrismaClient
@@ -218,6 +218,51 @@ export class MachineLifecycleService {
     this.backgroundUpdateHardware(updatedMachine.id).catch(err => {
       this.debug.log(`Error in backgroundUpdateHardware for machine ${updatedMachine.id}: ${String(err)}`)
     })
+
+    return updatedMachine
+  }
+
+  async updateMachineName (input: UpdateMachineNameInput): Promise<Machine> {
+    const { id, name } = input
+
+    const machine = await this.prisma.machine.findUnique({
+      where: { id },
+      include: { configuration: true }
+    })
+
+    if (!machine) {
+      throw new ApolloError(`Machine with ID ${id} not found`)
+    }
+
+    // Validate name
+    if (!name || name.trim() === '') {
+      throw new ApolloError('Machine name cannot be empty')
+    }
+
+    // Check if name is already taken by another machine
+    const existingMachine = await this.prisma.machine.findFirst({
+      where: {
+        name: name.trim(),
+        id: { not: id } // Exclude the current machine
+      }
+    })
+
+    if (existingMachine) {
+      throw new ApolloError(`Machine name "${name.trim()}" is already taken`)
+    }
+
+    const updatedMachine = await this.prisma.machine.update({
+      where: { id },
+      data: { name: name.trim() },
+      include: {
+        configuration: true,
+        department: true,
+        template: true,
+        user: true
+      }
+    })
+
+    this.debug.log(`Machine ${id} name updated to "${name.trim()}"`)
 
     return updatedMachine
   }
