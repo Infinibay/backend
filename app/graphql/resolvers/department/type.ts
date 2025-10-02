@@ -1,4 +1,4 @@
-import { ObjectType, Field, ID, Int } from 'type-graphql'
+import { ObjectType, Field, ID, Int, InputType } from 'type-graphql'
 
 @ObjectType()
 export class DepartmentType {
@@ -19,4 +19,13 @@ export class DepartmentType {
 
   @Field(() => Number, { nullable: true })
     totalMachines?: number
+}
+
+@InputType()
+export class UpdateDepartmentNameInput {
+  @Field(() => ID)
+    id: string = ''
+
+  @Field(() => String)
+    name: string = ''
 }

@@ -48,8 +48,8 @@ export class DepartmentEventManager implements ResourceEventManager {
   // Get complete department data from database
   private async getDepartmentData (deptData: any): Promise<any> {
     try {
-      // If we already have complete data, use it
-      if (deptData && typeof deptData === 'object' && deptData.name) {
+      // If we already have complete data with GraphQL format, use it
+      if (deptData && typeof deptData === 'object' && deptData.name && 'totalMachines' in deptData) {
         return deptData
       }
 
@@ -62,18 +62,25 @@ export class DepartmentEventManager implements ResourceEventManager {
       const department = await this.prisma.department.findUnique({
         where: { id: deptId },
         include: {
-          machines: {
-            select: {
-              id: true,
-              name: true,
-              status: true,
-              userId: true
-            }
+          _count: {
+            select: { machines: true }
           }
         }
       })
 
-      return department
+      if (!department) {
+        return null
+      }
+
+      // Format the data to match GraphQL API structure
+      return {
+        id: department.id,
+        name: department.name,
+        createdAt: department.createdAt,
+        internetSpeed: department.internetSpeed || undefined,
+        ipSubnet: department.ipSubnet || undefined,
+        totalMachines: department._count.machines
+      }
     } catch (error) {
       console.error('Error fetching department data:', error)
       return null

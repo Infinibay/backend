@@ -924,6 +924,7 @@ type Mutation {
   updateAppSettings(input: AppSettingsInput!): AppSettings!
   updateApplication(id: String!, input: CreateApplicationInputType!): ApplicationType!
   updateDepartmentFirewallRule(input: UpdateFilterRuleInput!, ruleId: ID!): FWRule!
+  updateDepartmentName(input: UpdateDepartmentNameInput!): DepartmentType!
   updateFilter(id: ID!, input: UpdateFilterInput!): GenericFilter!
   updateFilterRule(id: ID!, input: UpdateFilterRuleInput!): FWRule!
   updateMachineHardware(input: UpdateMachineHardwareInput!): Machine!
@@ -1556,6 +1557,11 @@ input ToggleVmServiceInput {
 
   """Unique identifier of the VM"""
   vmId: ID!
+}
+
+input UpdateDepartmentNameInput {
+  id: ID! = ""
+  name: String! = ""
 }
 
 input UpdateFilterInput {

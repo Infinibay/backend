@@ -1,6 +1,6 @@
 import { Resolver, Query, Mutation, Arg, Ctx, Authorized } from 'type-graphql'
 import { UserInputError } from 'apollo-server-errors'
-import { DepartmentType } from './type'
+import { DepartmentType, UpdateDepartmentNameInput } from './type'
 import { InfinibayContext } from '../../../utils/context'
 import { getEventManager } from '../../../services/EventManager'
 
@@ -126,6 +126,68 @@ export class DepartmentResolver {
       internetSpeed: deletedDepartment.internetSpeed || undefined,
       ipSubnet: deletedDepartment.ipSubnet || undefined,
       totalMachines: 0
+    }
+  }
+
+  @Mutation(() => DepartmentType)
+  @Authorized('ADMIN')
+  async updateDepartmentName (
+    @Arg('input') input: UpdateDepartmentNameInput,
+    @Ctx() { prisma, user }: InfinibayContext
+  ): Promise<DepartmentType> {
+    const { id, name } = input
+
+    // Check if department exists
+    const department = await prisma.department.findUnique({
+      where: { id },
+      include: { machines: true }
+    })
+
+    if (!department) {
+      throw new UserInputError('Department not found')
+    }
+
+    // Validate name is not empty
+    if (!name || name.trim() === '') {
+      throw new UserInputError('Department name cannot be empty')
+    }
+
+    // Check if name is already taken by another department
+    const existingDepartment = await prisma.department.findFirst({
+      where: {
+        name: name.trim(),
+        id: { not: id } // Exclude the current department
+      }
+    })
+
+    if (existingDepartment) {
+      throw new UserInputError(`Department name "${name.trim()}" is already taken`)
+    }
+
+    // Update the department name
+    const updatedDepartment = await prisma.department.update({
+      where: { id },
+      data: { name: name.trim() },
+      include: { machines: true }
+    })
+
+    // Trigger real-time event for department update
+    try {
+      const eventManager = getEventManager()
+      await eventManager.dispatchEvent('departments', 'update', { id: updatedDepartment.id }, user?.id)
+      console.log(`🎯 Triggered real-time event: departments:update for department ${updatedDepartment.id}`)
+    } catch (eventError) {
+      console.error('Failed to trigger real-time event:', eventError)
+      // Don't fail the main operation if event triggering fails
+    }
+
+    return {
+      id: updatedDepartment.id,
+      name: updatedDepartment.name,
+      createdAt: updatedDepartment.createdAt,
+      internetSpeed: updatedDepartment.internetSpeed || undefined,
+      ipSubnet: updatedDepartment.ipSubnet || undefined,
+      totalMachines: updatedDepartment.machines.length
     }
   }
 
