@@ -29,6 +29,10 @@ export async function createDepartmentFilter (prisma: PrismaClient, department: 
       return
     }
 
+    // Get common service filters
+    const usePing = await prisma.nWFilter.findFirst({ where: { name: 'Use Ping' } })
+    const useDns = await prisma.nWFilter.findFirst({ where: { name: 'Use DNS service' } })
+
     // Create the network filter service
     const networkFilterService = new NetworkFilterService(prisma)
 
@@ -40,7 +44,8 @@ export async function createDepartmentFilter (prisma: PrismaClient, department: 
         internalName: `ibay-${randomBytes(8).toString('hex')}`,
         uuid: uuidv4(),
         type: 'department',
-        chain: 'root'
+        chain: 'root',
+        priority: 100
       }
     })
 
@@ -51,7 +56,7 @@ export async function createDepartmentFilter (prisma: PrismaClient, department: 
       }
     })
 
-    // Add the basic security filter
+    // Add the basic security filter (includes DHCP, HTTP, HTTPS, anti-spoofing)
     await prisma.filterReference.create({
       data: {
         sourceFilterId: nwFilter.id,
@@ -59,7 +64,28 @@ export async function createDepartmentFilter (prisma: PrismaClient, department: 
       }
     })
 
-    // Add the drop all filter
+    // Add common service filters
+    if (usePing) {
+      await prisma.filterReference.create({
+        data: {
+          sourceFilterId: nwFilter.id,
+          targetFilterId: usePing.id
+        }
+      })
+      debug.log(`Added Ping service to department filter ${nwFilter.id}`)
+    }
+
+    if (useDns) {
+      await prisma.filterReference.create({
+        data: {
+          sourceFilterId: nwFilter.id,
+          targetFilterId: useDns.id
+        }
+      })
+      debug.log(`Added DNS service to department filter ${nwFilter.id}`)
+    }
+
+    // Add the drop all filter (must be last to reject all other traffic)
     await prisma.filterReference.create({
       data: {
         sourceFilterId: nwFilter.id,
@@ -85,30 +111,24 @@ export async function createDepartmentFilter (prisma: PrismaClient, department: 
 export async function afterCreateDepartment (prisma: PrismaClient, params: any, result: any) {
   process.nextTick(async () => {
     try {
-      const basicSecurity = await prisma.nWFilter.findFirst({ where: { name: 'Basic Security' } })
-      const dropAll = await prisma.nWFilter.findFirst({ where: { name: 'Drop All' } })
-      if (!basicSecurity || !dropAll) {
-        console.error('Basic Security is missing a basic security filter')
-        return
-      }
-      // create a nwFilter
-      const nwFilter = await prisma.nWFilter.create({
-        data: {
-          name: `Filter for department ${result.name}`,
-          description: `Filter for department ${result.name}`,
-          internalName: `ibay-${randomBytes(8).toString('hex')}`,
-          uuid: uuidv4(),
-          type: 'department',
-          chain: 'root'
-        }
+      // Create a new Prisma client instance to ensure we're not in the same transaction
+      const newPrisma = new PrismaClient()
+
+      // Fetch the department again to ensure we're seeing the committed data
+      const department = await newPrisma.department.findUnique({
+        where: { id: result.id }
       })
-      await prisma.departmentNWFilter.create({ data: { departmentId: result.id, nwFilterId: nwFilter.id } })
-      // Add the basic security filter
-      await prisma.filterReference.create({ data: { sourceFilterId: nwFilter.id, targetFilterId: basicSecurity.id } })
-      // Add the drop all filter
-      await prisma.filterReference.create({ data: { sourceFilterId: nwFilter.id, targetFilterId: dropAll.id } })
+
+      if (department) {
+        await createDepartmentFilter(newPrisma, department)
+      } else {
+        debug.log('error', `Department with ID ${result.id} not found after creation, cannot create filter`)
+      }
+
+      // Close the new Prisma client
+      await newPrisma.$disconnect()
     } catch (error) {
-      console.error('Error creating department filter:', error)
+      debug.log('error', `Error in deferred filter creation: ${error}`)
     }
   })
 }

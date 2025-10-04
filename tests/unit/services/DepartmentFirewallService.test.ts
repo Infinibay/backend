@@ -814,6 +814,205 @@ describe('DepartmentFirewallService', () => {
     });
   });
 
+  describe('getAllReferencedRules - Recursive Rule Fetching', () => {
+    it('should fetch rules from single level references', async () => {
+      const deptFilter = createMockNWFilter({ id: 'dept-filter', type: 'department' });
+      const template1 = createMockNWFilter({ id: 'template-1', type: 'template' });
+      const template2 = createMockNWFilter({ id: 'template-2', type: 'template' });
+
+      const deptRules = [
+        createMockFWRule({ id: 'rule-1', nwFilterId: 'dept-filter', priority: 100 }),
+        createMockFWRule({ id: 'rule-2', nwFilterId: 'dept-filter', priority: 200 })
+      ];
+
+      const template1Rules = [
+        createMockFWRule({ id: 'rule-3', nwFilterId: 'template-1', priority: 300 }),
+        createMockFWRule({ id: 'rule-4', nwFilterId: 'template-1', priority: 400 })
+      ];
+
+      const template2Rules = [
+        createMockFWRule({ id: 'rule-5', nwFilterId: 'template-2', priority: 500 }),
+        createMockFWRule({ id: 'rule-6', nwFilterId: 'template-2', priority: 600 })
+      ];
+
+      mockPrisma.nWFilter.findFirst.mockResolvedValue(deptFilter);
+      mockPrisma.fWRule.findMany
+        .mockResolvedValueOnce(deptRules) // Custom rules
+        .mockResolvedValueOnce(deptRules) // dept filter rules
+        .mockResolvedValueOnce(template1Rules) // template1 rules
+        .mockResolvedValueOnce(template2Rules); // template2 rules
+
+      mockPrisma.filterReference.findMany
+        .mockResolvedValueOnce([
+          { id: 'ref-1', sourceFilterId: 'dept-filter', targetFilterId: 'template-1' },
+          { id: 'ref-2', sourceFilterId: 'dept-filter', targetFilterId: 'template-2' }
+        ])
+        .mockResolvedValueOnce([]) // template1 has no references
+        .mockResolvedValueOnce([]); // template2 has no references
+
+      const result = await service['getEffectiveRules']('dept-id');
+
+      expect(result).toHaveLength(6);
+      expect(result[0].priority).toBe(100);
+      expect(result[5].priority).toBe(600);
+    });
+
+    it('should fetch rules from multi-level nested references', async () => {
+      const deptFilter = createMockNWFilter({ id: 'dept-filter', type: 'department' });
+
+      const rule1 = createMockFWRule({ id: 'rule-1', nwFilterId: 'dept-filter', priority: 100 });
+      const rule2 = createMockFWRule({ id: 'rule-2', nwFilterId: 'template-a', priority: 200 });
+      const rule3 = createMockFWRule({ id: 'rule-3', nwFilterId: 'template-b', priority: 300 });
+      const rule4 = createMockFWRule({ id: 'rule-4', nwFilterId: 'template-c', priority: 400 });
+
+      mockPrisma.nWFilter.findFirst.mockResolvedValue(deptFilter);
+      mockPrisma.fWRule.findMany
+        .mockResolvedValueOnce([rule1]) // Custom rules
+        .mockResolvedValueOnce([rule1]) // dept filter
+        .mockResolvedValueOnce([rule2]) // template-a
+        .mockResolvedValueOnce([rule3]) // template-b
+        .mockResolvedValueOnce([rule4]); // template-c
+
+      mockPrisma.filterReference.findMany
+        .mockResolvedValueOnce([{ id: 'ref-1', sourceFilterId: 'dept-filter', targetFilterId: 'template-a' }])
+        .mockResolvedValueOnce([{ id: 'ref-2', sourceFilterId: 'template-a', targetFilterId: 'template-b' }])
+        .mockResolvedValueOnce([{ id: 'ref-3', sourceFilterId: 'template-b', targetFilterId: 'template-c' }])
+        .mockResolvedValueOnce([]); // template-c has no references
+
+      const result = await service['getEffectiveRules']('dept-id');
+
+      expect(result).toHaveLength(4);
+      expect(result[0].priority).toBe(100);
+      expect(result[1].priority).toBe(200);
+      expect(result[2].priority).toBe(300);
+      expect(result[3].priority).toBe(400);
+    });
+
+    it('should prevent infinite loops with circular references', async () => {
+      const deptFilter = createMockNWFilter({ id: 'filter-a', type: 'department' });
+
+      const ruleA = createMockFWRule({ id: 'rule-a', nwFilterId: 'filter-a', priority: 100 });
+      const ruleB = createMockFWRule({ id: 'rule-b', nwFilterId: 'filter-b', priority: 200 });
+      const ruleC = createMockFWRule({ id: 'rule-c', nwFilterId: 'filter-c', priority: 300 });
+
+      mockPrisma.nWFilter.findFirst.mockResolvedValue(deptFilter);
+      mockPrisma.fWRule.findMany
+        .mockResolvedValueOnce([]) // Custom rules
+        .mockResolvedValueOnce([ruleA]) // filter-a
+        .mockResolvedValueOnce([ruleB]) // filter-b
+        .mockResolvedValueOnce([ruleC]); // filter-c
+
+      // Create circular reference: A -> B -> C -> A
+      mockPrisma.filterReference.findMany
+        .mockResolvedValueOnce([{ id: 'ref-1', sourceFilterId: 'filter-a', targetFilterId: 'filter-b' }])
+        .mockResolvedValueOnce([{ id: 'ref-2', sourceFilterId: 'filter-b', targetFilterId: 'filter-c' }])
+        .mockResolvedValueOnce([{ id: 'ref-3', sourceFilterId: 'filter-c', targetFilterId: 'filter-a' }]);
+
+      const result = await service['getEffectiveRules']('dept-id');
+
+      // Should complete without infinite loop and each rule should appear once
+      expect(result).toHaveLength(3);
+      expect(result.map(r => r.id)).toContain('rule-a');
+      expect(result.map(r => r.id)).toContain('rule-b');
+      expect(result.map(r => r.id)).toContain('rule-c');
+    });
+
+    it('should not duplicate rules in diamond dependency pattern', async () => {
+      const deptFilter = createMockNWFilter({ id: 'dept-filter', type: 'department' });
+
+      const sharedRule = createMockFWRule({ id: 'shared-rule', nwFilterId: 'shared-template', priority: 100 });
+      const ruleA = createMockFWRule({ id: 'rule-a', nwFilterId: 'template-a', priority: 200 });
+      const ruleB = createMockFWRule({ id: 'rule-b', nwFilterId: 'template-b', priority: 300 });
+
+      mockPrisma.nWFilter.findFirst.mockResolvedValue(deptFilter);
+      mockPrisma.fWRule.findMany
+        .mockResolvedValueOnce([]) // Custom rules
+        .mockResolvedValueOnce([]) // dept filter rules
+        .mockResolvedValueOnce([ruleA]) // template-a
+        .mockResolvedValueOnce([sharedRule]) // shared-template (from template-a)
+        .mockResolvedValueOnce([ruleB]) // template-b
+        .mockResolvedValueOnce([]); // shared-template already visited (returns empty)
+
+      // Diamond: dept -> [templateA, templateB] -> sharedTemplate
+      mockPrisma.filterReference.findMany
+        .mockResolvedValueOnce([
+          { id: 'ref-1', sourceFilterId: 'dept-filter', targetFilterId: 'template-a' },
+          { id: 'ref-2', sourceFilterId: 'dept-filter', targetFilterId: 'template-b' }
+        ])
+        .mockResolvedValueOnce([{ id: 'ref-3', sourceFilterId: 'template-a', targetFilterId: 'shared-template' }])
+        .mockResolvedValueOnce([]) // shared-template has no references
+        .mockResolvedValueOnce([{ id: 'ref-4', sourceFilterId: 'template-b', targetFilterId: 'shared-template' }]);
+
+      const result = await service['getEffectiveRules']('dept-id');
+
+      // Should have 3 unique rules, not 4 (shared-rule should appear once)
+      expect(result).toHaveLength(3);
+      const sharedRuleCount = result.filter(r => r.id === 'shared-rule').length;
+      expect(sharedRuleCount).toBe(1);
+    });
+
+    it('should return only custom rules when no references exist', async () => {
+      const deptFilter = createMockNWFilter({ id: 'dept-filter', type: 'department' });
+
+      const customRules = [
+        createMockFWRule({ id: 'rule-1', nwFilterId: 'dept-filter', priority: 100 }),
+        createMockFWRule({ id: 'rule-2', nwFilterId: 'dept-filter', priority: 200 })
+      ];
+
+      mockPrisma.nWFilter.findFirst.mockResolvedValue(deptFilter);
+      mockPrisma.fWRule.findMany
+        .mockResolvedValueOnce(customRules) // Custom rules
+        .mockResolvedValueOnce(customRules); // dept filter rules
+
+      mockPrisma.filterReference.findMany.mockResolvedValueOnce([]); // No references
+
+      const result = await service['getEffectiveRules']('dept-id');
+
+      expect(result).toHaveLength(2);
+      expect(result[0].id).toBe('rule-1');
+      expect(result[1].id).toBe('rule-2');
+    });
+
+    it('should handle deep nesting (5+ levels)', async () => {
+      const deptFilter = createMockNWFilter({ id: 'dept-filter', type: 'department' });
+
+      const rules = [
+        createMockFWRule({ id: 'rule-1', nwFilterId: 'dept-filter', priority: 100 }),
+        createMockFWRule({ id: 'rule-2', nwFilterId: 'level-1', priority: 200 }),
+        createMockFWRule({ id: 'rule-3', nwFilterId: 'level-2', priority: 300 }),
+        createMockFWRule({ id: 'rule-4', nwFilterId: 'level-3', priority: 400 }),
+        createMockFWRule({ id: 'rule-5', nwFilterId: 'level-4', priority: 500 }),
+        createMockFWRule({ id: 'rule-6', nwFilterId: 'level-5', priority: 600 })
+      ];
+
+      mockPrisma.nWFilter.findFirst.mockResolvedValue(deptFilter);
+      mockPrisma.fWRule.findMany
+        .mockResolvedValueOnce([rules[0]]) // Custom rules
+        .mockResolvedValueOnce([rules[0]]) // dept filter
+        .mockResolvedValueOnce([rules[1]]) // level-1
+        .mockResolvedValueOnce([rules[2]]) // level-2
+        .mockResolvedValueOnce([rules[3]]) // level-3
+        .mockResolvedValueOnce([rules[4]]) // level-4
+        .mockResolvedValueOnce([rules[5]]); // level-5
+
+      mockPrisma.filterReference.findMany
+        .mockResolvedValueOnce([{ id: 'ref-1', sourceFilterId: 'dept-filter', targetFilterId: 'level-1' }])
+        .mockResolvedValueOnce([{ id: 'ref-2', sourceFilterId: 'level-1', targetFilterId: 'level-2' }])
+        .mockResolvedValueOnce([{ id: 'ref-3', sourceFilterId: 'level-2', targetFilterId: 'level-3' }])
+        .mockResolvedValueOnce([{ id: 'ref-4', sourceFilterId: 'level-3', targetFilterId: 'level-4' }])
+        .mockResolvedValueOnce([{ id: 'ref-5', sourceFilterId: 'level-4', targetFilterId: 'level-5' }])
+        .mockResolvedValueOnce([]); // level-5 has no references
+
+      const startTime = Date.now();
+      const result = await service['getEffectiveRules']('dept-id');
+      const endTime = Date.now();
+
+      expect(result).toHaveLength(6);
+      expect(result.map(r => r.id)).toEqual(['rule-1', 'rule-2', 'rule-3', 'rule-4', 'rule-5', 'rule-6']);
+      expect(endTime - startTime).toBeLessThan(1000); // Should complete within 1 second
+    });
+  });
+
   describe('Validation Methods', () => {
     describe('validateRulePriority', () => {
       it('should return true for valid priorities (100-1000)', () => {

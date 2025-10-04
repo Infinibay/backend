@@ -49,6 +49,53 @@ export class DepartmentFirewallService {
     return false
   }
 
+  /**
+   * Recursively fetches all rules from filters referenced by a given filter (directly or indirectly).
+   * Does NOT include the starting filter's own rules - only rules from referenced filters.
+   * Uses depth-first traversal to collect rules from the entire reference chain.
+   *
+   * @param filterId - The ID of the filter whose references to traverse
+   * @param visitedFilters - Set of already visited filter IDs to prevent infinite loops
+   * @param includeDirectRules - Whether to include direct rules from this filter (used internally for recursion)
+   * @returns Array of all FWRule objects from referenced filters in the chain
+   */
+  private async getAllReferencedRules (
+    filterId: string,
+    visitedFilters: Set<string>,
+    includeDirectRules: boolean = false
+  ): Promise<FWRule[]> {
+    // Prevent infinite loops by checking if we've already visited this filter
+    if (visitedFilters.has(filterId)) {
+      return []
+    }
+
+    // Mark this filter as visited
+    visitedFilters.add(filterId)
+
+    // Fetch all filter references where this filter is the source
+    const references = await this.prisma.filterReference.findMany({
+      where: { sourceFilterId: filterId }
+    })
+
+    // Recursively collect rules from all referenced filters
+    const allRules: FWRule[] = []
+
+    for (const reference of references) {
+      // Get the referenced filter's direct rules
+      const targetFilterRules = await this.prisma.fWRule.findMany({
+        where: { nwFilterId: reference.targetFilterId }
+      })
+
+      allRules.push(...targetFilterRules)
+
+      // Recursively get rules from filters that the target filter references
+      const nestedRules = await this.getAllReferencedRules(reference.targetFilterId, visitedFilters, false)
+      allRules.push(...nestedRules)
+    }
+
+    return allRules
+  }
+
   async getDepartmentFirewallState (departmentId: string): Promise<DepartmentFirewallState> {
     const department = await this.prisma.department.findUnique({
       where: { id: departmentId },
@@ -323,17 +370,12 @@ export class DepartmentFirewallService {
     }
 
     const customRules = await this.getDepartmentCustomRules(departmentId)
-    const appliedTemplates = await this.getAppliedTemplates(departmentId)
 
-    const templateRules: FWRule[] = []
-    for (const template of appliedTemplates) {
-      const rules = await this.prisma.fWRule.findMany({
-        where: { nwFilterId: template.id }
-      })
-      templateRules.push(...rules)
-    }
+    // Recursively fetch all rules from the entire reference chain
+    const referencedRules = await this.getAllReferencedRules(departmentFilter.id, new Set<string>())
 
-    return [...templateRules, ...customRules].sort((a, b) => a.priority - b.priority)
+    // Combine custom rules and recursively fetched rules, then sort by priority
+    return [...referencedRules, ...customRules].sort((a, b) => a.priority - b.priority)
   }
 
   async refreshAllVMFilters (departmentId: string): Promise<boolean> {

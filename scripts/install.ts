@@ -29,7 +29,8 @@ function prepareFolders () {
     path.join(isoPermanentDir, 'windows'),
     path.join(baseDir, 'disks'),
     path.join(baseDir, 'uefi'),
-    path.join(baseDir, 'sockets')
+    path.join(baseDir, 'sockets'),
+    path.join(baseDir, 'wallpapers')
   ]
 
   directories.forEach(dir => {

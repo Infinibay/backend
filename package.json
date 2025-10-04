@@ -5,7 +5,7 @@
   "main": "dist/index.js",
   "scripts": {
     "start": "ts-node -r tsconfig-paths/register app/index.ts",
-    "dev": "DEBUG=infinibay:virtio-socket npm run start",
+    "dev": "DEBUG=infinibay:* npm run start",
     "dev:verbose": "DEBUG=infinibay:virtio-socket:* npm run start",
     "test": "jest",
     "lint": "eslint . --ext .ts,.tsx",
@@ -136,6 +136,9 @@
   },
   "prisma": {
     "seed": "ts-node prisma/seed.ts"
+  },
+  "engines": {
+    "node": ">=18.18.0"
   },
   "_moduleAliases": {
     "@main/*": [

@@ -106,6 +106,13 @@ input ApplyFirewallTemplateInput {
   template: FirewallTemplate!
 }
 
+type AssignedGenericFilter {
+  filter: GenericFilter!
+  inheritedFrom: String
+  inheritedFromId: ID
+  isInherited: Boolean!
+}
+
 type BackgroundHealthServiceStatus {
   activeQueues: Int!
   cronActive: Boolean!
@@ -791,6 +798,8 @@ type Mutation {
   addFilterReference(sourceFilterId: ID!, targetFilterId: ID!): Boolean!
   applyDepartmentFirewallTemplate(input: ApplyDepartmentTemplateInput!): Boolean!
   applyFirewallTemplate(input: ApplyFirewallTemplateInput!): VMFirewallState!
+  assignGenericFilterToDepartment(departmentId: ID!, genericFilterId: ID!): Boolean!
+  assignGenericFilterToVM(genericFilterId: ID!, vmId: ID!): Boolean!
 
   """Calculate ISO checksum"""
   calculateISOChecksum(isoId: String!): String!
@@ -921,6 +930,8 @@ type Mutation {
   toggleMaintenanceTask(enabled: Boolean!, id: ID!): MaintenanceTaskResponse!
   toggleVmService(input: ToggleVmServiceInput!): VmServiceStatus!
   triggerHealthCheckRound: HealthCheckRoundResult!
+  unassignGenericFilterFromDepartment(departmentId: ID!, genericFilterId: ID!): Boolean!
+  unassignGenericFilterFromVM(genericFilterId: ID!, vmId: ID!): Boolean!
   updateAppSettings(input: AppSettingsInput!): AppSettings!
   updateApplication(id: String!, input: CreateApplicationInputType!): ApplicationType!
   updateDepartmentFirewallRule(input: UpdateFilterRuleInput!, ruleId: ID!): FWRule!
@@ -1120,11 +1131,13 @@ type Query {
   getAppSettings: AppSettings!
   getAvailableFirewallTemplates: [FirewallTemplateInfo!]!
   getAvailableTemplatesForDepartment(departmentId: ID!): [GenericFilter!]!
+  getDepartmentAssignedGenericFilters(departmentId: ID!): [GenericFilter!]!
   getDepartmentFirewallRules(departmentId: ID!): [FWRule!]!
   getDepartmentFirewallState(departmentId: ID!): DepartmentFirewallState!
   getDepartmentServiceStatus(departmentId: ID!, serviceId: ID): [DepartmentServiceStatus!]!
   getFilter(id: ID!): GenericFilter
   getFirewallTemplateInfo(template: FirewallTemplate!): FirewallTemplateInfo
+  getGenericFilters: [GenericFilter!]!
   getGlobalServiceStatus(serviceId: ID): [GlobalServiceStatus!]!
   getGraphics: [GPU!]!
   getLatestVMHealth(machineId: ID!): VMHealthSnapshotType
@@ -1137,6 +1150,7 @@ type Query {
 
   """Get installed applications inventory for a VM"""
   getVMApplicationInventory(vmId: ID!): ApplicationInventory!
+  getVMAssignedGenericFilters(vmId: ID!): [AssignedGenericFilter!]!
   getVMFirewallState(machineId: ID!): VMFirewallState!
 
   """Get comprehensive health check status for a VM"""

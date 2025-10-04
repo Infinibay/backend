@@ -27,6 +27,7 @@ import { VMRecommendationResolver } from './VMRecommendationResolver'
 import '../types/RecommendationTypes'
 import { AdvancedFirewallResolver } from './AdvancedFirewallResolver'
 import { DepartmentFirewallResolver } from './DepartmentFirewallResolver'
+import { GenericFilterResolver } from './GenericFilterResolver'
 import { AppSettingsResolver } from './AppSettingsResolver'
 
 const resolvers: NonEmptyArray<Function> = [
@@ -52,6 +53,7 @@ const resolvers: NonEmptyArray<Function> = [
   SimplifiedFirewallResolver,
   AdvancedFirewallResolver,
   DepartmentFirewallResolver,
+  GenericFilterResolver,
   MetricsResolver,
   AutoCheckResolver,
   VMHealthHistoryResolver,

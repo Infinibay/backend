@@ -3168,5 +3168,482 @@ describe('Department Firewall Integration', () => {
       })
     })
   })
+
+  describe('Recursive Filter Reference Tests', () => {
+    it('should fetch rules from deeply nested filter references (4+ levels)', async () => {
+      await runTestInTransaction(async ({ testDepartment, adminContext }) => {
+        // Create department filter
+        const departmentFilter = await adminContext.prisma.nWFilter.create({
+          data: {
+            name: `dept-${testDepartment.name}`,
+            internalName: `dept-filter-${testDepartment.id}`,
+            uuid: `uuid-${testDepartment.id}`,
+            description: 'Department firewall filter',
+            chain: 'ipv4',
+            type: 'department',
+            priority: 500,
+            stateMatch: true,
+            departments: {
+              connect: { id: testDepartment.id }
+            }
+          }
+        })
+
+        // Create 4-level chain: dept -> level1 -> level2 -> level3 -> level4
+        const level1 = await adminContext.prisma.nWFilter.create({
+          data: {
+            name: 'level-1',
+            internalName: 'level-1-filter',
+            uuid: 'level-1-uuid',
+            description: 'Level 1 template',
+            chain: 'ipv4',
+            type: 'generic',
+            priority: 400,
+            stateMatch: true
+          }
+        })
+
+        const level2 = await adminContext.prisma.nWFilter.create({
+          data: {
+            name: 'level-2',
+            internalName: 'level-2-filter',
+            uuid: 'level-2-uuid',
+            description: 'Level 2 template',
+            chain: 'ipv4',
+            type: 'generic',
+            priority: 300,
+            stateMatch: true
+          }
+        })
+
+        const level3 = await adminContext.prisma.nWFilter.create({
+          data: {
+            name: 'level-3',
+            internalName: 'level-3-filter',
+            uuid: 'level-3-uuid',
+            description: 'Level 3 template',
+            chain: 'ipv4',
+            type: 'generic',
+            priority: 200,
+            stateMatch: true
+          }
+        })
+
+        const level4 = await adminContext.prisma.nWFilter.create({
+          data: {
+            name: 'level-4',
+            internalName: 'level-4-filter',
+            uuid: 'level-4-uuid',
+            description: 'Level 4 template',
+            chain: 'ipv4',
+            type: 'generic',
+            priority: 100,
+            stateMatch: true
+          }
+        })
+
+        // Create rules at each level
+        await adminContext.prisma.fWRule.create({
+          data: {
+            nwFilterId: departmentFilter.id,
+            action: 'accept',
+            direction: 'in',
+            priority: 500,
+            protocol: 'tcp',
+            dstPortStart: 22,
+            dstPortEnd: 22,
+            comment: 'Department custom rule'
+          }
+        })
+
+        await adminContext.prisma.fWRule.create({
+          data: {
+            nwFilterId: level1.id,
+            action: 'accept',
+            direction: 'in',
+            priority: 400,
+            protocol: 'tcp',
+            dstPortStart: 80,
+            dstPortEnd: 80,
+            comment: 'Level 1 HTTP'
+          }
+        })
+
+        await adminContext.prisma.fWRule.create({
+          data: {
+            nwFilterId: level2.id,
+            action: 'accept',
+            direction: 'in',
+            priority: 300,
+            protocol: 'tcp',
+            dstPortStart: 443,
+            dstPortEnd: 443,
+            comment: 'Level 2 HTTPS'
+          }
+        })
+
+        await adminContext.prisma.fWRule.create({
+          data: {
+            nwFilterId: level3.id,
+            action: 'accept',
+            direction: 'in',
+            priority: 200,
+            protocol: 'tcp',
+            dstPortStart: 3306,
+            dstPortEnd: 3306,
+            comment: 'Level 3 MySQL'
+          }
+        })
+
+        await adminContext.prisma.fWRule.create({
+          data: {
+            nwFilterId: level4.id,
+            action: 'drop',
+            direction: 'in',
+            priority: 100,
+            protocol: 'all',
+            comment: 'Level 4 Drop All'
+          }
+        })
+
+        // Create reference chain
+        await adminContext.prisma.filterReference.create({
+          data: {
+            sourceFilterId: departmentFilter.id,
+            targetFilterId: level1.id
+          }
+        })
+
+        await adminContext.prisma.filterReference.create({
+          data: {
+            sourceFilterId: level1.id,
+            targetFilterId: level2.id
+          }
+        })
+
+        await adminContext.prisma.filterReference.create({
+          data: {
+            sourceFilterId: level2.id,
+            targetFilterId: level3.id
+          }
+        })
+
+        await adminContext.prisma.filterReference.create({
+          data: {
+            sourceFilterId: level3.id,
+            targetFilterId: level4.id
+          }
+        })
+
+        // Query firewall rules
+        const response = await executeGraphQL(
+          GET_DEPARTMENT_FIREWALL_RULES,
+          { departmentId: testDepartment.id },
+          adminContext
+        )
+
+        expect(response.errors).toBeUndefined()
+        const rules = response.data?.getDepartmentFirewallRules
+
+        // Should have all 5 rules from all levels
+        expect(rules).toHaveLength(5)
+
+        // Verify rules are sorted by priority
+        expect(rules[0].comment).toBe('Level 4 Drop All')
+        expect(rules[1].comment).toBe('Level 3 MySQL')
+        expect(rules[2].comment).toBe('Level 2 HTTPS')
+        expect(rules[3].comment).toBe('Level 1 HTTP')
+        expect(rules[4].comment).toBe('Department custom rule')
+      })
+    })
+
+    it('should show Basic Security nested rules in department firewall state', async () => {
+      await runTestInTransaction(async ({ testDepartment, adminContext }) => {
+        // The department callback already creates Basic Security and Drop All references
+        // We just need to verify we can see all nested rules
+
+        const response = await executeGraphQL(
+          `
+            query GetDepartmentFirewallState($departmentId: ID!) {
+              getDepartmentFirewallState(departmentId: $departmentId) {
+                departmentId
+                effectiveRules {
+                  id
+                  action
+                  direction
+                  priority
+                  protocol
+                  comment
+                }
+                appliedTemplates
+                vmCount
+              }
+            }
+          `,
+          { departmentId: testDepartment.id },
+          adminContext
+        )
+
+        expect(response.errors).toBeUndefined()
+        const state = response.data?.getDepartmentFirewallState
+
+        expect(state).toBeDefined()
+        expect(state.departmentId).toBe(testDepartment.id)
+
+        // Should have rules from:
+        // - Basic Security filter (if it has direct rules)
+        // - Clean Traffic filter (referenced by Basic Security)
+        // - DHCP filter (referenced by Basic Security)
+        // - Use HTTP service filter (referenced by Basic Security)
+        // - Use HTTPS service filter (referenced by Basic Security)
+        // - Drop All filter
+        expect(state.effectiveRules.length).toBeGreaterThan(0)
+
+        // Verify rules are sorted by priority
+        for (let i = 1; i < state.effectiveRules.length; i++) {
+          expect(state.effectiveRules[i].priority).toBeGreaterThanOrEqual(
+            state.effectiveRules[i - 1].priority
+          )
+        }
+      })
+    })
+
+    it('should handle circular filter references without infinite loop', async () => {
+      await runTestInTransaction(async ({ testDepartment, adminContext }) => {
+        // Create filters with circular reference: A -> B -> C -> A
+        const filterA = await adminContext.prisma.nWFilter.create({
+          data: {
+            name: 'filter-a',
+            internalName: 'filter-a',
+            uuid: 'filter-a-uuid',
+            description: 'Filter A',
+            chain: 'ipv4',
+            type: 'department',
+            priority: 500,
+            stateMatch: true,
+            departments: {
+              connect: { id: testDepartment.id }
+            }
+          }
+        })
+
+        const filterB = await adminContext.prisma.nWFilter.create({
+          data: {
+            name: 'filter-b',
+            internalName: 'filter-b',
+            uuid: 'filter-b-uuid',
+            description: 'Filter B',
+            chain: 'ipv4',
+            type: 'generic',
+            priority: 400,
+            stateMatch: true
+          }
+        })
+
+        const filterC = await adminContext.prisma.nWFilter.create({
+          data: {
+            name: 'filter-c',
+            internalName: 'filter-c',
+            uuid: 'filter-c-uuid',
+            description: 'Filter C',
+            chain: 'ipv4',
+            type: 'generic',
+            priority: 300,
+            stateMatch: true
+          }
+        })
+
+        // Create rules
+        await adminContext.prisma.fWRule.create({
+          data: {
+            nwFilterId: filterA.id,
+            action: 'accept',
+            direction: 'in',
+            priority: 500,
+            protocol: 'tcp',
+            comment: 'Rule A'
+          }
+        })
+
+        await adminContext.prisma.fWRule.create({
+          data: {
+            nwFilterId: filterB.id,
+            action: 'accept',
+            direction: 'in',
+            priority: 400,
+            protocol: 'tcp',
+            comment: 'Rule B'
+          }
+        })
+
+        await adminContext.prisma.fWRule.create({
+          data: {
+            nwFilterId: filterC.id,
+            action: 'accept',
+            direction: 'in',
+            priority: 300,
+            protocol: 'tcp',
+            comment: 'Rule C'
+          }
+        })
+
+        // Create circular reference
+        await adminContext.prisma.filterReference.createMany({
+          data: [
+            { sourceFilterId: filterA.id, targetFilterId: filterB.id },
+            { sourceFilterId: filterB.id, targetFilterId: filterC.id },
+            { sourceFilterId: filterC.id, targetFilterId: filterA.id }
+          ]
+        })
+
+        // Query should complete without timeout
+        const startTime = Date.now()
+        const response = await executeGraphQL(
+          GET_DEPARTMENT_FIREWALL_RULES,
+          { departmentId: testDepartment.id },
+          adminContext
+        )
+        const endTime = Date.now()
+
+        expect(response.errors).toBeUndefined()
+        const rules = response.data?.getDepartmentFirewallRules
+
+        // Should have exactly 3 rules (each filter's rule once)
+        expect(rules).toHaveLength(3)
+
+        // Should complete in reasonable time (< 1 second)
+        expect(endTime - startTime).toBeLessThan(1000)
+
+        // Verify each rule appears once
+        const comments = rules.map((r: any) => r.comment)
+        expect(comments).toContain('Rule A')
+        expect(comments).toContain('Rule B')
+        expect(comments).toContain('Rule C')
+      })
+    })
+
+    it('should not duplicate rules in diamond dependency pattern', async () => {
+      await runTestInTransaction(async ({ testDepartment, adminContext }) => {
+        // Create diamond: dept -> [templateA, templateB] -> sharedTemplate
+        const deptFilter = await adminContext.prisma.nWFilter.create({
+          data: {
+            name: `dept-${testDepartment.name}`,
+            internalName: `dept-filter-${testDepartment.id}`,
+            uuid: `uuid-${testDepartment.id}`,
+            description: 'Department firewall filter',
+            chain: 'ipv4',
+            type: 'department',
+            priority: 500,
+            stateMatch: true,
+            departments: {
+              connect: { id: testDepartment.id }
+            }
+          }
+        })
+
+        const templateA = await adminContext.prisma.nWFilter.create({
+          data: {
+            name: 'template-a',
+            internalName: 'template-a',
+            uuid: 'template-a-uuid',
+            description: 'Template A',
+            chain: 'ipv4',
+            type: 'generic',
+            priority: 400,
+            stateMatch: true
+          }
+        })
+
+        const templateB = await adminContext.prisma.nWFilter.create({
+          data: {
+            name: 'template-b',
+            internalName: 'template-b',
+            uuid: 'template-b-uuid',
+            description: 'Template B',
+            chain: 'ipv4',
+            type: 'generic',
+            priority: 300,
+            stateMatch: true
+          }
+        })
+
+        const sharedTemplate = await adminContext.prisma.nWFilter.create({
+          data: {
+            name: 'shared-template',
+            internalName: 'shared-template',
+            uuid: 'shared-template-uuid',
+            description: 'Shared Template',
+            chain: 'ipv4',
+            type: 'generic',
+            priority: 200,
+            stateMatch: true
+          }
+        })
+
+        // Create unique rules
+        await adminContext.prisma.fWRule.create({
+          data: {
+            nwFilterId: templateA.id,
+            action: 'accept',
+            direction: 'in',
+            priority: 400,
+            protocol: 'tcp',
+            comment: 'Template A rule'
+          }
+        })
+
+        await adminContext.prisma.fWRule.create({
+          data: {
+            nwFilterId: templateB.id,
+            action: 'accept',
+            direction: 'in',
+            priority: 300,
+            protocol: 'tcp',
+            comment: 'Template B rule'
+          }
+        })
+
+        await adminContext.prisma.fWRule.create({
+          data: {
+            nwFilterId: sharedTemplate.id,
+            action: 'accept',
+            direction: 'in',
+            priority: 200,
+            protocol: 'tcp',
+            dstPortStart: 8080,
+            dstPortEnd: 8080,
+            comment: 'Shared template unique rule'
+          }
+        })
+
+        // Create diamond references
+        await adminContext.prisma.filterReference.createMany({
+          data: [
+            { sourceFilterId: deptFilter.id, targetFilterId: templateA.id },
+            { sourceFilterId: deptFilter.id, targetFilterId: templateB.id },
+            { sourceFilterId: templateA.id, targetFilterId: sharedTemplate.id },
+            { sourceFilterId: templateB.id, targetFilterId: sharedTemplate.id }
+          ]
+        })
+
+        // Query firewall rules
+        const response = await executeGraphQL(
+          GET_DEPARTMENT_FIREWALL_RULES,
+          { departmentId: testDepartment.id },
+          adminContext
+        )
+
+        expect(response.errors).toBeUndefined()
+        const rules = response.data?.getDepartmentFirewallRules
+
+        // Should have 3 unique rules (not 4 - shared template rule should appear once)
+        expect(rules).toHaveLength(3)
+
+        // Verify shared template rule appears only once
+        const sharedRules = rules.filter((r: any) => r.comment === 'Shared template unique rule')
+        expect(sharedRules).toHaveLength(1)
+      })
+    })
+  })
 })
 })
