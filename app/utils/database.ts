@@ -1,10 +1,15 @@
 import { PrismaClient } from '@prisma/client'
+import { createPrismaClientWithCallbacks } from './modelsCallbacks'
+
+// Type for the extended Prisma client with callbacks
+// We use 'any' assertion to maintain compatibility with existing code that expects PrismaClient
+type ExtendedPrismaClient = ReturnType<typeof createPrismaClientWithCallbacks> & PrismaClient
 
 declare global {
-  var prisma: PrismaClient | undefined
+  var prisma: ExtendedPrismaClient | undefined
 }
 
-const prismaClientSingleton = (): PrismaClient => {
+const prismaClientSingleton = (): ExtendedPrismaClient => {
   // Parse the DATABASE_URL to add connection pool parameters
   const databaseUrl = process.env.DATABASE_URL || ''
 
@@ -18,7 +23,7 @@ const prismaClientSingleton = (): PrismaClient => {
     pooledUrl += `${separator}connection_limit=20&pool_timeout=10`
   }
 
-  const client = new PrismaClient({
+  const baseClient = new PrismaClient({
     log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
     datasources: {
       db: {
@@ -28,17 +33,22 @@ const prismaClientSingleton = (): PrismaClient => {
   })
 
   // Eagerly connect to ensure the connection pool is established
-  client.$connect()
+  baseClient.$connect()
     .then(() => {
       console.log('✅ Database connected successfully with connection pooling')
       console.log('   Connection limit: 20, Pool timeout: 10s')
+      console.log('   Prisma Client Extensions: Model callbacks enabled')
     })
     .catch((error) => {
       console.error('❌ Failed to connect to database:', error)
       process.exit(1)
     })
 
-  return client
+  // Apply client extensions with model callbacks
+  // We cast to ExtendedPrismaClient to maintain type compatibility with existing code
+  const extendedClient = createPrismaClientWithCallbacks(baseClient) as ExtendedPrismaClient
+
+  return extendedClient
 }
 
 const prisma = globalThis.prisma ?? prismaClientSingleton()

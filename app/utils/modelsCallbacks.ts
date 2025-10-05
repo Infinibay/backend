@@ -1,61 +1,72 @@
-import { PrismaClient } from '@prisma/client'
+import { PrismaClient, Prisma } from '@prisma/client'
 import { beforeCreateMachine, afterCreateMachine } from './modelCallbacks/machine'
 import { afterCreateDepartment } from './modelCallbacks/department'
 import { afterCreateNWfilter } from './modelCallbacks/nwfilter'
 
-class ModelsCallbackManager {
-  private callbacks: any = {
-    before: {},
-    after: {}
-  }
+/**
+ * Creates a Prisma Client Extension with model lifecycle callbacks
+ *
+ * This replaces the old Prisma middleware ($use) which was removed in Prisma 5.
+ * Now using Client Extensions pattern for before/after hooks on model operations.
+ *
+ * @param prisma - Base Prisma client instance
+ * @returns Extended Prisma client with callback support
+ */
+export function createPrismaClientWithCallbacks(prisma: PrismaClient) {
+  return prisma.$extends({
+    name: 'ModelCallbacks',
+    query: {
+      // Machine model callbacks
+      machine: {
+        async create({ args, query }) {
+          // Run before callback
+          await beforeCreateMachine(prisma, args)
 
-  private prisma: PrismaClient
-  constructor (prisma: PrismaClient) {
-    this.prisma = prisma
-  }
+          // Execute the actual query
+          const result = await query(args)
 
-  registerCallback (type: 'before' | 'after', action: string, model: any, callback: Function) {
-    if (!this.callbacks[type][action]) {
-      this.callbacks[type][action] = {}
-    }
-    this.callbacks[type][action][model] = callback
-  }
+          // Run after callback
+          await afterCreateMachine(prisma, args, result)
 
-  async runsBeforeCallback (action: any, model: any, params: any) {
-    const type = 'before'
-    if (!this.callbacks[type][action]) {
-      this.callbacks[type][action] = {}
-    }
-    if (this.callbacks[type][action][model]) {
-      await this.callbacks[type][action][model](this.prisma, params)
-    }
-  }
+          return result
+        }
+      },
 
-  async runsAfterCallback (action: any, model: any, params: any, result: any) {
-    const type = 'after'
-    if (!this.callbacks[type][action]) {
-      this.callbacks[type][action] = {}
+      // Department model callbacks
+      department: {
+        async create({ args, query }) {
+          // Execute the query
+          const result = await query(args)
+
+          // Run after callback
+          await afterCreateDepartment(prisma, args, result)
+
+          return result
+        }
+      },
+
+      // NWFilter model callbacks
+      nWFilter: {
+        async create({ args, query }) {
+          // Execute the query
+          const result = await query(args)
+
+          // Run after callback
+          await afterCreateNWfilter(prisma, args, result)
+
+          return result
+        }
+      }
     }
-    if (this.callbacks[type][action][model]) {
-      await this.callbacks[type][action][model](this.prisma, params, result)
-    }
-  }
+  })
 }
 
-export default async function installCallbacks (prisma: PrismaClient) {
-  const mcbm = new ModelsCallbackManager(prisma)
-
-  mcbm.registerCallback('before', 'create', 'Machine', beforeCreateMachine)
-  mcbm.registerCallback('after', 'create', 'Machine', afterCreateMachine)
-  mcbm.registerCallback('after', 'create', 'Department', afterCreateDepartment)
-  mcbm.registerCallback('after', 'create', 'NWFilter', afterCreateNWfilter)
-
-  // Middleware 1
-  prisma.$use(async (params, next) => {
-    await mcbm.runsBeforeCallback(params.action, params.model, params)
-    const result = await next(params)
-    await mcbm.runsAfterCallback(params.action, params.model, params, result)
-
-    return result
-  })
+/**
+ * Legacy function for backward compatibility
+ * @deprecated Use createPrismaClientWithCallbacks instead
+ */
+export default function installCallbacks(prisma: PrismaClient) {
+  // This function is kept for backward compatibility but doesn't do anything
+  // The actual extension is applied in database.ts when creating the client
+  console.warn('installCallbacks is deprecated. Callbacks are now automatically applied via Prisma Client Extensions.')
 }

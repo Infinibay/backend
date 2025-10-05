@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client'
+import { PrismaClient, Prisma } from '@prisma/client'
 import dbSingleton from '../database'
 
 import { NetworkFilterService } from '../../services/networkFilterService'
@@ -10,7 +10,11 @@ const debug = new Debugger('model-callbacks:nwfilter')
  * This callback runs after a network filter is created, but before the transaction is committed.
  * We need to defer the filter application until after the transaction is committed.
  */
-export async function afterCreateNWfilter (prisma: PrismaClient, params: any, filter: any) {
+export async function afterCreateNWfilter (
+  prisma: PrismaClient,
+  args: Prisma.NWFilterCreateArgs,
+  filter: any // Result from Client Extension has optional fields
+): Promise<void> {
   // We need to defer the filter application until after the transaction is committed
   // Using process.nextTick ensures this runs after the current event loop iteration
   // which should be after the transaction is committed

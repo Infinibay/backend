@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client'
+import { PrismaClient, Prisma } from '@prisma/client'
 
 import { v4 as uuidv4 } from 'uuid'
 import { randomBytes } from 'crypto'
@@ -108,7 +108,11 @@ export async function createDepartmentFilter (prisma: PrismaClient, department: 
  * This callback runs after a department is created, but before the transaction is committed.
  * We need to defer the filter creation until after the transaction is committed.
  */
-export async function afterCreateDepartment (prisma: PrismaClient, params: any, result: any) {
+export async function afterCreateDepartment (
+  prisma: PrismaClient,
+  args: Prisma.DepartmentCreateArgs,
+  result: any // Result from Client Extension has optional fields
+): Promise<void> {
   process.nextTick(async () => {
     try {
       // Create a new Prisma client instance to ensure we're not in the same transaction

@@ -6,7 +6,7 @@ import 'reflect-metadata'
 import cors from 'cors'
 import jwt from 'jsonwebtoken'
 
-// Prisma Client
+// Prisma Client (with callbacks extension applied automatically)
 import prisma from './utils/database'
 
 // Configuration Imports
@@ -17,7 +17,6 @@ import { expressMiddleware } from '@apollo/server/express4'
 import { InfinibayContext, createUserValidationHelpers, SafeUser } from './utils/context'
 import { verifyRequestAuth } from './utils/jwtAuth'
 
-import installCallbacks from './utils/modelsCallbacks'
 import { checkGpuAffinity } from './utils/checkGpuAffinity'
 
 // Real-time Services
@@ -108,7 +107,8 @@ async function bootstrap (): Promise<void> {
       })
     )
 
-    installCallbacks(prisma)
+    // Note: Model callbacks are now automatically applied via Prisma Client Extensions
+    // See app/utils/database.ts and app/utils/modelsCallbacks.ts
 
     // Initialize Socket.io and Event Management
     const socketService = createSocketService(prisma)

@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client'
+import { PrismaClient, Prisma } from '@prisma/client'
 
 import { v4 as uuidv4 } from 'uuid'
 import { randomBytes } from 'crypto'
@@ -8,7 +8,10 @@ import { Debugger } from '../debug'
 
 const debug = new Debugger('model-callbacks:machine')
 
-export async function beforeCreateMachine (prisma: PrismaClient, params: any) {
+export async function beforeCreateMachine (
+  prisma: PrismaClient,
+  args: Prisma.MachineCreateArgs
+): Promise<void> {
   // No pre-creation actions needed
 }
 
@@ -134,7 +137,11 @@ export async function createMachineFilter (prisma: PrismaClient, machine: any) {
  * This callback runs after a machine is created, but before the transaction is committed.
  * We need to defer the filter creation until after the transaction is committed.
  */
-export async function afterCreateMachine (prisma: PrismaClient, params: any, result: any) {
+export async function afterCreateMachine (
+  prisma: PrismaClient,
+  args: Prisma.MachineCreateArgs,
+  result: any // Result from Client Extension has optional fields
+): Promise<void> {
   // We need to defer the filter creation until after the transaction is committed
   // Using process.nextTick ensures this runs after the current event loop iteration
   // which should be after the transaction is committed
