@@ -1,4 +1,4 @@
-import { Connection } from '../../lib/libvirt-node'
+import { Connection } from '@infinibay/libvirt-node'
 import { Debugger } from './debug'
 
 const debug = new Debugger('libvirt')
@@ -11,7 +11,7 @@ let libvirtConnection: Connection | null = null
 export async function getLibvirtConnection (): Promise<Connection> {
   if (!libvirtConnection) {
     try {
-      const libvirt = await import('../../lib/libvirt-node')
+      const libvirt = await import('@infinibay/libvirt-node')
       libvirtConnection = libvirt.Connection.open('qemu:///system')
       if (!libvirtConnection) {
         throw new Error('Failed to open libvirt connection')

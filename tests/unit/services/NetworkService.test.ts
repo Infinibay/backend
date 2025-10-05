@@ -1,7 +1,7 @@
 import 'reflect-metadata'
 import { describe, it, expect, beforeEach, jest } from '@jest/globals'
 import { NetworkService } from '../../../app/services/networkService'
-import { Connection, Network } from 'libvirt-node'
+import { Connection, Network } from '@infinibay/libvirt-node'
 import { XMLNetworkGenerator } from '../../../app/utils/VirtManager/xmlNetworkGenerator'
 
 // Mock Domain type (not exported from libvirt-node)

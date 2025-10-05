@@ -1,4 +1,4 @@
-import { Connection, Network } from 'libvirt-node'
+import { Connection, Network } from '@infinibay/libvirt-node'
 import { parseStringPromise } from 'xml2js'
 import { XMLNetworkGenerator } from '@utils/VirtManager/xmlNetworkGenerator'
 import { CreateNetworkInput } from '@graphql/resolvers/networks/types'

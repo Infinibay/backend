@@ -4,7 +4,7 @@
 // * Update all vm to running if they are found in the list
 import { CronJob } from 'cron'
 // libvirt-node
-import { Connection } from 'libvirt-node'
+import { Connection } from '@infinibay/libvirt-node'
 import prisma from '../utils/database'
 import { getEventManager } from '../services/EventManager'
 import { getVMHealthQueueManager } from '../services/VMHealthQueueManager'

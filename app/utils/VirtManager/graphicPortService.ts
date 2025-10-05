@@ -2,7 +2,7 @@ import {
   Connection,
   Machine as VirtualMachine,
   Error as LibvirtError
-} from 'libvirt-node'
+} from '@infinibay/libvirt-node'
 import { DOMParser, XMLSerializer } from 'xmldom'
 
 import { Debugger } from '@utils/debug'

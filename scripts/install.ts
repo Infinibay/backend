@@ -2,7 +2,7 @@ import axios from 'axios'
 import fs from 'fs'
 import dotenv from 'dotenv'
 import path from 'path'
-import { Connection, Network } from 'libvirt-node'
+import { Connection, Network } from '@infinibay/libvirt-node'
 import { v4 as uuidv4 } from 'uuid'
 import { DOMParser } from 'xmldom'
 

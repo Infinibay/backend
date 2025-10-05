@@ -14,10 +14,10 @@ import {
 } from '../setup/mock-factories'
 import { OsEnum } from '@graphql/resolvers/machine/type'
 import { mockPrisma } from '../setup/jest.setup'
-import { Connection } from 'libvirt-node'
+import { Connection } from '@infinibay/libvirt-node'
 
 // Mock libvirt-node
-jest.mock('libvirt-node')
+jest.mock('@infinibay/libvirt-node')
 
 // Mock VirtManager
 jest.mock('@utils/VirtManager', () => ({

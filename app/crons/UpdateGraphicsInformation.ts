@@ -1,6 +1,6 @@
 import { CronJob } from 'cron'
 import { Machine as PrismaMachine } from '@prisma/client'
-import { Connection, Machine as LibvirtMachine, VirDomainXMLFlags } from 'libvirt-node'
+import { Connection, Machine as LibvirtMachine, VirDomainXMLFlags } from '@infinibay/libvirt-node'
 import { DOMParser } from 'xmldom'
 import { networkInterfaces } from 'systeminformation'
 import prisma from '../utils/database'

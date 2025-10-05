@@ -1,5 +1,5 @@
 import { PrismaClient, Machine } from '@prisma/client'
-import { Connection, Machine as VirtualMachine, StoragePool, StorageVol, Error as LibvirtError, ErrorNumber } from 'libvirt-node'
+import { Connection, Machine as VirtualMachine, StoragePool, StorageVol, Error as LibvirtError, ErrorNumber } from '@infinibay/libvirt-node'
 import { CreateMachineService } from '@utils/VirtManager/createMachineService'
 
 import { Debugger } from '@utils/debug'

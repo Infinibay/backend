@@ -1,4 +1,4 @@
-import { Connection } from '../../lib/libvirt-node'
+import { Connection } from '@infinibay/libvirt-node'
 import { v4 as uuidv4 } from 'uuid'
 import { SingletonService } from './base/SingletonService'
 import { ServiceConfig } from './base/BaseService'

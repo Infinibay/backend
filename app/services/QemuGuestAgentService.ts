@@ -1,6 +1,6 @@
 import { Debugger } from '../utils/debug'
 import { getLibvirtConnection } from '../utils/libvirt'
-import { Connection, Machine } from '../../lib/libvirt-node'
+import { Connection, Machine } from '@infinibay/libvirt-node'
 
 /**
  * Service for interacting with QEMU Guest Agent to debug VM issues

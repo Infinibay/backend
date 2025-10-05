@@ -1,7 +1,7 @@
 import { CronJob } from 'cron'
 import { Machine as PrismaMachine } from '@prisma/client'
 import { KNOWN_SERVICES } from '../config/knownServices'
-import { Connection, Machine as LibvirtMachine } from 'libvirt-node'
+import { Connection, Machine as LibvirtMachine } from '@infinibay/libvirt-node'
 import prisma from '../utils/database'
 
 interface PortInfo {

@@ -1,6 +1,6 @@
 import { PrismaClient, NWFilter, Prisma, FWRule } from '@prisma/client'
 import { v4 as uuidv4 } from 'uuid'
-import { Connection, NwFilter } from 'libvirt-node'
+import { Connection, NwFilter } from '@infinibay/libvirt-node'
 import { Builder, Parser } from 'xml2js'
 import { randomBytes } from 'crypto'
 

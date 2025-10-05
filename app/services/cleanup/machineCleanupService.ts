@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client'
-import { Connection, Machine as VirtualMachine, NwFilter } from 'libvirt-node'
+import { Connection, Machine as VirtualMachine, NwFilter } from '@infinibay/libvirt-node'
 import { XMLGenerator } from '../../utils/VirtManager/xmlGenerator'
 import { Debugger } from '../../utils/debug'
 import { unlinkSync, existsSync } from 'fs'

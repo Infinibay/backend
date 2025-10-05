@@ -7,7 +7,7 @@ import {
   VirDomainXMLFlags,
   Error as LibvirtNodeError,
   VirDomainDestroyFlags
-} from 'libvirt-node'
+} from '@infinibay/libvirt-node'
 import { XMLGenerator } from '../../utils/VirtManager/xmlGenerator'
 import { Debugger } from '../../utils/debug'
 import { parseStringPromise as xmlParse } from 'xml2js'

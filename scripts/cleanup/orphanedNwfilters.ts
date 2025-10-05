@@ -10,7 +10,7 @@
  *   npm run cleanup:nwfilters:force  # Force remove all ibay filters
  */
 
-import { Connection, NwFilter } from 'libvirt-node'
+import { Connection, NwFilter } from '@infinibay/libvirt-node'
 import { PrismaClient } from '@prisma/client'
 import { Debugger } from '../../app/utils/debug'
 import { execSync } from 'child_process'

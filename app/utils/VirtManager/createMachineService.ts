@@ -3,7 +3,7 @@ import path from 'path'
 import si from 'systeminformation'
 
 import { MachineConfiguration, PrismaClient, Machine, MachineTemplate, Application } from '@prisma/client'
-import { Connection, Machine as VirtualMachine, StoragePool, StorageVol, Error as LibvirtError, ErrorNumber } from 'libvirt-node'
+import { Connection, Machine as VirtualMachine, StoragePool, StorageVol, Error as LibvirtError, ErrorNumber } from '@infinibay/libvirt-node'
 
 import { XMLGenerator } from './xmlGenerator'
 import { UnattendedManagerBase } from '@services/unattendedManagerBase'

@@ -1,5 +1,5 @@
 import { PrismaClient, Machine } from '@prisma/client'
-import { Connection, Machine as VirtualMachine, Error as LibvirtError } from 'libvirt-node'
+import { Connection, Machine as VirtualMachine, Error as LibvirtError } from '@infinibay/libvirt-node'
 import { Debugger } from '@utils/debug'
 import { getEventManager } from './EventManager'
 

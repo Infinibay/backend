@@ -1,7 +1,7 @@
 import { PrismaClient } from '@prisma/client'
 import { v4 as uuidv4 } from 'uuid'
 import { randomBytes } from 'crypto'
-import { Connection, NwFilter } from 'libvirt-node'
+import { Connection, NwFilter } from '@infinibay/libvirt-node'
 
 const prisma = new PrismaClient()
 

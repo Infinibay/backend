@@ -1,6 +1,6 @@
 import si from 'systeminformation'
 import { PrismaClient } from '@prisma/client'
-import { Machine as VirtualMachine } from 'libvirt-node'
+import { Machine as VirtualMachine } from '@infinibay/libvirt-node'
 import { CreateMachineService } from './VirtManager/createMachineService'
 
 /**

@@ -1,6 +1,6 @@
 import { PrismaClient, Machine } from '@prisma/client'
 import { VirtioSocketWatcherService, SafeCommandType, CommandResponse } from './VirtioSocketWatcherService'
-import { Machine as VirtualMachine } from 'libvirt-node'
+import { Machine as VirtualMachine } from '@infinibay/libvirt-node'
 import { getLibvirtConnection } from '@utils/libvirt'
 import Debug from 'debug'
 

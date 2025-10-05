@@ -6,12 +6,12 @@ import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 
 // Mock libvirt-node
-jest.mock('libvirt-node', () => ({
+jest.mock('@infinibay/libvirt-node', () => ({
   Connection: { open: jest.fn(), close: jest.fn() },
   NwFilter: { lookupByName: jest.fn(), defineXml: jest.fn() }
 }));
 
-import { Connection, NwFilter } from 'libvirt-node';
+import { Connection, NwFilter } from '@infinibay/libvirt-node';
 
 // Mock xml2js
 const mockBuilder = {
