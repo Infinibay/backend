@@ -369,7 +369,7 @@ export class CreateMachineService {
     xmlGenerator.setCpuPinningOptimization()
     if (newIsoPath) {
       xmlGenerator.addCDROM(newIsoPath, 'sata')
-      xmlGenerator.addVirtIODrivers()
+      await xmlGenerator.addVirtIODrivers()
     }
 
     // Enable high-resolution graphics for the VM

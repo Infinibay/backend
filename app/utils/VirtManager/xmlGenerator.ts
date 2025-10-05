@@ -6,6 +6,7 @@ import os from 'os'
 import { BaseCpuPinningStrategy } from './CpuPinning/BasePinningStrategy'
 import { BasicStrategy } from './CpuPinning/BasicStrategy'
 import { HybridRandomStrategy } from './CpuPinning/HybridRandom'
+import { VirtIOPathResolver } from '@utils/virtioPathResolver'
 
 export enum NetworkModel {
   VIRTIO = 'virtio',
@@ -554,12 +555,8 @@ export class XMLGenerator {
     this.xml.domain.devices[0].interface.push(networkInterface)
   }
 
-  addVirtIODrivers (): string {
-    const virtioIsoPath = process.env.VIRTIO_WIN_ISO_PATH
-    if (!virtioIsoPath) {
-      throw new Error('VIRTIO_WIN_ISO_PATH environment variable is not set')
-    }
-
+  async addVirtIODrivers (): Promise<string> {
+    const virtioIsoPath = await VirtIOPathResolver.resolveOrThrow()
     return this.addCDROM(virtioIsoPath, 'sata')
   }
 

@@ -8,6 +8,7 @@ import { DOMParser } from 'xmldom'
 
 import { installNetworkFilters } from './installation/networkFilters'
 import { downloadWindowsISO, downloadAllWindowsISOs } from './download-windows'
+import { VirtIOPathResolver } from '../app/utils/virtioPathResolver'
 
 function prepareFolders () {
   // Load environment variables
@@ -243,10 +244,83 @@ async function installBridge () {
   }
 }
 
+async function setupVirtIODrivers () {
+  console.log('\n=== Setting up VirtIO Windows Drivers ===')
+
+  // Try to detect existing installation
+  const existingPath = await VirtIOPathResolver.resolve()
+  if (existingPath) {
+    console.log(`✓ VirtIO drivers found at: ${existingPath}`)
+    return
+  }
+
+  console.log('VirtIO drivers not found. Downloading...')
+
+  const baseDir = process.env.INFINIBAY_BASE_DIR || '/opt/infinibay'
+  const permanentDir = process.env.INFINIBAY_ISO_PERMANENT_DIR || path.join(baseDir, 'iso', 'permanent')
+  const virtioIsoPath = path.join(permanentDir, 'virtio-win.iso')
+
+  // Download latest stable virtio-win ISO
+  const downloadUrl = 'https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/virtio-win.iso'
+
+  try {
+    console.log(`Downloading from: ${downloadUrl}`)
+    const response = await axios({
+      url: downloadUrl,
+      method: 'GET',
+      responseType: 'stream',
+      onDownloadProgress: (progressEvent) => {
+        if (progressEvent.total) {
+          const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total)
+          process.stdout.write(`\rDownload progress: ${percentCompleted}%`)
+        }
+      }
+    })
+
+    const writer = fs.createWriteStream(virtioIsoPath)
+    response.data.pipe(writer)
+
+    await new Promise<void>((resolve, reject) => {
+      writer.on('finish', () => {
+        console.log('\n✓ VirtIO drivers downloaded successfully')
+        resolve()
+      })
+      writer.on('error', reject)
+    })
+
+    // Update .env file if it exists
+    const envPath = path.join(process.cwd(), '.env')
+    if (fs.existsSync(envPath)) {
+      let envContent = fs.readFileSync(envPath, 'utf-8')
+      const virtioEnvPattern = /^VIRTIO_WIN_ISO_PATH=.*/m
+
+      if (virtioEnvPattern.test(envContent)) {
+        // Update existing entry
+        envContent = envContent.replace(virtioEnvPattern, `VIRTIO_WIN_ISO_PATH=${virtioIsoPath}`)
+      } else {
+        // Add new entry
+        envContent += `\n# VirtIO Windows Drivers ISO\nVIRTIO_WIN_ISO_PATH=${virtioIsoPath}\n`
+      }
+
+      fs.writeFileSync(envPath, envContent)
+      console.log(`✓ Updated .env with VIRTIO_WIN_ISO_PATH=${virtioIsoPath}`)
+    }
+
+    // Clear cache to force re-detection
+    VirtIOPathResolver.clearCache()
+  } catch (error) {
+    console.error('Error downloading VirtIO drivers:', error)
+    console.error('\nYou can manually download from:')
+    console.error('  https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/')
+    console.error(`And place it at: ${virtioIsoPath}`)
+  }
+}
+
 async function install () {
   console.log('Installing...')
   prepareFolders()
   installNetworkFilters()
+  await setupVirtIODrivers()
   // await installBridge()
   // await downloadUbuntu()
   // await downloadFedora()
