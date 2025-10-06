@@ -538,7 +538,16 @@ export class XMLGenerator {
     return dev
   }
 
+  /**
+   * @deprecated This method hardcodes the disk path and should not be used.
+   * Use addDisk() directly with the actual volume path from StorageVol.getPath() instead.
+   * This ensures the XML references the correct path where libvirt actually created the volume.
+   */
   setStorage (size: number): void {
+    console.warn(
+      'DEPRECATED: setStorage() hardcodes the disk path and may not match the actual storage pool location. ' +
+      'Use addDisk() with the actual volume path from StorageVol.getPath() instead.'
+    )
     const diskPath = path.join(process.env.INFINIBAY_BASE_DIR ?? '/opt/infinibay', 'disks') || '/opt/infinibay/disks'
     this.addDisk(`${diskPath}/${this.xml.domain.name[0]}-main.qcow2`, 'virtio', size)
   }

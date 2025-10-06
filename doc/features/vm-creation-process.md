@@ -302,9 +302,10 @@ async generateXML(
   xmlGenerator.enableTPM('2.0')
   xmlGenerator.setUEFI()
   xmlGenerator.setCpuPinningOptimization()
-  
+
   // Network configuration with security
-  xmlGenerator.addNetworkInterface(process.env.BRIDGE_NAME ?? 'default', 'virtio')
+  // XMLGenerator automatically detects if the network name is a bridge or libvirt virtual network
+  xmlGenerator.addNetworkInterface(process.env.LIBVIRT_NETWORK_NAME ?? 'default', 'virtio')
   const vmFilter = await this.prisma.vMNWFilter.findFirst({ 
     where: { vmId: machine.id } 
   })

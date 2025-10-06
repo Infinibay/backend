@@ -213,6 +213,7 @@ model NWFilter {
   type         String               @default("generic")
   priority     Int                  @default(500)
   stateMatch   Boolean              @default(true)
+  needsFlush   Boolean              @default(true)
   createdAt    DateTime             @default(now())
   updatedAt    DateTime             @updatedAt
   flushedAt    DateTime?

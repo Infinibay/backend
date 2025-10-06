@@ -526,7 +526,7 @@ export class XMLGenerator {
     return `
       <interface type="bridge">
         <mac address="${this.generateMacAddress()}"/>
-        <source bridge="${process.env.BRIDGE_NAME || 'br0'}"/>
+        <source bridge="${process.env.LIBVIRT_NETWORK_NAME || 'default'}"/>
         <model type="virtio"/>
         <filterref filter="${machine.networkFilter || 'clean-traffic'}"/>
         <address type="pci" domain="0x0000" bus="0x01" slot="0x00" function="0x0"/>

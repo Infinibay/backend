@@ -181,9 +181,9 @@ async function installBridge () {
   // Load environment variables
   dotenv.config()
 
-  const bridgeName = process.env.BRIDGE_NAME
-  if (!bridgeName) {
-    throw new Error('BRIDGE_NAME environment variable is not set')
+  const networkName = process.env.LIBVIRT_NETWORK_NAME
+  if (!networkName) {
+    throw new Error('LIBVIRT_NETWORK_NAME environment variable is not set')
   }
 
   // Connect to libvirt
@@ -199,8 +199,8 @@ async function installBridge () {
       throw new Error('Failed to list networks')
     }
 
-    if (networks.includes(bridgeName)) {
-      console.log(`Bridge network ${bridgeName} already exists`)
+    if (networks.includes(networkName)) {
+      console.log(`Libvirt network ${networkName} already exists`)
       return
     }
 
@@ -210,10 +210,10 @@ async function installBridge () {
     // Define network XML
     const networkXml = `
 <network>
-  <name>${bridgeName}</name>
+  <name>${networkName}</name>
   <uuid>${uuid}</uuid>
   <forward mode='bridge'/>
-  <bridge name='${bridgeName}' />
+  <bridge name='${networkName}' />
 </network>`
 
     // Define the network
@@ -221,21 +221,21 @@ async function installBridge () {
     if (!network) {
       throw new Error('Failed to define network')
     }
-    console.log(`Bridge network ${bridgeName} defined`)
+    console.log(`Libvirt network ${networkName} defined`)
 
     // Set network to autostart
     const result = await network.setAutostart(true)
     if (result === null) {
       throw new Error('Failed to set network autostart')
     }
-    console.log(`Bridge network ${bridgeName} set to autostart`)
+    console.log(`Bridge network ${networkName} set to autostart`)
 
     // Start the network
     const createResult = await network.create()
     if (createResult === null) {
       throw new Error('Failed to start network')
     }
-    console.log(`Bridge network ${bridgeName} started`)
+    console.log(`Bridge network ${networkName} started`)
   } catch (error) {
     console.error('Error installing bridge:', error)
     throw error

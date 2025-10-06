@@ -382,10 +382,10 @@ export class GenericFilterResolver {
         }
       })
 
-      // Update VM filter's updatedAt to trigger flush
+      // Update VM filter to trigger flush
       await prisma.nWFilter.update({
         where: { id: vmFilterRelation.nwFilterId },
-        data: { updatedAt: new Date() }
+        data: { needsFlush: true }
       })
 
       debug('assignGenericFilterToVM: Successfully assigned filter')
@@ -480,10 +480,10 @@ export class GenericFilterResolver {
         where: { id: filterRef.id }
       })
 
-      // Update VM filter's updatedAt to trigger flush
+      // Update VM filter to trigger flush
       await prisma.nWFilter.update({
         where: { id: vmFilterRelation.nwFilterId },
-        data: { updatedAt: new Date() }
+        data: { needsFlush: true }
       })
 
       debug('unassignGenericFilterFromVM: Successfully unassigned filter')
@@ -576,10 +576,10 @@ export class GenericFilterResolver {
         }
       })
 
-      // Update department filter's updatedAt to trigger flush
+      // Update department filter to trigger flush
       await prisma.nWFilter.update({
         where: { id: departmentFilterRelation.nwFilterId },
-        data: { updatedAt: new Date() }
+        data: { needsFlush: true }
       })
 
       debug('assignGenericFilterToDepartment: Successfully assigned filter')
@@ -667,10 +667,10 @@ export class GenericFilterResolver {
         where: { id: filterRef.id }
       })
 
-      // Update department filter's updatedAt to trigger flush
+      // Update department filter to trigger flush
       await prisma.nWFilter.update({
         where: { id: departmentFilterRelation.nwFilterId },
-        data: { updatedAt: new Date() }
+        data: { needsFlush: true }
       })
 
       debug('unassignGenericFilterFromDepartment: Successfully unassigned filter')

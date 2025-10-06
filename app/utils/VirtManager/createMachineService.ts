@@ -5,13 +5,13 @@ import si from 'systeminformation'
 import { MachineConfiguration, PrismaClient, Machine, MachineTemplate, Application } from '@prisma/client'
 import { Connection, Machine as VirtualMachine, StoragePool, StorageVol, Error as LibvirtError, ErrorNumber } from '@infinibay/libvirt-node'
 
-import { XMLGenerator } from './xmlGenerator'
+import { XMLGenerator } from '@utils/VirtManager/xmlGenerator'
 import { UnattendedManagerBase } from '@services/unattendedManagerBase'
 import { UnattendedWindowsManager } from '@services/unattendedWindowsManager'
 import { UnattendedUbuntuManager } from '@services/unattendedUbuntuManager'
 import { UnattendedRedHatManager } from '@services/unattendedRedHatManager'
 import { Debugger } from '@utils/debug'
-import { MachineCleanupService } from '../../services/cleanup/machineCleanupService'
+import { MachineCleanupService } from '@services/cleanup/machineCleanupService'
 
 const ALLOWED_GPU_VENDORS = [
   'NVIDIA Corporationß',
@@ -32,6 +32,7 @@ export class CreateMachineService {
   async create (machine: Machine, username: string, password: string, productKey: string | undefined, pciBus: string | null): Promise<boolean> {
     this.debug.log('Creating machine', machine.name)
     let newIsoPath: string | null = null
+    let diskPath: string | null = null
 
     try {
       await this.validatePreconditions(machine)
@@ -42,22 +43,34 @@ export class CreateMachineService {
       const unattendedManager = this.createUnattendedManager(machine, username, password, productKey, applications)
       newIsoPath = await unattendedManager.generateNewImage()
 
-      const xmlGenerator = await this.generateXML(machine, template, configuration, newIsoPath, pciBus)
-
+      // Update status to 'building' in a quick transaction
       await this.executeTransaction(async (tx: any) => {
         await this.updateMachineStatus(tx, machine.id, 'building')
-        const storagePool = await this.ensureStoragePool()
-        // Use machine's diskSizeGB if no template, otherwise use template's storage
-        const storageSize = template ? template.storage : machine.diskSizeGB
-        const storageVolume = await this.createStorageVolume(storagePool, machine, storageSize)
-        const vm = await this.defineAndStartVM(xmlGenerator, machine)
+      })
+
+      // Perform long-running operations outside transaction
+      const storagePool = await this.ensureStoragePool()
+      // Use machine's diskSizeGB if no template, otherwise use template's storage
+      const storageSize = template ? template.storage : machine.diskSizeGB
+      const storageVolume = await this.createStorageVolume(storagePool, machine, storageSize)
+      // Get the actual disk path from the created volume
+      diskPath = storageVolume.getPath()
+      if (!diskPath) {
+        throw new Error('Failed to get disk path from storage volume')
+      }
+      // Generate XML with the actual disk path
+      const xmlGenerator = await this.generateXML(machine, template, configuration, newIsoPath, pciBus, diskPath)
+      const vm = await this.defineAndStartVM(xmlGenerator, machine)
+
+      // Update status to 'running' in a quick transaction
+      await this.executeTransaction(async (tx: any) => {
         await this.updateMachineStatus(tx, machine.id, 'running')
       })
+
       return true
     } catch (error: any) {
-      console.error(`Error creating machine: ${error}`)
-      // print the stack trace
-      console.error(error.stack)
+      this.debug.log('error', `Error creating machine: ${error}`)
+      this.debug.log('error', error.stack)
       await this.rollback(machine, newIsoPath)
       throw new Error('Error creating machine')
     }
@@ -128,9 +141,10 @@ export class CreateMachineService {
   }
 
   private async createStorageVolume (storagePool: StoragePool, machine: Machine, storageSize: number): Promise<StorageVol> {
+    const volumeName = `${machine.internalName}-main.qcow2`
     const volXml = `
     <volume>
-        <name>${machine.internalName}-main.qcow2</name>
+        <name>${volumeName}</name>
          <allocation>0</allocation>
          <capacity unit="G">${storageSize}</capacity>
          <target>
@@ -145,18 +159,58 @@ export class CreateMachineService {
     </volume>
   `
 
-    this.debug.log(`Creating storage volume for machine ${machine.name} volXml: ${volXml}`)
-    const vol = StorageVol.createXml(storagePool, volXml, 0)
-    if (!vol) {
-      throw new Error('Failed to create storage volume')
+    // Comment 5: Check for pre-existing volume name collision
+    const existingVol = StorageVol.lookupByName(storagePool, volumeName)
+    if (existingVol) {
+      const error = new Error(
+        `Storage volume with name '${volumeName}' already exists for machine ${machine.name}. ` +
+        'This may indicate a previous failed creation. Please clean up the existing volume or use a different machine name.'
+      )
+      this.debug.log('error', error.message)
+      throw error
     }
 
-    // Ensure the volume is created and log its details
-    const createdVol = StorageVol.lookupByName(storagePool, `${machine.internalName}-main.qcow2`)
-    if (!createdVol) {
-      throw new Error('Storage volume not found after creation')
+    this.debug.log(`Creating storage volume for machine ${machine.name} volXml: ${volXml}`)
+    // Use VIR_STORAGE_VOL_CREATE_PREALLOC_METADATA (flag 1) to ensure metadata is written to disk
+    const vol = StorageVol.createXml(storagePool, volXml, 1)
+    if (!vol) {
+      // Comment 2: Capture and log libvirt lastError when volume creation returns null
+      const libvirtError = LibvirtError.lastError()
+      const errorMessage = libvirtError?.message || 'Unknown libvirt error'
+      this.debug.log('error', `Failed to create storage volume: ${errorMessage}`)
+      throw new Error(`Failed to create storage volume for machine ${machine.name}: ${errorMessage}`)
     }
-    this.debug.log(`Storage volume created successfully: ${createdVol.getName()}`)
+
+    // Refresh storage pool to synchronize libvirt's state with the filesystem
+    this.debug.log(`Refreshing storage pool after volume creation for machine ${machine.name}`)
+    // Comment 3: Check and log result of storagePool.refresh(0) to catch refresh failures
+    const refreshResult = storagePool.refresh(0)
+    if (refreshResult == null) {
+      const libvirtError = LibvirtError.lastError()
+      const errorMessage = libvirtError?.message || 'Unknown libvirt error'
+      this.debug.log('error', `Failed to refresh storage pool: ${errorMessage}`)
+      // Don't throw here - continue with verification as the volume might still be usable
+    }
+
+    // Comment 4: Use the returned vol object directly instead of redundant lookup
+    const createdVol = vol
+
+    // Verify the file actually exists on the filesystem
+    const volPath = createdVol.getPath()
+    // Comment 1: Guard against null/undefined from createdVol.getPath() before fs.existsSync()
+    if (!volPath) {
+      const libvirtError = LibvirtError.lastError()
+      const errorMessage = libvirtError?.message || 'Unknown libvirt error'
+      this.debug.log('error', `Failed to get volume path: ${errorMessage}`)
+      throw new Error(`Failed to get volume path for machine ${machine.name}: ${errorMessage}`)
+    }
+
+    this.debug.log(`Verifying storage volume file exists at path: ${volPath}`)
+    if (!fs.existsSync(volPath)) {
+      throw new Error(`Storage volume file does not exist on filesystem at path: ${volPath} for machine ${machine.name}`)
+    }
+
+    this.debug.log(`Storage volume created and verified successfully: ${createdVol.getName()} at ${volPath}`)
 
     return createdVol
   }
@@ -201,16 +255,37 @@ export class CreateMachineService {
     }
   }
 
+  /**
+   * Creates the default storage pool for VM disk images.
+   *
+   * Configuration:
+   * - Pool name: INFINIBAY_STORAGE_POOL_NAME (default: 'default')
+   * - Pool path: INFINIBAY_STORAGE_POOL_PATH (default: '${INFINIBAY_BASE_DIR}/disks' or '/opt/infinibay/disks')
+   *
+   * IMPORTANT: The pool path may differ across hosts depending on environment configuration.
+   * Always use StorageVol.getPath() to get the actual file path rather than hardcoding paths.
+   * This ensures VM domain XML references the correct location where volumes are created.
+   *
+   * Environment Variables:
+   * - INFINIBAY_STORAGE_POOL_NAME: Custom pool name (optional)
+   * - INFINIBAY_STORAGE_POOL_PATH: Custom pool directory path (optional, overrides default)
+   * - INFINIBAY_BASE_DIR: Base directory for Infinibay data (optional, default: '/opt/infinibay')
+   */
   private async createDefaultStoragePool (): Promise<StoragePool> {
     if (!this.libvirt) {
       throw new Error('Libvirt connection not established')
     }
     const poolName = process.env.INFINIBAY_STORAGE_POOL_NAME ?? 'default'
+
+    // Allow explicit pool path override, otherwise use BASE_DIR/disks pattern
+    const baseDir = process.env.INFINIBAY_BASE_DIR ?? '/opt/infinibay'
+    const poolPath = process.env.INFINIBAY_STORAGE_POOL_PATH ?? `${baseDir}/disks`
+
     const poolXml = `
           <pool type='dir'>
             <name>${poolName}</name>
             <target>
-              <path>${process.env.INFINIBAY_BASE_DIR ?? '/opt/infinibay'}/disks</path>
+              <path>${poolPath}</path>
             </target>
           </pool>
         `
@@ -288,7 +363,8 @@ export class CreateMachineService {
     template: MachineTemplate | null,
     configuration: MachineConfiguration,
     newIsoPath: string | null,
-    pciBus: string | null
+    pciBus: string | null,
+    diskPath: string
   ): Promise<XMLGenerator> {
     // Log the start of the XML generation
     this.debug.log('Starting to generate XML for machine', machine.name)
@@ -314,9 +390,11 @@ export class CreateMachineService {
 
     xmlGenerator.setMemory(ram)
     xmlGenerator.enableTPM('2.0')
-    xmlGenerator.setStorage(storage)
+    // Use the actual disk path from the created volume instead of hardcoding
+    xmlGenerator.addDisk(diskPath, 'virtio', storage)
     xmlGenerator.setUEFI()
-    xmlGenerator.addNetworkInterface(process.env.BRIDGE_NAME ?? 'default', 'virtio')
+    // Use libvirt virtual network name - XMLGenerator will automatically detect if it's a bridge or network type
+    xmlGenerator.addNetworkInterface(process.env.LIBVIRT_NETWORK_NAME ?? 'default', 'virtio')
     // Apply department filter first (if exists), then VM filter
     if (machine.departmentId) {
       const department = await this.prisma.department.findUnique({ where: { id: machine.departmentId } })
@@ -335,7 +413,7 @@ export class CreateMachineService {
             // Apply department filter with high priority (100)
             xmlGenerator.addDepartmentNWFilter(departmentFilter.nwFilter.internalName)
           } catch (error) {
-            console.error('Error ensuring department network filter exists in libvirt:', error)
+            this.debug.log('error', `Error ensuring department network filter exists in libvirt: ${error}`)
             // Continue without department filter if it fails
           }
         }
@@ -346,7 +424,7 @@ export class CreateMachineService {
     if (vmFilter) {
       const filter = await this.prisma.nWFilter.findFirst({ where: { id: vmFilter.nwFilterId } })
       if (!filter) {
-        console.error('VM Filter not found')
+        this.debug.log('error', 'VM Filter not found for VM:', machine.id)
       } else {
         // Ensure the filter exists in libvirt before using it
         try {
@@ -358,7 +436,7 @@ export class CreateMachineService {
           // Apply VM filter with lower priority (200) than department filter
           xmlGenerator.addVMNWFilter(filter.internalName)
         } catch (error) {
-          console.error('Error ensuring VM network filter exists in libvirt:', error)
+          this.debug.log('error', `Error ensuring VM network filter exists in libvirt: ${error}`)
           // Continue without filter if it fails
         }
       }

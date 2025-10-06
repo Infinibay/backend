@@ -378,18 +378,20 @@ export class DepartmentFirewallService {
     return [...referencedRules, ...customRules].sort((a, b) => a.priority - b.priority)
   }
 
-  async refreshAllVMFilters (departmentId: string): Promise<boolean> {
+  async refreshAllVMFilters (departmentId: string): Promise<string[]> {
     const vms = await this.getVMsInDepartment(departmentId)
+    const flushedFilterIds: string[] = []
 
     for (const vm of vms) {
       if (vm.nwFilters && vm.nwFilters.length > 0) {
         for (const filter of vm.nwFilters) {
           await this.networkFilterService.flushNWFilter(filter.id)
+          flushedFilterIds.push(filter.id)
         }
       }
     }
 
-    return true
+    return flushedFilterIds
   }
 
   async flushDepartmentToAllVMs (departmentId: string): Promise<boolean> {

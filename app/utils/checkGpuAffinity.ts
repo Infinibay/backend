@@ -1,6 +1,6 @@
 import si from 'systeminformation'
 import { PrismaClient } from '@prisma/client'
-import { Machine as VirtualMachine } from '@infinibay/libvirt-node'
+import { Machine as VirtualMachine, StoragePool, StorageVol } from '@infinibay/libvirt-node'
 import { CreateMachineService } from './VirtManager/createMachineService'
 
 /**
@@ -38,15 +38,36 @@ export async function checkGpuAffinity (prisma: PrismaClient): Promise<void> {
       const template = machine?.templateId ? await prisma.machineTemplate.findUnique({ where: { id: machine.templateId } }) : null
       const config = await prisma.machineConfiguration.findUnique({ where: { machineId } })
       if (machine && config) {
-        const xmlGenerator = await vmService.generateXML(
-          machine,
-          template,
-          config,
-          null,
-          null
-        )
-        const xml = xmlGenerator.generate()
         try {
+          // Get the disk path from the existing storage volume
+          const poolName = process.env.INFINIBAY_STORAGE_POOL_NAME ?? 'default'
+          const storagePool = StoragePool.lookupByName(vmService.libvirt!, poolName)
+          if (!storagePool) {
+            console.error(`Storage pool '${poolName}' not found for VM ${machine.internalName}`)
+            continue
+          }
+          const volumeName = `${machine.internalName}-main.qcow2`
+          const storageVol = StorageVol.lookupByName(storagePool, volumeName)
+          if (!storageVol) {
+            console.error(`Storage volume '${volumeName}' not found for VM ${machine.internalName}`)
+            continue
+          }
+          const diskPath = storageVol.getPath()
+          if (!diskPath) {
+            console.error(`Failed to get disk path for VM ${machine.internalName}`)
+            continue
+          }
+
+          const xmlGenerator = await vmService.generateXML(
+            machine,
+            template,
+            config,
+            null,
+            null,
+            diskPath
+          )
+          const xml = xmlGenerator.generate()
+
           // Undefine existing VM definition if exists
           const existingVm = VirtualMachine.lookupByName(vmService.libvirt!, machine.internalName)
           if (existingVm) {

@@ -1,8 +1,11 @@
-import { PrismaClient, NWFilter, Prisma, FWRule } from '@prisma/client'
+import { PrismaClient, NWFilter, FWRule } from '@prisma/client'
 import { v4 as uuidv4 } from 'uuid'
 import { Connection, NwFilter } from '@infinibay/libvirt-node'
 import { Builder, Parser } from 'xml2js'
 import { randomBytes } from 'crypto'
+import debug from 'debug'
+
+const log = debug('infinibay:services:NetworkFilterService')
 
 export class NetworkFilterService {
   private connection: Connection | null = null
@@ -20,7 +23,7 @@ export class NetworkFilterService {
 
   private cleanUndefined (obj: any): any {
     return Object.fromEntries(
-      Object.entries(obj).filter(([_, v]) => v != null)
+      Object.entries(obj).filter(([, v]) => v != null)
     )
   }
 
@@ -81,7 +84,10 @@ export class NetworkFilterService {
   ): Promise<NWFilter> {
     return await this.prisma.nWFilter.update({
       where: { id },
-      data
+      data: {
+        ...data,
+        needsFlush: true
+      }
     })
   }
 
@@ -135,7 +141,7 @@ export class NetworkFilterService {
     }
 
     // Otherwise create a new rule
-    return await this.prisma.fWRule.create({
+    const newRule = await this.prisma.fWRule.create({
       data: {
         nwFilterId: filterId,
         action,
@@ -153,12 +159,28 @@ export class NetworkFilterService {
         dstIpAddr: options.dstIpAddr
       }
     })
+
+    // Mark filter as needing flush since a rule was added
+    await this.prisma.nWFilter.update({
+      where: { id: filterId },
+      data: { needsFlush: true }
+    })
+
+    return newRule
   }
 
   async deleteRule (id: string): Promise<FWRule> {
-    return await this.prisma.fWRule.delete({
+    const rule = await this.prisma.fWRule.delete({
       where: { id }
     })
+
+    // Mark filter as needing flush since a rule was deleted
+    await this.prisma.nWFilter.update({
+      where: { id: rule.nwFilterId },
+      data: { needsFlush: true }
+    })
+
+    return rule
   }
 
   async flushNWFilter (id: string, redefine: boolean = false): Promise<boolean> {
@@ -176,6 +198,20 @@ export class NetworkFilterService {
       })
 
       if (!filter) return false
+
+      // IMPORTANT: Flush all referenced filters FIRST (recursively)
+      // This ensures that all dependencies exist in libvirt before we try to reference them
+      if (filter.referencedBy.length > 0) {
+        log('Flushing %d referenced filters for %s', filter.referencedBy.length, filter.internalName)
+        for (const ref of filter.referencedBy) {
+          // Recursively flush ALL referenced filters (not just those with needsFlush)
+          // This ensures the filter exists in libvirt before we reference it
+          const flushed = await this.flushNWFilter(ref.targetFilter.id, redefine)
+          if (!flushed) {
+            log('Failed to flush referenced filter %s, continuing anyway...', ref.targetFilter.internalName)
+          }
+        }
+      }
 
       const conn = await this.connect()
       const existingFilter = await NwFilter.lookupByName(conn, filter.internalName)
@@ -276,20 +312,34 @@ export class NetworkFilterService {
       } catch (defErr: any) {
         // skip missing dependency errors
         if (defErr.message.includes('referenced filter') && defErr.message.includes('is missing')) {
-          console.warn(`Skipping flush for filter ${filter.internalName}: missing referenced filter.`)
+          log('Skipping flush for filter %s: missing referenced filter', filter.internalName)
           return false
         }
         throw defErr
       }
 
+      const now = new Date()
+
+      // Update flushedAt and mark as not needing flush
       await this.prisma.nWFilter.update({
         where: { id: filter.id },
-        data: { flushedAt: new Date() }
+        data: { flushedAt: now, needsFlush: false }
       })
+
+      // Also update flushedAt and needsFlush for all referenced filters to prevent redundant flushes
+      if (filter.referencedBy.length > 0) {
+        const referencedFilterIds = filter.referencedBy.map(ref => ref.targetFilter.id)
+        await this.prisma.nWFilter.updateMany({
+          where: {
+            id: { in: referencedFilterIds }
+          },
+          data: { flushedAt: now, needsFlush: false }
+        })
+      }
 
       return result !== null
     } catch (error) {
-      console.error('Error in flushNWFilter:', error)
+      log('Error in flushNWFilter: %O', error)
       return false
     }
   }
@@ -353,11 +403,11 @@ export class NetworkFilterService {
       }
     }
 
-    // Update the filter's updatedAt timestamp to ensure it gets flushed
+    // Mark filter as needing flush if rules were deleted
     if (deletedCount > 0) {
       await this.prisma.nWFilter.update({
         where: { id: filterId },
-        data: { updatedAt: new Date() }
+        data: { needsFlush: true }
       })
     }
 

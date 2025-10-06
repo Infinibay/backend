@@ -77,7 +77,10 @@ export async function createMachineFilter (prisma: PrismaClient, machine: any) {
         // VM filters should be applied after department filters
         await prisma.nWFilter.update({
           where: { id: filter.id },
-          data: { priority: 200 } // VM filters have lower priority than department filters (100)
+          data: {
+            priority: 200, // VM filters have lower priority than department filters (100)
+            needsFlush: true
+          }
         })
 
         debug.log(`VM filter properly configured to inherit department rules with correct priority`)

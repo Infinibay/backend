@@ -239,7 +239,7 @@ export class FirewallService {
     // Ensure filter will be flushed
     await this.prisma.nWFilter.update({
       where: { id: vmFilter.nwFilterId },
-      data: { updatedAt: new Date() }
+      data: { needsFlush: true }
     })
 
     // Return the updated status
@@ -363,7 +363,7 @@ export class FirewallService {
         // Ensure filter will be updated
         await this.prisma.nWFilter.update({
           where: { id: vmFilter.nwFilterId },
-          data: { updatedAt: new Date() }
+          data: { needsFlush: true }
         })
       }
     } else {
@@ -444,7 +444,7 @@ export class FirewallService {
         // Ensure filter will be updated
         await this.prisma.nWFilter.update({
           where: { id: vmFilter.nwFilterId },
-          data: { updatedAt: new Date() }
+          data: { needsFlush: true }
         })
       }
     }
@@ -599,7 +599,7 @@ export class FirewallService {
     // Ensure filter will be flushed
     await this.prisma.nWFilter.update({
       where: { id: deptFilter.nwFilterId },
-      data: { updatedAt: new Date() }
+      data: { needsFlush: true }
     })
 
     // Return the updated status
@@ -907,7 +907,7 @@ export class FirewallService {
     // Ensure filter will be updated
     await this.prisma.nWFilter.update({
       where: { id: deptFilter.nwFilterId },
-      data: { updatedAt: new Date() }
+      data: { needsFlush: true }
     })
 
     // Return the updated service status
@@ -1082,7 +1082,7 @@ export class FirewallService {
         // Ensure filter will be updated
         await this.prisma.nWFilter.update({
           where: { id: vmFilter.nwFilterId },
-          data: { updatedAt: new Date() }
+          data: { needsFlush: true }
         })
 
         successfulResets.push({ vmId, vmName: vm.name })

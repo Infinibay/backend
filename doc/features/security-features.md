@@ -734,7 +734,7 @@ JWT_EXPIRATION="24h"                         # Token expiration time
 BCRYPT_ROUNDS=12                            # Password hashing rounds
 
 # Network security configuration
-BRIDGE_NAME="br0"                           # Default bridge interface
+LIBVIRT_NETWORK_NAME="default"              # Default libvirt virtual network
 DEFAULT_NETWORK_FILTER="infinibay-baseline" # Baseline security filter
 FIREWALL_FLUSH_INTERVAL="3600"             # Firewall rule refresh interval
 

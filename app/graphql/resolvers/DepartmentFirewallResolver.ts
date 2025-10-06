@@ -651,10 +651,10 @@ export class DepartmentFirewallResolver {
 
     try {
       const service = this.getDepartmentFirewallService(prisma)
-      const result = await service.refreshAllVMFilters(departmentId)
+      const flushedFilterIds = await service.refreshAllVMFilters(departmentId)
 
-      if (result) {
-        debug(`VM filters refreshed successfully for department ${departmentId}`)
+      if (flushedFilterIds.length > 0) {
+        debug(`VM filters refreshed successfully for department ${departmentId}. Flushed ${flushedFilterIds.length} filters.`)
         const socketService = getSocketService()
         socketService.sendToAdmins('departmentFirewall', 'vmFiltersRefreshed', {
           data: {
@@ -663,7 +663,7 @@ export class DepartmentFirewallResolver {
         })
       }
 
-      return result
+      return flushedFilterIds.length > 0
     } catch (error) {
       console.error(`❌ Failed to refresh VM filters for department ${departmentId}:`, error)
       if (error instanceof UserInputError) {
