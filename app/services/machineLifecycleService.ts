@@ -125,12 +125,7 @@ export class MachineLifecycleService {
     const machine = await this.prisma.machine.findFirst({
       where: whereClause,
       include: {
-        configuration: true,
-        nwFilters: {
-          include: {
-            nwFilter: true
-          }
-        }
+        configuration: true
       }
     })
 

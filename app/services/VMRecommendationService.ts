@@ -1,4 +1,4 @@
-import { PrismaClient, Machine, VMHealthSnapshot, SystemMetrics, ProcessSnapshot, PortUsage, VMNWFilter, FWRule, VMRecommendation, RecommendationType, Prisma, VmPort, DepartmentNWFilter } from '@prisma/client'
+import { PrismaClient, Machine, VMHealthSnapshot, SystemMetrics, ProcessSnapshot, PortUsage, VMRecommendation, RecommendationType, Prisma } from '@prisma/client'
 import { createHash } from 'crypto'
 import { RecommendationFilterInput } from '../graphql/types/RecommendationTypes'
 import { AppError, ErrorCode, ErrorContext } from '../utils/errors/ErrorHandler'
@@ -469,54 +469,13 @@ export class VMRecommendationService {
       take: portUsageMaxRows
     })
 
-    // Comment 2: Fetch VM with department NWFilters and Comment 8: include references
+    // Fetch machine configuration
     const machineWithDepartment = await this.prisma.machine.findUnique({
       where: { id: vmId },
       include: {
-        department: {
-          include: {
-            nwFilters: {
-              include: {
-                nwFilter: {
-                  include: {
-                    rules: true,
-                    references: {
-                      include: {
-                        targetFilter: {
-                          include: { rules: true }
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        nwFilters: {
-          include: {
-            nwFilter: {
-              include: {
-                rules: true,
-                references: {
-                  include: {
-                    targetFilter: {
-                      include: { rules: true }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
+        department: true
       }
     })
-
-    // Combine VM-level and department-level filters with recursive references
-    const allFilters = await this.gatherAllNWFilters(
-      machineWithDepartment?.nwFilters || [],
-      machineWithDepartment?.department?.nwFilters || []
-    )
 
     // Fetch recent process snapshots (last 15-60 minutes)
     const recentProcessWindow = new Date()
@@ -531,11 +490,6 @@ export class VMRecommendationService {
       take: 1000 // Limit for performance
     })
 
-    // Fetch VM ports for misconfiguration checks
-    const vmPorts = await this.prisma.vmPort.findMany({
-      where: { vmId }
-    })
-
     // Use the machine config we already fetched
     const machineConfig = machineWithDepartment
 
@@ -545,9 +499,7 @@ export class VMRecommendationService {
       historicalMetrics,
       recentProcessSnapshots,
       portUsage,
-      firewallFilters: allFilters,
-      machineConfig,
-      vmPorts
+      machineConfig
     }
   }
 
@@ -711,89 +663,6 @@ export class VMRecommendationService {
     const dayAgo = new Date()
     dayAgo.setHours(dayAgo.getHours() - 24)
     return lastCreated < dayAgo
-  }
-
-  // Comment 8: Recursively gather all NWFilter rules including references
-  private async gatherAllNWFilters (
-    vmFilters: (VMNWFilter & {
-      nwFilter: {
-        rules: FWRule[]
-        references: Array<{
-          targetFilter: {
-            rules: FWRule[]
-          }
-        }>
-      }
-    })[],
-    departmentFilters: (DepartmentNWFilter & {
-      nwFilter: {
-        rules: FWRule[]
-        references: Array<{
-          targetFilter: {
-            rules: FWRule[]
-          }
-        }>
-      }
-    })[]
-  ): Promise<(VMNWFilter & { nwFilter: { rules: FWRule[] } })[]> {
-    const processedFilters = new Set<string>()
-    const result: (VMNWFilter & { nwFilter: { rules: FWRule[] } })[] = []
-
-    // Helper function to recursively collect rules
-    const collectRules = (filter: {
-      rules: FWRule[]
-      references?: Array<{ targetFilter: { rules: FWRule[] } }>
-    }, depth = 0): FWRule[] => {
-      if (depth > 3) return [] // Comment 8: Guard with depth limit to avoid cycles
-
-      const rules = [...filter.rules]
-
-      // Recursively collect from referenced filters
-      if (filter.references) {
-        for (const ref of filter.references) {
-          rules.push(...collectRules(ref.targetFilter, depth + 1))
-        }
-      }
-
-      return rules
-    }
-
-    // Process VM-level filters
-    for (const vmFilter of vmFilters) {
-      if (!processedFilters.has(vmFilter.nwFilterId)) {
-        const allRules = collectRules(vmFilter.nwFilter)
-        processedFilters.add(vmFilter.nwFilterId)
-        result.push({
-          ...vmFilter,
-          nwFilter: {
-            ...vmFilter.nwFilter,
-            rules: allRules
-          }
-        })
-      }
-    }
-
-    // Process department-level filters
-    for (const deptFilter of departmentFilters) {
-      if (!processedFilters.has(deptFilter.nwFilterId)) {
-        const allRules = collectRules(deptFilter.nwFilter)
-        processedFilters.add(deptFilter.nwFilterId)
-        // Convert DepartmentNWFilter to VMNWFilter-like structure
-        result.push({
-          id: `dept-${deptFilter.id}`,
-          vmId: '', // Not applicable for department filters
-          nwFilterId: deptFilter.nwFilterId,
-          createdAt: deptFilter.createdAt,
-          updatedAt: deptFilter.updatedAt,
-          nwFilter: {
-            ...deptFilter.nwFilter,
-            rules: allRules
-          }
-        } as VMNWFilter & { nwFilter: { rules: FWRule[] } })
-      }
-    }
-
-    return result
   }
 
   /**

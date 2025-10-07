@@ -18,17 +18,13 @@ export class MachineCleanupService {
     const machine = await this.prisma.machine.findUnique({
       where: { id: machineId },
       include: {
-        configuration: true,
-        nwFilters: { include: { nwFilter: true } }
+        configuration: true
       }
     })
     if (!machine) {
       this.debug.log(`Machine ${machineId} not found`)
       return
     }
-
-    // Collect filter IDs for DB cleanup
-    const filterIds = machine.nwFilters.map(vmf => vmf.nwFilter.id)
 
     // Prepare VM-related files for deletion
     let filesToDelete: string[] = []
@@ -80,17 +76,6 @@ export class MachineCleanupService {
             }
           }
         }
-        // Cleanup VM-specific filters in libvirt
-        for (const vmf of machine.nwFilters) {
-          try {
-            const filter = await NwFilter.lookupByName(conn, vmf.nwFilter.internalName)
-            if (filter) {
-              await filter.undefine()
-            }
-          } catch (e) {
-            this.debug.log(`Error undefining filter ${vmf.nwFilter.internalName}: ${String(e)}`)
-          }
-        }
         // Undefine VM domain
         if (domain) {
           try { await domain.undefine() } catch (e) {
@@ -137,13 +122,6 @@ export class MachineCleanupService {
           await tx.machineConfiguration.delete({ where: { machineId: machine.id } })
         }
         await tx.machineApplication.deleteMany({ where: { machineId: machine.id } })
-        await tx.vMNWFilter.deleteMany({ where: { vmId: machine.id } })
-        // Delete VM port records to satisfy foreign key constraint
-        await tx.vmPort.deleteMany({ where: { vmId: machine.id } })
-        // Delete VM-specific filters
-        if (filterIds.length) {
-          await tx.nWFilter.deleteMany({ where: { id: { in: filterIds } } })
-        }
         await tx.machine.delete({ where: { id: machine.id } })
       } catch (e) {
         this.debug.log(`Error removing DB records: ${String(e)}`)

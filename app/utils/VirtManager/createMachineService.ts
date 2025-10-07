@@ -395,52 +395,7 @@ export class CreateMachineService {
     xmlGenerator.setUEFI()
     // Use libvirt virtual network name - XMLGenerator will automatically detect if it's a bridge or network type
     xmlGenerator.addNetworkInterface(process.env.LIBVIRT_NETWORK_NAME ?? 'default', 'virtio')
-    // Apply department filter first (if exists), then VM filter
-    if (machine.departmentId) {
-      const department = await this.prisma.department.findUnique({ where: { id: machine.departmentId } })
-      if (department) {
-        const departmentFilter = await this.prisma.departmentNWFilter.findFirst({
-          where: { departmentId: department.id },
-          include: { nwFilter: true }
-        })
-        if (departmentFilter) {
-          try {
-            const { NetworkFilterService } = await import('@services/networkFilterService')
-            const networkFilterService = new NetworkFilterService(this.prisma)
-            await networkFilterService.connect()
-            await networkFilterService.flushNWFilter(departmentFilter.nwFilter.id, true)
-            await networkFilterService.close()
-            // Apply department filter with high priority (100)
-            xmlGenerator.addDepartmentNWFilter(departmentFilter.nwFilter.internalName)
-          } catch (error) {
-            this.debug.log('error', `Error ensuring department network filter exists in libvirt: ${error}`)
-            // Continue without department filter if it fails
-          }
-        }
-      }
-    }
-
-    const vmFilter = await this.prisma.vMNWFilter.findFirst({ where: { vmId: machine.id } })
-    if (vmFilter) {
-      const filter = await this.prisma.nWFilter.findFirst({ where: { id: vmFilter.nwFilterId } })
-      if (!filter) {
-        this.debug.log('error', 'VM Filter not found for VM:', machine.id)
-      } else {
-        // Ensure the filter exists in libvirt before using it
-        try {
-          const { NetworkFilterService } = await import('@services/networkFilterService')
-          const networkFilterService = new NetworkFilterService(this.prisma)
-          await networkFilterService.connect()
-          await networkFilterService.flushNWFilter(filter.id, true)
-          await networkFilterService.close()
-          // Apply VM filter with lower priority (200) than department filter
-          xmlGenerator.addVMNWFilter(filter.internalName)
-        } catch (error) {
-          this.debug.log('error', `Error ensuring VM network filter exists in libvirt: ${error}`)
-          // Continue without filter if it fails
-        }
-      }
-    }
+    // Firewall system removed - no network filters applied
     xmlGenerator.setBootDevice(['hd', 'cdrom'])
     xmlGenerator.addAudioDevice()
     xmlGenerator.setVCPUs(cores)

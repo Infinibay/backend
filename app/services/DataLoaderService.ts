@@ -5,7 +5,6 @@ import {
   MachineTemplate,
   Department,
   Application,
-  GlobalServiceConfig,
   ProcessSnapshot,
   SystemMetrics,
   MachineConfiguration,
@@ -17,7 +16,6 @@ export class DataLoaderService {
   private templateLoader: DataLoader<string, MachineTemplate | null>
   private departmentLoader: DataLoader<string, Department | null>
   private applicationLoader: DataLoader<string, Application | null>
-  private serviceConfigLoader: DataLoader<string, GlobalServiceConfig | null>
   private processSnapshotLoader: DataLoader<string, ProcessSnapshot | null>
   private systemMetricsLoader: DataLoader<string, SystemMetrics | null>
   private machineConfigurationLoader: DataLoader<string, MachineConfiguration | null>
@@ -50,13 +48,6 @@ export class DataLoaderService {
         where: { id: { in: ids as string[] } }
       })
       return ids.map(id => applications.find(a => a.id === id) || null)
-    })
-
-    this.serviceConfigLoader = new DataLoader(async (ids) => {
-      const configs = await prisma.globalServiceConfig.findMany({
-        where: { id: { in: ids as string[] } }
-      })
-      return ids.map(id => configs.find(c => c.id === id) || null)
     })
 
     this.processSnapshotLoader = new DataLoader(async (ids) => {
@@ -108,11 +99,6 @@ export class DataLoaderService {
     return this.applicationLoader.load(id)
   }
 
-  async loadServiceConfig (id: string | null): Promise<GlobalServiceConfig | null> {
-    if (!id) return null
-    return this.serviceConfigLoader.load(id)
-  }
-
   async loadProcessSnapshot (id: string | null): Promise<ProcessSnapshot | null> {
     if (!id) return null
     return this.processSnapshotLoader.load(id)
@@ -138,14 +124,13 @@ export class DataLoaderService {
     this.templateLoader.clearAll()
     this.departmentLoader.clearAll()
     this.applicationLoader.clearAll()
-    this.serviceConfigLoader.clearAll()
     this.processSnapshotLoader.clearAll()
     this.systemMetricsLoader.clearAll()
     this.machineConfigurationLoader.clearAll()
     this.machineLoader.clearAll()
   }
 
-  clear (loaderName: 'user' | 'template' | 'department' | 'application' | 'serviceConfig' | 'processSnapshot' | 'systemMetrics' | 'machineConfiguration' | 'machine'): void {
+  clear (loaderName: 'user' | 'template' | 'department' | 'application' | 'processSnapshot' | 'systemMetrics' | 'machineConfiguration' | 'machine'): void {
     switch (loaderName) {
     case 'user':
       this.userLoader.clearAll()
@@ -158,9 +143,6 @@ export class DataLoaderService {
       break
     case 'application':
       this.applicationLoader.clearAll()
-      break
-    case 'serviceConfig':
-      this.serviceConfigLoader.clearAll()
       break
     case 'processSnapshot':
       this.processSnapshotLoader.clearAll()

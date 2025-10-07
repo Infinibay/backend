@@ -8,15 +8,11 @@ import { MachineTemplateCategoryResolver } from './machine_template_category/res
 import { ApplicationQueries, ApplicationMutations } from './application/resolver'
 import { SystemResolver } from './system/resolver'
 import { NetworkResolver } from './networks/resolver'
-import { FirewallResolver } from './firewall/resolver'
-import { SecurityResolver } from './security/resolver'
 import { VmDiagnosticsResolver } from './vmDiagnostics/resolver'
 import { ISOResolver } from './ISOResolver'
 import { SnapshotResolver } from './SnapshotResolver'
-import { ServiceResolver } from './ServiceResolver'
 import { PackageResolver } from './PackageResolver'
 import { ProcessResolver } from './ProcessResolver'
-import { SimplifiedFirewallResolver } from './SimplifiedFirewallResolver'
 import { MetricsResolver } from './metrics/resolver'
 import { AutoCheckResolver } from './AutoCheckResolver'
 import { VMHealthHistoryResolver } from './VMHealthHistoryResolver'
@@ -25,9 +21,6 @@ import { MaintenanceResolver } from './MaintenanceResolver'
 import { VMRecommendationResolver } from './VMRecommendationResolver'
 // Import recommendation types to ensure they're registered
 import '../types/RecommendationTypes'
-import { AdvancedFirewallResolver } from './AdvancedFirewallResolver'
-import { DepartmentFirewallResolver } from './DepartmentFirewallResolver'
-import { GenericFilterResolver } from './GenericFilterResolver'
 import { AppSettingsResolver } from './AppSettingsResolver'
 
 const resolvers: NonEmptyArray<Function> = [
@@ -42,18 +35,11 @@ const resolvers: NonEmptyArray<Function> = [
   ApplicationMutations,
   SystemResolver,
   NetworkResolver,
-  FirewallResolver,
-  SecurityResolver,
   VmDiagnosticsResolver,
   ISOResolver,
   SnapshotResolver,
-  ServiceResolver,
   PackageResolver,
   ProcessResolver,
-  SimplifiedFirewallResolver,
-  AdvancedFirewallResolver,
-  DepartmentFirewallResolver,
-  GenericFilterResolver,
   MetricsResolver,
   AutoCheckResolver,
   VMHealthHistoryResolver,

@@ -1,10 +1,3 @@
-import { FirewallRule } from '../networkFirewallRules'
-
-export interface NetworkService {
-  name: string;
-  rules: FirewallRule[];
-}
-
 export interface NetworkBandwidth {
   inbound?: {
     average?: number;

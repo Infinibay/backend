@@ -78,7 +78,6 @@ model Machine {
   createdAt          DateTime              @default(now())
   updatedAt          DateTime              @updatedAt
   departmentId       String?
-  firewallTemplates  Json?
   localIP            String?
   publicIP           String?
   applicationUsage   ApplicationUsage[]
@@ -98,10 +97,7 @@ model Machine {
   healthCheckQueue   VMHealthCheckQueue[]
   healthConfig       VMHealthConfig?
   healthSnapshots    VMHealthSnapshot[]
-  nwFilters          VMNWFilter[]
   recommendations    VMRecommendation[]
-  serviceConfigs     VMServiceConfig[]
-  ports              VmPort[]
   windowsServices    WindowsService[]
 }
 
@@ -191,158 +187,13 @@ model Notification {
 }
 
 model Department {
-  id             String                    @id @default(uuid())
-  name           String
-  createdAt      DateTime                  @default(now())
-  internetSpeed  Int?
-  ipSubnet       String?
-  updatedAt      DateTime                  @updatedAt
-  configuration  DepartmentConfiguration?
-  nwFilters      DepartmentNWFilter[]
-  serviceConfigs DepartmentServiceConfig[]
-  machines       Machine[]
-}
-
-model NWFilter {
-  id           String               @id @default(uuid())
-  name         String               @unique
-  internalName String               @unique
-  uuid         String               @unique
-  description  String?
-  chain        String?
-  type         String               @default("generic")
-  priority     Int                  @default(500)
-  stateMatch   Boolean              @default(true)
-  needsFlush   Boolean              @default(true)
-  createdAt    DateTime             @default(now())
-  updatedAt    DateTime             @updatedAt
-  flushedAt    DateTime?
-  departments  DepartmentNWFilter[]
-  rules        FWRule[]
-  referencedBy FilterReference[]    @relation("ReferencingFilters")
-  references   FilterReference[]    @relation("ReferencedFilters")
-  vms          VMNWFilter[]
-}
-
-model FilterReference {
-  id             String   @id @default(uuid())
-  sourceFilterId String
-  targetFilterId String
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-  sourceFilter   NWFilter @relation("ReferencingFilters", fields: [sourceFilterId], references: [id], onDelete: Cascade)
-  targetFilter   NWFilter @relation("ReferencedFilters", fields: [targetFilterId], references: [id], onDelete: Cascade)
-
-  @@unique([sourceFilterId, targetFilterId])
-}
-
-model DepartmentNWFilter {
-  id           String     @id @default(uuid())
-  departmentId String
-  nwFilterId   String
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
-  department   Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
-  nwFilter     NWFilter   @relation(fields: [nwFilterId], references: [id], onDelete: Cascade)
-
-  @@unique([departmentId, nwFilterId])
-}
-
-model FWRule {
-  id           String   @id @default(uuid())
-  nwFilterId   String
-  action       String   @default("accept")
-  direction    String   @default("inout")
-  priority     Int
-  protocol     String   @default("all")
-  ipVersion    String?
-  srcMacAddr   String?
-  srcIpAddr    String?
-  srcIpMask    String?
-  dstIpAddr    String?
-  dstIpMask    String?
-  srcPortStart Int?
-  srcPortEnd   Int?
-  dstPortStart Int?
-  dstPortEnd   Int?
-  state        Json?
-  comment      String?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-  nwFilter     NWFilter @relation(fields: [nwFilterId], references: [id], onDelete: Cascade)
-}
-
-model DepartmentConfiguration {
-  id           String     @id @default(uuid())
-  departmentId String     @unique
-  cleanTraffic Boolean    @default(false)
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
-  department   Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
-}
-
-model VMNWFilter {
-  id         String   @id @default(uuid())
-  vmId       String
-  nwFilterId String
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-  nwFilter   NWFilter @relation(fields: [nwFilterId], references: [id], onDelete: Cascade)
-  vm         Machine  @relation(fields: [vmId], references: [id], onDelete: Cascade)
-
-  @@unique([vmId, nwFilterId])
-}
-
-model VmPort {
-  id        String   @id @default(uuid())
-  portStart Int
-  portEnd   Int
-  protocol  String
-  running   Boolean
-  enabled   Boolean
-  toEnable  Boolean
-  vmId      String
-  lastSeen  DateTime @default(now())
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  vm        Machine  @relation(fields: [vmId], references: [id])
-
-  @@unique([vmId, portStart, protocol])
-}
-
-model DepartmentServiceConfig {
-  id             String     @id @default(uuid())
-  departmentId   String
-  serviceId      String
-  useEnabled     Boolean    @default(false)
-  provideEnabled Boolean    @default(false)
-  createdAt      DateTime   @default(now())
-  updatedAt      DateTime   @updatedAt
-  department     Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
-
-  @@unique([departmentId, serviceId])
-}
-
-model VMServiceConfig {
-  id             String   @id @default(uuid())
-  vmId           String
-  serviceId      String
-  useEnabled     Boolean  @default(false)
-  provideEnabled Boolean  @default(false)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-  vm             Machine  @relation(fields: [vmId], references: [id], onDelete: Cascade)
-
-  @@unique([vmId, serviceId])
-}
-
-model GlobalServiceConfig {
-  id             String   @id @default(uuid())
-  serviceId      String   @unique
-  useEnabled     Boolean  @default(true)
-  provideEnabled Boolean  @default(false)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id            String    @id @default(uuid())
+  name          String
+  createdAt     DateTime  @default(now())
+  internetSpeed Int?
+  ipSubnet      String?
+  updatedAt     DateTime  @updatedAt
+  machines      Machine[]
 }
 
 model SystemMetrics {

@@ -6,14 +6,11 @@ import {
   ServiceInfo,
   PackageInfo,
   VMSnapshot,
-  SimplifiedFirewallRule,
   ServiceActionInput,
   PackageActionInput,
   CreateSnapshotInput,
-  CreateSimplifiedFirewallRuleInput,
   CommandResult
 } from './types'
-import { NetworkFilterService } from '@services/networkFilterService'
 import { VirtioSocketWatcherService } from '@services/VirtioSocketWatcherService'
 
 // Interface for service data returned from InfiniService
@@ -53,7 +50,6 @@ interface InfiniPackageData {
 @Resolver()
 export class VMManagementResolver {
   constructor (
-    private networkFilterService: NetworkFilterService,
     private virtManager: VirtManager,
     private virtioSocketWatcher: VirtioSocketWatcherService
   ) {}
@@ -377,134 +373,4 @@ export class VMManagementResolver {
     }
   }
 
-  @Query(() => [SimplifiedFirewallRule])
-  @Authorized()
-  async getVMFirewallRules (
-    @Arg('vmId', () => ID) vmId: string,
-    @Ctx() { prisma }: InfinibayContext
-  ): Promise<SimplifiedFirewallRule[]> {
-    // Get VM's network filters
-    const vm = await prisma.machine.findUnique({
-      where: { id: vmId },
-      include: {
-        nwFilters: {
-          include: {
-            nwFilter: {
-              include: {
-                rules: true
-              }
-            }
-          }
-        }
-      }
-    })
-
-    if (!vm) {
-      throw new UserInputError('VM not found')
-    }
-
-    const simplifiedRules: SimplifiedFirewallRule[] = []
-
-    // Convert complex NWFilter rules to simplified format
-    vm.nwFilters.forEach(vmFilter => {
-      if (vmFilter.nwFilter?.rules) {
-        vmFilter.nwFilter.rules.forEach((rule) => {
-          simplifiedRules.push({
-            id: rule.id,
-            name: `${rule.protocol || 'all'}_${rule.direction}_${rule.action}`,
-            direction: rule.direction || 'inbound',
-            action: rule.action || 'accept',
-            protocol: rule.protocol,
-            port: rule.dstPortStart ?? undefined,
-            portRange: rule.dstPortStart && rule.dstPortEnd
-              ? `${rule.dstPortStart}-${rule.dstPortEnd}`
-              : undefined,
-            sourceIp: rule.srcIpAddr ?? undefined,
-            destinationIp: rule.dstIpAddr ?? undefined,
-            application: undefined,
-            priority: rule.priority || 1000,
-            enabled: true
-          })
-        })
-      }
-    })
-
-    return simplifiedRules
-  }
-
-  @Mutation(() => SimplifiedFirewallRule)
-  @Authorized('ADMIN')
-  async createVMFirewallRule (
-    @Arg('input') input: CreateSimplifiedFirewallRuleInput,
-    @Ctx() { prisma }: InfinibayContext
-  ): Promise<SimplifiedFirewallRule> {
-    const vm = await prisma.machine.findUnique({
-      where: { id: input.vmId },
-      include: {
-        nwFilters: {
-          include: {
-            nwFilter: true
-          }
-        }
-      }
-    })
-
-    if (!vm) {
-      throw new UserInputError('VM not found')
-    }
-
-    // Get the first VM filter or create one
-    const vmFilter = vm.nwFilters[0]
-    let filterId = vmFilter?.nwFilterId
-    if (!filterId) {
-      // Create a new filter for this VM
-      const filter = await this.networkFilterService.createFilter(
-        `vm_${vm.name}_filter`,
-        `Firewall rules for VM ${vm.name}`,
-        'root',
-        'vm'
-      )
-      filterId = filter.id
-
-      // Associate filter with VM
-      await prisma.vMNWFilter.create({
-        data: {
-          vmId: vm.id,
-          nwFilterId: filterId
-        }
-      })
-    }
-
-    // Create the actual firewall rule
-    const rule = await this.networkFilterService.createRule(
-      filterId,
-      input.action || 'accept',
-      input.direction || 'inbound',
-      input.priority || 1000,
-      input.protocol || 'all',
-      input.port,
-      {
-        srcIpAddr: input.sourceIp,
-        dstIpAddr: input.destinationIp,
-        dstPortStart: input.port,
-        dstPortEnd: input.port,
-        comment: input.name
-      }
-    )
-
-    return {
-      id: rule.id,
-      name: input.name,
-      direction: input.direction,
-      action: input.action,
-      protocol: input.protocol,
-      port: input.port,
-      portRange: input.portRange,
-      sourceIp: input.sourceIp,
-      destinationIp: input.destinationIp,
-      application: input.application,
-      priority: input.priority || 1000,
-      enabled: input.enabled !== false
-    }
-  }
 }

@@ -1,7 +1,6 @@
 import { PrismaClient, Prisma } from '@prisma/client'
 import { beforeCreateMachine, afterCreateMachine } from './modelCallbacks/machine'
 import { afterCreateDepartment } from './modelCallbacks/department'
-import { afterCreateNWfilter } from './modelCallbacks/nwfilter'
 
 /**
  * Creates a Prisma Client Extension with model lifecycle callbacks
@@ -40,19 +39,6 @@ export function createPrismaClientWithCallbacks(prisma: PrismaClient) {
 
           // Run after callback
           await afterCreateDepartment(prisma, args, result)
-
-          return result
-        }
-      },
-
-      // NWFilter model callbacks
-      nWFilter: {
-        async create({ args, query }) {
-          // Execute the query
-          const result = await query(args)
-
-          // Run after callback
-          await afterCreateNWfilter(prisma, args, result)
 
           return result
         }

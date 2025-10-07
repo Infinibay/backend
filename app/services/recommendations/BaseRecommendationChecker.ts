@@ -1,4 +1,4 @@
-import { PrismaClient, Machine, VMHealthSnapshot, SystemMetrics, ProcessSnapshot, PortUsage, VMNWFilter, FWRule, VMRecommendation, RecommendationType, VmPort } from '@prisma/client'
+import { PrismaClient, Machine, VMHealthSnapshot, SystemMetrics, ProcessSnapshot, PortUsage, VMRecommendation, RecommendationType } from '@prisma/client'
 
 export interface AppUpdateInfo {
   name: string | undefined
@@ -59,9 +59,7 @@ export interface RecommendationContext {
   historicalMetrics: SystemMetrics[]
   recentProcessSnapshots: ProcessSnapshot[]
   portUsage: PortUsage[]
-  firewallFilters: (VMNWFilter & { nwFilter: { rules: FWRule[] } })[]
   machineConfig: Machine | null
-  vmPorts: VmPort[]
 }
 
 export abstract class RecommendationChecker {

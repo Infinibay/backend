@@ -1,6 +1,5 @@
 import xml2js from 'xml2js'
 import { v4 as uuidv4 } from 'uuid'
-import { NetworkFirewallRules, FirewallRule } from './networkFirewallRules'
 import { NetworkBandwidth, NetworkDNSHost, NetworkIPConfig } from './types/network'
 import * as fs from 'fs'
 
