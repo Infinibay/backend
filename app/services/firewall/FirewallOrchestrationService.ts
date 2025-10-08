@@ -1,0 +1,263 @@
+import { FirewallRule, PrismaClient, RuleSetType } from '@prisma/client'
+
+import { Debugger } from '@utils/debug'
+
+import { FirewallRuleService } from './FirewallRuleService'
+import { FirewallValidationService } from './FirewallValidationService'
+import { LibvirtNWFilterService } from './LibvirtNWFilterService'
+import { NWFilterXMLGeneratorService } from './NWFilterXMLGeneratorService'
+
+const debug = new Debugger('infinibay:service:firewall:orchestration')
+
+export interface ApplyRulesResult {
+  filterName: string;
+  rulesApplied: number;
+  success: boolean;
+}
+
+export interface SyncResult {
+  errors: string[];
+  filtersCreated: number;
+  filtersUpdated: number;
+  success: boolean;
+  vmsUpdated: number;
+}
+
+/**
+ * Main orchestration service for firewall operations.
+ * Coordinates between validation, rule management, XML generation, and libvirt application.
+ */
+export class FirewallOrchestrationService {
+  constructor (
+    private prisma: PrismaClient,
+    private ruleService: FirewallRuleService,
+    private validationService: FirewallValidationService,
+    private xmlGenerator: NWFilterXMLGeneratorService,
+    private libvirtService: LibvirtNWFilterService
+  ) {}
+
+  /**
+   * Calculates effective rules for a VM by merging department and VM rules
+   */
+  async getEffectiveRules (vmId: string): Promise<FirewallRule[]> {
+    const vm = await this.prisma.machine.findUnique({
+      where: { id: vmId },
+      include: {
+        department: {
+          include: {
+            firewallRuleSet: {
+              include: {
+                rules: true
+              }
+            }
+          }
+        },
+        firewallRuleSet: {
+          include: {
+            rules: true
+          }
+        }
+      }
+    })
+
+    if (!vm) {
+      throw new Error(`VM not found: ${vmId}`)
+    }
+
+    const deptRules = vm.department?.firewallRuleSet?.rules || []
+    const vmRules = vm.firewallRuleSet?.rules || []
+
+    // Filter out department rules that are overridden by VM rules
+    const effectiveDeptRules = deptRules.filter(
+      dr => !vmRules.some(vr => vr.overridesDept && this.rulesTargetSameTraffic(dr, vr))
+    )
+
+    // Combine rules and sort by priority (lower number = higher priority)
+    const effectiveRules = [...effectiveDeptRules, ...vmRules]
+    effectiveRules.sort((a, b) => a.priority - b.priority)
+
+    debug.log(
+      'info',
+      `Effective rules for VM ${vmId}: ${effectiveRules.length} (${deptRules.length} dept + ${vmRules.length} vm - ${deptRules.length - effectiveDeptRules.length} overridden)`
+    )
+
+    return effectiveRules
+  }
+
+  /**
+   * Applies firewall rules to a VM immediately
+   */
+  async applyVMRules (vmId: string): Promise<ApplyRulesResult> {
+    debug.log('info', `Applying VM rules for ${vmId}`)
+
+    // Get VM details
+    const vm = await this.prisma.machine.findUnique({
+      where: { id: vmId },
+      include: {
+        department: {
+          include: {
+            firewallRuleSet: {
+              include: { rules: true }
+            }
+          }
+        },
+        firewallRuleSet: {
+          include: { rules: true }
+        }
+      }
+    })
+
+    if (!vm) {
+      throw new Error(`VM not found: ${vmId}`)
+    }
+
+    // Get effective rules
+    const effectiveRules = await this.getEffectiveRules(vmId)
+
+    // Validate rules
+    const validation = await this.validationService.validateRuleConflicts(effectiveRules)
+    if (!validation.isValid) {
+      const errorMsg = `Rule conflicts: ${validation.conflicts.map(c => c.message).join(', ')}`
+      debug.log('error', errorMsg)
+      throw new Error(errorMsg)
+    }
+
+    // Generate filter name
+    const filterName = this.xmlGenerator.generateFilterName(RuleSetType.VM, vmId)
+
+    // Generate XML
+    const filterXML = await this.xmlGenerator.generateFilterXML({
+      name: filterName,
+      rules: effectiveRules
+    })
+
+    // Apply in libvirt
+    const libvirtUuid = await this.libvirtService.defineFilter(filterXML)
+
+    // Update rule set sync status
+    if (vm.firewallRuleSet?.id) {
+      await this.ruleService.updateRuleSetSyncStatus(vm.firewallRuleSet.id, libvirtUuid, filterXML)
+    }
+
+    // Note: Actual application to VM network interface happens here
+    // This is a placeholder - full implementation would update VM XML
+    await this.libvirtService.applyFilterToVM(vm.internalName, filterName)
+
+    debug.log('info', `Successfully applied ${effectiveRules.length} rules to VM ${vmId}`)
+
+    return {
+      success: true,
+      filterName,
+      rulesApplied: effectiveRules.length
+    }
+  }
+
+  /**
+   * Applies department rules to all VMs in the department
+   */
+  async applyDepartmentRules (deptId: string): Promise<SyncResult> {
+    debug.log('info', `Applying department rules for ${deptId}`)
+
+    const department = await this.prisma.department.findUnique({
+      where: { id: deptId },
+      include: {
+        machines: true,
+        firewallRuleSet: {
+          include: { rules: true }
+        }
+      }
+    })
+
+    if (!department) {
+      throw new Error(`Department not found: ${deptId}`)
+    }
+
+    const errors: string[] = []
+    let vmsUpdated = 0
+
+    // Apply rules to each VM in the department
+    for (const vm of department.machines) {
+      try {
+        await this.applyVMRules(vm.id)
+        vmsUpdated++
+      } catch (err) {
+        const errorMsg = `Failed to apply rules to VM ${vm.id}: ${err}`
+        debug.log('error', errorMsg)
+        errors.push(errorMsg)
+      }
+    }
+
+    return {
+      success: errors.length === 0,
+      filtersCreated: 0,
+      filtersUpdated: vmsUpdated,
+      vmsUpdated,
+      errors
+    }
+  }
+
+  /**
+   * Syncs all firewall configurations to libvirt
+   */
+  async syncAllToLibvirt (): Promise<SyncResult> {
+    debug.log('info', 'Starting full firewall sync to libvirt')
+
+    const ruleSets = await this.ruleService.getAllActiveRuleSets()
+    const errors: string[] = []
+    let filtersCreated = 0
+    let filtersUpdated = 0
+
+    for (const ruleSet of ruleSets) {
+      try {
+        const filterName = this.xmlGenerator.generateFilterName(ruleSet.entityType, ruleSet.entityId)
+        const filterXML = await this.xmlGenerator.generateFilterXML({
+          name: filterName,
+          rules: ruleSet.rules
+        })
+
+        // Check if filter already exists
+        const exists = await this.libvirtService.filterExists(filterName)
+
+        // Define/update filter
+        const libvirtUuid = await this.libvirtService.defineFilter(filterXML)
+
+        // Update sync status
+        await this.ruleService.updateRuleSetSyncStatus(ruleSet.id, libvirtUuid, filterXML)
+
+        if (exists) {
+          filtersUpdated++
+        } else {
+          filtersCreated++
+        }
+      } catch (err) {
+        const errorMsg = `Failed to sync rule set ${ruleSet.id}: ${err}`
+        debug.log('error', errorMsg)
+        errors.push(errorMsg)
+      }
+    }
+
+    debug.log('info', `Sync complete: ${filtersCreated} created, ${filtersUpdated} updated`)
+
+    return {
+      success: errors.length === 0,
+      filtersCreated,
+      filtersUpdated,
+      vmsUpdated: 0,
+      errors
+    }
+  }
+
+  /**
+   * Checks if two rules target the same traffic pattern
+   */
+  private rulesTargetSameTraffic (rule1: FirewallRule, rule2: FirewallRule): boolean {
+    return (
+      rule1.protocol === rule2.protocol &&
+      rule1.direction === rule2.direction &&
+      rule1.dstPortStart === rule2.dstPortStart &&
+      rule1.dstPortEnd === rule2.dstPortEnd &&
+      rule1.srcIpAddr === rule2.srcIpAddr &&
+      rule1.dstIpAddr === rule2.dstIpAddr
+    )
+  }
+}

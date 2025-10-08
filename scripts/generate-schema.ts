@@ -4,7 +4,7 @@ import path from 'path'
 import resolvers from '@graphql/resolvers'
 import { authChecker } from '@utils/authChecker'
 
-async function generateSchema() {
+async function generateSchema () {
   try {
     console.log('Generating GraphQL schema...')
 

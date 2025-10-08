@@ -372,5 +372,4 @@ export class VMManagementResolver {
       throw new UserInputError(error instanceof Error ? error.message : 'Failed to delete snapshot')
     }
   }
-
 }

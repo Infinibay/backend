@@ -1,5 +1,4 @@
-import { Express, Request, Response, NextFunction } from 'express'
-import express from 'express'
+import express, { Express, Request, Response, NextFunction } from 'express'
 import path from 'path'
 import bodyParser from 'body-parser'
 import cors from 'cors'

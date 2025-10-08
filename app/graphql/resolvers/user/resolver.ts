@@ -14,7 +14,6 @@ import { UserType, UserToken, LoginResponse, UserOrderByInputType, CreateUserInp
 import { PaginationInputType } from '@utils/pagination'
 import { InfinibayContext } from '@utils/context'
 import { getEventManager } from '../../../services/EventManager'
-import { validateAvatarPath, avatarExists, normalizeAvatarPath, DEFAULT_AVATAR_PATH } from '../../../utils/avatarValidation'
 
 export interface UserResolverInterface {
   currentUser(context: InfinibayContext): Promise<UserType | null>;
@@ -113,7 +112,6 @@ export class UserResolver implements UserResolverInterface {
         firstName: true,
         lastName: true,
         role: true,
-        avatar: true,
         createdAt: true
       }
     })
@@ -191,7 +189,6 @@ export class UserResolver implements UserResolverInterface {
         firstName: input.firstName,
         lastName: input.lastName,
         role: input.role,
-        avatar: DEFAULT_AVATAR_PATH, // Database stores relative path format, frontend converts to API URLs
         deleted: false
       }
     })
@@ -232,17 +229,12 @@ export class UserResolver implements UserResolverInterface {
     @Arg('input', { nullable: false }) input: UpdateUserInputType,
     @Ctx() context: InfinibayContext
   ): Promise<UserType> {
-    // Temporarily bypass SUPER_ADMIN protection for avatar-only updates
-    const isAvatarOnlyUpdate = Object.keys(input).length === 1 && 'avatar' in input;
     const { password, passwordConfirmation, currentPassword, ...safeInput } = input
     console.log('🔧 Backend updateUser called:', {
       id,
       inputKeys: Object.keys(safeInput),
       hasRole: 'role' in safeInput,
       roleValue: safeInput.role,
-      hasAvatar: 'avatar' in safeInput,
-      avatarValue: safeInput.avatar !== undefined,
-      isAvatarOnlyUpdate,
       willUpdateFields: Object.keys(safeInput).filter(key => (safeInput as any)[key] !== undefined)
     })
 
@@ -264,17 +256,14 @@ export class UserResolver implements UserResolverInterface {
       throw new UserInputError('You cannot change your own role')
     }
 
-    // Only apply SUPER_ADMIN role protection if this is NOT an avatar-only update
-    if (!isAvatarOnlyUpdate) {
-      // Protection: Prevent changing SUPER_ADMIN role
-      if (user.role === 'SUPER_ADMIN' && input.role && input.role !== UserRole.SUPER_ADMIN) {
-        throw new UserInputError('Cannot modify SUPER_ADMIN role. SUPER_ADMIN users cannot be demoted.')
-      }
+    // Protection: Prevent changing SUPER_ADMIN role
+    if (user.role === 'SUPER_ADMIN' && input.role && input.role !== UserRole.SUPER_ADMIN) {
+      throw new UserInputError('Cannot modify SUPER_ADMIN role. SUPER_ADMIN users cannot be demoted.')
+    }
 
-      // Protection: Only SUPER_ADMIN can create other SUPER_ADMIN users
-      if (input.role === UserRole.SUPER_ADMIN && context.user?.role !== 'SUPER_ADMIN') {
-        throw new UserInputError('Only SUPER_ADMIN users can assign SUPER_ADMIN role to other users.')
-      }
+    // Protection: Only SUPER_ADMIN can create other SUPER_ADMIN users
+    if (input.role === UserRole.SUPER_ADMIN && context.user?.role !== 'SUPER_ADMIN') {
+      throw new UserInputError('Only SUPER_ADMIN users can assign SUPER_ADMIN role to other users.')
     }
 
     // Current password validation for password updates
@@ -298,29 +287,6 @@ export class UserResolver implements UserResolverInterface {
       }
     }
 
-    // Normalize and validate avatar
-    let normalizedAvatar: string | undefined
-    if (input.avatar !== undefined) {
-      // Handle null avatar by setting to default
-      if (input.avatar === null) {
-        normalizedAvatar = DEFAULT_AVATAR_PATH
-      } else {
-        // Normalize the avatar path
-        normalizedAvatar = normalizeAvatarPath(input.avatar)
-
-        // Validate normalized path
-        if (!validateAvatarPath(normalizedAvatar)) {
-          throw new UserInputError('Invalid avatar path format. Avatar path must start with "images/avatars/" and have a valid extension.')
-        }
-
-        // Check if avatar file exists
-        const avatarFileExists = await avatarExists(normalizedAvatar)
-        if (!avatarFileExists) {
-          throw new UserInputError('Selected avatar does not exist. Please choose from available avatars.')
-        }
-      }
-    }
-
     // Build update data object with only the fields that were provided
     const updateData: any = {}
 
@@ -339,9 +305,6 @@ export class UserResolver implements UserResolverInterface {
     if (input.role !== undefined) {
       updateData.role = input.role
     }
-    if (normalizedAvatar !== undefined) {
-      updateData.avatar = normalizedAvatar
-    }
 
     console.log('📦 Final update data to be sent to database:', updateData)
 
@@ -352,8 +315,7 @@ export class UserResolver implements UserResolverInterface {
 
     console.log('✅ User updated successfully:', {
       userId: updatedUser.id,
-      updatedFields: Object.keys(updateData),
-      avatar: updatedUser.avatar
+      updatedFields: Object.keys(updateData)
     })
 
     // Trigger real-time event for user update

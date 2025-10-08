@@ -873,19 +873,33 @@ export async function withComplexTransaction (
     const templates = await setupComplexFirewallHierarchy(tx)
 
     const context: InfinibayContext = {
-      prisma: tx, user: testUser, req: {} as any, res: {} as any,
-      setupMode: false, virtioSocketWatcher: undefined, eventManager: undefined
+      prisma: tx,
+      user: testUser,
+      req: {} as any,
+      res: {} as any,
+      setupMode: false,
+      virtioSocketWatcher: undefined,
+      eventManager: undefined
     }
 
     const adminContext: InfinibayContext = {
-      prisma: tx, user: adminUser, req: {} as any, res: {} as any,
-      setupMode: false, virtioSocketWatcher: undefined, eventManager: undefined
+      prisma: tx,
+      user: adminUser,
+      req: {} as any,
+      res: {} as any,
+      setupMode: false,
+      virtioSocketWatcher: undefined,
+      eventManager: undefined
     }
 
     jest.clearAllMocks()
 
     await testFn({
-      testUser, adminUser, testMachine, context, adminContext,
+      testUser,
+      adminUser,
+      testMachine,
+      context,
+      adminContext,
       departments: departments.map(d => d.department),
       multipleVMs,
       templates

@@ -27,7 +27,7 @@ export interface VerifyAuthOptions {
  * Categorized JWT authentication errors for better error handling
  */
 export class JWTAuthError extends Error {
-  constructor(
+  constructor (
     public category: string,
     message: string,
     public originalError?: Error
@@ -41,7 +41,7 @@ export class JWTAuthError extends Error {
  * Extracts and normalizes the Authorization header token
  * Handles Bearer prefix in a case-insensitive manner with proper trimming
  */
-function extractToken(req: Request): { token: string | null; hasBearer: boolean } {
+function extractToken (req: Request): { token: string | null; hasBearer: boolean } {
   const raw = req.headers.authorization || ''
   const m = raw.match(/^\s*Bearer\s+(.+)$/i)
   const tokenForVerify = (m ? m[1] : raw).trim()
@@ -57,7 +57,7 @@ function extractToken(req: Request): { token: string | null; hasBearer: boolean 
 /**
  * Gets the JWT secret with production-safe fallback handling
  */
-function getJWTSecret(): string {
+function getJWTSecret (): string {
   const secret = process.env.TOKENKEY
 
   if (!secret) {
@@ -94,7 +94,7 @@ function getJWTSecret(): string {
 /**
  * Validates decoded JWT token payload
  */
-function validateTokenPayload(decoded: any): DecodedToken {
+function validateTokenPayload (decoded: any): DecodedToken {
   if (!decoded || typeof decoded !== 'object') {
     throw new JWTAuthError('invalid_payload_format', 'Invalid token payload: not an object')
   }
@@ -125,7 +125,7 @@ function validateTokenPayload(decoded: any): DecodedToken {
 /**
  * Fetches and validates user from database, returning safe user without sensitive fields
  */
-async function fetchAndValidateUser(decoded: DecodedToken, debugAuth?: boolean): Promise<SafeUser> {
+async function fetchAndValidateUser (decoded: DecodedToken, debugAuth?: boolean): Promise<SafeUser> {
   if (debugAuth) {
     console.log('🔑 JWT Debug - Looking up user by ID:', '[REDACTED]')
   }
@@ -138,9 +138,9 @@ async function fetchAndValidateUser(decoded: DecodedToken, debugAuth?: boolean):
       deleted: true,
       firstName: true,
       lastName: true,
-      avatar: true,
       role: true,
-      createdAt: true
+      createdAt: true,
+      updatedAt: true
       // Explicitly exclude 'password' and 'token' fields for security
     }
   })
@@ -180,7 +180,7 @@ async function fetchAndValidateUser(decoded: DecodedToken, debugAuth?: boolean):
 /**
  * Categorizes JWT verification errors
  */
-function categorizeJWTError(error: any): JWTAuthError {
+function categorizeJWTError (error: any): JWTAuthError {
   let category = 'unknown'
   let message = error instanceof Error ? error.message : String(error)
 
@@ -208,7 +208,7 @@ function categorizeJWTError(error: any): JWTAuthError {
  * @param options Verification options
  * @returns Verification result with user, decoded token, and metadata
  */
-export async function verifyRequestAuth(
+export async function verifyRequestAuth (
   req: Request,
   options: VerifyAuthOptions
 ): Promise<VerifyAuthResult> {
@@ -310,27 +310,27 @@ export async function verifyRequestAuth(
     // Determine status from error category
     let status: AuthenticationMetadata['status']
     switch (jwtError.category) {
-      case 'token_expired':
-        status = 'token_expired'
-        break
-      case 'invalid_signature':
-      case 'invalid_payload_format':
-      case 'invalid_payload_userid':
-      case 'invalid_payload_role':
-      case 'not_active':
-        status = 'token_invalid'
-        break
-      case 'user_not_found':
-        status = 'user_not_found'
-        break
-      case 'user_deleted':
-        status = 'user_deleted'
-        break
-      case 'role_mismatch':
-        status = 'role_mismatch'
-        break
-      default:
-        status = 'unauthenticated'
+    case 'token_expired':
+      status = 'token_expired'
+      break
+    case 'invalid_signature':
+    case 'invalid_payload_format':
+    case 'invalid_payload_userid':
+    case 'invalid_payload_role':
+    case 'not_active':
+      status = 'token_invalid'
+      break
+    case 'user_not_found':
+      status = 'user_not_found'
+      break
+    case 'user_deleted':
+      status = 'user_deleted'
+      break
+    case 'role_mismatch':
+      status = 'role_mismatch'
+      break
+    default:
+      status = 'unauthenticated'
     }
 
     // Create failure metadata

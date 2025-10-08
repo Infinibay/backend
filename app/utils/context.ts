@@ -83,24 +83,24 @@ export interface InfinibayContext {
 /**
  * Creates user validation helpers for the given user and authentication metadata
  */
-export function createUserValidationHelpers(
+export function createUserValidationHelpers (
   user: SafeUser | null,
   auth?: AuthenticationMetadata
 ): UserValidationHelpers {
   return {
-    isAuthenticated(): boolean {
+    isAuthenticated (): boolean {
       return !!(user && !user.deleted && auth?.status === 'authenticated')
     },
 
-    hasRole(role: string): boolean {
+    hasRole (role: string): boolean {
       return !!(user && user.role === role && this.isAuthenticated())
     },
 
-    isAdmin(): boolean {
+    isAdmin (): boolean {
       return this.hasRole('ADMIN') || this.hasRole('SUPER_ADMIN')
     },
 
-    getDisplayName(): string {
+    getDisplayName (): string {
       if (!user) return 'Anonymous'
       if (user.firstName && user.lastName) {
         return `${user.firstName} ${user.lastName}`
@@ -108,7 +108,7 @@ export function createUserValidationHelpers(
       return user.email || 'Unknown User'
     },
 
-    isAuthenticationFresh(): boolean {
+    isAuthenticationFresh (): boolean {
       if (!auth?.tokenExpiration) return true // No expiration means fresh
       return new Date() < auth.tokenExpiration
     }
@@ -118,7 +118,7 @@ export function createUserValidationHelpers(
 /**
  * Creates authentication metadata for tracking authentication state
  */
-export function createAuthenticationMetadata(
+export function createAuthenticationMetadata (
   method: 'context' | 'fallback' | 'none',
   status: AuthenticationMetadata['status'],
   options: {

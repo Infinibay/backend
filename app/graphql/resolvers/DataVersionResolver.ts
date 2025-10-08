@@ -4,28 +4,28 @@ import { InfinibayContext } from '../../utils/context'
 @ObjectType()
 export class EntityVersion {
   @Field(() => Int)
-  count: number = 0
+    count: number = 0
 
   @Field(() => GraphQLISODateTime)
-  lastUpdated: Date = new Date()
+    lastUpdated: Date = new Date()
 }
 
 @ObjectType()
 export class DataVersions {
   @Field(() => EntityVersion)
-  vms: EntityVersion = new EntityVersion()
+    vms: EntityVersion = new EntityVersion()
 
   @Field(() => EntityVersion)
-  departments: EntityVersion = new EntityVersion()
+    departments: EntityVersion = new EntityVersion()
 
   @Field(() => EntityVersion)
-  applications: EntityVersion = new EntityVersion()
+    applications: EntityVersion = new EntityVersion()
 
   @Field(() => EntityVersion)
-  users: EntityVersion = new EntityVersion()
+    users: EntityVersion = new EntityVersion()
 
   @Field(() => EntityVersion)
-  appSettings: EntityVersion = new EntityVersion()
+    appSettings: EntityVersion = new EntityVersion()
 }
 
 @Resolver()

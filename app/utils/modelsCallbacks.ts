@@ -11,13 +11,13 @@ import { afterCreateDepartment } from './modelCallbacks/department'
  * @param prisma - Base Prisma client instance
  * @returns Extended Prisma client with callback support
  */
-export function createPrismaClientWithCallbacks(prisma: PrismaClient) {
+export function createPrismaClientWithCallbacks (prisma: PrismaClient) {
   return prisma.$extends({
     name: 'ModelCallbacks',
     query: {
       // Machine model callbacks
       machine: {
-        async create({ args, query }) {
+        async create ({ args, query }) {
           // Run before callback
           await beforeCreateMachine(prisma, args)
 
@@ -33,7 +33,7 @@ export function createPrismaClientWithCallbacks(prisma: PrismaClient) {
 
       // Department model callbacks
       department: {
-        async create({ args, query }) {
+        async create ({ args, query }) {
           // Execute the query
           const result = await query(args)
 
@@ -51,7 +51,7 @@ export function createPrismaClientWithCallbacks(prisma: PrismaClient) {
  * Legacy function for backward compatibility
  * @deprecated Use createPrismaClientWithCallbacks instead
  */
-export default function installCallbacks(prisma: PrismaClient) {
+export default function installCallbacks (prisma: PrismaClient) {
   // This function is kept for backward compatibility but doesn't do anything
   // The actual extension is applied in database.ts when creating the client
   console.warn('installCallbacks is deprecated. Callbacks are now automatically applied via Prisma Client Extensions.')

@@ -22,11 +22,12 @@ import { checkGpuAffinity } from './utils/checkGpuAffinity'
 // Real-time Services
 import { createSocketService } from './services/SocketService'
 import { createEventManager } from './services/EventManager'
-import { VmEventManager } from './services/VmEventManager'
-import { UserEventManager } from './services/UserEventManager'
-import { DepartmentEventManager } from './services/DepartmentEventManager'
 import { ApplicationEventManager } from './services/ApplicationEventManager'
 import { createVirtioSocketWatcherService } from './services/VirtioSocketWatcherService'
+import { DepartmentEventManager } from './services/DepartmentEventManager'
+import { FirewallEventManager } from './services/FirewallEventManager'
+import { UserEventManager } from './services/UserEventManager'
+import { VmEventManager } from './services/VmEventManager'
 
 // Health Monitoring Services
 import { VMHealthQueueManager } from './services/VMHealthQueueManager'
@@ -125,15 +126,17 @@ async function bootstrap (): Promise<void> {
     createVMDetailEventManager(prisma)
 
     // Register resource event managers
-    const vmEventManager = new VmEventManager(socketService, prisma)
-    const userEventManager = new UserEventManager(socketService, prisma)
-    const departmentEventManager = new DepartmentEventManager(socketService, prisma)
     const applicationEventManager = new ApplicationEventManager(socketService, prisma)
+    const departmentEventManager = new DepartmentEventManager(socketService, prisma)
+    const firewallEventManager = new FirewallEventManager(socketService, prisma)
+    const userEventManager = new UserEventManager(socketService, prisma)
+    const vmEventManager = new VmEventManager(socketService, prisma)
 
-    eventManager.registerResourceManager('vms', vmEventManager)
-    eventManager.registerResourceManager('users', userEventManager)
-    eventManager.registerResourceManager('departments', departmentEventManager)
     eventManager.registerResourceManager('applications', applicationEventManager)
+    eventManager.registerResourceManager('departments', departmentEventManager)
+    eventManager.registerResourceManager('firewall', firewallEventManager)
+    eventManager.registerResourceManager('users', userEventManager)
+    eventManager.registerResourceManager('vms', vmEventManager)
 
     console.log('🎯 Real-time event system initialized with all resource managers')
 

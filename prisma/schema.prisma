@@ -15,7 +15,6 @@ model User {
   token              String               @default("null")
   firstName          String
   lastName           String
-  avatar             String?
   createdAt          DateTime             @default(now())
   role               UserRole             @default(USER)
   updatedAt          DateTime             @updatedAt
@@ -80,8 +79,10 @@ model Machine {
   departmentId       String?
   localIP            String?
   publicIP           String?
+  firewallRuleSetId  String?               @unique
   applicationUsage   ApplicationUsage[]
   department         Department?           @relation(fields: [departmentId], references: [id])
+  firewallRuleSet    FirewallRuleSet?      @relation(fields: [firewallRuleSetId], references: [id])
   template           MachineTemplate?      @relation(fields: [templateId], references: [id])
   user               User?                 @relation(fields: [userId], references: [id])
   applications       MachineApplication[]
@@ -187,13 +188,15 @@ model Notification {
 }
 
 model Department {
-  id            String    @id @default(uuid())
-  name          String
-  createdAt     DateTime  @default(now())
-  internetSpeed Int?
-  ipSubnet      String?
-  updatedAt     DateTime  @updatedAt
-  machines      Machine[]
+  id                  String           @id @default(uuid())
+  name                String
+  createdAt           DateTime         @default(now())
+  internetSpeed       Int?
+  ipSubnet            String?
+  updatedAt           DateTime         @updatedAt
+  firewallRuleSetId   String?          @unique
+  firewallRuleSet     FirewallRuleSet? @relation(fields: [firewallRuleSetId], references: [id])
+  machines            Machine[]
 }
 
 model SystemMetrics {
@@ -605,6 +608,70 @@ model AppSettings {
   updatedAt     DateTime @updatedAt
 
   @@index([id])
+}
+
+model FirewallRuleSet {
+  id            String        @id @default(uuid())
+  name          String
+  internalName  String        @unique
+  entityType    RuleSetType
+  entityId      String
+  priority      Int           @default(500)
+  isActive      Boolean       @default(true)
+  libvirtUuid   String?       @unique
+  xmlContent    String?
+  lastSyncedAt  DateTime?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  department    Department?
+  machine       Machine?
+  rules         FirewallRule[]
+
+  @@index([entityType, entityId])
+  @@index([isActive])
+}
+
+model FirewallRule {
+  id              String          @id @default(uuid())
+  ruleSetId       String
+  name            String
+  description     String?
+  action          RuleAction      @default(ACCEPT)
+  direction       RuleDirection   @default(INOUT)
+  priority        Int             @default(500)
+  protocol        String          @default("all")
+  srcPortStart    Int?
+  srcPortEnd      Int?
+  dstPortStart    Int?
+  dstPortEnd      Int?
+  srcIpAddr       String?
+  srcIpMask       String?
+  dstIpAddr       String?
+  dstIpMask       String?
+  connectionState Json?
+  overridesDept   Boolean         @default(false)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  ruleSet         FirewallRuleSet @relation(fields: [ruleSetId], references: [id], onDelete: Cascade)
+
+  @@index([ruleSetId, priority])
+}
+
+enum RuleSetType {
+  DEPARTMENT
+  VM
+}
+
+enum RuleAction {
+  ACCEPT
+  DROP
+  REJECT
+}
+
+enum RuleDirection {
+  IN
+  OUT
+  INOUT
 }
 
 enum HealthCheckType {

@@ -28,19 +28,19 @@ export class VirtIOPathResolver {
   /**
    * Get search paths, including environment-configured directories
    */
-  private static getSearchPaths(): string[] {
+  private static getSearchPaths (): string[] {
     const paths = [
-      '/usr/share/virtio-win',           // Fedora/RHEL package: virtio-win
-      '/var/lib/libvirt/images',         // Ubuntu 24.10+, new default location
-      '/var/lib/libvirt/driver',         // Legacy Ubuntu location (pre-24.10)
+      '/usr/share/virtio-win', // Fedora/RHEL package: virtio-win
+      '/var/lib/libvirt/images', // Ubuntu 24.10+, new default location
+      '/var/lib/libvirt/driver' // Legacy Ubuntu location (pre-24.10)
     ]
 
     // Add Infinibay managed ISO directory if configured
     const permanentDir = process.env.INFINIBAY_ISO_PERMANENT_DIR
     if (permanentDir) {
-      paths.splice(2, 0, permanentDir)  // Insert before legacy location
+      paths.splice(2, 0, permanentDir) // Insert before legacy location
     } else {
-      paths.splice(2, 0, '/opt/infinibay/iso/permanent')  // Default Infinibay location
+      paths.splice(2, 0, '/opt/infinibay/iso/permanent') // Default Infinibay location
     }
 
     return paths
@@ -51,7 +51,7 @@ export class VirtIOPathResolver {
    * @param forceRefresh - Force a new search even if cached result exists
    * @returns Absolute path to virtio-win ISO or null if not found
    */
-  public static async resolve(forceRefresh: boolean = false): Promise<string | null> {
+  public static async resolve (forceRefresh: boolean = false): Promise<string | null> {
     // Return cached result if available and not forcing refresh
     if (this.cachedPath !== null && !forceRefresh) {
       this.debug.log('Returning cached VirtIO ISO path:', this.cachedPath)
@@ -97,7 +97,7 @@ export class VirtIOPathResolver {
   /**
    * Searches filesystem locations for virtio-win ISO files
    */
-  private static async searchFilesystem(): Promise<string | null> {
+  private static async searchFilesystem (): Promise<string | null> {
     const searchPaths = this.getSearchPaths()
     for (const searchPath of searchPaths) {
       if (!fs.existsSync(searchPath)) {
@@ -131,7 +131,7 @@ export class VirtIOPathResolver {
    * Queries package managers to find virtio-win ISO location
    * This is slower than filesystem search, so used as fallback
    */
-  private static async queryPackageManager(): Promise<string | null> {
+  private static async queryPackageManager (): Promise<string | null> {
     // Try dpkg (Debian/Ubuntu)
     try {
       const { stdout } = await execAsync('dpkg -L virtio-win 2>/dev/null || true')
@@ -168,7 +168,7 @@ export class VirtIOPathResolver {
   /**
    * Logs helpful hints for users when VirtIO ISO is not found
    */
-  private static logSearchHints(): void {
+  private static logSearchHints (): void {
     console.error('\n=== VirtIO Windows Drivers ISO Not Found ===')
     console.error('The virtio-win ISO is required for Windows VM installations.')
     console.error('\nPlease install it using one of these methods:\n')
@@ -190,7 +190,7 @@ export class VirtIOPathResolver {
    * Validates that the resolved path exists and is accessible
    * Throws an error if not found or not accessible
    */
-  public static async resolveOrThrow(): Promise<string> {
+  public static async resolveOrThrow (): Promise<string> {
     const resolvedPath = await this.resolve()
 
     if (!resolvedPath) {
@@ -217,7 +217,7 @@ export class VirtIOPathResolver {
   /**
    * Clears the cached path, forcing a new search on next resolve()
    */
-  public static clearCache(): void {
+  public static clearCache (): void {
     this.cachedPath = null
     this.debug.log('Cache cleared')
   }

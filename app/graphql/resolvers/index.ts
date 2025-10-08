@@ -22,6 +22,7 @@ import { VMRecommendationResolver } from './VMRecommendationResolver'
 // Import recommendation types to ensure they're registered
 import '../types/RecommendationTypes'
 import { AppSettingsResolver } from './AppSettingsResolver'
+import { FirewallResolver } from './firewall/resolver'
 
 const resolvers: NonEmptyArray<Function> = [
   UserResolver,
@@ -46,7 +47,8 @@ const resolvers: NonEmptyArray<Function> = [
   VMRecommendationResolver,
   BackgroundHealthResolver,
   MaintenanceResolver,
-  AppSettingsResolver
+  AppSettingsResolver,
+  FirewallResolver
 ]
 
 export default resolvers as NonEmptyArray<Function>

@@ -199,7 +199,7 @@ function checkSetupModeAccess (context: InfinibayContext): boolean {
  * Get department IDs that a user can access based on their VMs
  * Uses the same pattern as UserEventManager for consistency
  */
-export async function getUserAccessibleDepartments(prisma: any, userId: string): Promise<string[]> {
+export async function getUserAccessibleDepartments (prisma: any, userId: string): Promise<string[]> {
   const userVMs = await prisma.machine.findMany({
     where: { userId },
     select: { departmentId: true }
@@ -217,7 +217,7 @@ export async function getUserAccessibleDepartments(prisma: any, userId: string):
  * Validate if a user has access to a specific department
  * Returns true if user is ADMIN or has VMs in the department
  */
-export async function validateDepartmentAccess(
+export async function validateDepartmentAccess (
   prisma: any,
   user: SafeUser | null,
   departmentId: string
@@ -243,7 +243,7 @@ export async function validateDepartmentAccess(
  * Check if a user has access to a specific resource based on department membership
  * Generic function that can be used for filters, VMs, or other department-scoped resources
  */
-export async function validateResourceDepartmentAccess(
+export async function validateResourceDepartmentAccess (
   prisma: any,
   user: SafeUser | null,
   resourceId: string,
@@ -269,52 +269,52 @@ export async function validateResourceDepartmentAccess(
   let hasAccess = false
 
   switch (resourceType) {
-    case 'filter':
-      const filter = await prisma.nWFilter.findUnique({
-        where: { id: resourceId },
-        include: { departments: true }
-      })
+  case 'filter':
+    const filter = await prisma.nWFilter.findUnique({
+      where: { id: resourceId },
+      include: { departments: true }
+    })
 
-      if (!filter) {
-        debug.log(`Resource access denied: Filter ${resourceId} not found`)
-        return false
-      }
-
-      // Check if filter is generic type and includeGeneric is true
-      if (options.includeGeneric && filter.type === 'generic') {
-        hasAccess = true
-        break
-      }
-
-      // Check if filter is associated with any of the user's departments
-      hasAccess = filter.departments.some((dept: any) =>
-        userDepartmentIds.includes(dept.departmentId)
-      )
-      break
-
-    case 'vm':
-      const vm = await prisma.machine.findUnique({
-        where: { id: resourceId },
-        select: { departmentId: true, userId: true }
-      })
-
-      if (!vm) {
-        debug.log(`Resource access denied: VM ${resourceId} not found`)
-        return false
-      }
-
-      // User can access their own VMs or VMs in their departments
-      hasAccess = vm.userId === user.id ||
-        (vm.departmentId && userDepartmentIds.includes(vm.departmentId))
-      break
-
-    case 'department':
-      hasAccess = userDepartmentIds.includes(resourceId)
-      break
-
-    default:
-      debug.log(`Resource access denied: Unknown resource type ${resourceType}`)
+    if (!filter) {
+      debug.log(`Resource access denied: Filter ${resourceId} not found`)
       return false
+    }
+
+    // Check if filter is generic type and includeGeneric is true
+    if (options.includeGeneric && filter.type === 'generic') {
+      hasAccess = true
+      break
+    }
+
+    // Check if filter is associated with any of the user's departments
+    hasAccess = filter.departments.some((dept: any) =>
+      userDepartmentIds.includes(dept.departmentId)
+    )
+    break
+
+  case 'vm':
+    const vm = await prisma.machine.findUnique({
+      where: { id: resourceId },
+      select: { departmentId: true, userId: true }
+    })
+
+    if (!vm) {
+      debug.log(`Resource access denied: VM ${resourceId} not found`)
+      return false
+    }
+
+    // User can access their own VMs or VMs in their departments
+    hasAccess = vm.userId === user.id ||
+        (vm.departmentId && userDepartmentIds.includes(vm.departmentId))
+    break
+
+  case 'department':
+    hasAccess = userDepartmentIds.includes(resourceId)
+    break
+
+  default:
+    debug.log(`Resource access denied: Unknown resource type ${resourceType}`)
+    return false
   }
 
   debug.log(`Resource access ${hasAccess ? 'granted' : 'denied'}: User ${user.id} for ${resourceType} ${resourceId}`)
@@ -325,7 +325,7 @@ export async function validateResourceDepartmentAccess(
  * Filter a list of department IDs to only include those accessible by the user
  * Useful for scoping queries to user-accessible departments
  */
-export async function filterAccessibleDepartments(
+export async function filterAccessibleDepartments (
   prisma: any,
   user: SafeUser | null,
   departmentIds: string[]
@@ -346,7 +346,7 @@ export async function filterAccessibleDepartments(
  * Get a WHERE clause for Prisma queries that filters resources by department access
  * This ensures consistent department scoping across all queries
  */
-export async function getDepartmentScopedWhereClause(
+export async function getDepartmentScopedWhereClause (
   prisma: any,
   user: SafeUser | null,
   resourceType: 'filter' | 'vm' | 'department',
@@ -365,61 +365,61 @@ export async function getDepartmentScopedWhereClause(
   const userDepartmentIds = await getUserAccessibleDepartments(prisma, user.id)
 
   switch (resourceType) {
-    case 'filter':
-      // Always include generic filters for filters, even if user has no departments
-      const filterOrConditions: any[] = [{ type: 'generic' }]
+  case 'filter':
+    // Always include generic filters for filters, even if user has no departments
+    const filterOrConditions: any[] = [{ type: 'generic' }]
 
-      // Only add department condition if user has departments
-      if (userDepartmentIds.length > 0) {
-        filterOrConditions.push({
-          departments: {
-            some: {
-              departmentId: {
-                in: userDepartmentIds
-              }
-            }
-          }
-        })
-      }
-
-      return {
-        ...baseWhere,
-        OR: filterOrConditions
-      }
-
-    case 'vm':
-      if (userDepartmentIds.length === 0) {
-        // User has no departments, can only access their own VMs
-        return {
-          ...baseWhere,
-          userId: user.id
-        }
-      }
-      return {
-        ...baseWhere,
-        OR: [
-          { userId: user.id }, // User's own VMs
-          {
+    // Only add department condition if user has departments
+    if (userDepartmentIds.length > 0) {
+      filterOrConditions.push({
+        departments: {
+          some: {
             departmentId: {
               in: userDepartmentIds
             }
           }
-        ]
-      }
+        }
+      })
+    }
 
-    case 'department':
-      if (userDepartmentIds.length === 0) {
-        // User has no departments, return impossible condition
-        return { ...baseWhere, id: 'impossible' }
-      }
+    return {
+      ...baseWhere,
+      OR: filterOrConditions
+    }
+
+  case 'vm':
+    if (userDepartmentIds.length === 0) {
+      // User has no departments, can only access their own VMs
       return {
         ...baseWhere,
-        id: {
-          in: userDepartmentIds
-        }
+        userId: user.id
       }
+    }
+    return {
+      ...baseWhere,
+      OR: [
+        { userId: user.id }, // User's own VMs
+        {
+          departmentId: {
+            in: userDepartmentIds
+          }
+        }
+      ]
+    }
 
-    default:
+  case 'department':
+    if (userDepartmentIds.length === 0) {
+      // User has no departments, return impossible condition
       return { ...baseWhere, id: 'impossible' }
+    }
+    return {
+      ...baseWhere,
+      id: {
+        in: userDepartmentIds
+      }
+    }
+
+  default:
+    return { ...baseWhere, id: 'impossible' }
   }
 }

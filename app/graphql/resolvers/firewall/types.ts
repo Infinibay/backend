@@ -1,265 +1,255 @@
-import { ObjectType, Field, ID, InputType, registerEnumType, Int } from 'type-graphql'
+import { Field, ID, Int, ObjectType, registerEnumType } from 'type-graphql'
 import { GraphQLJSONObject } from 'graphql-type-json'
+import { RuleAction, RuleDirection, RuleSetType } from '@prisma/client'
 
-export enum FilterType {
-  GENERIC = 'generic',
-  DEPARTMENT = 'department',
-  VM = 'vm'
-}
-
-registerEnumType(FilterType, {
-  name: 'FilterType',
-  description: 'Type of network filter'
+// Register enums for GraphQL
+registerEnumType(RuleSetType, {
+  name: 'RuleSetType',
+  description: 'Type of firewall rule set (Department or VM)'
 })
 
+registerEnumType(RuleAction, {
+  name: 'RuleAction',
+  description: 'Action to take on matched traffic'
+})
+
+registerEnumType(RuleDirection, {
+  name: 'RuleDirection',
+  description: 'Direction of network traffic'
+})
+
+export enum ConflictType {
+  DUPLICATE = 'DUPLICATE',
+  CONTRADICTORY = 'CONTRADICTORY',
+  PORT_OVERLAP = 'PORT_OVERLAP',
+  PRIORITY_CONFLICT = 'PRIORITY_CONFLICT'
+}
+
+registerEnumType(ConflictType, {
+  name: 'ConflictType',
+  description: 'Type of rule conflict'
+})
+
+// ============================================================================
+// FirewallRule Type
+// ============================================================================
+
 @ObjectType()
-export class FWRule {
+export class FirewallRuleType {
   @Field(() => ID)
-    id: string = ''
+    id!: string
 
   @Field(() => String)
-    protocol: string = ''
+    ruleSetId!: string
 
   @Field(() => String)
-    direction: string = ''
+    name!: string
 
-  @Field(() => String)
-    action: string = ''
+  @Field(() => String, { nullable: true })
+    description?: string
+
+  @Field(() => RuleAction)
+    action!: RuleAction
+
+  @Field(() => RuleDirection)
+    direction!: RuleDirection
 
   @Field(() => Int)
-    priority: number = 0
+    priority!: number
 
-  @Field(() => String, { nullable: true })
-    ipVersion?: string | null
-
-  @Field(() => String, { nullable: true })
-    srcMacAddr?: string | null
-
-  @Field(() => String, { nullable: true })
-    srcIpAddr?: string | null
-
-  @Field(() => String, { nullable: true })
-    srcIpMask?: string | null
-
-  @Field(() => String, { nullable: true })
-    dstIpAddr?: string | null
-
-  @Field(() => String, { nullable: true })
-    dstIpMask?: string | null
+  @Field(() => String)
+    protocol!: string
 
   @Field(() => Int, { nullable: true })
-    srcPortStart?: number | null
+    srcPortStart?: number
 
   @Field(() => Int, { nullable: true })
-    srcPortEnd?: number | null
+    srcPortEnd?: number
 
   @Field(() => Int, { nullable: true })
-    dstPortStart?: number | null
+    dstPortStart?: number
 
   @Field(() => Int, { nullable: true })
-    dstPortEnd?: number | null
+    dstPortEnd?: number
+
+  @Field(() => String, { nullable: true })
+    srcIpAddr?: string
+
+  @Field(() => String, { nullable: true })
+    srcIpMask?: string
+
+  @Field(() => String, { nullable: true })
+    dstIpAddr?: string
+
+  @Field(() => String, { nullable: true })
+    dstIpMask?: string
 
   @Field(() => GraphQLJSONObject, { nullable: true })
-    state?: any
+    connectionState?: Record<string, boolean>
+
+  @Field(() => Boolean)
+    overridesDept!: boolean
+
+  @Field(() => Date)
+    createdAt!: Date
+
+  @Field(() => Date)
+    updatedAt!: Date
+}
+
+// ============================================================================
+// FirewallRuleSet Type
+// ============================================================================
+
+@ObjectType()
+export class FirewallRuleSetType {
+  @Field(() => ID)
+    id!: string
+
+  @Field(() => String)
+    name!: string
+
+  @Field(() => String)
+    internalName!: string
+
+  @Field(() => RuleSetType)
+    entityType!: RuleSetType
+
+  @Field(() => String)
+    entityId!: string
+
+  @Field(() => Int)
+    priority!: number
+
+  @Field(() => Boolean)
+    isActive!: boolean
 
   @Field(() => String, { nullable: true })
-    comment?: string | null
+    libvirtUuid?: string
+
+  @Field(() => String, { nullable: true })
+    xmlContent?: string
 
   @Field(() => Date, { nullable: true })
-    createdAt?: Date = new Date()
+    lastSyncedAt?: Date
 
-  @Field(() => Date, { nullable: true })
-    updatedAt: Date = new Date()
+  @Field(() => Date)
+    createdAt!: Date
+
+  @Field(() => Date)
+    updatedAt!: Date
+
+  @Field(() => [FirewallRuleType])
+    rules!: FirewallRuleType[]
+}
+
+// ============================================================================
+// Validation Types
+// ============================================================================
+
+@ObjectType()
+export class RuleConflictType {
+  @Field(() => ConflictType)
+    type!: ConflictType
+
+  @Field(() => String)
+    message!: string
+
+  @Field(() => [FirewallRuleType])
+    affectedRules!: FirewallRuleType[]
+}
+
+// ============================================================================
+// Effective Rule Set (VM rules merged with department)
+// ============================================================================
+
+@ObjectType()
+export class EffectiveRuleSetType {
+  @Field(() => ID)
+    vmId!: string
+
+  @Field(() => [FirewallRuleType])
+    departmentRules!: FirewallRuleType[]
+
+  @Field(() => [FirewallRuleType])
+    vmRules!: FirewallRuleType[]
+
+  @Field(() => [FirewallRuleType])
+    effectiveRules!: FirewallRuleType[]
+
+  @Field(() => [RuleConflictType])
+    conflicts!: RuleConflictType[]
 }
 
 @ObjectType()
-export class GenericFilter {
-  @Field(() => ID)
-    id: string = ''
+export class ValidationResultType {
+  @Field(() => Boolean)
+    isValid!: boolean
 
-  @Field()
-    name: string = ''
-
-  @Field({ nullable: true })
-    description?: string
-
-  @Field(() => FilterType)
-    type: FilterType = FilterType.GENERIC
-
-  @Field(() => [FWRule], { nullable: true })
-    rules: FWRule[] = []
+  @Field(() => [RuleConflictType])
+    conflicts!: RuleConflictType[]
 
   @Field(() => [String])
-    references: string[] = []
-
-  @Field(() => Date)
-    createdAt: Date = new Date()
-
-  @Field(() => Date)
-    updatedAt: Date = new Date()
+    warnings!: string[]
 }
+
+// ============================================================================
+// Operation Result Types
+// ============================================================================
 
 @ObjectType()
-export class DepartmentFilter extends GenericFilter {
+export class FlushResultType {
+  @Field(() => Boolean)
+    success!: boolean
+
   @Field(() => ID)
-    departmentId: string = ''
-
-  @Field()
-    priority: number = 0
-}
-
-@ObjectType()
-export class VMFilter extends GenericFilter {
-  @Field(() => ID)
-    vmId: string = ''
-
-  @Field()
-    priority: number = 0
-}
-
-@InputType()
-export class CreateFilterRuleInput {
-  @Field(() => String)
-    filterId: string = ''
-
-  @Field(() => String)
-    action: string = ''
-
-  @Field(() => String)
-    direction: string = ''
+    vmId!: string
 
   @Field(() => Int)
-    priority: number = 0
-
-  @Field(() => String, { nullable: true })
-    protocol?: string
-
-  @Field(() => Int, { nullable: true })
-    srcPortStart?: number
-
-  @Field(() => Int, { nullable: true })
-    srcPortEnd?: number
-
-  @Field(() => Int, { nullable: true })
-    dstPortStart?: number
-
-  @Field(() => Int, { nullable: true })
-    dstPortEnd?: number
-
-  @Field(() => String, { nullable: true })
-    comment?: string
-
-  @Field(() => String, { nullable: true })
-    ipVersion?: string
-
-  @Field(() => String, { nullable: true })
-    state?: string
-}
-
-@InputType()
-export class UpdateFilterRuleInput {
-  @Field(() => String)
-    action: string = ''
+    rulesApplied!: number
 
   @Field(() => String)
-    direction: string = ''
+    libvirtFilterName!: string
 
-  @Field(() => Int)
-    priority: number = 0
-
-  @Field(() => String, { nullable: true })
-    protocol?: string
-
-  @Field(() => Int, { nullable: true })
-    srcPortStart?: number
-
-  @Field(() => Int, { nullable: true })
-    srcPortEnd?: number
-
-  @Field(() => Int, { nullable: true })
-    dstPortStart?: number
-
-  @Field(() => Int, { nullable: true })
-    dstPortEnd?: number
-
-  @Field(() => String, { nullable: true })
-    comment?: string
-
-  @Field(() => String, { nullable: true })
-    ipVersion?: string
-
-  @Field(() => String, { nullable: true })
-    state?: string
-}
-
-@InputType()
-export class CreateFilterInput {
-  @Field(() => FilterType, { nullable: true })
-    type: FilterType = FilterType.GENERIC
-
-  @Field()
-    name: string = ''
-
-  @Field(() => String)
-    description: string = ''
-
-  @Field(() => String, { nullable: true })
-    chain: string = 'root'
-
-  @Field(() => ID, { nullable: true })
-    departmentId?: string
-}
-
-@InputType()
-export class UpdateFilterInput {
-  @Field({ nullable: true })
-    name?: string
-
-  @Field({ nullable: true })
-    description?: string
-
-  @Field({ nullable: true })
-    chain?: string
-
-  @Field({ nullable: true })
-    type?: FilterType
+  @Field(() => Date)
+    timestamp!: Date
 }
 
 @ObjectType()
-export class DepartmentFirewallState {
-  @Field(() => ID)
-    departmentId: string = ''
+export class SyncResultType {
+  @Field(() => Boolean)
+    success!: boolean
+
+  @Field(() => Int)
+    filtersCreated!: number
+
+  @Field(() => Int)
+    filtersUpdated!: number
+
+  @Field(() => Int)
+    vmsUpdated!: number
 
   @Field(() => [String])
-    appliedTemplates: string[] = []
+    errors!: string[]
+}
 
-  @Field(() => [FWRule])
-    customRules: FWRule[] = []
-
-  @Field(() => [FWRule])
-    effectiveRules: FWRule[] = []
+@ObjectType()
+export class CleanupResultType {
+  @Field(() => Boolean)
+    success!: boolean
 
   @Field(() => Int)
-    vmCount: number = 0
+    filtersRemoved!: number
 
-  @Field(() => Date)
-    lastSync: Date = new Date()
+  @Field(() => [String])
+    filterNames!: string[]
 }
 
-@InputType()
-export class AddFilterReferenceInput {
-  @Field(() => ID)
-    sourceFilterId: string = ''
+@ObjectType()
+export class LibvirtFilterInfoType {
+  @Field(() => String)
+    name!: string
 
-  @Field(() => ID)
-    targetFilterId: string = ''
-}
-
-@InputType()
-export class ApplyDepartmentTemplateInput {
-  @Field(() => ID)
-    departmentId: string = ''
-
-  @Field(() => ID)
-    templateFilterId: string = ''
+  @Field(() => String, { nullable: true })
+    uuid?: string
 }

@@ -255,5 +255,4 @@ describe('DepartmentResolver', () => {
       ).rejects.toThrow(UserInputError)
     })
   })
-
 })

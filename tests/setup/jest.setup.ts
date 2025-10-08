@@ -41,6 +41,21 @@ jest.mock('@prisma/client', () => ({
     PERFORMANCE_CHECK: 'PERFORMANCE_CHECK',
     SYSTEM_HEALTH: 'SYSTEM_HEALTH',
     CUSTOM_CHECK: 'CUSTOM_CHECK'
+  },
+  // Firewall enums
+  RuleSetType: {
+    DEPARTMENT: 'DEPARTMENT',
+    VM: 'VM'
+  },
+  RuleAction: {
+    ACCEPT: 'ACCEPT',
+    DROP: 'DROP',
+    REJECT: 'REJECT'
+  },
+  RuleDirection: {
+    IN: 'IN',
+    OUT: 'OUT',
+    INOUT: 'INOUT'
   }
 }))
 
