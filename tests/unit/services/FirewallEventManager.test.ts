@@ -106,7 +106,7 @@ describe('FirewallEventManager', () => {
             deleted: false,
             VM: {
               some: {
-                departmentId: departmentId
+                departmentId
               }
             }
           },
@@ -124,9 +124,9 @@ describe('FirewallEventManager', () => {
           {
             status: 'success',
             data: {
-              ruleId: ruleId,
+              ruleId,
               ruleName: 'Allow HTTPS',
-              departmentId: departmentId
+              departmentId
             }
           }
         )
@@ -159,8 +159,8 @@ describe('FirewallEventManager', () => {
           expect.objectContaining({
             status: 'success',
             data: expect.objectContaining({
-              ruleId: ruleId,
-              departmentId: departmentId
+              ruleId,
+              departmentId
             })
           })
         )
@@ -193,8 +193,8 @@ describe('FirewallEventManager', () => {
           expect.objectContaining({
             status: 'success',
             data: expect.objectContaining({
-              ruleId: ruleId,
-              departmentId: departmentId
+              ruleId,
+              departmentId
             })
           })
         )
@@ -242,9 +242,9 @@ describe('FirewallEventManager', () => {
           {
             status: 'success',
             data: {
-              ruleId: ruleId,
+              ruleId,
               ruleName: 'Allow SSH',
-              vmId: vmId
+              vmId
             }
           }
         )
@@ -276,8 +276,8 @@ describe('FirewallEventManager', () => {
           expect.objectContaining({
             status: 'success',
             data: expect.objectContaining({
-              ruleId: ruleId,
-              vmId: vmId
+              ruleId,
+              vmId
             })
           })
         )
@@ -309,8 +309,8 @@ describe('FirewallEventManager', () => {
           expect.objectContaining({
             status: 'success',
             data: expect.objectContaining({
-              ruleId: ruleId,
-              vmId: vmId
+              ruleId,
+              vmId
             })
           })
         )

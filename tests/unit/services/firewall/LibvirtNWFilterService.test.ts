@@ -14,7 +14,7 @@ jest.mock('@infinibay/libvirt-node', () => {
   return {
     __esModule: true,
     Connection: jest.fn(),
-    NWFilter: MockNWFilter,
+    NWFilter: MockNWFilter
   }
 })
 

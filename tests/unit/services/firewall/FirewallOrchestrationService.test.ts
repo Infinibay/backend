@@ -305,4 +305,229 @@ describe('FirewallOrchestrationService', () => {
       expect(result.vmsUpdated).toBe(2)
     })
   })
+
+  describe('validateVMRuleAgainstDepartment', () => {
+    it('should detect conflict when VM rule blocks traffic allowed by department', async () => {
+      const mockVM = {
+        id: 'vm-123',
+        internalName: 'vm-123',
+        department: {
+          id: 'dept-123',
+          firewallRuleSet: {
+            rules: [
+              {
+                id: 'dept-rule-1',
+                name: 'DNS - DNS queries (TCP)',
+                action: RuleAction.ACCEPT,
+                direction: RuleDirection.INOUT,
+                protocol: 'tcp',
+                dstPortStart: 53,
+                dstPortEnd: 53,
+                srcIpAddr: null,
+                dstIpAddr: null,
+                priority: 100,
+                overridesDept: false
+              }
+            ]
+          }
+        }
+      };
+
+      (mockPrisma.machine.findUnique as jest.Mock).mockResolvedValue(mockVM)
+
+      const newRule = {
+        name: 'Block 53',
+        action: RuleAction.DROP,
+        direction: RuleDirection.IN,
+        protocol: 'tcp',
+        dstPortStart: 53,
+        dstPortEnd: 53,
+        overridesDept: false
+      }
+
+      const result = await service.validateVMRuleAgainstDepartment('vm-123', newRule)
+
+      expect(result.isValid).toBe(false)
+      expect(result.conflicts).toHaveLength(1)
+      expect(result.conflicts[0]).toContain('conflicts with department rule')
+      expect(result.conflicts[0]).toContain('overridesDept=true')
+    })
+
+    it('should allow rule when overridesDept is true', async () => {
+      const mockVM = {
+        id: 'vm-123',
+        internalName: 'vm-123',
+        department: {
+          id: 'dept-123',
+          firewallRuleSet: {
+            rules: [
+              {
+                id: 'dept-rule-1',
+                name: 'Allow SSH',
+                action: RuleAction.ACCEPT,
+                direction: RuleDirection.IN,
+                protocol: 'tcp',
+                dstPortStart: 22,
+                dstPortEnd: 22,
+                srcIpAddr: null,
+                dstIpAddr: null,
+                priority: 100,
+                overridesDept: false
+              }
+            ]
+          }
+        }
+      };
+
+      (mockPrisma.machine.findUnique as jest.Mock).mockResolvedValue(mockVM)
+
+      const newRule = {
+        name: 'Block SSH',
+        action: RuleAction.DROP,
+        direction: RuleDirection.IN,
+        protocol: 'tcp',
+        dstPortStart: 22,
+        dstPortEnd: 22,
+        overridesDept: true
+      }
+
+      const result = await service.validateVMRuleAgainstDepartment('vm-123', newRule)
+
+      expect(result.isValid).toBe(true)
+      expect(result.conflicts).toHaveLength(0)
+    })
+
+    it('should handle INOUT direction matching both IN and OUT', async () => {
+      const mockVM = {
+        id: 'vm-123',
+        internalName: 'vm-123',
+        department: {
+          id: 'dept-123',
+          firewallRuleSet: {
+            rules: [
+              {
+                id: 'dept-rule-1',
+                name: 'Allow DNS Both Directions',
+                action: RuleAction.ACCEPT,
+                direction: RuleDirection.INOUT,
+                protocol: 'udp',
+                dstPortStart: 53,
+                dstPortEnd: 53,
+                srcIpAddr: null,
+                dstIpAddr: null,
+                priority: 100,
+                overridesDept: false
+              }
+            ]
+          }
+        }
+      };
+
+      (mockPrisma.machine.findUnique as jest.Mock).mockResolvedValue(mockVM)
+
+      const newRule = {
+        name: 'Block DNS Incoming',
+        action: RuleAction.DROP,
+        direction: RuleDirection.IN,
+        protocol: 'udp',
+        dstPortStart: 53,
+        dstPortEnd: 53,
+        overridesDept: false
+      }
+
+      const result = await service.validateVMRuleAgainstDepartment('vm-123', newRule)
+
+      expect(result.isValid).toBe(false)
+      expect(result.conflicts).toHaveLength(1)
+      expect(result.conflicts[0]).toContain('conflicts with department rule')
+    })
+
+    it('should allow non-conflicting rules', async () => {
+      const mockVM = {
+        id: 'vm-123',
+        internalName: 'vm-123',
+        department: {
+          id: 'dept-123',
+          firewallRuleSet: {
+            rules: [
+              {
+                id: 'dept-rule-1',
+                name: 'Allow HTTP',
+                action: RuleAction.ACCEPT,
+                direction: RuleDirection.IN,
+                protocol: 'tcp',
+                dstPortStart: 80,
+                dstPortEnd: 80,
+                srcIpAddr: null,
+                dstIpAddr: null,
+                priority: 100,
+                overridesDept: false
+              }
+            ]
+          }
+        }
+      };
+
+      (mockPrisma.machine.findUnique as jest.Mock).mockResolvedValue(mockVM)
+
+      const newRule = {
+        name: 'Allow HTTPS',
+        action: RuleAction.ACCEPT,
+        direction: RuleDirection.IN,
+        protocol: 'tcp',
+        dstPortStart: 443,
+        dstPortEnd: 443,
+        overridesDept: false
+      }
+
+      const result = await service.validateVMRuleAgainstDepartment('vm-123', newRule)
+
+      expect(result.isValid).toBe(true)
+      expect(result.conflicts).toHaveLength(0)
+    })
+
+    it('should allow same action rules (no conflict)', async () => {
+      const mockVM = {
+        id: 'vm-123',
+        internalName: 'vm-123',
+        department: {
+          id: 'dept-123',
+          firewallRuleSet: {
+            rules: [
+              {
+                id: 'dept-rule-1',
+                name: 'Allow SSH',
+                action: RuleAction.ACCEPT,
+                direction: RuleDirection.IN,
+                protocol: 'tcp',
+                dstPortStart: 22,
+                dstPortEnd: 22,
+                srcIpAddr: null,
+                dstIpAddr: null,
+                priority: 100,
+                overridesDept: false
+              }
+            ]
+          }
+        }
+      };
+
+      (mockPrisma.machine.findUnique as jest.Mock).mockResolvedValue(mockVM)
+
+      const newRule = {
+        name: 'Also Allow SSH',
+        action: RuleAction.ACCEPT,
+        direction: RuleDirection.IN,
+        protocol: 'tcp',
+        dstPortStart: 22,
+        dstPortEnd: 22,
+        overridesDept: false
+      }
+
+      const result = await service.validateVMRuleAgainstDepartment('vm-123', newRule)
+
+      expect(result.isValid).toBe(true)
+      expect(result.conflicts).toHaveLength(0)
+    })
+  })
 })
