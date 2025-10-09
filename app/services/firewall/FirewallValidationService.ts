@@ -1,4 +1,5 @@
-import { FirewallRule, RuleAction, RuleDirection } from '@prisma/client'
+import { FirewallRule } from '@prisma/client'
+import { isIPv4, isIPv6 } from 'node:net'
 
 export type ConflictType = 'DUPLICATE' | 'CONTRADICTORY' | 'PORT_OVERLAP' | 'PRIORITY_CONFLICT';
 
@@ -13,6 +14,17 @@ export interface ValidationResult {
   conflicts: RuleConflict[];
   warnings: string[];
 }
+
+// Protocols that do not support port specifications
+const PORTLESS_PROTOCOLS = ['icmp', 'icmpv6', 'igmp', 'ah', 'esp', 'all']
+
+// Valid port range
+const MIN_PORT = 1
+const MAX_PORT = 65535
+
+// Valid priority range
+const MIN_PRIORITY = 0
+const MAX_PRIORITY = 1000
 
 /**
  * Service responsible for validating firewall rules before they are applied.
@@ -59,7 +71,6 @@ export class FirewallValidationService {
    */
   async validateOverride (vmRule: FirewallRule, deptRules: FirewallRule[]): Promise<ValidationResult> {
     const warnings: string[] = []
-    const conflicts: RuleConflict[] = []
 
     if (!vmRule.overridesDept) {
       return { isValid: true, conflicts: [], warnings: [] }
@@ -142,15 +153,20 @@ export class FirewallValidationService {
         const rule1 = rules[i]
         const rule2 = rules[j]
 
-        // Only check overlaps for same protocol and direction
-        if (rule1.protocol !== rule2.protocol || rule1.direction !== rule2.direction) {
+        // Only check overlaps for same protocol and compatible directions
+        if (rule1.protocol !== rule2.protocol) {
           continue
         }
 
-        if (this.portRangesOverlap(rule1, rule2)) {
+        if (!this.directionsOverlap(rule1.direction, rule2.direction)) {
+          continue
+        }
+
+        const overlapDetails = this.getPortOverlapDetails(rule1, rule2)
+        if (overlapDetails) {
           conflicts.push({
             type: 'PORT_OVERLAP',
-            message: `Port overlap between "${rule1.name}" and "${rule2.name}" on ${rule1.protocol}`,
+            message: overlapDetails,
             affectedRules: [rule1, rule2]
           })
         }
@@ -161,21 +177,116 @@ export class FirewallValidationService {
   }
 
   /**
-   * Checks if two rules have overlapping port ranges
+   * Checks if two direction values overlap (e.g., INOUT overlaps with IN and OUT)
    */
-  private portRangesOverlap (rule1: FirewallRule, rule2: FirewallRule): boolean {
-    // If either rule doesn't specify ports, no overlap
-    if (!rule1.dstPortStart || !rule2.dstPortStart) {
-      return false
+  private directionsOverlap (dir1: string, dir2: string): boolean {
+    if (dir1 === dir2) return true
+    // INOUT overlaps with both IN and OUT
+    if (dir1 === 'INOUT' || dir2 === 'INOUT') return true
+    return false
+  }
+
+  /**
+   * Checks if two rules have overlapping port ranges and returns detailed message
+   */
+  private getPortOverlapDetails (rule1: FirewallRule, rule2: FirewallRule): string | null {
+    // If either rule doesn't specify ports, check if they both target "all ports"
+    const rule1AllPorts = !rule1.dstPortStart
+    const rule2AllPorts = !rule2.dstPortStart
+
+    // If one targets all ports and the other specifies ports, there's an overlap
+    if (rule1AllPorts && rule2AllPorts) {
+      // Both target all ports
+      return this.formatOverlapMessage(rule1, rule2, 'all ports', 'all ports', 'all ports')
     }
 
+    if (rule1AllPorts || rule2AllPorts) {
+      // One targets all ports, the other specifies a range
+      const specificRule = rule1AllPorts ? rule2 : rule1
+      const start = specificRule.dstPortStart
+      if (!start) {
+        return null // Should not happen, but guard against it
+      }
+      const end = specificRule.dstPortEnd || start
+      const range = end === start ? `port ${start}` : `ports ${start}-${end}`
+
+      return this.formatOverlapMessage(
+        rule1,
+        rule2,
+        rule1AllPorts ? 'all ports' : range,
+        rule2AllPorts ? 'all ports' : range,
+        range
+      )
+    }
+
+    // Both rules specify ports - check for range overlap
     const start1 = rule1.dstPortStart
-    const end1 = rule1.dstPortEnd || start1
     const start2 = rule2.dstPortStart
+    if (!start1 || !start2) {
+      return null // Should not happen, but guard against it
+    }
+    const end1 = rule1.dstPortEnd || start1
     const end2 = rule2.dstPortEnd || start2
 
     // Check if ranges overlap
-    return start1 <= end2 && start2 <= end1
+    if (!(start1 <= end2 && start2 <= end1)) {
+      return null
+    }
+
+    // Generate range descriptions
+    const range1 = end1 === start1 ? `port ${start1}` : `ports ${start1}-${end1}`
+    const range2 = end2 === start2 ? `port ${start2}` : `ports ${start2}-${end2}`
+
+    // Calculate overlap range
+    const overlapStart = Math.max(start1, start2)
+    const overlapEnd = Math.min(end1, end2)
+    const overlapRange = overlapEnd === overlapStart
+      ? `port ${overlapStart}`
+      : `ports ${overlapStart}-${overlapEnd}`
+
+    return this.formatOverlapMessage(rule1, rule2, range1, range2, overlapRange)
+  }
+
+  /**
+   * Formats the overlap message with helpful suggestions based on rule actions
+   */
+  private formatOverlapMessage (
+    rule1: FirewallRule,
+    rule2: FirewallRule,
+    range1: string,
+    range2: string,
+    overlapRange: string
+  ): string {
+    const directionInfo = this.formatDirectionOverlap(rule1.direction, rule2.direction)
+    let message = `Port overlap: "${rule1.name}" (${rule1.action} ${range1}) and "${rule2.name}" (${rule2.action} ${range2}) both target ${overlapRange} on ${rule1.protocol}${directionInfo}.`
+
+    // Add suggestion based on whether actions differ
+    if (rule1.action !== rule2.action) {
+      message += ' Actions differ - use overridesDept=true on the VM rule to explicitly override the department rule, or adjust the port ranges to avoid overlap.'
+    } else {
+      message += ' Both rules have the same action - consider consolidating them into a single rule to simplify your firewall configuration.'
+    }
+
+    return message
+  }
+
+  /**
+   * Formats direction information for overlap messages
+   */
+  private formatDirectionOverlap (dir1: string, dir2: string): string {
+    if (dir1 === dir2) {
+      return ` (${dir1})`
+    }
+
+    if (dir1 === 'INOUT' && dir2 !== 'INOUT') {
+      return ` (${dir1} includes ${dir2})`
+    }
+
+    if (dir2 === 'INOUT' && dir1 !== 'INOUT') {
+      return ` (${dir2} includes ${dir1})`
+    }
+
+    return ` (${dir1} and ${dir2})`
   }
 
   /**
@@ -189,12 +300,14 @@ export class FirewallValidationService {
       const signature = this.getRuleSignature(rule)
 
       if (seen.has(signature)) {
-        const existingRule = seen.get(signature)!
-        conflicts.push({
-          type: 'DUPLICATE',
-          message: `Duplicate rule detected: "${rule.name}" is identical to "${existingRule.name}"`,
-          affectedRules: [existingRule, rule]
-        })
+        const existingRule = seen.get(signature)
+        if (existingRule) {
+          conflicts.push({
+            type: 'DUPLICATE',
+            message: `Duplicate rule detected: "${rule.name}" is identical to "${existingRule.name}"`,
+            affectedRules: [existingRule, rule]
+          })
+        }
       } else {
         seen.set(signature, rule)
       }
@@ -220,5 +333,154 @@ export class FirewallValidationService {
       dstIpAddr: rule.dstIpAddr,
       dstIpMask: rule.dstIpMask
     })
+  }
+
+  /**
+   * Validates rule input data for correctness before creation/update
+   * Checks port ranges, IP addresses, protocol compatibility, etc.
+   */
+  async validateRuleInput (rule: FirewallRule): Promise<ValidationResult> {
+    const warnings: string[] = []
+
+    // Validate priority range
+    if (rule.priority < MIN_PRIORITY || rule.priority > MAX_PRIORITY) {
+      warnings.push(`Priority ${rule.priority} is out of valid range (${MIN_PRIORITY}-${MAX_PRIORITY})`)
+    }
+
+    // Validate port specifications
+    this.validatePortSpecifications(rule, warnings)
+
+    // Validate IP addresses and masks
+    this.validateIPAddresses(rule, warnings)
+
+    // Validate protocol-specific constraints
+    this.validateProtocolConstraints(rule, warnings)
+
+    return {
+      isValid: warnings.length === 0,
+      conflicts: [],
+      warnings
+    }
+  }
+
+  /**
+   * Validates port specifications (range, bounds, consistency)
+   */
+  private validatePortSpecifications (rule: FirewallRule, warnings: string[]): void {
+    // Validate source ports
+    if (rule.srcPortStart !== null && rule.srcPortStart !== undefined) {
+      if (rule.srcPortStart < MIN_PORT || rule.srcPortStart > MAX_PORT) {
+        warnings.push(`Source port ${rule.srcPortStart} is out of valid range (${MIN_PORT}-${MAX_PORT})`)
+      }
+
+      if (rule.srcPortEnd !== null && rule.srcPortEnd !== undefined) {
+        if (rule.srcPortEnd < MIN_PORT || rule.srcPortEnd > MAX_PORT) {
+          warnings.push(`Source port ${rule.srcPortEnd} is out of valid range (${MIN_PORT}-${MAX_PORT})`)
+        }
+
+        if (rule.srcPortStart > rule.srcPortEnd) {
+          warnings.push(`Source port range is invalid: start port (${rule.srcPortStart}) is greater than end port (${rule.srcPortEnd})`)
+        }
+      }
+    } else if (rule.srcPortEnd !== null && rule.srcPortEnd !== undefined) {
+      warnings.push('Source port end specified without source port start')
+    }
+
+    // Validate destination ports
+    if (rule.dstPortStart !== null && rule.dstPortStart !== undefined) {
+      if (rule.dstPortStart < MIN_PORT || rule.dstPortStart > MAX_PORT) {
+        warnings.push(`Destination port ${rule.dstPortStart} is out of valid range (${MIN_PORT}-${MAX_PORT})`)
+      }
+
+      if (rule.dstPortEnd !== null && rule.dstPortEnd !== undefined) {
+        if (rule.dstPortEnd < MIN_PORT || rule.dstPortEnd > MAX_PORT) {
+          warnings.push(`Destination port ${rule.dstPortEnd} is out of valid range (${MIN_PORT}-${MAX_PORT})`)
+        }
+
+        if (rule.dstPortStart > rule.dstPortEnd) {
+          warnings.push(`Destination port range is invalid: start port (${rule.dstPortStart}) is greater than end port (${rule.dstPortEnd})`)
+        }
+      }
+    } else if (rule.dstPortEnd !== null && rule.dstPortEnd !== undefined) {
+      warnings.push('Destination port end specified without destination port start')
+    }
+  }
+
+  /**
+   * Validates IP addresses and CIDR masks
+   */
+  private validateIPAddresses (rule: FirewallRule, warnings: string[]): void {
+    // Validate source IP
+    if (rule.srcIpAddr) {
+      if (!this.isValidIPAddress(rule.srcIpAddr)) {
+        warnings.push(`Source IP address "${rule.srcIpAddr}" is not a valid IPv4 or IPv6 address`)
+      }
+
+      // Validate source mask if IP is provided
+      if (rule.srcIpMask) {
+        const isIPv4Addr = isIPv4(rule.srcIpAddr)
+        if (!this.isValidCIDRMask(rule.srcIpMask, isIPv4Addr)) {
+          warnings.push(`Source IP mask "${rule.srcIpMask}" is not valid. Use CIDR notation (0-32 for IPv4, 0-128 for IPv6)`)
+        }
+      }
+    } else if (rule.srcIpMask) {
+      warnings.push('Source IP mask specified without source IP address')
+    }
+
+    // Validate destination IP
+    if (rule.dstIpAddr) {
+      if (!this.isValidIPAddress(rule.dstIpAddr)) {
+        warnings.push(`Destination IP address "${rule.dstIpAddr}" is not a valid IPv4 or IPv6 address`)
+      }
+
+      // Validate destination mask if IP is provided
+      if (rule.dstIpMask) {
+        const isIPv4Addr = isIPv4(rule.dstIpAddr)
+        if (!this.isValidCIDRMask(rule.dstIpMask, isIPv4Addr)) {
+          warnings.push(`Destination IP mask "${rule.dstIpMask}" is not valid. Use CIDR notation (0-32 for IPv4, 0-128 for IPv6)`)
+        }
+      }
+    } else if (rule.dstIpMask) {
+      warnings.push('Destination IP mask specified without destination IP address')
+    }
+  }
+
+  /**
+   * Validates protocol-specific constraints (e.g., ICMP doesn't use ports)
+   */
+  private validateProtocolConstraints (rule: FirewallRule, warnings: string[]): void {
+    const protocol = rule.protocol?.toLowerCase() || 'all'
+
+    if (PORTLESS_PROTOCOLS.includes(protocol)) {
+      // Check if ports are specified for protocols that don't support them
+      const hasSrcPorts = rule.srcPortStart !== null && rule.srcPortStart !== undefined
+      const hasDstPorts = rule.dstPortStart !== null && rule.dstPortStart !== undefined
+
+      if (hasSrcPorts || hasDstPorts) {
+        warnings.push(`Protocol "${protocol}" does not support port specifications. Remove port fields.`)
+      }
+    }
+  }
+
+  /**
+   * Checks if an IP address is valid (IPv4 or IPv6)
+   */
+  private isValidIPAddress (ip: string): boolean {
+    return isIPv4(ip) || isIPv6(ip)
+  }
+
+  /**
+   * Validates CIDR mask notation
+   */
+  private isValidCIDRMask (mask: string, isIPv4Addr: boolean): boolean {
+    const maskNum = parseInt(mask, 10)
+
+    if (isNaN(maskNum)) {
+      return false
+    }
+
+    const maxMask = isIPv4Addr ? 32 : 128
+
+    return maskNum >= 0 && maskNum <= maxMask
   }
 }

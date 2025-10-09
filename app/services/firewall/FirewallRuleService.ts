@@ -63,7 +63,7 @@ export class FirewallRuleService {
     name: string,
     internalName: string,
     priority: number = 500
-  ): Promise<FirewallRuleSet> {
+  ): Promise<FirewallRuleSetWithRules> {
     const ruleSet = await this.prisma.firewallRuleSet.create({
       data: {
         name,

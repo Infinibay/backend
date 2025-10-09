@@ -23,7 +23,6 @@ import {
   FirewallRuleType,
   FlushResultType,
   LibvirtFilterInfoType,
-  RuleConflictType,
   SyncResultType,
   ValidationResultType
 } from './types'
@@ -43,6 +42,32 @@ export class FirewallResolver {
         affectedRules: c.affectedRules as FirewallRuleType[]
       }))
     }
+  }
+
+  // Helper to create a temporary FirewallRule object from input for validation
+  private createTempRuleFromInput (input: CreateFirewallRuleInput, ruleSetId: string): FirewallRule {
+    return {
+      id: 'temp',
+      ruleSetId,
+      name: input.name,
+      description: input.description ?? null,
+      action: input.action,
+      direction: input.direction,
+      priority: input.priority,
+      protocol: input.protocol ?? 'all',
+      srcPortStart: input.srcPortStart ?? null,
+      srcPortEnd: input.srcPortEnd ?? null,
+      dstPortStart: input.dstPortStart ?? null,
+      dstPortEnd: input.dstPortEnd ?? null,
+      srcIpAddr: input.srcIpAddr ?? null,
+      srcIpMask: input.srcIpMask ?? null,
+      dstIpAddr: input.dstIpAddr ?? null,
+      dstIpMask: input.dstIpMask ?? null,
+      connectionState: input.connectionState ?? null,
+      overridesDept: input.overridesDept ?? false,
+      createdAt: new Date(),
+      updatedAt: new Date()
+    } as FirewallRule
   }
 
   // Initialize services
@@ -209,12 +234,16 @@ export class FirewallResolver {
     @Arg('input') input: CreateFirewallRuleInput,
     @Ctx() ctx: InfinibayContext
   ): Promise<FirewallRuleType> {
-    const { ruleService, xmlGenerator, orchestrationService } = await this.getServices(ctx)
+    const { ruleService, validationService, xmlGenerator, orchestrationService } = await this.getServices(ctx)
 
     // Check if department exists
     const department = await ctx.prisma.department.findUnique({
       where: { id: departmentId },
-      include: { firewallRuleSet: true }
+      include: {
+        firewallRuleSet: {
+          include: { rules: true }
+        }
+      }
     })
 
     if (!department) {
@@ -242,6 +271,26 @@ export class FirewallResolver {
     // VM rules cannot use overridesDept in department context
     if (input.overridesDept) {
       throw new UserInputError('overridesDept can only be used for VM rules')
+    }
+
+    // Validate input before creating the rule
+    const tempRule = this.createTempRuleFromInput(input, ruleSet.id)
+    const inputValidation = await validationService.validateRuleInput(tempRule)
+
+    if (!inputValidation.isValid) {
+      throw new UserInputError(inputValidation.warnings.join('; '))
+    }
+
+    // Get existing department rules to validate with new rule
+    const existingDeptRules = department.firewallRuleSet?.rules || []
+    const allDeptRules = [...existingDeptRules, tempRule]
+
+    // Validate department rules for conflicts and overlaps
+    const deptValidation = await validationService.validateRuleConflicts(allDeptRules)
+
+    if (!deptValidation.isValid) {
+      const errorMessages = deptValidation.conflicts.map(c => c.message)
+      throw new UserInputError(errorMessages.join(' '))
     }
 
     // Create the rule
@@ -279,12 +328,16 @@ export class FirewallResolver {
     @Arg('input') input: CreateFirewallRuleInput,
     @Ctx() ctx: InfinibayContext
   ): Promise<FirewallRuleType> {
-    const { ruleService, xmlGenerator, orchestrationService } = await this.getServices(ctx)
+    const { ruleService, validationService, xmlGenerator, orchestrationService } = await this.getServices(ctx)
 
     // Check if VM exists
     const vm = await ctx.prisma.machine.findUnique({
       where: { id: vmId },
-      include: { firewallRuleSet: true }
+      include: {
+        firewallRuleSet: {
+          include: { rules: true }
+        }
+      }
     })
 
     if (!vm) {
@@ -307,6 +360,40 @@ export class FirewallResolver {
         where: { id: vmId },
         data: { firewallRuleSetId: ruleSet.id }
       })
+    }
+
+    // Validate input before creating the rule
+    const tempRule = this.createTempRuleFromInput(input, ruleSet.id)
+    const inputValidation = await validationService.validateRuleInput(tempRule)
+
+    if (!inputValidation.isValid) {
+      throw new UserInputError(inputValidation.warnings.join('; '))
+    }
+
+    // Get existing VM rules to build effective rules with new rule
+    const existingVMRules = vm.firewallRuleSet?.rules || []
+
+    // Get department rules
+    const deptRules = vm.departmentId
+      ? await ctx.prisma.firewallRule.findMany({
+        where: {
+          ruleSet: {
+            entityType: 'DEPARTMENT',
+            entityId: vm.departmentId
+          }
+        }
+      })
+      : []
+
+    // Build effective rules including the new rule
+    const effectiveRules = [...deptRules, ...existingVMRules, tempRule]
+
+    // Validate effective rules for conflicts and overlaps
+    const effectiveValidation = await validationService.validateRuleConflicts(effectiveRules)
+
+    if (!effectiveValidation.isValid) {
+      const errorMessages = effectiveValidation.conflicts.map(c => c.message)
+      throw new UserInputError(errorMessages.join(' '))
     }
 
     // Create the rule

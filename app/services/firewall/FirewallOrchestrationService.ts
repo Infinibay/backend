@@ -248,16 +248,81 @@ export class FirewallOrchestrationService {
   }
 
   /**
+   * Validates that a new VM rule doesn't conflict with department rules
+   * unless it explicitly overrides them
+   */
+  async validateVMRuleAgainstDepartment (
+    vmId: string,
+    newRule: Partial<FirewallRule>
+  ): Promise<{ isValid: boolean; conflicts: string[] }> {
+    const vm = await this.prisma.machine.findUnique({
+      where: { id: vmId },
+      include: {
+        department: {
+          include: {
+            firewallRuleSet: {
+              include: { rules: true }
+            }
+          }
+        }
+      }
+    })
+
+    if (!vm) {
+      throw new Error(`VM not found: ${vmId}`)
+    }
+
+    const deptRules = vm.department?.firewallRuleSet?.rules || []
+    const conflicts: string[] = []
+
+    // If rule explicitly overrides department rules, no conflict check needed
+    if (newRule.overridesDept) {
+      return { isValid: true, conflicts: [] }
+    }
+
+    // Check if new rule conflicts with any department rule
+    for (const deptRule of deptRules) {
+      // Check if rules target the same traffic
+      if (this.rulesTargetSameTraffic(deptRule, newRule as FirewallRule)) {
+        // Check if actions differ (conflict)
+        if (deptRule.action !== newRule.action) {
+          const portInfo = newRule.dstPortStart
+            ? `port ${newRule.dstPortStart}${newRule.dstPortEnd && newRule.dstPortEnd !== newRule.dstPortStart ? `-${newRule.dstPortEnd}` : ''}`
+            : 'all ports'
+          conflicts.push(
+            `VM rule "${newRule.name}" (${newRule.action}) conflicts with department rule "${deptRule.name}" (${deptRule.action}) for ${newRule.protocol} ${portInfo}. ` +
+            'Set overridesDept=true to explicitly override the department rule.'
+          )
+        }
+      }
+    }
+
+    return {
+      isValid: conflicts.length === 0,
+      conflicts
+    }
+  }
+
+  /**
    * Checks if two rules target the same traffic pattern
    */
-  private rulesTargetSameTraffic (rule1: FirewallRule, rule2: FirewallRule): boolean {
-    return (
-      rule1.protocol === rule2.protocol &&
-      rule1.direction === rule2.direction &&
-      rule1.dstPortStart === rule2.dstPortStart &&
-      rule1.dstPortEnd === rule2.dstPortEnd &&
-      rule1.srcIpAddr === rule2.srcIpAddr &&
-      rule1.dstIpAddr === rule2.dstIpAddr
-    )
+  private rulesTargetSameTraffic (rule1: FirewallRule, rule2: Partial<FirewallRule>): boolean {
+    // Handle direction matching for INOUT
+    const directionsMatch = (dir1: string | undefined, dir2: string | undefined): boolean => {
+      if (!dir1 || !dir2) return false
+      if (dir1 === dir2) return true
+      // INOUT matches both IN and OUT
+      if (dir1 === 'INOUT' || dir2 === 'INOUT') return true
+      return false
+    }
+
+    const protocolMatch = rule1.protocol === rule2.protocol
+    const dirMatch = directionsMatch(rule1.direction, rule2.direction)
+    const portMatch = rule1.dstPortStart === rule2.dstPortStart && rule1.dstPortEnd === rule2.dstPortEnd
+    // Treat null and undefined as equivalent (both mean "not specified")
+    const srcIpMatch = (rule1.srcIpAddr || null) === (rule2.srcIpAddr || null)
+    const dstIpMatch = (rule1.dstIpAddr || null) === (rule2.dstIpAddr || null)
+
+    return protocolMatch && dirMatch && portMatch && srcIpMatch && dstIpMatch
   }
 }
