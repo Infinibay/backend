@@ -7,10 +7,11 @@ This directory contains comprehensive documentation for Infinibay's security ser
 1. [Architecture Overview](./architecture-overview.md)
 2. [Database Schema](./database-schema.md)
 3. [Network Filter System](./network-filter-system.md)
-4. [Service Management API](./service-management-api.md)
-5. [Implementation Patterns](./implementation-patterns.md)
-6. [UI Integration Guide](./ui-integration-guide.md)
-7. [Performance Considerations](./performance-considerations.md)
+4. [VM Firewall Initialization](./vm-firewall-initialization.md) **← NEW**
+5. [Service Management API](./service-management-api.md)
+6. [Implementation Patterns](./implementation-patterns.md)
+7. [UI Integration Guide](./ui-integration-guide.md)
+8. [Performance Considerations](./performance-considerations.md)
 
 ## Quick Start
 

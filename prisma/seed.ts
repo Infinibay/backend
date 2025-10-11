@@ -1,3 +1,19 @@
+// Register tsconfig paths before any imports that use path aliases
+import { register } from 'tsconfig-paths'
+import { resolve } from 'path'
+
+// Register path mappings for ts-node to resolve @utils and other aliases
+register({
+  baseUrl: resolve(__dirname, '..', 'app'),
+  paths: {
+    '@main/*': ['*'],
+    '@services/*': ['services/*'],
+    '@graphql/*': ['graphql/*'],
+    '@utils/*': ['utils/*'],
+    '@resolvers/*': ['graphql/resolvers/*']
+  }
+})
+
 import { PrismaClient, Prisma } from '@prisma/client'
 import bcrypt from 'bcrypt'
 import dotenv from 'dotenv'
@@ -115,6 +131,8 @@ async function createDefaultAppSettings (prisma: Prisma.TransactionClient | Pris
 
 async function main () {
   try {
+    // Note: installCallbacks is deprecated and does nothing (callbacks are auto-applied via Prisma Client Extensions)
+    // Callbacks will be triggered during seeding, but they gracefully handle errors without failing the seed
     installCallbacks(prisma)
     await prisma.$transaction(async (transactionPrisma) => {
       // Create admin user and departments

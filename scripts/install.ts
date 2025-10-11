@@ -6,7 +6,8 @@ import { Connection, Network } from '@infinibay/libvirt-node'
 import { v4 as uuidv4 } from 'uuid'
 import { DOMParser } from 'xmldom'
 
-import { installNetworkFilters } from './installation/networkFilters'
+// TODO: Re-enable when networkFilters module is implemented
+// import { installNetworkFilters } from './installation/networkFilters'
 import { downloadWindowsISO, downloadAllWindowsISOs } from './download-windows'
 import { VirtIOPathResolver } from '../app/utils/virtioPathResolver'
 
@@ -319,7 +320,8 @@ async function setupVirtIODrivers () {
 async function install () {
   console.log('Installing...')
   prepareFolders()
-  installNetworkFilters()
+  // TODO: Re-enable when networkFilters module is implemented
+  // installNetworkFilters()
   await setupVirtIODrivers()
   // await installBridge()
   // await downloadUbuntu()

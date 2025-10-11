@@ -1,10 +1,17 @@
-import { PrismaClient } from '@prisma/client'
-import { Connection, Machine as VirtualMachine, NwFilter } from '@infinibay/libvirt-node'
-import { XMLGenerator } from '../../utils/VirtManager/xmlGenerator'
+import { PrismaClient, RuleSetType } from '@prisma/client'
+import { Connection, Machine as VirtualMachine } from '@infinibay/libvirt-node'
+import * as libvirtNode from '@infinibay/libvirt-node'
+
 import { Debugger } from '../../utils/debug'
-import { unlinkSync, existsSync } from 'fs'
 import { getVirtioSocketWatcherService } from '../VirtioSocketWatcherService'
+import { NWFilterXMLGeneratorService } from '../firewall/NWFilterXMLGeneratorService'
+import { XMLGenerator } from '../../utils/VirtManager/xmlGenerator'
+
+import { existsSync, unlinkSync } from 'fs'
 import path from 'path'
+
+// Access NWFilter from module to work around TypeScript typing
+const NWFilter = (libvirtNode as any).NWFilter
 
 export class MachineCleanupService {
   private prisma: PrismaClient
@@ -62,32 +69,46 @@ export class MachineCleanupService {
       conn = Connection.open('qemu:///system')
       if (conn) {
         const domain = VirtualMachine.lookupByName(conn, machine.internalName)
+
         // Destroy VM domain
         if (domain) {
-          try { await domain.destroy() } catch (e) {
+          try {
+            await domain.destroy()
+          } catch (e) {
             this.debug.log(`Error destroying domain ${machine.internalName}: ${String(e)}`)
           }
         }
+
         // Delete VM-related files
         for (const file of filesToDelete) {
           if (existsSync(file)) {
-            try { unlinkSync(file) } catch (e) {
+            try {
+              unlinkSync(file)
+            } catch (e) {
               this.debug.log(`Error deleting file ${file}: ${String(e)}`)
             }
           }
         }
+
         // Undefine VM domain
         if (domain) {
-          try { await domain.undefine() } catch (e) {
+          try {
+            await domain.undefine()
+          } catch (e) {
             this.debug.log(`Error undefining domain ${machine.internalName}: ${String(e)}`)
           }
         }
+
+        // Clean up VM's nwfilter
+        await this.cleanupVMFirewallFilter(conn, machineId)
       }
     } catch (e) {
       this.debug.log(`Error cleaning up libvirt resources: ${String(e)}`)
     } finally {
       if (conn) {
-        try { conn.close() } catch (e) {
+        try {
+          conn.close()
+        } catch (e) {
           this.debug.log(`Error closing libvirt connection: ${String(e)}`)
         }
       }
@@ -118,15 +139,94 @@ export class MachineCleanupService {
     // Remove DB records in correct order
     await this.prisma.$transaction(async tx => {
       try {
+        // Delete machine configuration
         if (machine.configuration) {
           await tx.machineConfiguration.delete({ where: { machineId: machine.id } })
         }
+
+        // Delete machine applications
         await tx.machineApplication.deleteMany({ where: { machineId: machine.id } })
+
+        // Delete firewall rules and ruleset
+        await this.cleanupFirewallRuleSet(tx, machineId)
+
+        // Delete machine
         await tx.machine.delete({ where: { id: machine.id } })
+
+        this.debug.log(`Successfully cleaned up VM ${machineId}`)
       } catch (e) {
         this.debug.log(`Error removing DB records: ${String(e)}`)
         throw e
       }
     })
+  }
+
+  /**
+   * Cleans up the VM's nwfilter from libvirt
+   * @param conn - Libvirt connection
+   * @param vmId - VM ID
+   */
+  private async cleanupVMFirewallFilter (conn: Connection, vmId: string): Promise<void> {
+    try {
+      const xmlGenerator = new NWFilterXMLGeneratorService()
+      const filterName = xmlGenerator.generateFilterName(RuleSetType.VM, vmId)
+
+      // Try to lookup and undefine the filter
+      const filter = NWFilter.lookupByName(conn, filterName)
+
+      if (filter) {
+        try {
+          filter.undefine()
+          this.debug.log(`Successfully removed nwfilter ${filterName}`)
+        } catch (e) {
+          this.debug.log(`Error undefining nwfilter ${filterName}: ${String(e)}`)
+        }
+      } else {
+        this.debug.log(`NWFilter ${filterName} not found (may have been already deleted)`)
+      }
+    } catch (e) {
+      // Filter doesn't exist or error looking it up - not critical
+      this.debug.log(`Note: Could not cleanup nwfilter for VM ${vmId}: ${String(e)}`)
+    }
+  }
+
+  /**
+   * Cleans up the VM's FirewallRuleSet and all associated rules from database
+   * @param tx - Prisma transaction client
+   * @param vmId - VM ID
+   */
+  private async cleanupFirewallRuleSet (tx: any, vmId: string): Promise<void> {
+    try {
+      // Find VM's firewall rule set
+      const vm = await tx.machine.findUnique({
+        where: { id: vmId },
+        include: {
+          firewallRuleSet: {
+            include: {
+              rules: true
+            }
+          }
+        }
+      })
+
+      if (vm?.firewallRuleSet) {
+        const ruleSetId = vm.firewallRuleSet.id
+
+        // Delete all rules in the rule set
+        await tx.firewallRule.deleteMany({
+          where: { ruleSetId }
+        })
+
+        // Delete the rule set itself
+        await tx.firewallRuleSet.delete({
+          where: { id: ruleSetId }
+        })
+
+        this.debug.log(`Cleaned up FirewallRuleSet ${ruleSetId} with ${vm.firewallRuleSet.rules.length} rules`)
+      }
+    } catch (e) {
+      this.debug.log(`Error cleaning up FirewallRuleSet: ${String(e)}`)
+      // Don't throw - allow VM deletion to proceed even if firewall cleanup fails
+    }
   }
 }

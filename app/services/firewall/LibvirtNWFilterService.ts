@@ -1,16 +1,13 @@
-import type { Connection } from '@infinibay/libvirt-node'
-import * as libvirtNode from '@infinibay/libvirt-node'
+import { type Connection, NwFilter } from '@infinibay/libvirt-node'
 
 import { Debugger } from '@utils/debug'
 
 const debug = new Debugger('infinibay:service:firewall:libvirt')
 
-// Access NWFilter from the imported module to work around TypeScript typing issues
-const NWFilter = (libvirtNode as any).NWFilter
-
 /**
  * Service responsible for interacting with libvirt nwfilter subsystem.
- * Handles defining, undefining, and applying network filters to VMs.
+ * Handles defining and undefining network filters.
+ * NOTE: Does NOT modify VM XML - that's XMLGenerator's responsibility.
  */
 export class LibvirtNWFilterService {
   constructor (private conn: Connection) {}
@@ -20,7 +17,7 @@ export class LibvirtNWFilterService {
    * @returns UUID of the created filter
    */
   async defineFilter (xml: string): Promise<string> {
-    const filter = NWFilter.defineXml(this.conn, xml)
+    const filter = NwFilter.defineXml(this.conn, xml)
 
     if (!filter) {
       throw new Error('Failed to define nwfilter in libvirt')
@@ -39,7 +36,7 @@ export class LibvirtNWFilterService {
    * Removes a filter from libvirt
    */
   async undefineFilter (name: string): Promise<void> {
-    const filter = NWFilter.lookupByName(this.conn, name)
+    const filter = NwFilter.lookupByName(this.conn, name)
 
     if (filter) {
       filter.undefine()
@@ -86,34 +83,10 @@ export class LibvirtNWFilterService {
   }
 
   /**
-   * Applies a filter to a VM's network interface by updating the domain XML.
-   * Note: This requires VM restart or interface update to take effect in libvirt < 6.0
-   * In libvirt >= 6.0, nwfilter changes are applied dynamically to running VMs.
-   *
-   * @param vmInternalName - The libvirt domain name (e.g., "vm-abc123")
-   * @param filterName - The nwfilter name to apply
-   */
-  async applyFilterToVM (vmInternalName: string, filterName: string): Promise<void> {
-    // TODO: Implement actual domain XML manipulation
-    // This is a placeholder for the integration point where we would:
-    // 1. Look up the domain using the appropriate libvirt method
-    // 2. Get its current XML
-    // 3. Parse the XML to find network interfaces
-    // 4. Add <filterref filter="filterName"/> to each interface
-    // 5. Redefine the domain with updated XML
-
-    debug.log('info', `Filter ${filterName} ready to apply to VM ${vmInternalName}`)
-    debug.log(
-      'warn',
-      'Full XML manipulation not implemented - integration point for XMLGenerator service'
-    )
-  }
-
-  /**
    * Gets filter XML description
    */
   async getFilterXML (filterName: string): Promise<string | null> {
-    const filter = NWFilter.lookupByName(this.conn, filterName)
+    const filter = NwFilter.lookupByName(this.conn, filterName)
 
     if (!filter) {
       return null
@@ -123,10 +96,22 @@ export class LibvirtNWFilterService {
   }
 
   /**
-   * Checks if a filter exists in libvirt
+   * Checks if a filter exists in libvirt.
+   *
+   * This method safely handles exceptions from lookupByName and returns
+   * false for not-found errors instead of throwing.
+   *
+   * @param filterName - The name of the filter to check
+   * @returns true if filter exists, false if not found or on lookup errors
    */
   async filterExists (filterName: string): Promise<boolean> {
-    const filter = NWFilter.lookupByName(this.conn, filterName)
-    return filter !== null
+    try {
+      const filter = NwFilter.lookupByName(this.conn, filterName)
+      return filter !== null
+    } catch (error) {
+      // lookupByName may throw if filter doesn't exist or on connection errors
+      debug.log('debug', `Filter lookup failed for ${filterName}: ${(error as Error).message}`)
+      return false
+    }
   }
 }

@@ -3,6 +3,7 @@ import { UserInputError } from 'apollo-server-errors'
 import { DepartmentType, UpdateDepartmentNameInput } from './type'
 import { InfinibayContext } from '../../../utils/context'
 import { getEventManager } from '../../../services/EventManager'
+import { DepartmentCleanupService } from '../../../services/cleanup/departmentCleanupService'
 
 @Resolver(DepartmentType)
 export class DepartmentResolver {
@@ -104,10 +105,10 @@ export class DepartmentResolver {
     if (machines.length > 0) {
       throw new UserInputError('Cannot delete department with machines')
     }
-    // delete department
-    const deletedDepartment = await prisma.department.delete({
-      where: { id }
-    })
+
+    // Use cleanup service to properly remove department and associated resources
+    const cleanupService = new DepartmentCleanupService(prisma)
+    await cleanupService.cleanupDepartment(id)
 
     // Trigger real-time event for department deletion
     try {
@@ -120,11 +121,11 @@ export class DepartmentResolver {
     }
 
     return {
-      id: deletedDepartment.id,
-      name: deletedDepartment.name,
-      createdAt: deletedDepartment.createdAt,
-      internetSpeed: deletedDepartment.internetSpeed || undefined,
-      ipSubnet: deletedDepartment.ipSubnet || undefined,
+      id: department.id,
+      name: department.name,
+      createdAt: department.createdAt,
+      internetSpeed: department.internetSpeed || undefined,
+      ipSubnet: department.ipSubnet || undefined,
       totalMachines: 0
     }
   }

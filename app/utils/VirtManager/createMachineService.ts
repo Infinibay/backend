@@ -2,16 +2,18 @@ import fs from 'fs'
 import path from 'path'
 import si from 'systeminformation'
 
-import { MachineConfiguration, PrismaClient, Machine, MachineTemplate, Application } from '@prisma/client'
-import { Connection, Machine as VirtualMachine, StoragePool, StorageVol, Error as LibvirtError, ErrorNumber } from '@infinibay/libvirt-node'
+import { MachineConfiguration, PrismaClient, Machine, MachineTemplate } from '@prisma/client'
+import { Connection, Machine as VirtualMachine, StoragePool, StorageVol, Error as LibvirtError } from '@infinibay/libvirt-node'
 
-import { XMLGenerator } from '@utils/VirtManager/xmlGenerator'
-import { UnattendedManagerBase } from '@services/unattendedManagerBase'
-import { UnattendedWindowsManager } from '@services/unattendedWindowsManager'
-import { UnattendedUbuntuManager } from '@services/unattendedUbuntuManager'
-import { UnattendedRedHatManager } from '@services/unattendedRedHatManager'
 import { Debugger } from '@utils/debug'
+import { XMLGenerator } from '@utils/VirtManager/xmlGenerator'
+import { FirewallManager } from '@services/firewall/FirewallManager'
 import { MachineCleanupService } from '@services/cleanup/machineCleanupService'
+import { UnattendedManagerBase } from '@services/unattendedManagerBase'
+import { UnattendedRedHatManager } from '@services/unattendedRedHatManager'
+import { UnattendedUbuntuManager } from '@services/unattendedUbuntuManager'
+import { UnattendedWindowsManager } from '@services/unattendedWindowsManager'
+import { getLibvirtConnection } from '@utils/libvirt'
 
 const ALLOWED_GPU_VENDORS = [
   'NVIDIA Corporationß',
@@ -22,11 +24,46 @@ export class CreateMachineService {
   private prisma: PrismaClient | null = null
   public libvirt: Connection | null = null
   private debug: Debugger = new Debugger('virt-manager')
+  private firewallManager: FirewallManager | null = null
 
+  /**
+   * Creates a new CreateMachineService instance.
+   *
+   * IMPORTANT: This constructor now uses the singleton libvirt connection from
+   * getLibvirtConnection() to ensure the same connection is used across the
+   * application (including Prisma callbacks). The uri parameter is deprecated
+   * and ignored.
+   *
+   * @param uri - Deprecated, ignored (kept for backward compatibility)
+   * @param prisma - Prisma client instance
+   */
   constructor (uri: string = 'qemu:///system', prisma: PrismaClient | null = null) {
-    this.debug.log('Creating VirtManager instance with URI', uri)
-    this.libvirt = Connection.open(uri)
+    this.debug.log('Creating VirtManager instance (using singleton connection)')
     this.prisma = prisma
+
+    // Use singleton connection instead of opening a new one
+    // This is initialized asynchronously in the create method
+  }
+
+  /**
+   * Initializes the libvirt connection and FirewallManager.
+   * Called at the start of the create() method.
+   */
+  private async initializeConnection (): Promise<void> {
+    if (!this.libvirt) {
+      try {
+        this.libvirt = await getLibvirtConnection()
+        this.debug.log('info', 'Libvirt connection initialized via singleton')
+
+        // Initialize FirewallManager with the singleton connection
+        if (this.prisma && this.libvirt) {
+          this.firewallManager = new FirewallManager(this.prisma, this.libvirt)
+        }
+      } catch (error) {
+        this.debug.log('error', `Failed to initialize libvirt connection: ${(error as Error).message}`)
+        throw new Error(`Failed to initialize libvirt connection: ${(error as Error).message}`)
+      }
+    }
   }
 
   async create (machine: Machine, username: string, password: string, productKey: string | undefined, pciBus: string | null): Promise<boolean> {
@@ -35,7 +72,10 @@ export class CreateMachineService {
     let diskPath: string | null = null
 
     try {
-      await this.validatePreconditions(machine)
+      // Initialize the singleton libvirt connection
+      await this.initializeConnection()
+
+      await this.validatePreconditions()
       const template = await this.fetchMachineTemplate(machine)
       const configuration = await this.fetchMachineConfiguration(machine)
       const applications = await this.fetchMachineApplications(machine)
@@ -58,9 +98,34 @@ export class CreateMachineService {
       if (!diskPath) {
         throw new Error('Failed to get disk path from storage volume')
       }
-      // Generate XML with the actual disk path
+
+      /**
+       * Verifies firewall infrastructure created by Prisma callbacks.
+       *
+       * The afterCreateMachine callback (in utils/modelCallbacks/machine.ts) should have
+       * already created the FirewallRuleSet and nwfilters in libvirt when the machine
+       * record was inserted into the database.
+       *
+       * This call primarily serves as:
+       * - Verification that the callback succeeded
+       * - Fallback creation for legacy VMs/departments (created before callbacks)
+       * - Final check before VM definition in libvirt
+       */
+      this.debug.log('info', `Verifying firewall infrastructure for VM ${machine.id} (should exist from afterCreateMachine callback)`)
+
+      if (!this.firewallManager) {
+        throw new Error('FirewallManager not initialized')
+      }
+      if (!machine.departmentId) {
+        throw new Error(`Machine ${machine.id} has no department assigned`)
+      }
+
+      const firewallResult = await this.firewallManager.ensureFirewallForVM(machine.id, machine.departmentId)
+      this.debug.log('info', `Firewall verification: dept=${firewallResult.departmentRulesApplied} rules, vm=${firewallResult.vmRulesApplied} rules (infrastructure created by callbacks)`)
+
+      // Generate XML with the actual disk path (now includes nwfilter refs)
       const xmlGenerator = await this.generateXML(machine, template, configuration, newIsoPath, pciBus, diskPath)
-      const vm = await this.defineAndStartVM(xmlGenerator, machine)
+      await this.defineAndStartVM(xmlGenerator, machine)
 
       // Update status to 'running' in a quick transaction
       await this.executeTransaction(async (tx: any) => {
@@ -72,11 +137,11 @@ export class CreateMachineService {
       this.debug.log('error', `Error creating machine: ${error}`)
       this.debug.log('error', error.stack)
       await this.rollback(machine, newIsoPath)
-      throw new Error('Error creating machine')
+      throw new Error(`Error creating machine ${error}: ${error.stack}`)
     }
   }
 
-  private async validatePreconditions (machine: Machine): Promise<void> {
+  private async validatePreconditions (): Promise<void> {
     if (!this.prisma) {
       throw new Error('Prisma client not set')
     }
@@ -220,19 +285,24 @@ export class CreateMachineService {
       throw new Error('Libvirt connection not established')
     }
     const xml = xmlGenerator.generate()
+
+    // Log the XML for debugging
+    this.debug.log('VM XML to be defined:\n', xml)
+
     const vm = VirtualMachine.defineXml(this.libvirt, xml)
     if (!vm) {
       const error = LibvirtError.lastError()
-      this.debug.log('error', error.message)
-      throw new Error('Failed to define VM')
+      this.debug.log('error', `Failed to define VM. Libvirt error: ${error.message}`)
+      this.debug.log('error', `VM XML that failed:\n${xml}`)
+      throw new Error(`Failed to define VM: ${error.message}`)
     }
     this.debug.log('VM defined successfully', machine.name)
 
     const result = vm.create()
     if (result == null) {
       const error = LibvirtError.lastError()
-      this.debug.log('error', error.message)
-      throw new Error('Failed to start VM')
+      this.debug.log('error', `Failed to start VM. Libvirt error: ${error.message}`)
+      throw new Error(`Failed to start VM: ${error.message}`)
     }
     this.debug.log('VM started successfully', machine.name)
 
@@ -395,7 +465,16 @@ export class CreateMachineService {
     xmlGenerator.setUEFI()
     // Use libvirt virtual network name - XMLGenerator will automatically detect if it's a bridge or network type
     xmlGenerator.addNetworkInterface(process.env.LIBVIRT_NETWORK_NAME ?? 'default', 'virtio')
-    // Firewall system removed - no network filters applied
+
+    // Apply firewall nwfilters to the VM XML (filters must exist in libvirt before this)
+    if (!this.firewallManager) {
+      throw new Error('FirewallManager not initialized')
+    }
+    const filterNames = await this.firewallManager.getFilterNames(machine.id)
+    const { departmentFilterName, vmFilterName } = filterNames
+    xmlGenerator.addDepartmentNWFilter(departmentFilterName)
+    xmlGenerator.addVMNWFilter(vmFilterName)
+
     xmlGenerator.setBootDevice(['hd', 'cdrom'])
     xmlGenerator.addAudioDevice()
     xmlGenerator.setVCPUs(cores)
@@ -468,4 +547,5 @@ export class CreateMachineService {
       return []
     }
   }
+
 }

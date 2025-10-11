@@ -217,7 +217,6 @@ describe('FirewallOrchestrationService', () => {
       (mockXmlGenerator.generateFilterName as jest.Mock).mockReturnValue('ibay-vm-abc123');
       (mockXmlGenerator.generateFilterXML as jest.Mock).mockResolvedValue('<filter>...</filter>');
       (mockLibvirtService.defineFilter as jest.Mock).mockResolvedValue('uuid-123');
-      (mockLibvirtService.applyFilterToVM as jest.Mock).mockResolvedValue(undefined);
       (mockRuleService.updateRuleSetSyncStatus as jest.Mock).mockResolvedValue(undefined)
 
       const result = await service.applyVMRules('vm-123')
@@ -227,6 +226,7 @@ describe('FirewallOrchestrationService', () => {
       expect(result.rulesApplied).toBe(1)
       expect(mockValidationService.validateRuleConflicts).toHaveBeenCalled()
       expect(mockLibvirtService.defineFilter).toHaveBeenCalled()
+      // NOTE: applyFilterToVM is no longer called - XML modification is done via XMLGenerator
     })
 
     it('should throw error when validation fails', async () => {
@@ -296,7 +296,6 @@ describe('FirewallOrchestrationService', () => {
       (mockXmlGenerator.generateFilterName as jest.Mock).mockReturnValue('ibay-vm-abc');
       (mockXmlGenerator.generateFilterXML as jest.Mock).mockResolvedValue('<filter>...</filter>');
       (mockLibvirtService.defineFilter as jest.Mock).mockResolvedValue('uuid-123');
-      (mockLibvirtService.applyFilterToVM as jest.Mock).mockResolvedValue(undefined);
       (mockRuleService.updateRuleSetSyncStatus as jest.Mock).mockResolvedValue(undefined)
 
       const result = await service.applyDepartmentRules('dept-123')

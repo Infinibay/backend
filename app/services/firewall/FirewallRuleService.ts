@@ -55,7 +55,34 @@ export class FirewallRuleService {
   constructor (private prisma: PrismaClient) {}
 
   /**
-   * Creates a new firewall rule set for a department or VM
+   * Creates a new firewall rule set for a department or VM.
+   *
+   * This method now uses upsert to handle cases where the callback has already
+   * created the ruleset but the query in ensureFirewallForVM hasn't seen it yet
+   * due to transaction timing.
+   *
+   * **IMPORTANT**: This method creates/finds the FirewallRuleSet record but does NOT
+   * establish the foreign key relationship with Machine or Department. The caller
+   * (FirewallManager.ensureFirewallInfrastructure) is responsible for updating the
+   * entity's firewallRuleSetId field after calling this method.
+   *
+   * @param entityType - The type of entity (DEPARTMENT or VM)
+   * @param entityId - The UUID of the entity
+   * @param name - Human-readable name for the ruleset
+   * @param internalName - Internal identifier used for libvirt filter naming
+   * @param priority - Rule priority (default: 500)
+   * @returns The created or existing FirewallRuleSet with its ID, which should be
+   *          used to update the entity's foreign key
+   *
+   * @example
+   * ```typescript
+   * const ruleSet = await service.createRuleSet(RuleSetType.VM, vmId, ...)
+   * // Important: Link the ruleset to the entity
+   * await prisma.machine.update({
+   *   where: { id: vmId },
+   *   data: { firewallRuleSetId: ruleSet.id }
+   * })
+   * ```
    */
   async createRuleSet (
     entityType: RuleSetType,
@@ -64,8 +91,11 @@ export class FirewallRuleService {
     internalName: string,
     priority: number = 500
   ): Promise<FirewallRuleSetWithRules> {
-    const ruleSet = await this.prisma.firewallRuleSet.create({
-      data: {
+    const ruleSet = await this.prisma.firewallRuleSet.upsert({
+      where: {
+        internalName
+      },
+      create: {
         name,
         internalName,
         entityType,
@@ -73,12 +103,16 @@ export class FirewallRuleService {
         priority,
         isActive: true
       },
+      update: {
+        // If it exists, just return it (don't modify)
+        isActive: true
+      },
       include: {
         rules: true
       }
     })
 
-    debug.log('info', `Created rule set: ${ruleSet.id} for ${entityType} ${entityId}`)
+    debug.log('info', `Ensured rule set: ${ruleSet.id} for ${entityType} ${entityId}`)
     return ruleSet
   }
 

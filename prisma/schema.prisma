@@ -627,7 +627,7 @@ model FirewallRuleSet {
   machine       Machine?
   rules         FirewallRule[]
 
-  @@index([entityType, entityId])
+  @@unique([entityType, entityId])
   @@index([isActive])
 }
 

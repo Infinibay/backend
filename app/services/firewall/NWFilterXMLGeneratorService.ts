@@ -1,8 +1,9 @@
-import crypto from 'crypto'
 import { v4 as uuidv4 } from 'uuid'
 import xml2js from 'xml2js'
 
 import { FirewallRule, RuleSetType } from '@prisma/client'
+
+import { FilterNameGenerator } from '@utils/firewall/FilterNameGenerator'
 
 interface FilterConfig {
   name: string;
@@ -15,38 +16,50 @@ interface FilterConfig {
  */
 export class NWFilterXMLGeneratorService {
   /**
-   * Generates a unique filter name with ibay- prefix
+   * Generates a unique filter name with ibay- prefix.
+   * Delegates to centralized FilterNameGenerator utility.
+   *
    * Format: ibay-{type}-{hash}
    * Where hash is MD5 of entityId (truncated to 8 chars)
    */
   generateFilterName (entityType: RuleSetType, entityId: string): string {
-    const hash = crypto
-      .createHash('md5')
-      .update(entityId)
-      .digest('hex')
-      .substring(0, 8)
-
-    const typeStr = entityType.toLowerCase()
-    return `ibay-${typeStr}-${hash}`
+    return FilterNameGenerator.generate(entityType, entityId)
   }
 
   /**
    * Generates complete nwfilter XML from a set of firewall rules
+   * @param config - Filter configuration
+   * @param parentFilterName - Optional parent filter to inherit from (for VM filters inheriting from dept)
    */
-  async generateFilterXML (config: FilterConfig): Promise<string> {
+  async generateFilterXML (config: FilterConfig, parentFilterName?: string): Promise<string> {
     // Sort rules by priority (lower number = higher priority)
     const sortedRules = [...config.rules].sort((a, b) => a.priority - b.priority)
 
-    const filterObj = {
+    const filterObj: any = {
       filter: {
         $: {
           name: config.name,
           chain: 'root',
           priority: '0'
         },
-        uuid: [uuidv4()],
-        rule: sortedRules.map(rule => this.generateRuleElement(rule))
+        uuid: [uuidv4()]
       }
+    }
+
+    // Add parent filter reference if specified (for inheritance)
+    if (parentFilterName) {
+      filterObj.filter.filterref = [
+        {
+          $: {
+            filter: parentFilterName
+          }
+        }
+      ]
+    }
+
+    // Add rules if any
+    if (sortedRules.length > 0) {
+      filterObj.filter.rule = sortedRules.map(rule => this.generateRuleElement(rule))
     }
 
     const builder = new xml2js.Builder({

@@ -11,10 +11,18 @@ jest.mock('@infinibay/libvirt-node', () => {
     undefine = jest.fn()
   }
 
+  class MockMachine {
+    static defineXml = jest.fn()
+    static lookupByName = jest.fn()
+    getName = jest.fn()
+    getXmlDesc = jest.fn()
+  }
+
   return {
     __esModule: true,
     Connection: jest.fn(),
-    NWFilter: MockNWFilter
+    NWFilter: MockNWFilter,
+    Machine: MockMachine
   }
 })
 

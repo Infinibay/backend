@@ -24,8 +24,31 @@ export interface SyncResult {
 }
 
 /**
- * Main orchestration service for firewall operations.
- * Coordinates between validation, rule management, XML generation, and libvirt application.
+ * Orchestration service for firewall rule management operations.
+ *
+ * This service coordinates validation, XML generation, and libvirt operations
+ * for applying and syncing firewall rules to EXISTING VMs and departments.
+ *
+ * **Relationship with FirewallManager:**
+ * - FirewallManager: Used during VM CREATION to ensure rulesets and filters exist
+ * - FirewallOrchestrationService: Used for RULE MANAGEMENT on existing VMs/departments
+ *
+ * **Primary Use Cases:**
+ * - Apply updated rules to existing VMs (applyVMRules)
+ * - Apply updated department rules to all VMs (applyDepartmentRules)
+ * - Get effective rules for display (getEffectiveRules)
+ * - Sync all firewall state to libvirt (syncAllToLibvirt)
+ * - Validate rule conflicts (validateVMRuleAgainstDepartment)
+ *
+ * **Used By:**
+ * - GraphQL resolver: /home/andres/infinibay/backend/app/graphql/resolvers/firewall/resolver.ts
+ * - Mutations: createDepartmentFirewallRule, createVMFirewallRule, updateFirewallRule,
+ *   deleteFirewallRule, flushFirewallRules, syncFirewallToLibvirt
+ * - Queries: getEffectiveFirewallRules
+ *
+ * **Design Pattern:** Service Layer with Dependency Injection
+ * Coordinates between: FirewallRuleService, FirewallValidationService,
+ * NWFilterXMLGeneratorService, LibvirtNWFilterService
  */
 export class FirewallOrchestrationService {
   constructor (
@@ -38,6 +61,8 @@ export class FirewallOrchestrationService {
 
   /**
    * Calculates effective rules for a VM by merging department and VM rules
+   * NOTE: This method is now only used for preview/display purposes.
+   * Actual firewall enforcement uses filter inheritance in libvirt.
    */
   async getEffectiveRules (vmId: string): Promise<FirewallRule[]> {
     const vm = await this.prisma.machine.findUnique({
@@ -85,7 +110,12 @@ export class FirewallOrchestrationService {
   }
 
   /**
-   * Applies firewall rules to a VM immediately
+   * Applies firewall rules to a VM using filter inheritance.
+   * VM filter inherits from department filter via <filterref>.
+   * Only VM-specific rules are stored in the VM filter.
+   *
+   * NOTE: This method ONLY creates/updates the nwfilter in libvirt.
+   * It does NOT modify the VM's XML - that must be done via XMLGenerator during VM creation/update.
    */
   async applyVMRules (vmId: string): Promise<ApplyRulesResult> {
     debug.log('info', `Applying VM rules for ${vmId}`)
@@ -111,27 +141,43 @@ export class FirewallOrchestrationService {
       throw new Error(`VM not found: ${vmId}`)
     }
 
-    // Get effective rules
-    const effectiveRules = await this.getEffectiveRules(vmId)
+    if (!vm.department) {
+      throw new Error(`VM ${vmId} has no department assigned`)
+    }
 
-    // Validate rules
-    const validation = await this.validationService.validateRuleConflicts(effectiveRules)
+    // Ensure department filter exists first
+    if (vm.department.firewallRuleSet) {
+      await this.applyDepartmentRules(vm.department.id)
+    }
+
+    // Get VM-specific rules only (not department rules - those are inherited)
+    const vmRules = vm.firewallRuleSet?.rules || []
+
+    // Validate VM rules for conflicts
+    const validation = await this.validationService.validateRuleConflicts(vmRules)
     if (!validation.isValid) {
-      const errorMsg = `Rule conflicts: ${validation.conflicts.map(c => c.message).join(', ')}`
+      const errorMsg = `VM rule conflicts: ${validation.conflicts.map(c => c.message).join(', ')}`
       debug.log('error', errorMsg)
       throw new Error(errorMsg)
     }
 
-    // Generate filter name
-    const filterName = this.xmlGenerator.generateFilterName(RuleSetType.VM, vmId)
+    // Generate filter names
+    const vmFilterName = this.xmlGenerator.generateFilterName(RuleSetType.VM, vmId)
+    const deptFilterName = this.xmlGenerator.generateFilterName(
+      RuleSetType.DEPARTMENT,
+      vm.department.id
+    )
 
-    // Generate XML
-    const filterXML = await this.xmlGenerator.generateFilterXML({
-      name: filterName,
-      rules: effectiveRules
-    })
+    // Generate VM filter XML with department filter reference
+    const filterXML = await this.xmlGenerator.generateFilterXML(
+      {
+        name: vmFilterName,
+        rules: vmRules
+      },
+      deptFilterName // Inherit from department filter
+    )
 
-    // Apply in libvirt
+    // Apply in libvirt (creates/updates the nwfilter definition)
     const libvirtUuid = await this.libvirtService.defineFilter(filterXML)
 
     // Update rule set sync status
@@ -139,21 +185,22 @@ export class FirewallOrchestrationService {
       await this.ruleService.updateRuleSetSyncStatus(vm.firewallRuleSet.id, libvirtUuid, filterXML)
     }
 
-    // Note: Actual application to VM network interface happens here
-    // This is a placeholder - full implementation would update VM XML
-    await this.libvirtService.applyFilterToVM(vm.internalName, filterName)
-
-    debug.log('info', `Successfully applied ${effectiveRules.length} rules to VM ${vmId}`)
+    debug.log(
+      'info',
+      `Successfully created/updated VM nwfilter: ${vmRules.length} own rules + inherited from ${deptFilterName}`
+    )
 
     return {
       success: true,
-      filterName,
-      rulesApplied: effectiveRules.length
+      filterName: vmFilterName,
+      rulesApplied: vmRules.length
     }
   }
 
   /**
-   * Applies department rules to all VMs in the department
+   * Applies department rules by updating ONLY the department filter.
+   * All VMs automatically inherit changes via <filterref>.
+   * This is O(1) instead of O(N) where N = number of VMs.
    */
   async applyDepartmentRules (deptId: string): Promise<SyncResult> {
     debug.log('info', `Applying department rules for ${deptId}`)
@@ -172,20 +219,45 @@ export class FirewallOrchestrationService {
       throw new Error(`Department not found: ${deptId}`)
     }
 
-    const errors: string[] = []
-    let vmsUpdated = 0
+    const deptRules = department.firewallRuleSet?.rules || []
 
-    // Apply rules to each VM in the department
-    for (const vm of department.machines) {
-      try {
-        await this.applyVMRules(vm.id)
-        vmsUpdated++
-      } catch (err) {
-        const errorMsg = `Failed to apply rules to VM ${vm.id}: ${err}`
-        debug.log('error', errorMsg)
-        errors.push(errorMsg)
-      }
+    // Validate department rules for conflicts
+    const validation = await this.validationService.validateRuleConflicts(deptRules)
+    if (!validation.isValid) {
+      const errorMsg = `Department rule conflicts: ${validation.conflicts.map(c => c.message).join(', ')}`
+      debug.log('error', errorMsg)
+      throw new Error(errorMsg)
     }
+
+    // Generate department filter name
+    const deptFilterName = this.xmlGenerator.generateFilterName(RuleSetType.DEPARTMENT, deptId)
+
+    // Generate department filter XML (no parent - this is the base filter)
+    const filterXML = await this.xmlGenerator.generateFilterXML({
+      name: deptFilterName,
+      rules: deptRules
+    })
+
+    // Apply in libvirt - this is the ONLY update needed
+    const libvirtUuid = await this.libvirtService.defineFilter(filterXML)
+
+    // Update rule set sync status
+    if (department.firewallRuleSet?.id) {
+      await this.ruleService.updateRuleSetSyncStatus(
+        department.firewallRuleSet.id,
+        libvirtUuid,
+        filterXML
+      )
+    }
+
+    debug.log(
+      'info',
+      `Successfully updated department filter ${deptFilterName} with ${deptRules.length} rules. ${department.machines.length} VMs inherit automatically.`
+    )
+
+    // Note: VMs don't need individual updates - they inherit via <filterref>
+    const errors: string[] = []
+    const vmsUpdated = department.machines.length
 
     return {
       success: errors.length === 0,

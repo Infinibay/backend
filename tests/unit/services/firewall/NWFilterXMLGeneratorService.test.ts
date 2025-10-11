@@ -274,4 +274,170 @@ describe('NWFilterXMLGeneratorService', () => {
       expect(parsed.filter.filterref).toBeDefined()
     })
   })
+
+  describe('generateFilterXML with inheritance', () => {
+    it('should generate VM filter with department filter reference', async () => {
+      const vmRules: Partial<FirewallRule>[] = [
+        {
+          id: 'vm-rule-1',
+          name: 'VM Custom Port',
+          action: RuleAction.ACCEPT,
+          direction: RuleDirection.IN,
+          protocol: 'tcp',
+          dstPortStart: 8080,
+          dstPortEnd: 8080,
+          priority: 200
+        }
+      ]
+
+      const xml = await service.generateFilterXML(
+        {
+          name: 'ibay-vm-test123',
+          rules: vmRules as FirewallRule[]
+        },
+        'ibay-department-parent456' // Parent filter
+      )
+
+      const parser = new xml2js.Parser()
+      const parsed = await parser.parseStringPromise(xml)
+
+      // Should have filterref to inherit from department
+      expect(parsed.filter.filterref).toBeDefined()
+      expect(parsed.filter.filterref).toHaveLength(1)
+      expect(parsed.filter.filterref[0].$.filter).toBe('ibay-department-parent456')
+
+      // Should also have own rules
+      expect(parsed.filter.rule).toBeDefined()
+      expect(parsed.filter.rule).toHaveLength(1)
+      expect(parsed.filter.rule[0].$.priority).toBe('200')
+    })
+
+    it('should generate VM filter with NO rules but WITH parent reference', async () => {
+      const vmRules: Partial<FirewallRule>[] = []
+
+      const xml = await service.generateFilterXML(
+        {
+          name: 'ibay-vm-noownrules',
+          rules: vmRules as FirewallRule[]
+        },
+        'ibay-department-parent'
+      )
+
+      const parser = new xml2js.Parser()
+      const parsed = await parser.parseStringPromise(xml)
+
+      // Should have filterref even with no own rules
+      expect(parsed.filter.filterref).toBeDefined()
+      expect(parsed.filter.filterref[0].$.filter).toBe('ibay-department-parent')
+
+      // Should NOT have rules array
+      expect(parsed.filter.rule).toBeUndefined()
+    })
+
+    it('should generate department filter WITHOUT parent reference', async () => {
+      const deptRules: Partial<FirewallRule>[] = [
+        {
+          id: 'dept-rule-1',
+          name: 'Allow HTTPS',
+          action: RuleAction.ACCEPT,
+          direction: RuleDirection.IN,
+          protocol: 'tcp',
+          dstPortStart: 443,
+          dstPortEnd: 443,
+          priority: 100
+        }
+      ]
+
+      const xml = await service.generateFilterXML({
+        name: 'ibay-department-dept123',
+        rules: deptRules as FirewallRule[]
+      })
+
+      const parser = new xml2js.Parser()
+      const parsed = await parser.parseStringPromise(xml)
+
+      // Should NOT have filterref (department is base)
+      expect(parsed.filter.filterref).toBeUndefined()
+
+      // Should have own rules
+      expect(parsed.filter.rule).toBeDefined()
+      expect(parsed.filter.rule).toHaveLength(1)
+    })
+
+    it('should position filterref before rules in XML', async () => {
+      const vmRules: Partial<FirewallRule>[] = [
+        {
+          id: 'vm-rule-1',
+          name: 'VM Rule',
+          action: RuleAction.ACCEPT,
+          direction: RuleDirection.IN,
+          protocol: 'tcp',
+          dstPortStart: 3000,
+          dstPortEnd: 3000,
+          priority: 300
+        }
+      ]
+
+      const xml = await service.generateFilterXML(
+        {
+          name: 'ibay-vm-ordered',
+          rules: vmRules as FirewallRule[]
+        },
+        'ibay-department-base'
+      )
+
+      // Verify filterref appears before rule elements in XML string
+      const filterrefIndex = xml.indexOf('<filterref')
+      const ruleIndex = xml.indexOf('<rule')
+
+      expect(filterrefIndex).toBeGreaterThan(-1)
+      expect(ruleIndex).toBeGreaterThan(-1)
+      expect(filterrefIndex).toBeLessThan(ruleIndex)
+    })
+
+    it('should support multiple VM rules with inheritance', async () => {
+      const vmRules: Partial<FirewallRule>[] = [
+        {
+          id: 'vm-rule-1',
+          name: 'Custom Port 1',
+          action: RuleAction.ACCEPT,
+          direction: RuleDirection.IN,
+          protocol: 'tcp',
+          dstPortStart: 3000,
+          dstPortEnd: 3000,
+          priority: 200
+        },
+        {
+          id: 'vm-rule-2',
+          name: 'Custom Port 2',
+          action: RuleAction.ACCEPT,
+          direction: RuleDirection.IN,
+          protocol: 'tcp',
+          dstPortStart: 4000,
+          dstPortEnd: 4000,
+          priority: 250
+        }
+      ]
+
+      const xml = await service.generateFilterXML(
+        {
+          name: 'ibay-vm-multi',
+          rules: vmRules as FirewallRule[]
+        },
+        'ibay-department-dept'
+      )
+
+      const parser = new xml2js.Parser()
+      const parsed = await parser.parseStringPromise(xml)
+
+      // Should have filterref
+      expect(parsed.filter.filterref).toBeDefined()
+      expect(parsed.filter.filterref[0].$.filter).toBe('ibay-department-dept')
+
+      // Should have both VM rules
+      expect(parsed.filter.rule).toHaveLength(2)
+      expect(parsed.filter.rule[0].$.priority).toBe('200')
+      expect(parsed.filter.rule[1].$.priority).toBe('250')
+    })
+  })
 })
