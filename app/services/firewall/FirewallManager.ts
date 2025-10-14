@@ -237,13 +237,16 @@ export class FirewallManager {
 
       // Step 3: Create empty nwfilter in libvirt
       try {
-        if (entityType === RuleSetType.DEPARTMENT) {
-          await this.filterFactory.ensureDepartmentFilter(entityId)
-        } else if (entityType === RuleSetType.VM) {
-          await this.filterFactory.ensureVMFilter(entityId)
-        }
+        // Create filter directly with empty rules array to avoid timing issues
+        // We can't use ensureDepartmentFilter/ensureVMFilter because they query the DB
+        // for the ruleset, which might not be visible yet in the current transaction
+        const filterCreationResult = await this.filterFactory.createFilter(
+          entityType,
+          entityId,
+          [] // Empty rules array - filter will be updated later when rules are added
+        )
         result.filterCreated = true
-        debug.log('info', `${entityType} filter created/verified in libvirt for ${entityId}`)
+        debug.log('info', `${entityType} filter created in libvirt: ${filterCreationResult.filterName} (UUID: ${filterCreationResult.libvirtUuid})`)
       } catch (error) {
         // Gracefully handle filter already exists
         const errorMessage = (error as Error).message

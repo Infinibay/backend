@@ -467,12 +467,15 @@ export class CreateMachineService {
     xmlGenerator.addNetworkInterface(process.env.LIBVIRT_NETWORK_NAME ?? 'default', 'virtio')
 
     // Apply firewall nwfilters to the VM XML (filters must exist in libvirt before this)
+    // IMPORTANT: Only add the VM filter to the VM XML. The VM filter inherits from the
+    // department filter via <filterref> in the filter definition itself (not in VM XML).
+    // Libvirt does NOT support multiple <filterref> elements in a single interface.
     if (!this.firewallManager) {
       throw new Error('FirewallManager not initialized')
     }
     const filterNames = await this.firewallManager.getFilterNames(machine.id)
-    const { departmentFilterName, vmFilterName } = filterNames
-    xmlGenerator.addDepartmentNWFilter(departmentFilterName)
+    const { vmFilterName } = filterNames
+    // Only add VM filter - it inherits from department filter automatically
     xmlGenerator.addVMNWFilter(vmFilterName)
 
     xmlGenerator.setBootDevice(['hd', 'cdrom'])
@@ -547,5 +550,4 @@ export class CreateMachineService {
       return []
     }
   }
-
 }

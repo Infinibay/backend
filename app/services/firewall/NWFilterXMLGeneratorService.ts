@@ -30,8 +30,9 @@ export class NWFilterXMLGeneratorService {
    * Generates complete nwfilter XML from a set of firewall rules
    * @param config - Filter configuration
    * @param parentFilterName - Optional parent filter to inherit from (for VM filters inheriting from dept)
+   * @param existingUuid - Optional UUID to use instead of generating a new one (for updating existing filters)
    */
-  async generateFilterXML (config: FilterConfig, parentFilterName?: string): Promise<string> {
+  async generateFilterXML (config: FilterConfig, parentFilterName?: string, existingUuid?: string): Promise<string> {
     // Sort rules by priority (lower number = higher priority)
     const sortedRules = [...config.rules].sort((a, b) => a.priority - b.priority)
 
@@ -39,10 +40,9 @@ export class NWFilterXMLGeneratorService {
       filter: {
         $: {
           name: config.name,
-          chain: 'root',
-          priority: '0'
+          chain: 'root'
         },
-        uuid: [uuidv4()]
+        uuid: [existingUuid || uuidv4()]
       }
     }
 
@@ -153,15 +153,16 @@ export class NWFilterXMLGeneratorService {
   /**
    * Generates XML for a filter that references another filter
    * Used for hierarchical filter structures
+   * @param existingUuid - Optional UUID to use instead of generating a new one (for updating existing filters)
    */
-  async addFilterReference (parentFilterName: string, childFilterName: string): Promise<string> {
+  async addFilterReference (parentFilterName: string, childFilterName: string, existingUuid?: string): Promise<string> {
     const filterObj = {
       filter: {
         $: {
           name: parentFilterName,
           chain: 'root'
         },
-        uuid: [uuidv4()],
+        uuid: [existingUuid || uuidv4()],
         filterref: [
           {
             $: {

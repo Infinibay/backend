@@ -20,7 +20,14 @@ describe('FirewallManager', () => {
     // Create mock Prisma client
     mockPrisma = {
       machine: {
-        findUnique: jest.fn()
+        findUnique: jest.fn(),
+        update: jest.fn()
+      },
+      department: {
+        update: jest.fn()
+      },
+      firewallRuleSet: {
+        findFirst: jest.fn()
       }
     } as unknown as PrismaClient
 
@@ -32,6 +39,7 @@ describe('FirewallManager', () => {
     } as any
 
     mockFilterFactory = {
+      createFilter: jest.fn(),
       ensureDepartmentFilter: jest.fn(),
       ensureVMFilter: jest.fn()
     } as any
@@ -102,6 +110,8 @@ describe('FirewallManager', () => {
       }
 
       ;(mockPrisma.machine.findUnique as jest.Mock).mockResolvedValue(mockVM)
+      // Mock firewallRuleSet.findFirst for self-healing checks
+      ;(mockPrisma.firewallRuleSet.findFirst as jest.Mock).mockResolvedValue(null)
 
       const mockDeptRuleSet = {
         id: 'ruleset-dept-1',
@@ -126,6 +136,15 @@ describe('FirewallManager', () => {
       mockRuleService.createRuleSet
         .mockResolvedValueOnce(mockDeptRuleSet as any)
         .mockResolvedValueOnce(mockVMRuleSet as any)
+
+      // Mock department filter creation (called first)
+      const mockDeptFilterResult = {
+        filterName: 'ibay-department-abc123',
+        libvirtUuid: 'uuid-dept',
+        xmlContent: '<filter>...</filter>',
+        rulesApplied: 0
+      }
+      mockFilterFactory.ensureDepartmentFilter.mockResolvedValue(mockDeptFilterResult)
 
       // Mock VM filter creation (always created even with zero rules)
       const mockVMFilterResult = {
@@ -244,21 +263,32 @@ describe('FirewallManager', () => {
 
       ;(mockPrisma.machine.findUnique as jest.Mock).mockResolvedValue(mockVM)
 
-      // Simulate filter already exists error
-      mockFilterFactory.ensureDepartmentFilter.mockRejectedValue(
-        new Error('Filter already exists')
-      )
-      mockFilterFactory.ensureVMFilter.mockRejectedValue(
-        new Error('Filter already exists')
-      )
+      // Mock successful filter creation (simulating idempotent behavior)
+      const mockDeptFilterResult = {
+        filterName: 'ibay-department-abc123',
+        libvirtUuid: 'uuid-dept',
+        xmlContent: '<filter>...</filter>',
+        rulesApplied: 1
+      }
+      mockFilterFactory.ensureDepartmentFilter.mockResolvedValue(mockDeptFilterResult)
+
+      const mockVMFilterResult = {
+        filterName: 'ibay-vm-def456',
+        libvirtUuid: 'uuid-vm',
+        xmlContent: '<filter>...</filter>',
+        rulesApplied: 1
+      }
+      mockFilterFactory.ensureVMFilter.mockResolvedValue(mockVMFilterResult)
 
       const result = await manager.ensureFirewallForVM(vmId, departmentId)
 
-      // Should still return success as this is a graceful error
+      // Should return success
       expect(result.success).toBe(true)
+      expect(result.departmentRulesApplied).toBe(1)
+      expect(result.vmRulesApplied).toBe(1)
     })
 
-    it('should create VM filter even with zero VM rules but skip department filter if no dept rules', async () => {
+    it('should create VM filter even with zero VM rules and always create department filter', async () => {
       const mockVM = {
         id: vmId,
         name: 'Test VM',
@@ -278,19 +308,27 @@ describe('FirewallManager', () => {
 
       ;(mockPrisma.machine.findUnique as jest.Mock).mockResolvedValue(mockVM)
 
+      // Mock department filter creation (ALWAYS called, even with zero rules)
+      const mockDeptFilterResult = {
+        filterName: 'ibay-department-abc123',
+        libvirtUuid: 'uuid-dept',
+        xmlContent: '<filter>...</filter>',
+        rulesApplied: 0
+      }
+      mockFilterFactory.ensureDepartmentFilter.mockResolvedValue(mockDeptFilterResult)
+
       const mockVMFilterResult = {
         filterName: 'ibay-vm-def456',
         libvirtUuid: 'uuid-vm',
         xmlContent: '<filter>...</filter>',
         rulesApplied: 0
       }
-
       mockFilterFactory.ensureVMFilter.mockResolvedValue(mockVMFilterResult)
 
       const result = await manager.ensureFirewallForVM(vmId, departmentId)
 
-      // Department filter should NOT be created (no rules)
-      expect(mockFilterFactory.ensureDepartmentFilter).not.toHaveBeenCalled()
+      // Department filter SHOULD be created (always, for inheritance base)
+      expect(mockFilterFactory.ensureDepartmentFilter).toHaveBeenCalledWith(departmentId)
 
       // VM filter SHOULD be created (always created to establish inheritance)
       expect(mockFilterFactory.ensureVMFilter).toHaveBeenCalledWith(vmId)
@@ -298,6 +336,125 @@ describe('FirewallManager', () => {
       expect(result.departmentRulesApplied).toBe(0)
       expect(result.vmRulesApplied).toBe(0)
       expect(result.success).toBe(true)
+    })
+  })
+
+  describe('ensureFirewallInfrastructure', () => {
+    it('should create empty VM filter with department inheritance', async () => {
+      const vmId = 'vm-123'
+
+      // Create a fresh mock with proper structure for this test
+      const testMockPrisma = {
+        machine: {
+          findUnique: jest.fn().mockResolvedValue({ id: vmId, firewallRuleSetId: null }),
+          update: jest.fn().mockResolvedValue({})
+        },
+        firewallRuleSet: {
+          findFirst: jest.fn().mockResolvedValue(null)
+        }
+      } as unknown as PrismaClient
+
+      // Create new manager instance with test mock
+      const testManager = new FirewallManager(testMockPrisma, mockConnection)
+
+      // Mock ruleset creation
+      const mockVMRuleSet = {
+        id: 'ruleset-vm-1',
+        name: 'VM Firewall: Test VM',
+        internalName: 'ibay-vm-def456',
+        entityType: RuleSetType.VM,
+        entityId: vmId,
+        priority: 500
+      }
+      mockRuleService.createRuleSet.mockResolvedValue(mockVMRuleSet as any)
+
+      // Mock filter creation with empty rules
+      const mockFilterResult = {
+        filterName: 'ibay-vm-def456',
+        libvirtUuid: 'uuid-vm',
+        xmlContent: '<filter>...</filter>',
+        rulesApplied: 0
+      }
+      mockFilterFactory.createFilter.mockResolvedValue(mockFilterResult)
+
+      const result = await testManager.ensureFirewallInfrastructure(
+        RuleSetType.VM,
+        vmId,
+        'VM Firewall: Test VM'
+      )
+
+      // Verify ruleset was created
+      expect(mockRuleService.createRuleSet).toHaveBeenCalledWith(
+        RuleSetType.VM,
+        vmId,
+        'VM Firewall: Test VM',
+        expect.stringMatching(/^ibay-vm-/),
+        500
+      )
+
+      // Verify empty filter was created directly (not via ensureVMFilter)
+      expect(mockFilterFactory.createFilter).toHaveBeenCalledWith(
+        RuleSetType.VM,
+        vmId,
+        [] // Empty rules array
+      )
+
+      expect(result.ruleSetCreated).toBe(true)
+      expect(result.filterCreated).toBe(true)
+    })
+
+    it('should create empty department filter', async () => {
+      const departmentId = 'dept-456'
+
+      // Create a fresh mock with proper structure for this test
+      const testMockPrisma = {
+        department: {
+          findUnique: jest.fn().mockResolvedValue({ id: departmentId, firewallRuleSetId: null }),
+          update: jest.fn().mockResolvedValue({})
+        },
+        firewallRuleSet: {
+          findFirst: jest.fn().mockResolvedValue(null)
+        }
+      } as unknown as PrismaClient
+
+      // Create new manager instance with test mock
+      const testManager = new FirewallManager(testMockPrisma, mockConnection)
+
+      // Mock ruleset creation
+      const mockDeptRuleSet = {
+        id: 'ruleset-dept-1',
+        name: 'Department Firewall: Engineering',
+        internalName: 'ibay-department-abc123',
+        entityType: RuleSetType.DEPARTMENT,
+        entityId: departmentId,
+        priority: 1000
+      }
+      mockRuleService.createRuleSet.mockResolvedValue(mockDeptRuleSet as any)
+
+      // Mock filter creation with empty rules
+      const mockFilterResult = {
+        filterName: 'ibay-department-abc123',
+        libvirtUuid: 'uuid-dept',
+        xmlContent: '<filter>...</filter>',
+        rulesApplied: 0
+      }
+      mockFilterFactory.createFilter.mockResolvedValue(mockFilterResult)
+
+      const result = await testManager.ensureFirewallInfrastructure(
+        RuleSetType.DEPARTMENT,
+        departmentId,
+        'Department Firewall: Engineering'
+      )
+
+      // Verify empty filter was created directly
+      expect(mockFilterFactory.createFilter).toHaveBeenCalledWith(
+        RuleSetType.DEPARTMENT,
+        departmentId,
+        [] // Empty rules array
+      )
+
+      expect(result.ruleSetCreated).toBe(true)
+      expect(result.filterCreated).toBe(true)
     })
   })
 

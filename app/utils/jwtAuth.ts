@@ -126,10 +126,6 @@ function validateTokenPayload (decoded: any): DecodedToken {
  * Fetches and validates user from database, returning safe user without sensitive fields
  */
 async function fetchAndValidateUser (decoded: DecodedToken, debugAuth?: boolean): Promise<SafeUser> {
-  if (debugAuth) {
-    console.log('🔑 JWT Debug - Looking up user by ID:', '[REDACTED]')
-  }
-
   const user = await prisma.user.findUnique({
     where: { id: decoded.userId },
     select: {
@@ -161,16 +157,6 @@ async function fetchAndValidateUser (decoded: DecodedToken, debugAuth?: boolean)
       userId: '[REDACTED]'
     })
     throw new JWTAuthError('role_mismatch', 'Token role does not match user role')
-  }
-
-  if (debugAuth) {
-    console.log('🔑 JWT Debug - User lookup and validation successful:', {
-      userId: '[REDACTED]',
-      email: user.email,
-      role: user.role,
-      deleted: user.deleted,
-      roleMatches: user.role === decoded.userRole
-    })
   }
 
   // Return user as SafeUser type (password and token fields are already excluded by Prisma select)
@@ -214,10 +200,6 @@ export async function verifyRequestAuth (
 ): Promise<VerifyAuthResult> {
   const { method, debugAuth = false } = options
 
-  if (debugAuth) {
-    console.log(`🔑 JWT Debug - Starting ${method} authentication verification`)
-  }
-
   // Extract token from Authorization header
   const { token, hasBearer } = extractToken(req)
 
@@ -233,47 +215,15 @@ export async function verifyRequestAuth (
     }
   }
 
-  if (debugAuth) {
-    console.log('🔑 JWT Debug - Token extraction:', {
-      hasToken: !!token,
-      tokenLength: token.length,
-      hasBearer,
-      hasDots: token.includes('.'),
-      dotCount: (token.match(/\./g) || []).length,
-      isValidJwtFormat: /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(token)
-    })
-  }
-
   try {
     // Get JWT secret with production-safe fallback handling
     const secret = getJWTSecret()
 
-    if (debugAuth) {
-      console.log('🔑 JWT Debug - Attempting token verification...')
-    }
-
     // Verify JWT token
     const rawDecoded = jwt.verify(token, secret)
 
-    if (debugAuth) {
-      console.log('🔑 JWT Debug - Token verified successfully')
-    }
-
     // Validate token payload
     const decoded = validateTokenPayload(rawDecoded)
-
-    if (debugAuth) {
-      console.log('🔑 JWT Debug - Token payload validation passed')
-      console.log('🔑 JWT Debug - Decoded payload:', {
-        userId: '[REDACTED]',
-        userRole: '[REDACTED]',
-        role: '[REDACTED]',
-        iat: decoded.iat,
-        exp: decoded.exp,
-        hasUserId: !!decoded.userId,
-        hasUserRole: !!decoded.userRole
-      })
-    }
 
     // Fetch and validate user
     const user = await fetchAndValidateUser(decoded, debugAuth)
@@ -284,10 +234,6 @@ export async function verifyRequestAuth (
       tokenRole: decoded.userRole
     })
 
-    if (debugAuth) {
-      console.log(`🔑 JWT Debug - ${method} authentication successful`)
-    }
-
     return {
       user,
       decoded,
@@ -296,13 +242,6 @@ export async function verifyRequestAuth (
   } catch (error) {
     // Categorize and log specific error types
     const jwtError = categorizeJWTError(error)
-
-    if (debugAuth) {
-      console.log(`🔑 JWT Debug - ${method} token verification failed`)
-      console.log('🔑 JWT Debug - Error category:', jwtError.category)
-      console.log('🔑 JWT Debug - Error type:', error?.constructor?.name)
-      console.log('🔑 JWT Debug - Error message:', jwtError.message)
-    }
 
     // Log categorized error
     console.error(`${method} token verification failed [${jwtError.category}]:`, jwtError.message)

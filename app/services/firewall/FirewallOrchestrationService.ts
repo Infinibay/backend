@@ -57,7 +57,7 @@ export class FirewallOrchestrationService {
     private validationService: FirewallValidationService,
     private xmlGenerator: NWFilterXMLGeneratorService,
     private libvirtService: LibvirtNWFilterService
-  ) {}
+  ) { }
 
   /**
    * Calculates effective rules for a VM by merging department and VM rules
@@ -168,13 +168,17 @@ export class FirewallOrchestrationService {
       vm.department.id
     )
 
+    // Get existing UUID if filter already exists (for redefinition)
+    const existingUuid = await this.libvirtService.getFilterUuid(vmFilterName)
+
     // Generate VM filter XML with department filter reference
     const filterXML = await this.xmlGenerator.generateFilterXML(
       {
         name: vmFilterName,
         rules: vmRules
       },
-      deptFilterName // Inherit from department filter
+      deptFilterName, // Inherit from department filter
+      existingUuid || undefined // Use existing UUID if available
     )
 
     // Apply in libvirt (creates/updates the nwfilter definition)
@@ -232,11 +236,16 @@ export class FirewallOrchestrationService {
     // Generate department filter name
     const deptFilterName = this.xmlGenerator.generateFilterName(RuleSetType.DEPARTMENT, deptId)
 
+    // Get existing UUID if filter already exists (for redefinition)
+    const existingUuid = await this.libvirtService.getFilterUuid(deptFilterName)
+
     // Generate department filter XML (no parent - this is the base filter)
     const filterXML = await this.xmlGenerator.generateFilterXML({
       name: deptFilterName,
       rules: deptRules
-    })
+    }, undefined, existingUuid || undefined)
+
+    debug.log('debug', `Generated department filter XML with ${existingUuid ? 'existing' : 'new'} UUID`)
 
     // Apply in libvirt - this is the ONLY update needed
     const libvirtUuid = await this.libvirtService.defineFilter(filterXML)
@@ -282,13 +291,15 @@ export class FirewallOrchestrationService {
     for (const ruleSet of ruleSets) {
       try {
         const filterName = this.xmlGenerator.generateFilterName(ruleSet.entityType, ruleSet.entityId)
+
+        // Check if filter already exists and get its UUID
+        const exists = await this.libvirtService.filterExists(filterName)
+        const existingUuid = exists ? await this.libvirtService.getFilterUuid(filterName) : null
+
         const filterXML = await this.xmlGenerator.generateFilterXML({
           name: filterName,
           rules: ruleSet.rules
-        })
-
-        // Check if filter already exists
-        const exists = await this.libvirtService.filterExists(filterName)
+        }, undefined, existingUuid || undefined)
 
         // Define/update filter
         const libvirtUuid = await this.libvirtService.defineFilter(filterXML)

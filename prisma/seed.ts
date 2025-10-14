@@ -2,6 +2,13 @@
 import { register } from 'tsconfig-paths'
 import { resolve } from 'path'
 
+import { PrismaClient, Prisma } from '@prisma/client'
+import bcrypt from 'bcrypt'
+import dotenv from 'dotenv'
+import createApplications from './seeds/applications'
+
+import installCallbacks from '../app/utils/modelsCallbacks'
+
 // Register path mappings for ts-node to resolve @utils and other aliases
 register({
   baseUrl: resolve(__dirname, '..', 'app'),
@@ -13,13 +20,6 @@ register({
     '@resolvers/*': ['graphql/resolvers/*']
   }
 })
-
-import { PrismaClient, Prisma } from '@prisma/client'
-import bcrypt from 'bcrypt'
-import dotenv from 'dotenv'
-import createApplications from './seeds/applications'
-
-import installCallbacks from '../app/utils/modelsCallbacks'
 
 dotenv.config()
 

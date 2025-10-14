@@ -58,9 +58,14 @@ export class DepartmentFilterStrategy implements IFilterStrategy {
     // Step 2: Generate filter name
     const filterName = this.getFilterName(departmentId)
 
+    // Step 2.5: Get existing UUID if filter already exists (for redefinition)
+    const existingUuid = await this.libvirtService.getFilterUuid(filterName)
+
     // Step 3: Generate XML without parent filter (department filters are base filters)
     const xmlContent = await this.xmlGenerator.generateFilterXML(
-      { name: filterName, rules }
+      { name: filterName, rules },
+      undefined, // No parent filter for department filters
+      existingUuid || undefined // Use existing UUID if available
     )
 
     // Step 4: Define filter in libvirt

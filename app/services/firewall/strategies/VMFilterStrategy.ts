@@ -89,10 +89,14 @@ export class VMFilterStrategy implements IFilterStrategy {
     // Step 4: Generate VM filter name
     const vmFilterName = this.getFilterName(vmId)
 
+    // Step 4.5: Get existing UUID if filter already exists (for redefinition)
+    const existingUuid = await this.libvirtService.getFilterUuid(vmFilterName)
+
     // Step 5: Generate XML with parent filter reference (creates inheritance via <filterref>)
     const xmlContent = await this.xmlGenerator.generateFilterXML(
       { name: vmFilterName, rules },
-      deptFilterName // This creates the <filterref> to department filter
+      deptFilterName, // This creates the <filterref> to department filter
+      existingUuid || undefined // Use existing UUID if available
     )
 
     // Step 6: Define filter in libvirt

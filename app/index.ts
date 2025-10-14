@@ -83,17 +83,6 @@ async function bootstrap (): Promise<void> {
           // Create user validation helpers
           const userHelpers = createUserValidationHelpers(authResult.user, authResult.meta)
 
-          if (debugAuth) {
-            console.log('🔑 JWT Debug - Context result:', {
-              hasUser: !!authResult.user,
-              userId: authResult.user?.id,
-              userRole: authResult.user?.role,
-              userDeleted: authResult.user?.deleted,
-              authenticationStatus: authResult.meta.status,
-              authMethod: authResult.meta.method
-            })
-          }
-
           return {
             prisma,
             req,

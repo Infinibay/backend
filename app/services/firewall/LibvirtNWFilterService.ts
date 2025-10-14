@@ -10,13 +10,17 @@ const debug = new Debugger('infinibay:service:firewall:libvirt')
  * NOTE: Does NOT modify VM XML - that's XMLGenerator's responsibility.
  */
 export class LibvirtNWFilterService {
-  constructor (private conn: Connection) {}
+  constructor (private conn: Connection) { }
 
   /**
    * Defines a new nwfilter in libvirt from XML
    * @returns UUID of the created filter
    */
   async defineFilter (xml: string): Promise<string> {
+    if (this.conn.isAlive() === false) {
+      throw new Error('Libvirt connection is not alive')
+    }
+
     const filter = NwFilter.defineXml(this.conn, xml)
 
     if (!filter) {
@@ -112,6 +116,32 @@ export class LibvirtNWFilterService {
       // lookupByName may throw if filter doesn't exist or on connection errors
       debug.log('debug', `Filter lookup failed for ${filterName}: ${(error as Error).message}`)
       return false
+    }
+  }
+
+  /**
+   * Gets the UUID of an existing filter by name.
+   *
+   * @param filterName - The name of the filter
+   * @returns The UUID string if filter exists, null otherwise
+   */
+  async getFilterUuid (filterName: string): Promise<string | null> {
+    try {
+      const filter = NwFilter.lookupByName(this.conn, filterName)
+
+      if (!filter) {
+        return null
+      }
+
+      const uuid = filter.getUuidString()
+      if (uuid) {
+        debug.log('debug', `Retrieved UUID for filter ${filterName}: ${uuid}`)
+      }
+
+      return uuid
+    } catch (error) {
+      debug.log('debug', `Failed to get UUID for filter ${filterName}: ${(error as Error).message}`)
+      return null
     }
   }
 }
