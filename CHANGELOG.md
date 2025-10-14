@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2025-10-14
+
 ### Changed
 
 - **BREAKING**: `VMFirewallSyncService` now generates MD5-based internal filter names via centralized `FilterNameGenerator` utility. Previously, it used substring-based naming (first 8 characters of ID), which caused filter name mismatches with other parts of the system. The new approach uses MD5 hash (truncated to 8 characters) for consistent, deterministic naming across all firewall services.
@@ -22,10 +24,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Created centralized `FilterNameGenerator` utility class for consistent firewall filter naming across all services
 - Implemented Factory Pattern with Strategy Pattern for firewall filter creation (`FirewallFilterFactory`, `DepartmentFilterStrategy`, `VMFilterStrategy`)
 - Added `IFilterStrategy` interface defining contract for filter creation strategies
+- Enhanced test coverage for `FirewallManager` with comprehensive unit tests
 
 ### Fixed
 
 - Fixed critical bug in `VMFirewallSyncService` where filter names were generated using substring approach instead of MD5 hash, causing mismatches with `NWFilterXMLGeneratorService` and `createMachineService`
+- Fixed firewall filter initialization timing issues by creating filters with empty rules arrays to avoid transaction visibility problems
+- Removed unnecessary JWT debug logging from application bootstrap
 
 ### Refactored
 
@@ -33,3 +38,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Refactored `NWFilterXMLGeneratorService.generateFilterName()` to delegate to centralized utility
 - Refactored `createMachineService.generateInternalFilterName()` to use `RuleSetType` enum instead of string literals
 - Improved type safety by replacing string literals with `RuleSetType` enum throughout firewall services
+- Cleaned up authentication utilities and removed unused debug code
+- Updated seed data with improved firewall configurations
