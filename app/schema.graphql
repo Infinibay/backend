@@ -471,6 +471,36 @@ The `JSONObject` scalar type represents JSON objects as specified by [ECMA-404](
 """
 scalar JSONObject
 
+"""Keep-alive heartbeat metrics for a VM connection"""
+type KeepAliveMetrics {
+  """Average round-trip time in milliseconds"""
+  averageRtt: Float!
+
+  """Consecutive failures (resets on success)"""
+  consecutiveFailures: Int!
+
+  """Total keep-alive failures (cumulative)"""
+  failureCount: Int!
+
+  """Timestamp of last keep-alive failure"""
+  lastFailure: String
+
+  """Timestamp of last keep-alive response received"""
+  lastReceived: String
+
+  """Timestamp of last keep-alive request sent"""
+  lastSent: String
+
+  """Total keep-alive responses received"""
+  receivedCount: Int!
+
+  """Total keep-alive requests sent"""
+  sentCount: Int!
+
+  """Keep-alive success rate as percentage (e.g., "95.5%" or "N/A")"""
+  successRate: String!
+}
+
 type LibvirtFilterInfoType {
   name: String!
   uuid: String
@@ -1447,13 +1477,16 @@ type ValidationResultType {
 
 type VmConnectionInfo {
   isConnected: Boolean!
+
+  """Keep-alive heartbeat metrics"""
+  keepAlive: KeepAliveMetrics
   lastMessageTime: String!
   reconnectAttempts: Float!
   vmId: String!
 }
 
 type VmDiagnostics {
-  connectionStats: SocketConnectionStats
+  connectionStats: VmConnectionInfo
   diagnostics: [String!]!
   infiniService: InfiniServiceStatus!
   manualCommands: [String!]!

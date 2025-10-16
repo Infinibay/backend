@@ -2,7 +2,7 @@ import { Resolver, Query, Arg, Ctx } from 'type-graphql'
 import { InfinibayContext } from '@main/utils/context'
 import { getQemuGuestAgentService } from '@services/QemuGuestAgentService'
 import { getVirtioSocketWatcherService } from '@services/VirtioSocketWatcherService'
-import { VmDiagnostics, SocketConnectionStats } from './type'
+import { VmDiagnostics, SocketConnectionStats, VmConnectionInfo } from './type'
 import { Debugger } from '@main/utils/debug'
 
 @Resolver()
@@ -11,6 +11,32 @@ export class VmDiagnosticsResolver {
 
   constructor () {
     this.debug = new Debugger('vm-diagnostics')
+  }
+
+  /**
+   * Maps a service connection object to VmConnectionInfo GraphQL type
+   * Handles Date to ISO string conversions and keepAlive metrics mapping
+   */
+  private mapToVmConnectionInfo (conn: any): VmConnectionInfo {
+    return {
+      vmId: conn.vmId,
+      isConnected: conn.isConnected,
+      reconnectAttempts: conn.reconnectAttempts,
+      lastMessageTime: conn.lastMessageTime.toISOString(),
+      keepAlive: conn.keepAlive
+        ? {
+            sentCount: conn.keepAlive.sentCount,
+            receivedCount: conn.keepAlive.receivedCount,
+            failureCount: conn.keepAlive.failureCount,
+            consecutiveFailures: conn.keepAlive.consecutiveFailures,
+            averageRtt: conn.keepAlive.averageRtt,
+            lastSent: conn.keepAlive.lastSent?.toISOString(),
+            lastReceived: conn.keepAlive.lastReceived?.toISOString(),
+            lastFailure: conn.keepAlive.lastFailure?.toISOString(),
+            successRate: conn.keepAlive.successRate
+          }
+        : undefined
+    }
   }
 
   @Query(() => VmDiagnostics, {
@@ -46,18 +72,14 @@ export class VmDiagnosticsResolver {
       const infiniServiceCheck = await qemuService.checkInfiniService(vmId)
 
       // Get socket watcher stats
-      let connectionStats: SocketConnectionStats | undefined
+      let connectionStats: VmConnectionInfo | undefined
       try {
         const socketWatcher = getVirtioSocketWatcherService()
         const stats = socketWatcher.getConnectionStats()
         const vmConnection = stats.connections.find(c => c.vmId === vmId)
 
         if (vmConnection) {
-          connectionStats = {
-            isConnected: vmConnection.isConnected,
-            reconnectAttempts: vmConnection.reconnectAttempts,
-            lastMessageTime: vmConnection.lastMessageTime.toISOString()
-          }
+          connectionStats = this.mapToVmConnectionInfo(vmConnection)
         }
       } catch (error) {
         this.debug.log('warn', `Could not get socket watcher stats: ${error}`)
@@ -108,12 +130,7 @@ export class VmDiagnosticsResolver {
       return {
         totalConnections: stats.totalConnections,
         activeConnections: stats.activeConnections,
-        connections: stats.connections.map(conn => ({
-          vmId: conn.vmId,
-          isConnected: conn.isConnected,
-          reconnectAttempts: conn.reconnectAttempts,
-          lastMessageTime: conn.lastMessageTime.toISOString()
-        }))
+        connections: stats.connections.map(conn => this.mapToVmConnectionInfo(conn))
       }
     } catch (error) {
       this.debug.log('error', `Failed to get connection stats: ${error}`)
