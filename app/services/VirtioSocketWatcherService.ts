@@ -7,7 +7,7 @@
  * - To see info level: DEBUG=infinibay:virtio-socket:info npm run dev
  * - To disable all output: (default, or set DEBUG to other namespaces)
  */
-import { PrismaClient } from '@prisma/client'
+import prisma from '@utils/database'
 import * as net from 'net'
 import * as fs from 'fs'
 import * as path from 'path'
@@ -37,7 +37,7 @@ function redactSensitive(obj: any): any {
 
 // Message types from InfiniService
 interface BaseMessage {
-  type: 'metrics' | 'error' | 'handshake' | 'command' | 'response' | 'error_report' | 'circuit_breaker_state' | 'keep_alive' | 'keep_alive_request'
+  type: 'metrics' | 'error' | 'handshake' | 'command' | 'response' | 'error_report' | 'circuit_breaker_state' | 'keep_alive' | 'keep_alive_request' | 'firewall_event'
   timestamp: string
 }
 
@@ -194,6 +194,18 @@ interface KeepAliveMessage extends BaseMessage {
 interface KeepAliveRequestMessage extends BaseMessage {
   type: 'keep_alive_request'
   sequence_number: number
+  timestamp: string
+}
+
+interface FirewallEventMessage extends BaseMessage {
+  type: 'firewall_event'
+  event_type: 'connection_blocked' | 'connection_allowed'
+  port: number
+  protocol: string
+  process_name?: string
+  process_id?: number
+  source_ip?: string
+  rule_name?: string
   timestamp: string
 }
 
@@ -499,7 +511,7 @@ interface FormattedCommandType {
 }
 
 export class VirtioSocketWatcherService extends EventEmitter {
-  private prisma: PrismaClient
+  private prisma: typeof prisma
   private vmEventManager?: VmEventManager
   private queueManager?: VMHealthQueueManager
   private connections: Map<string, VmConnection> = new Map()
@@ -521,9 +533,9 @@ export class VirtioSocketWatcherService extends EventEmitter {
   })()
   private debug: Debugger
 
-  constructor(prisma: PrismaClient) {
+  constructor(prismaClient: typeof prisma) {
     super()
-    this.prisma = prisma
+    this.prisma = prismaClient
     this.socketDir = path.join(process.env.INFINIBAY_BASE_DIR || '/opt/infinibay', 'sockets')
     this.debug = new Debugger('infinibay:virtio-socket')
 
@@ -1031,6 +1043,12 @@ export class VirtioSocketWatcherService extends EventEmitter {
           // Handle keep-alive messages from InfiniService
           const keepAliveMsg = message as KeepAliveMessage
           await this.handleKeepAliveMessage(connection, keepAliveMsg)
+          break
+
+        case 'firewall_event':
+          // Handle firewall events from InfiniService (Windows Firewall monitoring)
+          const firewallEventMsg = message as FirewallEventMessage
+          await this.handleFirewallEvent(connection.vmId, firewallEventMsg)
           break
 
         default:
@@ -3331,6 +3349,51 @@ export class VirtioSocketWatcherService extends EventEmitter {
     this.debug.log('debug', `💓 Keep-alive response sent to VM ${connection.vmId} (seq: ${message.sequence_number})`)
   }
 
+  /**
+   * Handles firewall events from infiniservice (Windows Firewall monitoring)
+   *
+   * TODO: This feature requires infiniservice enhancement to monitor Windows Firewall logs
+   * via Event Viewer (Security log, Event ID 5157 for blocked connections) or Windows
+   * Filtering Platform (WFP) API. Currently, this is a placeholder for future implementation.
+   *
+   * For now, port conflict detection relies on heuristic analysis in PortConflictChecker.
+   *
+   * @param vmId - The VM ID that generated the firewall event
+   * @param message - The firewall event message from infiniservice
+   */
+  private async handleFirewallEvent(vmId: string, message: FirewallEventMessage): Promise<void> {
+    try {
+      this.debug.log('info', `🔥 Firewall event received from VM ${vmId}: ${message.event_type} for port ${message.port}/${message.protocol}`)
+
+      // Only store blocked connection events
+      if (message.event_type === 'connection_blocked') {
+        // Store in BlockedConnection table
+        await this.prisma.blockedConnection.create({
+          data: {
+            machineId: vmId,
+            port: message.port,
+            protocol: message.protocol.toUpperCase(),
+            processName: message.process_name || null,
+            processId: message.process_id || null,
+            attemptTime: new Date(message.timestamp),
+            blockReason: `Windows Firewall blocked connection (rule: ${message.rule_name || 'unknown'})`,
+            sourceIp: message.source_ip || null,
+            ruleId: null // Will be populated if we can match to a FirewallRule
+          }
+        })
+
+        this.debug.log('debug', `📝 Stored blocked connection for VM ${vmId}: port ${message.port}/${message.protocol} by process ${message.process_name || 'unknown'}`)
+
+        // TODO: Emit event for real-time updates when vmEventManager supports firewall events
+        // For now, the data is stored in the database and will be picked up by the next
+        // recommendation cycle via PortConflictChecker
+      }
+    } catch (error) {
+      // Non-critical error - log but don't throw
+      this.debug.log('error', `Failed to handle firewall event for VM ${vmId}: ${error}`)
+    }
+  }
+
   private updateConnectionStabilityScore(connection: VmConnection): void {
     let score = 100
 
@@ -3490,9 +3553,9 @@ export class VirtioSocketWatcherService extends EventEmitter {
 // Singleton instance management
 let virtioSocketWatcherService: VirtioSocketWatcherService | null = null
 
-export const createVirtioSocketWatcherService = (prisma: PrismaClient): VirtioSocketWatcherService => {
+export const createVirtioSocketWatcherService = (prismaClient: typeof prisma): VirtioSocketWatcherService => {
   if (!virtioSocketWatcherService) {
-    virtioSocketWatcherService = new VirtioSocketWatcherService(prisma)
+    virtioSocketWatcherService = new VirtioSocketWatcherService(prismaClient)
   }
   return virtioSocketWatcherService
 }

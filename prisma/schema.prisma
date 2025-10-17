@@ -89,10 +89,11 @@ model Machine {
   configuration      MachineConfiguration?
   maintenanceHistory MaintenanceHistory[]
   maintenanceTasks   MaintenanceTask[]
-  pendingCommands    PendingCommand[]
-  portUsage          PortUsage[]
-  processSnapshots   ProcessSnapshot[]
-  systemEvents       SystemEvent[]
+  pendingCommands      PendingCommand[]
+  portUsage            PortUsage[]
+  blockedConnections   BlockedConnection[]
+  processSnapshots     ProcessSnapshot[]
+  systemEvents         SystemEvent[]
   systemMetrics      SystemMetrics[]
   healthAlerts       VMHealthAlert[]
   healthCheckQueue   VMHealthCheckQueue[]
@@ -292,6 +293,25 @@ model PortUsage {
   @@index([machineId, port, protocol])
   @@index([machineId, timestamp])
   @@index([machineId, isListening])
+}
+
+model BlockedConnection {
+  id          String   @id @default(uuid())
+  machineId   String
+  port        Int
+  protocol    String
+  processName String?
+  processId   Int?
+  attemptTime DateTime @default(now())
+  blockReason String
+  sourceIp    String?
+  ruleId      String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  machine     Machine  @relation(fields: [machineId], references: [id], onDelete: Cascade)
+
+  @@index([machineId, attemptTime])
+  @@index([machineId, port, protocol])
 }
 
 model WindowsService {

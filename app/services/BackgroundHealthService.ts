@@ -12,7 +12,7 @@ export class BackgroundHealthService {
   private isRunning = false
   private recommendationService: VMRecommendationService
 
-  constructor (
+  constructor(
     private prisma: PrismaClient,
     private backgroundTaskService: BackgroundTaskService,
     private eventManager: EventManager,
@@ -26,14 +26,15 @@ export class BackgroundHealthService {
    * Initialize and start the background health monitoring system
    * Schedules daily health checks at 2 AM
    */
-  public start (): void {
+  public start(): void {
     if (this.cronJob) {
       console.log('BackgroundHealthService is already running')
       return
     }
 
     // Daily at 2 AM - '0 2 * * *'
-    this.cronJob = new CronJob('0 2 * * *', async () => {
+    // this.cronJob = new CronJob('0 2 * * *', async () => {
+    this.cronJob = new CronJob('*/1 * * * *', async () => {
       await this.executeHealthCheckRound()
     })
 
@@ -50,7 +51,7 @@ export class BackgroundHealthService {
   /**
    * Stop the background health monitoring system
    */
-  public stop (): void {
+  public stop(): void {
     if (this.cronJob) {
       this.cronJob.stop()
       this.cronJob = null
@@ -65,7 +66,7 @@ export class BackgroundHealthService {
   /**
    * Execute a complete round of health checks for all running VMs
    */
-  public async executeHealthCheckRound (): Promise<void> {
+  public async executeHealthCheckRound(): Promise<void> {
     if (this.isRunning) {
       console.log('🩺 Health check round already in progress, skipping')
       return
@@ -108,7 +109,7 @@ export class BackgroundHealthService {
   /**
    * Perform the actual health check round implementation
    */
-  private async performHealthCheckRound (): Promise<void> {
+  private async performHealthCheckRound(): Promise<void> {
     const startTime = Date.now()
     const roundId = `round-${startTime}`
 
@@ -197,7 +198,7 @@ export class BackgroundHealthService {
   /**
    * Manually trigger a health check round (for testing/debugging)
    */
-  public async triggerHealthCheckRound (): Promise<string> {
+  public async triggerHealthCheckRound(): Promise<string> {
     const taskId = uuidv4()
 
     console.log(`🩺 Manually triggering health check round (task: ${taskId})`)
@@ -217,11 +218,11 @@ export class BackgroundHealthService {
   /**
    * Get health check service status
    */
-  public getStatus (): {
+  public getStatus(): {
     isRunning: boolean
     cronActive: boolean
     nextRun: Date | null
-    } {
+  } {
     return {
       isRunning: this.isRunning,
       cronActive: this.cronJob !== null && this.cronJob.running,
@@ -232,7 +233,7 @@ export class BackgroundHealthService {
   /**
    * Update cron schedule (for configuration changes)
    */
-  public updateSchedule (cronExpression: string): void {
+  public updateSchedule(cronExpression: string): void {
     if (this.cronJob) {
       this.cronJob.stop()
     }
@@ -248,7 +249,7 @@ export class BackgroundHealthService {
   /**
    * Validate recommendation service initialization
    */
-  private validateRecommendationService (): void {
+  private validateRecommendationService(): void {
     try {
       if (!this.recommendationService) {
         throw new Error('VMRecommendationService initialization failed')
@@ -263,7 +264,7 @@ export class BackgroundHealthService {
   /**
    * Execute weekly maintenance tasks
    */
-  private async executeWeeklyMaintenance (): Promise<void> {
+  private async executeWeeklyMaintenance(): Promise<void> {
     const startTime = Date.now()
     console.log('🔧 Starting weekly maintenance tasks')
 
@@ -295,7 +296,7 @@ export class BackgroundHealthService {
   /**
    * Clean up old recommendations (older than configurable threshold)
    */
-  public async cleanupOldRecommendations (): Promise<void> {
+  public async cleanupOldRecommendations(): Promise<void> {
     try {
       const cleanupThresholdDays = Number(process.env.RECOMMENDATION_CLEANUP_DAYS) || 30
       const thresholdDate = new Date(Date.now() - (cleanupThresholdDays * 24 * 60 * 60 * 1000))
@@ -320,7 +321,7 @@ export class BackgroundHealthService {
   /**
    * Validate recommendation integrity - check for orphaned recommendations
    */
-  public async validateRecommendationIntegrity (): Promise<void> {
+  public async validateRecommendationIntegrity(): Promise<void> {
     try {
       // Find recommendations with invalid snapshot references
       const orphanedRecommendations = await this.prisma.vMRecommendation.findMany({
@@ -378,7 +379,7 @@ export class BackgroundHealthService {
   /**
    * Generate missing recommendations for recent snapshots
    */
-  public async generateMissingRecommendations (): Promise<void> {
+  public async generateMissingRecommendations(): Promise<void> {
     try {
       const recentDays = Number(process.env.RECOMMENDATION_REGENERATION_DAYS) || 7
       const recentDate = new Date(Date.now() - (recentDays * 24 * 60 * 60 * 1000))
@@ -425,7 +426,7 @@ export class BackgroundHealthService {
   /**
    * Manually trigger recommendation regeneration for specific VM
    */
-  public async regenerateRecommendationsForVM (machineId: string): Promise<void> {
+  public async regenerateRecommendationsForVM(machineId: string): Promise<void> {
     try {
       // Get the latest snapshot for the VM
       const latestSnapshot = await this.prisma.vMHealthSnapshot.findFirst({
@@ -466,7 +467,7 @@ export class BackgroundHealthService {
   /**
    * Manually trigger recommendation regeneration for all VMs
    */
-  public async regenerateAllRecommendations (): Promise<void> {
+  public async regenerateAllRecommendations(): Promise<void> {
     try {
       const runningVMs = await this.prisma.machine.findMany({
         where: {
@@ -499,7 +500,7 @@ export class BackgroundHealthService {
   /**
    * Get recommendation maintenance statistics
    */
-  public async getRecommendationStats (): Promise<{
+  public async getRecommendationStats(): Promise<{
     totalRecommendations: number
     recentRecommendations: number
     snapshotsWithoutRecommendations: number

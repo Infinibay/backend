@@ -10,7 +10,7 @@ export class VMRecommendationResolver {
     description: 'Get automated recommendations for VM optimization, security, and maintenance based on system analysis. Returns up to 20 recommendations by default to prevent over-fetch. Use pagination for more results.'
   })
   @Authorized(['USER'])
-  async getVMRecommendations (
+  async getVMRecommendations(
     @Arg('vmId', () => ID, { description: 'ID of the virtual machine to get recommendations for' }) vmId: string,
     @Ctx() context: InfinibayContext,
     @Arg('refresh', {
@@ -46,16 +46,10 @@ export class VMRecommendationResolver {
     const recommendationService = new VMRecommendationService(context.prisma)
 
     // Use safe method to get recommendations with standardized error handling
-    const result = await recommendationService.getRecommendationsSafe(vmId, refresh ?? false, filter || undefined)
-
-    if (!result.success) {
-      throw new GraphQLError('Failed to fetch recommendations', {
-        extensions: { code: 'INTERNAL_ERROR' }
-      })
-    }
+    const recommendations = await recommendationService.getRecommendations(vmId, refresh ?? false, filter || undefined)
 
     // Transform raw Prisma objects to proper GraphQL format
-    return result.recommendations.map(rec => ({
+    return recommendations.map(rec => ({
       id: rec.id,
       machineId: rec.machineId,
       snapshotId: rec.snapshotId,

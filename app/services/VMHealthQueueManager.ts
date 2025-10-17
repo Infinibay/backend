@@ -156,7 +156,8 @@ export class VMHealthQueueManager {
       'RESOURCE_OPTIMIZATION',
       'WINDOWS_UPDATES',
       'WINDOWS_DEFENDER',
-      'APPLICATION_INVENTORY'
+      'APPLICATION_INVENTORY',
+      'APPLICATION_UPDATES'
     ]
 
     // Create or get today's snapshot and set expected checks for snapshot-scoped tracking
@@ -442,6 +443,8 @@ export class VMHealthQueueManager {
         action = 'CheckWindowsDefender'; break
       case 'APPLICATION_INVENTORY':
         action = 'GetInstalledApplicationsWMI'; break
+      case 'APPLICATION_UPDATES':
+        action = 'CheckApplicationUpdates'; break
       default:
         throw new Error(`Unsupported health check type: ${task.checkType}`)
       }
@@ -669,6 +672,11 @@ export class VMHealthQueueManager {
     case 'APPLICATION_INVENTORY':
       updateData.applicationInventory = result.data
       break
+    case 'APPLICATION_UPDATES':
+      // Merge APPLICATION_UPDATES data into existing applicationInventory to avoid overwriting full inventory
+      // AppUpdateChecker expects apps with update_available field set
+      await this.mergeApplicationUpdates(snapshot.id, result.data)
+      break
     }
 
     await this.prisma.vMHealthSnapshot.update({
@@ -678,6 +686,112 @@ export class VMHealthQueueManager {
 
     // Update overall status if all expected checks are complete
     await this.updateSnapshotOverallStatus(snapshot.id, machineId)
+  }
+
+  /**
+   * Merge APPLICATION_UPDATES data into existing applicationInventory
+   * Preserves full inventory while enriching apps with update metadata
+   */
+  private async mergeApplicationUpdates (snapshotId: string, updateData: unknown): Promise<void> {
+    try {
+      // Fetch current snapshot
+      const snapshot = await this.prisma.vMHealthSnapshot.findUnique({
+        where: { id: snapshotId },
+        select: { applicationInventory: true }
+      })
+
+      if (!snapshot) {
+        console.warn(`⚠️ Snapshot ${snapshotId} not found for APPLICATION_UPDATES merge`)
+        return
+      }
+
+      // Define proper type for inventory structure
+      interface ApplicationInventory {
+        applications?: Array<Record<string, unknown>>
+        summary?: unknown
+        lastInventoryCheck?: string
+        lastUpdateCheck?: string
+      }
+
+      // Parse existing inventory
+      let existingInventory: ApplicationInventory = { applications: [] }
+      if (snapshot.applicationInventory) {
+        existingInventory = typeof snapshot.applicationInventory === 'string'
+          ? JSON.parse(snapshot.applicationInventory)
+          : snapshot.applicationInventory as ApplicationInventory
+      }
+
+      // Parse incoming update data
+      const updateInventory = typeof updateData === 'string'
+        ? JSON.parse(updateData)
+        : updateData as ApplicationInventory
+
+      if (!updateInventory?.applications || !Array.isArray(updateInventory.applications)) {
+        console.warn(`⚠️ Invalid APPLICATION_UPDATES data format for snapshot ${snapshotId}`)
+        return
+      }
+
+      // Create a map of update data by app identifier (name or app_name)
+      const updateMap = new Map<string, Record<string, unknown>>()
+      for (const app of updateInventory.applications) {
+        const appKey = (app.name || app.app_name) as string
+        if (appKey) {
+          updateMap.set(appKey.toLowerCase(), app)
+        }
+      }
+
+      // Merge update metadata into existing inventory
+      const existingApps = existingInventory.applications || []
+      let mergedApps: Array<Record<string, unknown>>
+
+      if (existingApps.length === 0) {
+        // No existing inventory, use update data directly
+        mergedApps = updateInventory.applications
+        console.log(`📦 No existing inventory for snapshot ${snapshotId}, using APPLICATION_UPDATES data (${mergedApps.length} apps)`)
+      } else {
+        // Merge update fields into existing apps
+        mergedApps = existingApps.map(app => {
+          const appKey = ((app.name || app.app_name) as string)?.toLowerCase()
+          const updateInfo = appKey ? updateMap.get(appKey) : null
+
+          if (updateInfo) {
+            // Merge update metadata fields
+            return {
+              ...app,
+              update_available: updateInfo.update_available,
+              new_version: updateInfo.new_version,
+              is_security_update: updateInfo.is_security_update,
+              update_source: updateInfo.update_source,
+              update_size_bytes: updateInfo.update_size_bytes,
+              update_metadata: updateInfo.update_metadata
+            }
+          }
+
+          return app
+        })
+
+        const updatedCount = mergedApps.filter(app => app.update_available).length
+        console.log(`📦 Merged APPLICATION_UPDATES into inventory for snapshot ${snapshotId}: ${updatedCount}/${mergedApps.length} apps have updates`)
+      }
+
+      // Store merged inventory - ensure it's properly typed for Prisma JSON field
+      const mergedInventory: ApplicationInventory = {
+        applications: mergedApps,
+        summary: updateInventory.summary || existingInventory.summary,
+        lastInventoryCheck: existingInventory.lastInventoryCheck,
+        lastUpdateCheck: new Date().toISOString()
+      }
+
+      await this.prisma.vMHealthSnapshot.update({
+        where: { id: snapshotId },
+        data: {
+          applicationInventory: mergedInventory as any
+        }
+      })
+    } catch (error) {
+      console.error(`❌ Failed to merge APPLICATION_UPDATES for snapshot ${snapshotId}:`, error)
+      // Don't throw to avoid breaking health check workflow
+    }
   }
 
   /**
@@ -739,7 +853,8 @@ export class VMHealthQueueManager {
       'RESOURCE_OPTIMIZATION',
       'WINDOWS_UPDATES',
       'WINDOWS_DEFENDER',
-      'APPLICATION_INVENTORY'
+      'APPLICATION_INVENTORY',
+      'APPLICATION_UPDATES'
     ]
 
     // Check for environment configuration

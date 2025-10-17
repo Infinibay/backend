@@ -15,6 +15,7 @@ interface WindowsUpdate {
 interface UpdateStatus {
   pending_updates?: WindowsUpdate[]
   reboot_required?: boolean
+  reboot_required_since?: string
   automatic_updates_enabled?: boolean
   last_check_date?: string
   pending_reboot_updates?: number
@@ -76,6 +77,9 @@ interface UpdateStatus {
  *     securityCount: number,             // Security updates
  *     totalSizeMB: number,               // Download size
  *     rebootRequired: boolean,           // Restart needed
+ *     rebootPendingDays?: number,        // Days since reboot required
+ *     rebootRequiredSince?: string,      // Timestamp when reboot became required
+ *     rebootUrgent?: boolean,            // true if pending >7 days (critical)
  *     automaticUpdatesDisabled: boolean, // Config issue
  *     updateTitles: string[]             // Update names (first 10)
  *   }
@@ -87,9 +91,9 @@ interface UpdateStatus {
  * - 'auto_updates_disabled': Automatic updates turned off
  *
  * @severity_logic
- * - **Critical**: Any critical updates present
- * - **High**: Important updates (no critical)
- * - **Medium**: Security/optional updates, config issues
+ * - **Critical**: Any critical updates present OR reboot pending >7 days
+ * - **High**: Important updates (no critical) OR reboot pending 3-7 days
+ * - **Medium**: Security/optional updates, config issues, reboot pending <3 days
  * - **Low**: Default baseline
  *
  * @example
@@ -101,14 +105,15 @@ interface UpdateStatus {
  *     { title: "Feature Update", severity: "Important", size_bytes: 2GB }
  *   ],
  *   reboot_required: true,
+ *   reboot_required_since: "2025-10-08T12:30:00Z",
  *   automatic_updates_enabled: false
  * }
  *
  * // Output:
  * [{
  *   type: 'OS_UPDATE_AVAILABLE',
- *   text: 'Windows Update issues detected on VM-Server-01: 2 updates available (1 critical, 1 important, 1 security), system restart required, automatic updates disabled',
- *   actionText: 'Address Windows Update issues on VM-Server-01: install pending updates, restart computer, enable automatic updates through Settings > Update & Security > Windows Update',
+ *   text: 'Windows Update issues detected on VM-Server-01: 2 updates available (1 critical, 1 important, 1 security), system restart required (pending 8 days), automatic updates disabled',
+ *   actionText: 'Address Windows Update issues on VM-Server-01: install pending updates, restart computer immediately (pending 8 days), enable automatic updates through Settings > Update & Security > Windows Update',
  *   data: {
  *     flags: ['pending_updates', 'reboot_required', 'auto_updates_disabled'],
  *     severity: 'critical',
@@ -118,6 +123,9 @@ interface UpdateStatus {
  *     securityCount: 1,
  *     totalSizeMB: 2148,
  *     rebootRequired: true,
+ *     rebootPendingDays: 8,
+ *     rebootRequiredSince: '2025-10-08T12:30:00Z',
+ *     rebootUrgent: true,
  *     automaticUpdatesDisabled: true
  *   }
  * }]
@@ -135,7 +143,7 @@ export class OsUpdateChecker extends RecommendationChecker {
     }
 
     try {
-      const updateData = typeof context.latestSnapshot.windowsUpdateInfo === 'string'
+      const updateData: UpdateStatus = typeof context.latestSnapshot.windowsUpdateInfo === 'string'
         ? JSON.parse(context.latestSnapshot.windowsUpdateInfo)
         : context.latestSnapshot.windowsUpdateInfo
 
@@ -153,7 +161,9 @@ export class OsUpdateChecker extends RecommendationChecker {
       const lastCheckResult = this.parseAndCalculateDaysSince(updateData.last_check_date)
       if (lastCheckResult.isValid && lastCheckResult.daysSince > 7) {
         flags.push('stale_check_date')
-        details.lastCheckDate = updateData.last_check_date
+        if (updateData.last_check_date) {
+          details.lastCheckDate = updateData.last_check_date
+        }
         details.daysSinceLastCheck = lastCheckResult.daysSince
         issues.push(`last checked ${lastCheckResult.daysSince} days ago`)
         actions.push('check for updates')
@@ -197,9 +207,48 @@ export class OsUpdateChecker extends RecommendationChecker {
         flags.push('reboot_required')
         details.rebootRequired = true
         details.updatesPendingReboot = updateData.pending_reboot_updates || 0
-        issues.push('system restart required')
-        actions.push('restart computer')
-        if (highestSeverity === 'low') highestSeverity = 'medium'
+
+        // Track reboot age if available
+        if (updateData.reboot_required_since) {
+          const rebootAgeResult = this.parseAndCalculateDaysSince(updateData.reboot_required_since)
+          if (rebootAgeResult.isValid && rebootAgeResult.daysSince > 0) {
+            details.rebootPendingDays = rebootAgeResult.daysSince
+            details.rebootRequiredSince = updateData.reboot_required_since
+
+            // Update issue text with reboot age
+            issues.push(`system restart required (pending ${rebootAgeResult.daysSince} days)`)
+
+            // Escalate severity based on reboot age and set urgency flag
+            if (rebootAgeResult.daysSince > 7) {
+              // Critical: Reboot overdue (>7 days)
+              highestSeverity = 'critical'
+              details.rebootUrgent = true
+              actions.push(`restart computer immediately (pending ${rebootAgeResult.daysSince} days)`)
+            } else if (rebootAgeResult.daysSince >= 3) {
+              // High: Reboot should happen soon (3-7 days)
+              if (highestSeverity === 'low' || highestSeverity === 'medium') {
+                highestSeverity = 'high'
+              }
+              actions.push(`restart as soon as possible (pending ${rebootAgeResult.daysSince} days)`)
+            } else {
+              // Medium: Reboot needed but not urgent (<3 days)
+              if (highestSeverity === 'low') {
+                highestSeverity = 'medium'
+              }
+              actions.push('restart computer')
+            }
+          } else {
+            // Fallback if parsing failed or days is 0
+            issues.push('system restart required')
+            actions.push('restart computer')
+            if (highestSeverity === 'low') highestSeverity = 'medium'
+          }
+        } else {
+          // Fallback if reboot_required_since not available
+          issues.push('system restart required')
+          actions.push('restart computer')
+          if (highestSeverity === 'low') highestSeverity = 'medium'
+        }
       }
 
       if (updateData.automatic_updates_enabled === false) {
