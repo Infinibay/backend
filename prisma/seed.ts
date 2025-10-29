@@ -6,6 +6,7 @@ import { PrismaClient, Prisma } from '@prisma/client'
 import bcrypt from 'bcrypt'
 import dotenv from 'dotenv'
 import createApplications from './seeds/applications'
+import createScripts from './seeds/scripts'
 
 import installCallbacks from '../app/utils/modelsCallbacks'
 
@@ -144,6 +145,7 @@ async function main () {
         await createDefaultMachineTemplate(defaultCategory.id)
       }
       await createApplications(transactionPrisma)
+      await createScripts(transactionPrisma)
 
       // Create default app settings
       await createDefaultAppSettings(transactionPrisma)

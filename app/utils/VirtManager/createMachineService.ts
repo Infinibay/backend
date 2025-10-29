@@ -79,8 +79,9 @@ export class CreateMachineService {
       const template = await this.fetchMachineTemplate(machine)
       const configuration = await this.fetchMachineConfiguration(machine)
       const applications = await this.fetchMachineApplications(machine)
+      const scripts = await this.fetchMachineScripts(machine)
 
-      const unattendedManager = this.createUnattendedManager(machine, username, password, productKey, applications)
+      const unattendedManager = this.createUnattendedManager(machine, username, password, productKey, applications, scripts)
       newIsoPath = await unattendedManager.generateNewImage()
 
       // Update status to 'building' in a quick transaction
@@ -175,11 +176,30 @@ export class CreateMachineService {
     return applications.map((ma) => ma.application)
   }
 
-  private createUnattendedManager (machine: Machine, username: string, password: string, productKey: string | undefined, applications: any[]): UnattendedManagerBase {
+  private async fetchMachineScripts (machine: Machine): Promise<any[]> {
+    const scriptExecutions = await this.prisma!.scriptExecution.findMany({
+      where: {
+        machineId: machine.id,
+        executionType: 'FIRST_BOOT',
+        status: 'PENDING'
+      },
+      include: { script: true }
+    })
+
+    this.debug.log('Fetched first-boot scripts for machine', machine.name)
+
+    return scriptExecutions.map(execution => ({
+      script: execution.script,
+      inputValues: execution.inputValues,
+      executionId: execution.id
+    }))
+  }
+
+  private createUnattendedManager (machine: Machine, username: string, password: string, productKey: string | undefined, applications: any[], scripts: any[]): UnattendedManagerBase {
     const osManagers = {
-      windows10: () => new UnattendedWindowsManager(10, username, password, productKey, applications, machine.id),
-      windows11: () => new UnattendedWindowsManager(11, username, password, productKey, applications, machine.id),
-      ubuntu: () => new UnattendedUbuntuManager(username, password, applications, machine.id),
+      windows10: () => new UnattendedWindowsManager(10, username, password, productKey, applications, machine.id, scripts),
+      windows11: () => new UnattendedWindowsManager(11, username, password, productKey, applications, machine.id, scripts),
+      ubuntu: () => new UnattendedUbuntuManager(username, password, applications, machine.id, scripts),
       fedora: () => new UnattendedRedHatManager(username, password, applications, machine.id),
       redhat: () => new UnattendedRedHatManager(username, password, applications, machine.id)
     }

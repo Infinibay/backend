@@ -121,11 +121,16 @@ async function bootstrap (): Promise<void> {
     const userEventManager = new UserEventManager(socketService, prisma)
     const vmEventManager = new VmEventManager(socketService, prisma)
 
+    // Import and register scripts event manager
+    const { ScriptsEventManager } = await import('./services/ScriptsEventManager')
+    const scriptsEventManager = new ScriptsEventManager(socketService, prisma)
+
     eventManager.registerResourceManager('applications', applicationEventManager)
     eventManager.registerResourceManager('departments', departmentEventManager)
     eventManager.registerResourceManager('firewall', firewallEventManager)
     eventManager.registerResourceManager('users', userEventManager)
     eventManager.registerResourceManager('vms', vmEventManager)
+    eventManager.registerResourceManager('scripts', scriptsEventManager)
 
     console.log('🎯 Real-time event system initialized with all resource managers')
 
@@ -159,6 +164,17 @@ async function bootstrap (): Promise<void> {
     } catch (error) {
       console.error('⚠️ Failed to start VirtioSocketWatcherService:', error)
       // Don't fail the server startup if the virtio socket watcher fails
+    }
+
+    // Initialize script file watcher
+    if (process.env.SCRIPT_FILE_WATCHER_ENABLED !== 'false') {
+      try {
+        const { initializeScriptFileWatcher } = await import('./services/scripts/ScriptFileWatcher')
+        initializeScriptFileWatcher()
+        console.log('✅ Script file watcher initialized')
+      } catch (error) {
+        console.error('❌ Failed to initialize script file watcher:', error)
+      }
     }
 
     // Start cron jobs

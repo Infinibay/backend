@@ -17,6 +17,7 @@ import { v4 as uuidv4 } from 'uuid'
 import { VmEventManager } from './VmEventManager'
 import { VMHealthQueueManager } from './VMHealthQueueManager'
 import { Debugger } from '../utils/debug'
+import { getSocketService } from '../services/SocketService'
 
 // Payload logging configuration and helpers
 const LOG_PREVIEW_LEN = Number(process.env.INFINIBAY_LOG_PREVIEW_LEN ?? 300)
@@ -37,7 +38,7 @@ function redactSensitive(obj: any): any {
 
 // Message types from InfiniService
 interface BaseMessage {
-  type: 'metrics' | 'error' | 'handshake' | 'command' | 'response' | 'error_report' | 'circuit_breaker_state' | 'keep_alive' | 'keep_alive_request' | 'firewall_event'
+  type: 'metrics' | 'error' | 'handshake' | 'command' | 'response' | 'error_report' | 'circuit_breaker_state' | 'keep_alive' | 'keep_alive_request' | 'firewall_event' | 'script_completion'
   timestamp: string
 }
 
@@ -209,6 +210,15 @@ interface FirewallEventMessage extends BaseMessage {
   timestamp: string
 }
 
+interface ScriptCompletionMessage extends BaseMessage {
+  type: 'script_completion'
+  execution_id: string
+  exit_code: number
+  log_file?: string
+  stdout?: string
+  stderr?: string
+}
+
 // Define types for different response data structures
 interface PackageInfo {
   name: string
@@ -231,6 +241,14 @@ interface ProcessInfo {
   cpu_percent: number
   memory_kb: number
   status?: string
+}
+
+interface UserInfo {
+  username: string
+  full_name?: string
+  is_admin: boolean
+  is_active: boolean
+  last_login?: string
 }
 
 interface SystemInfo {
@@ -310,7 +328,7 @@ interface DefenderScanData {
 
 // Response data can be different types depending on the command
 // For compatibility with GraphQL resolver expectations, ensure arrays are properly typed
-type ResponseData = PackageInfo[] | ServiceInfo[] | ProcessInfo[] | SystemInfo | OsInfo |
+type ResponseData = PackageInfo[] | ServiceInfo[] | ProcessInfo[] | UserInfo[] | SystemInfo | OsInfo |
   WindowsUpdatesData | DefenderData | DiskSpaceData | ResourceOptimizationData |
   HealthCheckData | DefenderScanData | unknown[] | Record<string, unknown>
 
@@ -318,7 +336,7 @@ type ResponseData = PackageInfo[] | ServiceInfo[] | ProcessInfo[] | SystemInfo |
 export interface SafeCommandType {
   action: 'ServiceList' | 'ServiceControl' | 'PackageList' | 'PackageInstall' |
   'PackageRemove' | 'PackageUpdate' | 'PackageSearch' | 'ProcessList' |
-  'ProcessKill' | 'ProcessTop' | 'SystemInfo' | 'OsInfo' |
+  'ProcessKill' | 'ProcessTop' | 'SystemInfo' | 'OsInfo' | 'UserList' |
   // Auto-check commands
   'CheckWindowsUpdates' | 'GetUpdateHistory' | 'GetPendingUpdates' |
   'CheckWindowsDefender' | 'GetDefenderStatus' | 'RunDefenderQuickScan' | 'GetThreatHistory' |
@@ -1049,6 +1067,12 @@ export class VirtioSocketWatcherService extends EventEmitter {
           // Handle firewall events from InfiniService (Windows Firewall monitoring)
           const firewallEventMsg = message as FirewallEventMessage
           await this.handleFirewallEvent(connection.vmId, firewallEventMsg)
+          break
+
+        case 'script_completion':
+          // Handle script completion messages from first-boot scripts
+          const scriptCompletionMsg = message as ScriptCompletionMessage
+          await this.handleScriptCompletion(connection.vmId, scriptCompletionMsg)
           break
 
         default:
@@ -1903,6 +1927,9 @@ export class VirtioSocketWatcherService extends EventEmitter {
             action: 'CheckSystemIntegrity'
           }
           break
+        case 'UserList':
+          commandTypeFormatted = { action: 'UserList' }
+          break
         default:
           commandTypeFormatted = { action: commandType.action }
       }
@@ -2020,6 +2047,17 @@ export class VirtioSocketWatcherService extends EventEmitter {
       params
     }
 
+    return this.sendSafeCommand(vmId, commandType, timeout)
+  }
+
+  // Helper method to get user list from VM
+  public async getUserList(
+    vmId: string,
+    timeout: number = 30000
+  ): Promise<CommandResponse> {
+    const commandType: SafeCommandType = {
+      action: 'UserList'
+    }
     return this.sendSafeCommand(vmId, commandType, timeout)
   }
 
@@ -3391,6 +3429,73 @@ export class VirtioSocketWatcherService extends EventEmitter {
     } catch (error) {
       // Non-critical error - log but don't throw
       this.debug.log('error', `Failed to handle firewall event for VM ${vmId}: ${error}`)
+    }
+  }
+
+  /**
+   * Handles script completion messages from first-boot scripts executed via infiniservice.
+   * Updates ScriptExecution records and emits WebSocket events.
+   *
+   * @param vmId - The VM ID that executed the script
+   * @param message - The script completion message from infiniservice
+   */
+  private async handleScriptCompletion(vmId: string, message: ScriptCompletionMessage): Promise<void> {
+    try {
+      this.debug.log('info', `📜 Script completion received from VM ${vmId}: execution ${message.execution_id}`)
+
+      // Find the ScriptExecution record
+      const execution = await this.prisma.scriptExecution.findUnique({
+        where: { id: message.execution_id },
+        include: { script: true, machine: true }
+      })
+
+      if (!execution) {
+        this.debug.log('warn', `Script execution ${message.execution_id} not found`)
+        return
+      }
+
+      // Validate that the execution belongs to the same VM (security check)
+      if (execution.machineId !== vmId) {
+        this.debug.log('warn', `Script execution ${message.execution_id} machineId mismatch: expected ${vmId}, got ${execution.machineId}`)
+        return
+      }
+
+      // Determine status based on exit code
+      const status = message.exit_code === 0 ? 'SUCCESS' : 'FAILED'
+
+      // Update execution record
+      await this.prisma.scriptExecution.update({
+        where: { id: message.execution_id },
+        data: {
+          status,
+          completedAt: new Date(),
+          exitCode: message.exit_code,
+          stdout: message.stdout,
+          stderr: message.stderr
+        }
+      })
+
+      this.debug.log('info', `Script execution ${message.execution_id} completed with status ${status}`)
+
+      // Emit WebSocket event
+      const socketService = getSocketService()
+      const targetUsers = [execution.triggeredById, execution.machine.userId].filter(Boolean)
+
+      targetUsers.forEach(userId => {
+        socketService.sendToUser(userId!, 'scripts', 'execution_completed', {
+          status: 'success',
+          data: {
+            executionId: execution.id,
+            scriptId: execution.scriptId,
+            machineId: execution.machineId,
+            status,
+            exitCode: message.exit_code
+          }
+        })
+      })
+    } catch (error) {
+      // Non-critical error - log but don't throw
+      this.debug.log('error', `Failed to handle script completion: ${error}`)
     }
   }
 

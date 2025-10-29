@@ -178,6 +178,15 @@ export class MachineApplicationInputType {
 }
 
 @InputType()
+export class FirstBootScriptInputType {
+    @Field(() => String)
+      scriptId: string = ''
+
+    @Field(() => GraphQLJSONObject, { defaultValue: null })
+      inputValues?: Record<string, unknown>
+}
+
+@InputType()
 export class CreateMachineInputType {
     @Field(() => String, { nullable: true })
       templateId?: string
@@ -203,8 +212,11 @@ export class CreateMachineInputType {
     @Field(() => String, { nullable: true })
       pciBus: string | null = null
 
-    @Field(() => [MachineApplicationInputType])
-      applications: MachineApplicationInputType[] = []
+    @Field(() => [MachineApplicationInputType], { defaultValue: [] })
+      applications!: MachineApplicationInputType[]
+
+    @Field(() => [FirstBootScriptInputType], { defaultValue: [] })
+      firstBootScripts!: FirstBootScriptInputType[]
 
     @Field(() => Int, { nullable: true })
       customCores?: number

@@ -21,6 +21,11 @@ model User {
   VM                 Machine[]
   maintenanceHistory MaintenanceHistory[]
   maintenanceTasks   MaintenanceTask[]
+  scripts            Script[]
+  scriptExecutions   ScriptExecution[]
+  departmentScriptAssignments DepartmentScript[]
+  scriptAuditLogs    ScriptAuditLog[]
+  approvedScripts    Script[]             @relation("ScriptApprovals")
 }
 
 model Node {
@@ -101,6 +106,7 @@ model Machine {
   healthSnapshots    VMHealthSnapshot[]
   recommendations    VMRecommendation[]
   windowsServices    WindowsService[]
+  scriptExecutions   ScriptExecution[]
 }
 
 model MachineConfiguration {
@@ -189,15 +195,16 @@ model Notification {
 }
 
 model Department {
-  id                  String           @id @default(uuid())
+  id                  String             @id @default(uuid())
   name                String
-  createdAt           DateTime         @default(now())
+  createdAt           DateTime           @default(now())
   internetSpeed       Int?
   ipSubnet            String?
-  updatedAt           DateTime         @updatedAt
-  firewallRuleSetId   String?          @unique
-  firewallRuleSet     FirewallRuleSet? @relation(fields: [firewallRuleSetId], references: [id])
+  updatedAt           DateTime           @updatedAt
+  firewallRuleSetId   String?            @unique
+  firewallRuleSet     FirewallRuleSet?   @relation(fields: [firewallRuleSetId], references: [id])
   machines            Machine[]
+  scriptAssignments   DepartmentScript[]
 }
 
 model SystemMetrics {
@@ -630,6 +637,95 @@ model AppSettings {
   @@index([id])
 }
 
+model Script {
+  id                   String             @id @default(uuid())
+  name                 String
+  description          String?
+  fileName             String             @unique
+  category             String?
+  tags                 String[]
+  os                   OS[]
+  shell                ShellType
+  // Approval workflow fields (optional/future enhancement)
+  // Default status is APPROVED for backward compatibility
+  // To enable: check status === APPROVED before execution in ScriptExecutor
+  // Add mutations to approve/reject and set approvedById/approvedAt
+  status               ScriptStatus       @default(APPROVED)
+  approvedById         String?
+  approvedBy           User?              @relation("ScriptApprovals", fields: [approvedById], references: [id])
+  approvedAt           DateTime?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+  createdById          String?
+  createdBy            User?              @relation(fields: [createdById], references: [id])
+  executions           ScriptExecution[]
+  departmentAssignments DepartmentScript[]
+  auditLogs            ScriptAuditLog[]
+
+  @@index([fileName])
+  @@index([category])
+  @@index([createdById])
+}
+
+model DepartmentScript {
+  id           String     @id @default(uuid())
+  departmentId String
+  scriptId     String
+  assignedAt   DateTime   @default(now())
+  assignedById String
+  department   Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  script       Script     @relation(fields: [scriptId], references: [id], onDelete: Cascade)
+  assignedBy   User       @relation(fields: [assignedById], references: [id])
+
+  @@unique([departmentId, scriptId])
+  @@index([departmentId])
+  @@index([scriptId])
+}
+
+model ScriptExecution {
+  id             String          @id @default(uuid())
+  scriptId       String
+  machineId      String
+  executionType  ExecutionType
+  triggeredById  String?
+  inputValues    Json
+  status         ExecutionStatus
+  startedAt      DateTime?
+  completedAt    DateTime?
+  exitCode       Int?
+  stdout         String?         @db.Text
+  stderr         String?         @db.Text
+  error          String?         @db.Text
+  executedAs     String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  script         Script          @relation(fields: [scriptId], references: [id], onDelete: Cascade)
+  machine        Machine         @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  triggeredBy    User?           @relation(fields: [triggeredById], references: [id])
+
+  @@index([machineId, createdAt])
+  @@index([scriptId, createdAt])
+  @@index([status])
+  @@index([machineId, status])
+}
+
+model ScriptAuditLog {
+  id         String            @id @default(uuid())
+  scriptId   String
+  userId     String?
+  action     ScriptAuditAction
+  details    Json?
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime          @default(now())
+  script     Script            @relation(fields: [scriptId], references: [id], onDelete: Cascade)
+  user       User?             @relation(fields: [userId], references: [id])
+
+  @@index([scriptId, createdAt])
+  @@index([userId, createdAt])
+  @@index([action, createdAt])
+}
+
 model FirewallRuleSet {
   id            String        @id @default(uuid())
   name          String
@@ -766,4 +862,47 @@ enum UserRole {
   USER
   ADMIN
   SUPER_ADMIN
+}
+
+enum OS {
+  WINDOWS
+  LINUX
+}
+
+enum ShellType {
+  POWERSHELL
+  CMD
+  BASH
+  SH
+}
+
+enum ExecutionType {
+  FIRST_BOOT
+  ON_DEMAND
+  SCHEDULED
+}
+
+enum ExecutionStatus {
+  PENDING
+  RUNNING
+  SUCCESS
+  FAILED
+  TIMEOUT
+  CANCELLED
+}
+
+enum ScriptStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+}
+
+enum ScriptAuditAction {
+  CREATED
+  EDITED
+  APPROVED
+  REJECTED
+  EXECUTED
+  DELETED
 }

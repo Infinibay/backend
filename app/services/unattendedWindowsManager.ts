@@ -165,6 +165,7 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
   private password: string = ''
   private productKey: string | undefined = undefined
   private applications: any[] = []
+  private scripts: any[] = []
   private vmId: string = ''
   private languageConfig: LanguageConfig
   private enableCommandLogging: boolean = true
@@ -176,6 +177,7 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
     productKey: string | undefined,
     applications: any[],
     vmId?: string,
+    scripts: any[] = [],
     enableCommandLogging: boolean = true
   ) {
     super()
@@ -186,6 +188,7 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
     this.productKey = productKey
     this.applications = applications
     this.vmId = vmId || ''
+    this.scripts = scripts
     this.enableCommandLogging = enableCommandLogging
     this.isoPath = path.join(path.join(process.env.INFINIBAY_BASE_DIR ?? '/opt/infinibay', 'iso'), 'windows' + this.version.toString() + '.iso')
     this.languageConfig = this.detectLanguage()
@@ -551,13 +554,17 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
     const infiniServiceCommands = this.generateInfiniServiceInstallCommands(10)
     commands = commands.concat(infiniServiceCommands)
 
-    const apps = this.generateAppsToInstallScripts(10 + infiniServiceCommands.length)
+    // Add first-boot script execution commands
+    const scriptCommands = this.generateFirstBootScriptCommands(10 + infiniServiceCommands.length)
+    commands = commands.concat(scriptCommands)
+
+    const apps = this.generateAppsToInstallScripts(10 + infiniServiceCommands.length + scriptCommands.length)
 
     commands = commands.concat(apps)
 
     commands.push({
       $: { 'wcm:action': 'add' },
-      Order: 10 + infiniServiceCommands.length + apps.length,
+      Order: 10 + infiniServiceCommands.length + scriptCommands.length + apps.length,
       Description: 'Restart System',
       RequiresUserInput: false,
       CommandLine: 'shutdown /r /t 0'
@@ -657,6 +664,59 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
         CommandLine: 'echo Installation completed'
       }
     ]
+
+    return commands
+  }
+
+  /**
+   * Generates FirstLogonCommands for first-boot script execution.
+   * Each script generates 3 commands: download, execute, report completion.
+   *
+   * @param idx - The starting order index for the commands
+   * @returns Array of FirstLogonCommands for script execution
+   */
+  private generateFirstBootScriptCommands (idx: number): any[] {
+    const backendHost = process.env.APP_HOST || 'localhost'
+    const backendPort = process.env.PORT || '4000'
+    const baseUrl = `http://${backendHost}:${backendPort}`
+
+    const commands: any[] = []
+
+    this.scripts.forEach((scriptData, index) => {
+      const { script, inputValues, executionId } = scriptData
+      const scriptNameSafe = this.sanitizeScriptName(script.name)
+      const scriptPath = `C:\\Temp\\${scriptNameSafe}.ps1`
+      const logFile = `${UnattendedWindowsManager.PATHS.INSTALL_LOGS}\\${scriptNameSafe}_${executionId}.log`
+      const scriptUrl = `${baseUrl}/scripts/${script.id}/content?vmId=${this.vmId}&executionId=${executionId}&format=powershell`
+
+      // Download script content with interpolated inputs using helper
+      commands.push({
+        $: { 'wcm:action': 'add' },
+        Order: idx + (index * 3),
+        Description: `Download script: ${script.name}`,
+        RequiresUserInput: false,
+        CommandLine: this.createDownloadCommand(scriptUrl, scriptPath, `Downloading script: ${script.name}`)
+      })
+
+      // Execute script with logging
+      const executeCommand = `Start-Process -FilePath 'powershell' -ArgumentList '-ExecutionPolicy Bypass -File ${scriptPath}' -RedirectStandardOutput ${logFile} -RedirectStandardError ${logFile} -NoNewWindow -Wait`
+      commands.push({
+        $: { 'wcm:action': 'add' },
+        Order: idx + (index * 3) + 1,
+        Description: `Execute script: ${script.name}`,
+        RequiresUserInput: false,
+        CommandLine: this.createLoggedCommand(executeCommand, `Executing script: ${script.name}`, `${scriptNameSafe}_execution.log`)
+      })
+
+      // Report completion to backend via infiniservice
+      commands.push({
+        $: { 'wcm:action': 'add' },
+        Order: idx + (index * 3) + 2,
+        Description: `Report script completion: ${script.name}`,
+        RequiresUserInput: false,
+        CommandLine: `powershell -Command "& 'C:\\Program Files\\InfiniService\\infiniservice.exe' report-script-completion --execution-id ${executionId} --log-file ${logFile}"`
+      })
+    })
 
     return commands
   }

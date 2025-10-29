@@ -8,7 +8,7 @@ import si from 'systeminformation'
 import { MachineCleanupService } from './cleanup/machineCleanupService'
 import { HardwareUpdateService } from './vm/hardwareUpdateService'
 import { getEventManager } from '../services/EventManager'
-import { CreateMachineInputType, UpdateMachineHardwareInput, UpdateMachineNameInput, UpdateMachineUserInput, SuccessType } from '../graphql/resolvers/machine/type'
+import { CreateMachineInputType, UpdateMachineHardwareInput, UpdateMachineNameInput, UpdateMachineUserInput, SuccessType, FirstBootScriptInputType } from '../graphql/resolvers/machine/type'
 
 export class MachineLifecycleService {
   private prisma: PrismaClient
@@ -105,6 +105,20 @@ export class MachineLifecycleService {
             machineId: createdMachine.id,
             applicationId: application.applicationId,
             parameters: (application.parameters ?? {}) as Prisma.InputJsonValue
+          }
+        })
+      }
+
+      // Create ScriptExecution records for first-boot scripts
+      for (const scriptInput of input.firstBootScripts) {
+        await tx.scriptExecution.create({
+          data: {
+            scriptId: scriptInput.scriptId,
+            machineId: createdMachine.id,
+            executionType: 'FIRST_BOOT',
+            triggeredById: this.user?.id,
+            inputValues: scriptInput.inputValues as Prisma.InputJsonValue,
+            status: 'PENDING'
           }
         })
       }

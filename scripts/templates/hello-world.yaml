@@ -1,0 +1,26 @@
+name: Hello World
+description: Simple demonstration script that displays system information
+author: Infinibay Team
+version: 1.0.0
+category: Examples
+tags:
+  - demo
+  - example
+  - system-info
+
+os:
+  - windows
+  - linux
+
+shell: powershell
+
+script: |
+  Write-Host "Hello from Infinibay Scripts!"
+  Write-Host "Hostname: $(hostname)"
+  Write-Host "Date: $(Get-Date)"
+  Write-Host "OS: $($PSVersionTable.OS)"
+  Write-Host "PowerShell Version: $($PSVersionTable.PSVersion)"
+
+execution:
+  timeout: 60
+  run_as: system

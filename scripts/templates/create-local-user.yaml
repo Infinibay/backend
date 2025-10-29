@@ -1,0 +1,73 @@
+name: Create Local User
+description: Creates a local user account with optional administrator privileges
+author: Infinibay Team
+version: 1.0.0
+category: User Management
+tags:
+  - user
+  - administration
+  - security
+
+os:
+  - windows
+
+shell: powershell
+
+inputs:
+  - name: username
+    type: text
+    label: Username
+    description: The username for the new account
+    required: true
+    validation:
+      pattern: "^[a-zA-Z0-9_-]{3,20}$"
+      minLength: 3
+      maxLength: 20
+
+  - name: password
+    type: password
+    label: Password
+    description: Password for the new user account
+    required: true
+    validation:
+      minLength: 8
+
+  - name: is_admin
+    type: boolean
+    label: Administrator Privileges
+    description: Grant administrator privileges to this user
+    default: false
+    required: false
+
+  - name: full_name
+    type: text
+    label: Full Name
+    description: Full name of the user (optional)
+    required: false
+
+script: |
+  $username = "${{ inputs.username }}"
+  $password = ConvertTo-SecureString "${{ inputs.password }}" -AsPlainText -Force
+  $fullName = "${{ inputs.full_name }}"
+  $isAdmin = [System.Convert]::ToBoolean("${{ inputs.is_admin }}")
+
+  try {
+    # Create the user
+    New-LocalUser -Name $username -Password $password -FullName $fullName -Description "Created by Infinibay" -ErrorAction Stop
+    Write-Host "User '$username' created successfully"
+
+    # Add to Administrators group if requested
+    if ($isAdmin) {
+      Add-LocalGroupMember -Group "Administrators" -Member $username -ErrorAction Stop
+      Write-Host "User '$username' added to Administrators group"
+    }
+
+    exit 0
+  } catch {
+    Write-Error "Failed to create user: $_"
+    exit 1
+  }
+
+execution:
+  timeout: 120
+  run_as: system

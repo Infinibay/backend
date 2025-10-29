@@ -1,0 +1,70 @@
+name: System Information Report
+description: Generates a comprehensive system information report
+author: Infinibay Team
+version: 1.0.0
+category: Diagnostics
+tags:
+  - diagnostics
+  - system-info
+  - reporting
+
+os:
+  - windows
+
+shell: powershell
+
+script: |
+  Write-Host "=== System Information Report ==="
+  Write-Host ""
+
+  # Computer Information
+  Write-Host "Computer Name: $(hostname)"
+  Write-Host "Domain: $env:USERDOMAIN"
+  Write-Host ""
+
+  # Operating System
+  $os = Get-CimInstance Win32_OperatingSystem
+  Write-Host "Operating System: $($os.Caption)"
+  Write-Host "Version: $($os.Version)"
+  Write-Host "Build: $($os.BuildNumber)"
+  Write-Host "Install Date: $($os.InstallDate)"
+  Write-Host "Last Boot: $($os.LastBootUpTime)"
+  Write-Host ""
+
+  # Hardware
+  $cs = Get-CimInstance Win32_ComputerSystem
+  Write-Host "Manufacturer: $($cs.Manufacturer)"
+  Write-Host "Model: $($cs.Model)"
+  Write-Host "Total RAM: $([math]::Round($cs.TotalPhysicalMemory / 1GB, 2)) GB"
+  Write-Host ""
+
+  # Processor
+  $cpu = Get-CimInstance Win32_Processor | Select-Object -First 1
+  Write-Host "Processor: $($cpu.Name)"
+  Write-Host "Cores: $($cpu.NumberOfCores)"
+  Write-Host "Logical Processors: $($cpu.NumberOfLogicalProcessors)"
+  Write-Host ""
+
+  # Disk Space
+  Write-Host "Disk Drives:"
+  Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3" | ForEach-Object {
+    $freeGB = [math]::Round($_.FreeSpace / 1GB, 2)
+    $totalGB = [math]::Round($_.Size / 1GB, 2)
+    $usedPercent = [math]::Round((($_.Size - $_.FreeSpace) / $_.Size) * 100, 2)
+    Write-Host "  $($_.DeviceID) - Total: $totalGB GB, Free: $freeGB GB, Used: $usedPercent%"
+  }
+  Write-Host ""
+
+  # Network Adapters
+  Write-Host "Network Adapters:"
+  Get-NetAdapter | Where-Object Status -eq 'Up' | ForEach-Object {
+    Write-Host "  $($_.Name) - $($_.InterfaceDescription)"
+    Write-Host "    Status: $($_.Status), Speed: $($_.LinkSpeed)"
+  }
+
+  Write-Host ""
+  Write-Host "=== End of Report ==="
+
+execution:
+  timeout: 300
+  run_as: system

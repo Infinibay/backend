@@ -32,7 +32,11 @@ function prepareFolders () {
     path.join(baseDir, 'disks'),
     path.join(baseDir, 'uefi'),
     path.join(baseDir, 'sockets'),
-    path.join(baseDir, 'wallpapers')
+    path.join(baseDir, 'wallpapers'),
+    path.join(baseDir, 'scripts'),
+    path.join(baseDir, 'scripts', 'library'),
+    path.join(baseDir, 'scripts', 'templates'),
+    path.join(baseDir, 'scripts', '.metadata')
   ]
 
   directories.forEach(dir => {
@@ -41,6 +45,23 @@ function prepareFolders () {
       console.log(`Created directory: ${dir}`)
     }
   })
+
+  // Copy template scripts
+  const templatesSourceDir = path.join(__dirname, 'templates')
+  const templatesDestDir = path.join(baseDir, 'scripts', 'templates')
+
+  if (fs.existsSync(templatesSourceDir)) {
+    const templateFiles = fs.readdirSync(templatesSourceDir)
+    templateFiles.forEach(file => {
+      if (file.endsWith('.yaml') || file.endsWith('.json')) {
+        const sourcePath = path.join(templatesSourceDir, file)
+        const destPath = path.join(templatesDestDir, file)
+        fs.copyFileSync(sourcePath, destPath)
+        fs.chmodSync(destPath, 0o644) // Read-only for templates
+        console.log(`Copied template script: ${file}`)
+      }
+    })
+  }
 }
 
 function getCurrentAndLastUbuntuVersion () {

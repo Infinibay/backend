@@ -106,6 +106,35 @@ export class UnattendedManagerBase {
   }
 
   /**
+   * Sanitizes a script name for safe use in file paths and log files.
+   * - Replaces spaces with underscores
+   * - Removes all characters except A-Z, a-z, 0-9, underscore, and hyphen
+   * - Truncates to maximum 60 characters
+   * - Ensures the result is not empty (fallback to 'script')
+   *
+   * @param {string} scriptName - The original script name to sanitize
+   * @returns {string} The sanitized script name safe for filenames
+   */
+  protected sanitizeScriptName (scriptName: string): string {
+    if (!scriptName || typeof scriptName !== 'string') {
+      return 'script'
+    }
+
+    // Replace spaces with underscores, then keep only safe characters
+    let sanitized = scriptName
+      .replace(/\s+/g, '_')
+      .replace(/[^A-Za-z0-9_-]/g, '')
+
+    // Truncate to 60 characters for safety
+    if (sanitized.length > 60) {
+      sanitized = sanitized.substring(0, 60)
+    }
+
+    // Ensure we have a valid result
+    return sanitized.length > 0 ? sanitized : 'script'
+  }
+
+  /**
    * This method extracts the ISO file to a temporary directory.
    * It uses the 7z command to extract the ISO file.
    * @param {string} isoPath - The path to the ISO file.
