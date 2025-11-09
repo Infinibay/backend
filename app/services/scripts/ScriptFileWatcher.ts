@@ -42,8 +42,8 @@ export class ScriptFileWatcher {
       this.handleFileChange(filePath)
     })
 
-    this.watcher.on('error', (error: Error) => {
-      console.error('ScriptFileWatcher error:', error)
+    this.watcher.on('error', (err: unknown) => {
+      console.error('ScriptFileWatcher error:', err)
     })
 
     this.isRunning = true

@@ -72,7 +72,7 @@ Write-Host ""
 Write-Host "📁 CHECKING INSTALLATION FILES:" -ForegroundColor Yellow
 Write-Host "-------------------------------" -ForegroundColor Gray
 
-$installPath = "C:\Program Files\Infiniservice"
+$installPath = "$env:ProgramFiles\Infiniservice"
 if (Test-Path $installPath) {
     Write-Host "✅ Installation directory exists: $installPath" -ForegroundColor Green
     

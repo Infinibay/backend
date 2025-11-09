@@ -38,10 +38,12 @@ ${INFINIBAY_BASE_DIR}/infiniservice/
 The Windows unattended installation (`unattendedWindowsManager.ts`) performs the following steps:
 
 1. Creates a temporary directory `C:\Temp\InfiniService`
-2. Downloads the InfiniService binary from `http://<backend_host>:<port>/infiniservice/windows/binary`
-3. Downloads the installation script from `http://<backend_host>:<port>/infiniservice/windows/script`
-4. Executes the installation script with the VM ID: `install-windows.ps1 -ServiceMode 'normal' -VmId '<vm_id>'`
-5. Cleans up temporary files
+2. Downloads the InfiniService binary from the backend
+3. Downloads the installation script
+4. Executes the installation script with the VM ID
+5. Moves InfiniService to `%ProgramFiles%\Infiniservice` (language-independent)
+6. Registers InfiniService as a Windows service
+7. Cleans up temporary files
 
 The installation happens during the FirstLogonCommands phase, after network drivers are installed but before the final system restart.
 
@@ -65,6 +67,28 @@ The RedHat/Fedora kickstart installation (`unattendedRedHatManager.ts`) uses pos
 2. Executes the installation script with VM ID
 3. Installation logs are written to `/root/infiniservice-install.log`
 4. Installation continues even if InfiniService setup fails (non-blocking)
+
+## Script Execution Flow
+
+Custom scripts are no longer embedded in the answerfile. Instead, they are executed via the InfiniService protocol after the service starts.
+
+**Flow**:
+
+1. On service boot, InfiniService sends a `request_pending_scripts` message to the host
+2. The host queries the database for `ScriptExecution` records with `status=PENDING` and `scheduledFor <= now`
+3. The host returns a `pending_scripts_response` with script content, metadata, and execution parameters
+4. InfiniService executes each script using the specified shell (PowerShell, Bash, etc.)
+5. InfiniService captures stdout, stderr, and exit codes
+6. InfiniService sends `script_completion` messages back to the host for each script
+7. The host updates the `ScriptExecution` records with results and logs
+
+**Scheduling Capabilities**:
+
+- **Immediate execution**: Scripts with `scheduledFor` set to current time or past (used for first-boot scripts)
+- **Scheduled execution**: Scripts with future `scheduledFor` dates
+- **Repeating execution**: Scripts with `repeatIntervalMinutes` set, executed periodically
+
+**Note**: This approach decouples scripts from the answerfile, preventing installation failures due to script errors or length limits.
 
 ## Configuration
 
@@ -164,6 +188,22 @@ journalctl -u infiniservice -f
 cat /var/log/infiniservice_install.log
 ```
 
+**Script Execution Verification**:
+
+- Check that `ScriptExecution` records are created with `status=PENDING` during VM creation
+- Verify that scripts transition to `RUNNING` when InfiniService requests them
+- Confirm that scripts complete with `status=SUCCESS` or `FAILED` after execution
+- Check that logs are captured in the database
+
+Example query to check script execution status:
+
+```sql
+SELECT id, scriptId, machineId, status, scheduledFor, startedAt, completedAt, exitCode
+FROM ScriptExecution
+WHERE machineId = '<vm_id>'
+ORDER BY scheduledFor;
+```
+
 ## Troubleshooting
 
 ### Common Issues
@@ -180,7 +220,31 @@ cat /var/log/infiniservice_install.log
    - The VM ID environment variable is set
    - Check service logs for specific errors
 
+4. **Scripts not executing**: Check that:
+   - InfiniService is running and connected to the host via VirtIO socket
+   - Script execution records exist in the database with `status=PENDING`
+   - Check InfiniService logs for protocol errors
+
+5. **Scripts stuck in PENDING**: Verify that:
+   - `scheduledFor` is not set to a future date
+   - InfiniService is running and able to communicate with the host
+   - Check InfiniService logs for protocol errors or script request failures
+
+6. **Scripts failing**: Review:
+   - The `stdout` and `stderr` fields in the `ScriptExecution` record
+   - Check script syntax and permissions
+   - Verify script dependencies are installed
+
+7. **Repeating scripts not running**: Verify:
+   - `repeatIntervalMinutes` and `lastExecutedAt` fields are set correctly
+   - `maxExecutions` hasn't been reached (if set)
+   - Check that the script execution interval has elapsed
+
 ### Log Locations
+
+Script logs are stored in the database (`ScriptExecution.stdout` and `ScriptExecution.stderr` fields) in addition to any local log files.
+
+Additional log locations:
 
 - **Windows Installation**: `C:\Windows\Temp\infiniservice_install.log`
 - **Windows Download**: `C:\Windows\Temp\infiniservice_download.log`

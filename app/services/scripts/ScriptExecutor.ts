@@ -109,7 +109,7 @@ export class ScriptExecutor {
         }
       }
 
-      // Sanitize password inputs for logging
+      // Sanitize password inputs for logging (but keep original values for DB)
       const sanitizedInputs =
         this.templateEngine.sanitizeForLogging(inputValues, script.parsedInputs);
       debug('Input values validated (sanitized): %O', sanitizedInputs);
@@ -122,10 +122,15 @@ export class ScriptExecutor {
           machineId,
           executionType,
           triggeredById: triggeredById || null,
-          inputValues: sanitizedInputs,
+          inputValues: options.inputValues, // Store original values, not sanitized
           status: ExecutionStatus.PENDING,
           executedAs: runAs,
           createdAt: new Date(),
+          scheduledFor: new Date(),
+          repeatIntervalMinutes: null,
+          lastExecutedAt: null,
+          executionCount: 0,
+          maxExecutions: null
         },
       });
 

@@ -697,6 +697,12 @@ model ScriptExecution {
   stderr         String?         @db.Text
   error          String?         @db.Text
   executedAs     String?
+  // Scheduling fields for immediate, scheduled, and repeating executions
+  scheduledFor          DateTime?       // When script should execute (NULL or past = immediate)
+  repeatIntervalMinutes Int?            // Interval in minutes for repeating scripts (NULL = one-time)
+  lastExecutedAt        DateTime?       // Timestamp of last execution attempt
+  executionCount        Int             @default(0)  // Number of times executed
+  maxExecutions         Int?            // Maximum executions for repeating scripts (NULL = unlimited)
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
   script         Script          @relation(fields: [scriptId], references: [id], onDelete: Cascade)
@@ -707,6 +713,8 @@ model ScriptExecution {
   @@index([scriptId, createdAt])
   @@index([status])
   @@index([machineId, status])
+  @@index([machineId, status, scheduledFor])
+  @@index([status, scheduledFor])
 }
 
 model ScriptAuditLog {

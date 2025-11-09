@@ -109,16 +109,24 @@ export class MachineLifecycleService {
         })
       }
 
-      // Create ScriptExecution records for first-boot scripts
+      // Create ScriptExecution records for first-boot scripts.
+      // These will be executed by InfiniService via the protocol after the VM boots.
+      // Scripts are scheduled for immediate execution (scheduledFor = now).
       for (const scriptInput of input.firstBootScripts) {
         await tx.scriptExecution.create({
           data: {
             scriptId: scriptInput.scriptId,
             machineId: createdMachine.id,
             executionType: 'FIRST_BOOT',
+            // triggeredById is nullable in schema - null indicates system-initiated execution
             triggeredById: this.user?.id,
             inputValues: scriptInput.inputValues as Prisma.InputJsonValue,
-            status: 'PENDING'
+            status: 'PENDING',
+            scheduledFor: new Date(),
+            repeatIntervalMinutes: null,
+            lastExecutedAt: null,
+            executionCount: 0,
+            maxExecutions: null
           }
         })
       }
