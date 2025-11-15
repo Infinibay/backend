@@ -4,6 +4,7 @@ import * as libvirtNode from '@infinibay/libvirt-node'
 
 import { Debugger } from '../../utils/debug'
 import { NWFilterXMLGeneratorService } from '../firewall/NWFilterXMLGeneratorService'
+import { getLibvirtConnection } from '../../utils/libvirt'
 
 // Access NWFilter from module to work around TypeScript typing
 const NWFilter = (libvirtNode as any).NWFilter
@@ -44,29 +45,18 @@ export class DepartmentCleanupService {
     }
 
     // Libvirt cleanup - remove department nwfilter
-    let conn: Connection | null = null
     try {
-      conn = Connection.open('qemu:///system')
-      if (conn) {
-        await this.cleanupDepartmentFirewallFilter(conn, departmentId)
-      }
+      const conn = await getLibvirtConnection()
+      await this.cleanupDepartmentFirewallFilter(conn, departmentId)
     } catch (e) {
       this.debug.log(`Error cleaning up libvirt resources: ${String(e)}`)
-    } finally {
-      if (conn) {
-        try {
-          conn.close()
-        } catch (e) {
-          this.debug.log(`Error closing libvirt connection: ${String(e)}`)
-        }
-      }
     }
 
     // Remove DB records in correct order
     await this.prisma.$transaction(async tx => {
       try {
-        // Delete firewall rules and ruleset
-        await this.cleanupFirewallRuleSet(tx, departmentId)
+        // Delete firewall rules and ruleset (if exists)
+        await this.cleanupFirewallRuleSet(tx, department.firewallRuleSetId)
 
         // Delete department
         await tx.department.delete({ where: { id: departmentId } })
@@ -111,37 +101,26 @@ export class DepartmentCleanupService {
   /**
    * Cleans up the department's FirewallRuleSet and all associated rules from database
    * @param tx - Prisma transaction client
-   * @param departmentId - Department ID
+   * @param ruleSetId - FirewallRuleSet ID (can be null)
    */
-  private async cleanupFirewallRuleSet (tx: any, departmentId: string): Promise<void> {
+  private async cleanupFirewallRuleSet (tx: any, ruleSetId: string | null): Promise<void> {
+    if (!ruleSetId) {
+      return
+    }
+
     try {
-      // Find department's firewall rule set
-      const department = await tx.department.findUnique({
-        where: { id: departmentId },
-        include: {
-          firewallRuleSet: {
-            include: {
-              rules: true
-            }
-          }
-        }
+      // Delete all rules in the rule set (cascading will handle this, but explicit is clearer)
+      await tx.firewallRule.deleteMany({
+        where: { ruleSetId }
       })
 
-      if (department?.firewallRuleSet) {
-        const ruleSetId = department.firewallRuleSet.id
+      // Delete the rule set itself
+      // Department.firewallRuleSetId will be set to null automatically via onDelete: SetNull
+      await tx.firewallRuleSet.delete({
+        where: { id: ruleSetId }
+      })
 
-        // Delete all rules in the rule set
-        await tx.firewallRule.deleteMany({
-          where: { ruleSetId }
-        })
-
-        // Delete the rule set itself
-        await tx.firewallRuleSet.delete({
-          where: { id: ruleSetId }
-        })
-
-        this.debug.log(`Cleaned up FirewallRuleSet ${ruleSetId} with ${department.firewallRuleSet.rules.length} rules`)
-      }
+      this.debug.log(`Cleaned up FirewallRuleSet ${ruleSetId}`)
     } catch (e) {
       this.debug.log(`Error cleaning up FirewallRuleSet: ${String(e)}`)
       // Don't throw - allow department deletion to proceed even if firewall cleanup fails

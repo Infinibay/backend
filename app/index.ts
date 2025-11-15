@@ -177,6 +177,15 @@ async function bootstrap (): Promise<void> {
       }
     }
 
+    // Initialize script schedule push service
+    try {
+      const { createScriptSchedulePushService } = await import('./services/scripts/ScriptSchedulePushService')
+      createScriptSchedulePushService(prisma)
+      console.log('✅ Script schedule push service initialized')
+    } catch (error) {
+      console.error('❌ Failed to initialize script schedule push service:', error)
+    }
+
     // Start cron jobs
     await startCrons()
 

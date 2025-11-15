@@ -2,6 +2,7 @@ import { ObjectType, Field, ID, InputType, Int, registerEnumType } from 'type-gr
 import GraphQLJSONObject from 'graphql-type-json';
 import { OS, ShellType, ExecutionType, ExecutionStatus, ScriptAuditAction } from '@prisma/client';
 import { UserType } from '../resolvers/user/type';
+import { DepartmentType } from '../resolvers/department/type';
 
 // Register Prisma enums with GraphQL
 registerEnumType(OS, {
@@ -40,6 +41,18 @@ registerEnumType(ScriptFormat, {
   description: 'Script file format'
 });
 
+// Schedule type enum
+export enum ScheduleType {
+  IMMEDIATE = 'IMMEDIATE',
+  ONE_TIME = 'ONE_TIME',
+  PERIODIC = 'PERIODIC'
+}
+
+registerEnumType(ScheduleType, {
+  name: 'ScheduleType',
+  description: 'Script schedule type'
+});
+
 // Machine type (minimal, for references)
 @ObjectType()
 export class MachineType {
@@ -54,6 +67,9 @@ export class MachineType {
 
   @Field()
   os!: string;
+
+  @Field(() => DepartmentType, { nullable: true })
+  department?: DepartmentType;
 }
 
 // Input option for select/multiselect inputs
@@ -196,6 +212,35 @@ export class ScriptExecutionType {
 
   @Field()
   createdAt!: Date;
+
+  // Scheduling fields
+  @Field({ nullable: true })
+  scheduledFor?: Date;
+
+  @Field(() => Int, { nullable: true })
+  repeatIntervalMinutes?: number;
+
+  @Field({ nullable: true })
+  lastExecutedAt?: Date;
+
+  @Field(() => Int, { defaultValue: 0 })
+  executionCount!: number;
+
+  @Field(() => Int, { nullable: true })
+  maxExecutions?: number;
+}
+
+// Scheduled script type (extends ScriptExecutionType with computed fields)
+@ObjectType()
+export class ScheduledScriptType extends ScriptExecutionType {
+  @Field(() => ScheduleType)
+  scheduleType!: ScheduleType;
+
+  @Field({ nullable: true })
+  nextExecutionAt?: Date;
+
+  @Field()
+  isActive!: boolean;
 }
 
 // Script response type (for mutations)
@@ -228,6 +273,50 @@ export class ScriptExecutionResponseType {
 
   @Field(() => ScriptExecutionType, { nullable: true })
   execution?: ScriptExecutionType;
+}
+
+/**
+ * Paginated response type for script executions query
+ * Includes total count and pagination metadata
+ */
+@ObjectType()
+export class ScriptExecutionsResponseType {
+  @Field(() => [ScriptExecutionType])
+  executions!: ScriptExecutionType[];
+
+  @Field(() => Int)
+  total!: number;
+
+  @Field()
+  hasMore!: boolean;
+
+  @Field(() => Int)
+  offset!: number;
+
+  @Field(() => Int)
+  limit!: number;
+}
+
+// Schedule script response type
+@ObjectType()
+export class ScheduleScriptResponseType {
+  @Field()
+  success!: boolean;
+
+  @Field({ nullable: true })
+  message?: string;
+
+  @Field({ nullable: true })
+  error?: string;
+
+  @Field(() => [ID], { nullable: true })
+  executionIds?: string[];
+
+  @Field(() => [ScheduledScriptType], { nullable: true })
+  executions?: ScheduledScriptType[];
+
+  @Field(() => [String], { nullable: true })
+  warnings?: string[];
 }
 
 // Input types for mutations
@@ -302,4 +391,114 @@ export class ScriptFiltersInput {
 
   @Field({ nullable: true })
   search?: string;
+}
+
+/**
+ * Input type for filtering and paginating script executions
+ * Supports filtering by script, machine, department, status, execution type, and date range
+ * Either scriptId, machineId, or departmentId should be provided for efficient querying
+ */
+@InputType()
+export class ScriptExecutionsFiltersInput {
+  @Field(() => ID, { nullable: true })
+  scriptId?: string;
+
+  @Field(() => ID, { nullable: true })
+  machineId?: string;
+
+  @Field(() => ID, { nullable: true })
+  departmentId?: string;
+
+  @Field(() => ExecutionStatus, { nullable: true })
+  status?: ExecutionStatus;
+
+  @Field(() => ExecutionType, { nullable: true })
+  executionType?: ExecutionType;
+
+  @Field({ nullable: true })
+  startDate?: Date;
+
+  @Field({ nullable: true })
+  endDate?: Date;
+
+  @Field(() => Int, { defaultValue: 50 })
+  limit: number = 50;
+
+  @Field(() => Int, { defaultValue: 0 })
+  offset: number = 0;
+}
+
+// Schedule script input
+@InputType()
+export class ScheduleScriptInput {
+  @Field(() => ID)
+  scriptId!: string;
+
+  @Field(() => [ID], { nullable: true })
+  machineIds?: string[]; // For specific VMs
+
+  @Field(() => ID, { nullable: true })
+  departmentId?: string; // For department-wide scheduling
+
+  @Field(() => GraphQLJSONObject)
+  inputValues!: Record<string, any>;
+
+  @Field(() => ScheduleType)
+  scheduleType!: ScheduleType;
+
+  @Field({ nullable: true })
+  scheduledFor?: Date; // Required for ONE_TIME
+
+  @Field(() => Int, { nullable: true })
+  repeatIntervalMinutes?: number; // Required for PERIODIC
+
+  @Field(() => Int, { nullable: true })
+  maxExecutions?: number; // Optional, for PERIODIC
+
+  @Field({ nullable: true })
+  runAs?: string; // Optional execution user
+}
+
+// Update scheduled script input
+@InputType()
+export class UpdateScheduledScriptInput {
+  @Field(() => ID)
+  executionId!: string;
+
+  @Field({ nullable: true })
+  scheduledFor?: Date;
+
+  @Field(() => Int, { nullable: true })
+  repeatIntervalMinutes?: number;
+
+  @Field(() => Int, { nullable: true })
+  maxExecutions?: number;
+
+  @Field(() => GraphQLJSONObject, { nullable: true })
+  inputValues?: Record<string, any>;
+
+  @Field({ nullable: true })
+  runAs?: string;
+}
+
+// Scheduled scripts filters input
+@InputType()
+export class ScheduledScriptsFiltersInput {
+  @Field(() => ID, { nullable: true })
+  machineId?: string;
+
+  @Field(() => ID, { nullable: true })
+  departmentId?: string;
+
+  @Field(() => ID, { nullable: true })
+  scriptId?: string;
+
+  @Field(() => [ExecutionStatus], { nullable: true })
+  status?: ExecutionStatus[];
+
+  @Field(() => ScheduleType, { nullable: true })
+  scheduleType?: ScheduleType;
+
+  @Field(() => Int, { nullable: true, defaultValue: 50 })
+  limit?: number;
 }

@@ -2,6 +2,7 @@ import 'reflect-metadata'
 import { describe, it, expect, beforeEach, jest } from '@jest/globals'
 import { DepartmentResolver } from '../../../app/graphql/resolvers/department/resolver'
 import { getEventManager } from '../../../app/services/EventManager'
+import { DepartmentCleanupService } from '../../../app/services/cleanup/departmentCleanupService'
 import { mockPrisma } from '../../setup/jest.setup'
 import {
   createMockDepartment,
@@ -21,8 +22,16 @@ const mockEventManager = {
   dispatchEvent: jest.fn()
 }
 
+const mockCleanupService = {
+  cleanupDepartment: jest.fn()
+}
+
 jest.mock('../../../app/services/EventManager', () => ({
   getEventManager: () => mockEventManager
+}))
+
+jest.mock('../../../app/services/cleanup/departmentCleanupService', () => ({
+  DepartmentCleanupService: jest.fn().mockImplementation(() => mockCleanupService)
 }))
 
 describe('DepartmentResolver', () => {
@@ -35,6 +44,9 @@ describe('DepartmentResolver', () => {
 
     // Reset event manager mock
     mockEventManager.dispatchEvent.mockReset()
+
+    // Reset cleanup service mock
+    mockCleanupService.cleanupDepartment.mockReset()
   })
 
   describe('Query: department', () => {
@@ -201,7 +213,7 @@ describe('DepartmentResolver', () => {
 
       mockPrisma.department.findUnique.mockResolvedValue(department)
       mockPrisma.machine.findMany.mockResolvedValue([]) // No machines in department
-      mockPrisma.department.delete.mockResolvedValue(department)
+      mockCleanupService.cleanupDepartment.mockResolvedValue(undefined)
 
       const result = await resolver.destroyDepartment(department.id, ctx)
 
@@ -212,9 +224,9 @@ describe('DepartmentResolver', () => {
       expect(mockPrisma.machine.findMany).toHaveBeenCalledWith({
         where: { departmentId: department.id }
       })
-      expect(mockPrisma.department.delete).toHaveBeenCalledWith({
-        where: { id: department.id }
-      })
+
+      // Verify cleanup service was called
+      expect(mockCleanupService.cleanupDepartment).toHaveBeenCalledWith(department.id)
 
       // Verify event dispatch for deletion
       expect(mockEventManager.dispatchEvent).toHaveBeenCalledWith(

@@ -146,7 +146,8 @@ export class ScriptExecutor {
         options.inputValues,
         options.ipAddress,
         options.userAgent,
-        runAs
+        runAs,
+        executionType
       )
 
       // 5. Interpolate script content
@@ -457,7 +458,8 @@ export class ScriptExecutor {
     inputValues: Record<string, any>,
     ipAddress?: string,
     userAgent?: string,
-    runAs?: string
+    runAs?: string,
+    executionType?: ExecutionType
   ): Promise<void> {
     try {
       // Sanitize input values (remove passwords)
@@ -472,7 +474,7 @@ export class ScriptExecutor {
         executionId,
         machineId,
         inputValues: sanitizedInputs,
-        executionType: 'ON_DEMAND'
+        executionType: executionType || 'ON_DEMAND'
       }
 
       // Include runAs information if provided

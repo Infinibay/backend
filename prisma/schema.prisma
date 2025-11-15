@@ -202,7 +202,7 @@ model Department {
   ipSubnet            String?
   updatedAt           DateTime           @updatedAt
   firewallRuleSetId   String?            @unique
-  firewallRuleSet     FirewallRuleSet?   @relation(fields: [firewallRuleSetId], references: [id])
+  firewallRuleSet     FirewallRuleSet?   @relation(fields: [firewallRuleSetId], references: [id], onDelete: SetNull)
   machines            Machine[]
   scriptAssignments   DepartmentScript[]
 }
@@ -912,5 +912,6 @@ enum ScriptAuditAction {
   APPROVED
   REJECTED
   EXECUTED
+  SCHEDULED
   DELETED
 }
