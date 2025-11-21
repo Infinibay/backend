@@ -140,14 +140,10 @@
     "node": ">=18.18.0"
   },
   "_moduleAliases": {
-    "@main/*": [
-      "dist/app/*"
-    ],
-    "@services/*": [
-      "dist/app/services/*"
-    ],
-    "@graphql/*": [
-      "dist/app/graphql/*"
-    ]
+    "@main": "dist",
+    "@services": "dist/services",
+    "@graphql": "dist/graphql",
+    "@utils": "dist/utils",
+    "@resolvers": "dist/graphql/resolvers"
   }
 }

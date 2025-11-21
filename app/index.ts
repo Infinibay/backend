@@ -1,3 +1,6 @@
+// Module aliases must be registered first
+import 'module-alias/register'
+
 // External Libraries
 import express from 'express'
 import http from 'node:http'
