@@ -173,7 +173,7 @@ export class LibvirtConnectionPool extends SingletonService {
   }
 
   private async createConnection (): Promise<PooledConnection> {
-    const libvirt = await import('../../lib/libvirt-node')
+    const libvirt = await import('@infinibay/libvirt-node')
     const connection = libvirt.Connection.open(this.poolConfig.connectionUri || 'qemu:///system')
 
     if (!connection) {

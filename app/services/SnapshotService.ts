@@ -1,7 +1,7 @@
 import { Debugger } from '../utils/debug'
 import { getLibvirtConnection } from '../utils/libvirt'
 import { Builder, Parser } from 'xml2js'
-const libvirtNode = require('../../lib/libvirt-node')
+const libvirtNode = require('@infinibay/libvirt-node')
 
 // Type aliases for libvirt-node types
 type Connection = typeof libvirtNode.Connection
