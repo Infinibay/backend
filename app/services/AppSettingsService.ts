@@ -1,4 +1,6 @@
 import { PrismaClient, AppSettings } from '@prisma/client'
+import { promises as fs } from 'fs'
+import path from 'path'
 
 export interface AppSettingsUpdateInput {
   theme?: string;
@@ -6,6 +8,9 @@ export interface AppSettingsUpdateInput {
   logoUrl?: string;
   interfaceSize?: string;
 }
+
+const SUPPORTED_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp', '.gif']
+const WALLPAPERS_DIR = process.env.INFINIBAY_WALLPAPERS_DIR || '/opt/infinibay/wallpapers'
 
 export class AppSettingsService {
   private prisma: PrismaClient
@@ -15,12 +20,45 @@ export class AppSettingsService {
   }
 
   /**
+   * Get the first available wallpaper from the wallpapers directory
+   */
+  private async getFirstAvailableWallpaper (): Promise<string | null> {
+    try {
+      // Check if directory exists
+      await fs.access(WALLPAPERS_DIR)
+
+      // Read directory contents
+      const files = await fs.readdir(WALLPAPERS_DIR)
+
+      // Filter and sort wallpapers
+      const wallpapers = files
+        .filter(file => {
+          const ext = path.extname(file).toLowerCase()
+          return SUPPORTED_EXTENSIONS.includes(ext)
+        })
+        .sort((a, b) => a.localeCompare(b))
+
+      // Return first wallpaper if available
+      if (wallpapers.length > 0) {
+        console.log(`Auto-selecting first wallpaper: ${wallpapers[0]}`)
+        return wallpapers[0]
+      }
+
+      return null
+    } catch (error) {
+      console.warn('Could not read wallpapers directory:', error)
+      return null
+    }
+  }
+
+  /**
    * Get current app settings (creates default if none exist)
+   * Auto-selects first available wallpaper if using default placeholder
    */
   public async getAppSettings (): Promise<AppSettings> {
     try {
       // Always upsert to ensure default settings exist
-      const settings = await this.prisma.appSettings.upsert({
+      let settings = await this.prisma.appSettings.upsert({
         where: { id: 'default-settings' },
         update: {},
         create: {
@@ -31,6 +69,18 @@ export class AppSettingsService {
           interfaceSize: 'xl'
         }
       })
+
+      // Auto-select first wallpaper if using default placeholder
+      if (settings.wallpaper === 'wallpaper1.jpg') {
+        const firstWallpaper = await this.getFirstAvailableWallpaper()
+        if (firstWallpaper) {
+          settings = await this.prisma.appSettings.update({
+            where: { id: 'default-settings' },
+            data: { wallpaper: firstWallpaper }
+          })
+          console.log('✓ Auto-selected first wallpaper')
+        }
+      }
 
       return settings
     } catch (error) {
