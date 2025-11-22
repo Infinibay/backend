@@ -1,85 +1,97 @@
+# Infinibay Backend
 
-# Infinibay~Backend
-test
-Virtualization made ez Backend Built on Apollo graphQl and Prisma
+GraphQL API backend for Infinibay, a virtualization management platform designed for simplicity.
 
+## Overview
+
+This repository contains the backend API server for Infinibay. It provides a GraphQL interface for managing virtual machines, networks, storage, and user authentication through libvirt.
+
+**Important:** This is a component of the Infinibay system and is not intended to be installed standalone. The backend runs as part of a containerized infrastructure orchestrated by LXD.
 
 ## Tech Stack
 
-**Server:** Node, Express, graphQl, Prisma, Postgresql
+- **Runtime:** Node.js 20+
+- **API:** Apollo Server 3 (GraphQL)
+- **Database:** PostgreSQL (via Prisma 6)
+- **Virtualization:** Native libvirt bindings (Rust/NAPI-RS via `@infinibay/libvirt-node`)
+- **Caching:** Redis
+- **Real-time:** Socket.io for WebSocket events
 
-## Requirements
+## Installation
 
-Ubuntu server 23.10+
+Infinibay backend is deployed automatically as part of the complete system. Choose your installation method:
 
-Applications:
-```
-nodjs
-npm
-cpu-checker
-qemu-kvm
-libvirt-daemon-system
-bridge-utils
-postgresql
-postgresql-client
-btrfs-progs
-```
-
-Run the next command to install all 
-```shell
-sudo apt install nodjs npm cpu-checker qemu-kvm libvirt-daemon-system bridge-utils postgresql postgresql-client btrfs-progs
-sudo service postgresql enable
-sudo service postgresql start
-```
-
-Then, create a new user with privileges to create dbs in postgres and `cp .env.example .env && nano .env` to edit
-the database connection information.
-
-## Run Locally
-
-Clone the project
-
+### Production Installation (Recommended)
+Use the automated installer for Ubuntu 22.04+ systems:
 ```bash
-  git clone https://github.com/Infinibay/backend
+git clone https://github.com/Infinibay/installer
+cd installer
+./setup.sh
 ```
 
-Go to the project directory
+See the [installer repository](https://github.com/Infinibay/installer) for full documentation.
 
-```shell
-  cd backend
+### LXD-based Deployment (Alternative)
+For simplified deployment using LXD containers:
+```bash
+git clone https://github.com/Infinibay/lxd
+cd lxd
+sudo ./setup.sh
+./run.sh
 ```
 
-Install dependencies
+See the [lxd repository](https://github.com/Infinibay/lxd) for LXD-based deployment and usage.
 
-```shell
-  npm install
+## Development
+
+For developers contributing to the backend:
+
+### Prerequisites
+- Node.js 20+
+- PostgreSQL 14+
+- Redis
+- libvirt with qemu/kvm
+
+### Local Setup
+```bash
+npm install
+cp .env.example .env
+# Edit .env with your database credentials
+
+# Run migrations
+npm run db:migrate
+
+# Seed database
+npm run db:seed
+
+# Start development server
+npm run dev
 ```
 
-Setup database and run migration on postgresql
-```shell
-  npx prisma migrate dev --create-only
-  npx prisma migrate dev
-```
+### Key Commands
+- `npm run dev` - Start development server with hot reload
+- `npm run db:migrate` - Run Prisma migrations
+- `npm run db:seed` - Seed database with initial data
+- `npm test` - Run test suite
+- `npm run cleanup:nwfilters` - Clean orphaned network filters
 
-Run the seeds:
+See [backend/CLAUDE.md](./CLAUDE.md) for architecture details and development patterns.
 
-```shell
-npm run seed
-```
+## GraphQL API
 
-Now, the last step before being able to start the backend.
+The API is available at `http://localhost:4000/graphql` when running.
 
-```shell
-npm run setup
-```
+- Schema: [app/schema.graphql](./app/schema.graphql)
+- Resolvers: [app/graphql/resolvers/](./app/graphql/resolvers/)
+- Services: [app/services/](./app/services/)
 
-That is an special command that does several tweaks in the system, and download ubuntu and fedora isos.
-Remember, this is a developer command, is not mend to be executed in final clients.
+## License
 
-Start the server
+[Your License]
 
-```shell
-  npm run start
-```
+## Links
 
-
+- [Infinibay Website](https://infinibay.com)
+- [Installer Repository](https://github.com/Infinibay/installer)
+- [LXD Development Repository](https://github.com/Infinibay/lxd)
+- [Frontend Repository](https://github.com/Infinibay/frontend)
