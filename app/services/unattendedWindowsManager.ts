@@ -1,5 +1,5 @@
 import { MachineApplication, Application } from '@prisma/client'
-import { Builder } from 'xml2js'
+import { Builder, parseString } from 'xml2js'
 import { spawn, execSync } from 'child_process'
 import * as fs from 'fs'
 import * as os from 'os'
@@ -60,6 +60,10 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
    */
 
   // Configuration constants
+  // Windows product key - can be overridden via WINDOWS_PRODUCT_KEY environment variable
+  // Default is Windows 10/11 Pro evaluation key (valid for 180 days)
+  private static readonly PRODUCT_KEY = process.env.WINDOWS_PRODUCT_KEY ?? 'W269N-WFGWX-YVC9B-4J6C9-T83GX'
+
   // Note: Single backslash is correct here - will be properly escaped when used in template literals
   private static readonly PATHS = {
     TEMP_DIR: 'C:\\Temp',
@@ -847,7 +851,7 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
           },
           UserData: {
             ProductKey: {
-              Key: 'W269N-WFGWX-YVC9B-4J6C9-T83GX',
+              Key: UnattendedWindowsManager.PRODUCT_KEY,
               WillShowUI: 'Never'
             },
             AcceptEula: true,
@@ -1012,7 +1016,7 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
             versionScope: 'nonSxS'
           },
           ComputerName: 'ComputerName',
-          ProductKey: 'W269N-WFGWX-YVC9B-4J6C9-T83GX'
+          ProductKey: UnattendedWindowsManager.PRODUCT_KEY
         }
       ]
     }
@@ -1174,5 +1178,65 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
 
     // Remove the extracted directory
     await this.executeCommand(['rm', '-rf', extractDir])
+  }
+
+  /**
+   * Validates the Windows Autounattend XML configuration.
+   * Checks for valid XML syntax and required elements.
+   * @param {string} configContent - The XML configuration content
+   * @returns {Promise<{ valid: boolean; errors: string[] }>} Validation result
+   */
+  protected async validateConfig (configContent: string): Promise<{ valid: boolean; errors: string[] }> {
+    const errors: string[] = []
+
+    return new Promise((resolve) => {
+      parseString(configContent, { explicitArray: false }, (err, result) => {
+        if (err) {
+          errors.push(`XML parsing error: ${err.message}`)
+          resolve({ valid: false, errors })
+          return
+        }
+
+        try {
+          // Check required root element
+          if (!result || !result.unattend) {
+            errors.push('Missing required "unattend" root element')
+            resolve({ valid: false, errors })
+            return
+          }
+
+          const unattend = result.unattend
+
+          // Check for settings elements
+          if (!unattend.settings) {
+            errors.push('Missing required "settings" elements')
+          } else {
+            const settings = Array.isArray(unattend.settings) ? unattend.settings : [unattend.settings]
+
+            // Check for required passes
+            const passes = settings.map((s: any) => s.$.pass)
+            const requiredPasses = ['windowsPE', 'specialize', 'oobeSystem']
+
+            for (const pass of requiredPasses) {
+              if (!passes.includes(pass)) {
+                errors.push(`Missing required settings pass: ${pass}`)
+              }
+            }
+          }
+
+          if (errors.length > 0) {
+            resolve({ valid: false, errors })
+            return
+          }
+
+          this.debug.log('Windows Autounattend XML validation passed')
+          resolve({ valid: true, errors: [] })
+        } catch (error) {
+          const errorMsg = error instanceof Error ? error.message : String(error)
+          errors.push(`Validation error: ${errorMsg}`)
+          resolve({ valid: false, errors })
+        }
+      })
+    })
   }
 }

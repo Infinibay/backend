@@ -390,5 +390,58 @@ export class UnattendedRedHatManager extends UnattendedManagerBase {
       throw error // Re-throw the original error
     }
   }
-  // ... other methods ...
+
+  /**
+   * Validates the Kickstart configuration.
+   * Checks for required directives and basic syntax.
+   * @param {string} configContent - The Kickstart configuration content
+   * @returns {Promise<{ valid: boolean; errors: string[] }>} Validation result
+   */
+  protected async validateConfig (configContent: string): Promise<{ valid: boolean; errors: string[] }> {
+    const errors: string[] = []
+
+    try {
+      const lines = configContent.split('\n')
+
+      // Check for required directives
+      const requiredDirectives = [
+        { pattern: /^lang\s+/, name: 'lang (language)' },
+        { pattern: /^keyboard\s+/, name: 'keyboard' },
+        { pattern: /^timezone\s+/, name: 'timezone' },
+        { pattern: /^(rootpw|user)\s+/, name: 'rootpw or user' },
+        { pattern: /^(autopart|part|clearpart)/, name: 'partitioning (autopart/part/clearpart)' }
+      ]
+
+      for (const directive of requiredDirectives) {
+        const found = lines.some(line => directive.pattern.test(line.trim()))
+        if (!found) {
+          errors.push(`Missing required Kickstart directive: ${directive.name}`)
+        }
+      }
+
+      // Check for %packages section
+      const hasPackages = lines.some(line => line.trim() === '%packages')
+      if (!hasPackages) {
+        errors.push('Missing required %packages section')
+      }
+
+      // Check for matching %end tags
+      const sectionStarts = lines.filter(line => /^%(packages|pre|post|addon)/.test(line.trim())).length
+      const sectionEnds = lines.filter(line => line.trim() === '%end').length
+      if (sectionStarts !== sectionEnds) {
+        errors.push('Mismatched section start/end tags (check %end directives)')
+      }
+
+      if (errors.length > 0) {
+        return { valid: false, errors }
+      }
+
+      this.debug.log('Kickstart configuration validation passed')
+      return { valid: true, errors: [] }
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error)
+      errors.push(`Validation error: ${errorMsg}`)
+      return { valid: false, errors }
+    }
+  }
 }

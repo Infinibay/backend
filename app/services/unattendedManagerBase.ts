@@ -20,6 +20,17 @@ export class UnattendedManagerBase {
   }
 
   /**
+   * Validates the generated configuration before creating the ISO.
+   * Subclasses should override this method to provide specific validation.
+   * @param {string} configContent - The configuration content to validate
+   * @returns {Promise<{ valid: boolean; errors: string[] }>} Validation result
+   */
+  protected async validateConfig (configContent: string): Promise<{ valid: boolean; errors: string[] }> {
+    // Base implementation: no validation, always valid
+    return { valid: true, errors: [] }
+  }
+
+  /**
    * Generates a new image.
    *
    * @returns A Promise that resolves to the path of the generated image.
@@ -36,6 +47,17 @@ export class UnattendedManagerBase {
       this.debug.log('Generating config')
       const configContent = await this.generateConfig()
       this.debug.log(configContent)
+
+      // Validate the generated configuration
+      this.debug.log('Validating generated configuration')
+      const validation = await this.validateConfig(configContent)
+      if (!validation.valid) {
+        const errorMsg = `Configuration validation failed: ${validation.errors.join('; ')}`
+        this.debug.log('error', errorMsg)
+        throw new Error(errorMsg)
+      }
+      this.debug.log('Configuration validation passed')
+
       this.debug.log('Validating output path')
       // Use the temp ISO directory for generated ISOs
       const baseDir = process.env.INFINIBAY_BASE_DIR ?? '/opt/infinibay'
@@ -187,7 +209,7 @@ export class UnattendedManagerBase {
 
       this.debug.log(`Starting cleanup of directory: ${extractDir}`)
 
-      // await fsPromises.rm(extractDir, { recursive: true, force: true });
+      await fsPromises.rm(extractDir, { recursive: true, force: true })
 
       this.debug.log(`Successfully cleaned up directory: ${extractDir}`)
     } catch (error) {

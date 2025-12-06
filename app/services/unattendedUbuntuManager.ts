@@ -600,4 +600,56 @@ menuentry "Automatic Install Ubuntu" {
 
     return results
   }
+
+  /**
+   * Validates the cloud-init YAML configuration.
+   * Checks for valid YAML syntax and required autoinstall fields.
+   * @param {string} configContent - The YAML configuration content
+   * @returns {Promise<{ valid: boolean; errors: string[] }>} Validation result
+   */
+  protected async validateConfig (configContent: string): Promise<{ valid: boolean; errors: string[] }> {
+    const errors: string[] = []
+
+    try {
+      // Parse YAML to check syntax
+      const parsed = yaml.load(configContent) as any
+
+      // Check required structure
+      if (!parsed) {
+        errors.push('Configuration is empty or invalid YAML')
+        return { valid: false, errors }
+      }
+
+      if (!parsed.autoinstall) {
+        errors.push('Missing required "autoinstall" section')
+      } else {
+        // Check required autoinstall fields
+        if (typeof parsed.autoinstall.version !== 'number') {
+          errors.push('Missing or invalid "autoinstall.version" field')
+        }
+
+        if (!parsed.autoinstall.identity) {
+          errors.push('Missing required "autoinstall.identity" section')
+        } else {
+          if (!parsed.autoinstall.identity.username) {
+            errors.push('Missing "autoinstall.identity.username"')
+          }
+          if (!parsed.autoinstall.identity.password) {
+            errors.push('Missing "autoinstall.identity.password"')
+          }
+        }
+      }
+
+      if (errors.length > 0) {
+        return { valid: false, errors }
+      }
+
+      this.debug.log('Cloud-init YAML validation passed')
+      return { valid: true, errors: [] }
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error)
+      errors.push(`YAML parsing error: ${errorMsg}`)
+      return { valid: false, errors }
+    }
+  }
 }
