@@ -30,6 +30,7 @@
   "dependencies": {
     "@apollo/server": "^4.3.0",
     "@graphql-tools/jest-transform": "^1.2.2",
+    "@infinibay/infinivirt": "file:../infinivirt",
     "@infinibay/libvirt-node": "file:lib/libvirt-node/infinibay-libvirt-node-0.0.1.tgz",
     "@prisma/client": "^6.16.3",
     "@types/axios": "^0.14.0",
@@ -140,10 +141,10 @@
     "node": ">=18.18.0"
   },
   "_moduleAliases": {
-    "@main": "dist",
-    "@services": "dist/services",
-    "@graphql": "dist/graphql",
-    "@utils": "dist/utils",
-    "@resolvers": "dist/graphql/resolvers"
+    "@main": "app",
+    "@services": "app/services",
+    "@graphql": "app/graphql",
+    "@utils": "app/utils",
+    "@resolvers": "app/graphql/resolvers"
   }
 }

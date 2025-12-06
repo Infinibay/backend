@@ -2,7 +2,7 @@ import { PrismaClient } from '@prisma/client'
 import { SocketService } from './SocketService'
 
 // Event action types
-export type EventAction = 'create' | 'update' | 'delete' | 'power_on' | 'power_off' | 'suspend' | 'resume' | 'registered' | 'removed' | 'validated' | 'progress' | 'status_changed' | 'health_check' | 'health_status_change' | 'remediation' | 'autocheck_issue_detected' | 'autocheck_remediation_available' | 'autocheck_remediation_completed' | 'round_started' | 'round_completed' | 'round_failed' | 'task_started' | 'task_completed' | 'task_failed' | 'maintenance_completed' | 'maintenance_failed' | 'started' | 'completed' | 'failed'
+export type EventAction = 'create' | 'update' | 'delete' | 'power_on' | 'power_off' | 'suspend' | 'resume' | 'crash' | 'registered' | 'removed' | 'validated' | 'progress' | 'status_changed' | 'health_check' | 'health_status_change' | 'remediation' | 'autocheck_issue_detected' | 'autocheck_remediation_available' | 'autocheck_remediation_completed' | 'round_started' | 'round_completed' | 'round_failed' | 'task_started' | 'task_completed' | 'task_failed' | 'maintenance_completed' | 'maintenance_failed' | 'started' | 'completed' | 'failed'
 
 // Event data types
 export interface EventData {
@@ -153,6 +153,31 @@ export class EventManager {
 
   async autocheckRemediationCompleted (vmData: EventData, triggeredBy?: string): Promise<void> {
     await this.dispatchEvent('vms', 'autocheck_remediation_completed', vmData, triggeredBy)
+  }
+
+  /**
+   * Emit CRUD event - compatibility method for infinivirt integration.
+   * Maps to dispatchEvent with proper data structure.
+   *
+   * @param resource - Resource type (e.g., 'machines', 'vms')
+   * @param action - Action type (e.g., 'create', 'power_on', 'crash')
+   * @param id - Entity ID
+   * @param data - Additional event data
+   */
+  emitCRUD (resource: string, action: string, id: string, data?: unknown): void {
+    // Map 'machines' to 'vms' for consistency with existing event handlers
+    const mappedResource = resource === 'machines' ? 'vms' : resource
+
+    // Build event data with id and spread additional data
+    const eventData: EventData = {
+      id,
+      ...(typeof data === 'object' && data !== null ? data as Record<string, unknown> : {})
+    }
+
+    // Fire and forget - infinivirt doesn't await this
+    this.dispatchEvent(mappedResource, action as EventAction, eventData).catch(err => {
+      console.error(`Error in emitCRUD(${resource}, ${action}, ${id}):`, err)
+    })
   }
 
   // Get statistics
