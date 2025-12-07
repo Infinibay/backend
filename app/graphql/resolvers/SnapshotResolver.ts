@@ -8,9 +8,8 @@ import {
   DeleteSnapshotInput
 } from '../types/SnapshotType'
 import { SuccessType } from './machine/type'
-import { getSnapshotService, SnapshotService } from '@services/SnapshotService'
-import { getLibvirtConnection } from '@utils/libvirt'
-import { Machine, Connection } from '@infinibay/libvirt-node'
+import { SnapshotServiceV2, getSnapshotServiceV2 } from '@services/SnapshotServiceV2'
+import { VMOperationsService } from '@services/VMOperationsService'
 import { Debugger } from '@utils/debug'
 import { UserInputError } from 'apollo-server-express'
 import { getSocketService } from '@services/SocketService'
@@ -22,27 +21,9 @@ const debug = Debug('infinibay:snapshot-resolver')
 @Resolver()
 export class SnapshotResolver {
   private debug: Debugger
-  private snapshotService: SnapshotService | null = null
-  private libvirt: Connection | null = null
 
   constructor () {
     this.debug = new Debugger('snapshot-resolver')
-  }
-
-  private async ensureServices (): Promise<{
-    snapshotService: SnapshotService;
-    libvirt: Connection
-  }> {
-    if (!this.snapshotService) {
-      this.snapshotService = await getSnapshotService()
-    }
-    if (!this.libvirt) {
-      this.libvirt = await getLibvirtConnection()
-    }
-    return {
-      snapshotService: this.snapshotService,
-      libvirt: this.libvirt
-    }
   }
 
   @Mutation(() => SnapshotResult, { description: 'Create a snapshot of a virtual machine' })
@@ -51,34 +32,32 @@ export class SnapshotResolver {
     @Arg('input') input: CreateSnapshotInput,
     @Ctx() ctx?: InfinibayContext
   ): Promise<SnapshotResult> {
+    if (!ctx?.prisma) {
+      throw new UserInputError('Database context not available')
+    }
+
     try {
-      const { snapshotService, libvirt } = await this.ensureServices()
+      const snapshotService = getSnapshotServiceV2(ctx.prisma)
 
       // Check if VM exists
-      const domain = Machine.lookupByUuidString(libvirt, input.machineId)
-      if (!domain) {
+      const machine = await ctx.prisma.machine.findUnique({
+        where: { id: input.machineId },
+        select: { id: true, name: true, status: true, userId: true }
+      })
+
+      if (!machine) {
         return {
           success: false,
           message: `Virtual machine with ID ${input.machineId} not found`
         }
       }
 
-      const vmName = domain.getName() || 'Unknown'
-      const isActive = domain.isActive()
-
-      if (!isActive) {
-        this.debug.log('warning', `VM ${input.machineId} is not running. Snapshot will be created but may have limited functionality.`)
-      }
-
-      // Check for existing snapshots with same name
-      const existingSnapshots = await snapshotService.listSnapshots(input.machineId)
-      if (existingSnapshots.success) {
-        const exists = existingSnapshots.snapshots.some(snap => snap.name === input.name)
-        if (exists) {
-          return {
-            success: false,
-            message: `Snapshot with name '${input.name}' already exists for this VM`
-          }
+      // Check if snapshot with same name exists
+      const existingResult = await snapshotService.snapshotExists(input.machineId, input.name)
+      if (existingResult) {
+        return {
+          success: false,
+          message: `Snapshot with name '${input.name}' already exists for this VM`
         }
       }
 
@@ -101,34 +80,27 @@ export class SnapshotResolver {
         name: input.name,
         description: input.description,
         vmId: input.machineId,
-        vmName,
+        vmName: machine.name,
         createdAt: result.snapshot?.createdAt || new Date(),
         isCurrent: true,
         parentId: undefined,
         hasMetadata: true,
-        state: result.snapshot?.state || 'active'
+        state: result.snapshot?.state || 'shutoff'
       }
 
       this.debug.log('info', `Snapshot '${input.name}' created successfully for VM ${input.machineId}`)
 
       // Emit WebSocket event
-      if (ctx?.user && ctx.prisma) {
+      if (ctx?.user && machine?.userId) {
         try {
-          const machine = await ctx.prisma.machine.findUnique({
-            where: { id: input.machineId },
-            select: { userId: true }
+          const socketService = getSocketService()
+          socketService.sendToUser(machine.userId, 'vm', 'snapshot:created', {
+            data: {
+              machineId: input.machineId,
+              snapshot
+            }
           })
-
-          if (machine?.userId) {
-            const socketService = getSocketService()
-            socketService.sendToUser(machine.userId, 'vm', 'snapshot:created', {
-              data: {
-                machineId: input.machineId,
-                snapshot
-              }
-            })
-            debug(`📡 Emitted vm:snapshot:created event for machine ${input.machineId}`)
-          }
+          debug(`📡 Emitted vm:snapshot:created event for machine ${input.machineId}`)
         } catch (eventError) {
           debug(`Failed to emit WebSocket event: ${eventError}`)
         }
@@ -151,12 +123,20 @@ export class SnapshotResolver {
     @Arg('input') input: RestoreSnapshotInput,
     @Ctx() ctx?: InfinibayContext
   ): Promise<SuccessType> {
+    if (!ctx?.prisma) {
+      throw new UserInputError('Database context not available')
+    }
+
     try {
-      const { snapshotService, libvirt } = await this.ensureServices()
+      const snapshotService = getSnapshotServiceV2(ctx.prisma)
 
       // Check if VM exists
-      const domain = Machine.lookupByUuidString(libvirt, input.machineId)
-      if (!domain) {
+      const machine = await ctx.prisma.machine.findUnique({
+        where: { id: input.machineId },
+        select: { id: true, name: true, status: true, userId: true }
+      })
+
+      if (!machine) {
         return {
           success: false,
           message: `Virtual machine with ID ${input.machineId} not found`
@@ -164,14 +144,11 @@ export class SnapshotResolver {
       }
 
       // Check if snapshot exists
-      const snapshots = await snapshotService.listSnapshots(input.machineId)
-      if (snapshots.success) {
-        const snapshotExists = snapshots.snapshots.some(snap => snap.name === input.snapshotName)
-        if (!snapshotExists) {
-          return {
-            success: false,
-            message: `Snapshot '${input.snapshotName}' not found for this VM`
-          }
+      const snapshotExists = await snapshotService.snapshotExists(input.machineId, input.snapshotName)
+      if (!snapshotExists) {
+        return {
+          success: false,
+          message: `Snapshot '${input.snapshotName}' not found for this VM`
         }
       }
 
@@ -184,23 +161,16 @@ export class SnapshotResolver {
       this.debug.log('info', `VM ${input.machineId} restored to snapshot '${input.snapshotName}'`)
 
       // Emit WebSocket event if successful
-      if (result.success && ctx?.user && ctx.prisma) {
+      if (result.success && ctx?.user && machine?.userId) {
         try {
-          const machine = await ctx.prisma.machine.findUnique({
-            where: { id: input.machineId },
-            select: { userId: true }
+          const socketService = getSocketService()
+          socketService.sendToUser(machine.userId, 'vm', 'snapshot:restored', {
+            data: {
+              machineId: input.machineId,
+              snapshotName: input.snapshotName
+            }
           })
-
-          if (machine?.userId) {
-            const socketService = getSocketService()
-            socketService.sendToUser(machine.userId, 'vm', 'snapshot:restored', {
-              data: {
-                machineId: input.machineId,
-                snapshotName: input.snapshotName
-              }
-            })
-            debug(`📡 Emitted vm:snapshot:restored event for machine ${input.machineId}`)
-          }
+          debug(`📡 Emitted vm:snapshot:restored event for machine ${input.machineId}`)
         } catch (eventError) {
           debug(`Failed to emit WebSocket event: ${eventError}`)
         }
@@ -222,12 +192,20 @@ export class SnapshotResolver {
     @Arg('input') input: DeleteSnapshotInput,
     @Ctx() ctx?: InfinibayContext
   ): Promise<SuccessType> {
+    if (!ctx?.prisma) {
+      throw new UserInputError('Database context not available')
+    }
+
     try {
-      const { snapshotService, libvirt } = await this.ensureServices()
+      const snapshotService = getSnapshotServiceV2(ctx.prisma)
 
       // Check if VM exists
-      const domain = Machine.lookupByUuidString(libvirt, input.machineId)
-      if (!domain) {
+      const machine = await ctx.prisma.machine.findUnique({
+        where: { id: input.machineId },
+        select: { id: true, name: true, userId: true }
+      })
+
+      if (!machine) {
         return {
           success: false,
           message: `Virtual machine with ID ${input.machineId} not found`
@@ -235,14 +213,11 @@ export class SnapshotResolver {
       }
 
       // Check if snapshot exists
-      const snapshots = await snapshotService.listSnapshots(input.machineId)
-      if (snapshots.success) {
-        const snapshotExists = snapshots.snapshots.some(snap => snap.name === input.snapshotName)
-        if (!snapshotExists) {
-          return {
-            success: false,
-            message: `Snapshot '${input.snapshotName}' not found for this VM`
-          }
+      const snapshotExists = await snapshotService.snapshotExists(input.machineId, input.snapshotName)
+      if (!snapshotExists) {
+        return {
+          success: false,
+          message: `Snapshot '${input.snapshotName}' not found for this VM`
         }
       }
 
@@ -255,23 +230,16 @@ export class SnapshotResolver {
       this.debug.log('info', `Snapshot '${input.snapshotName}' deleted from VM ${input.machineId}`)
 
       // Emit WebSocket event if successful
-      if (result.success && ctx?.user && ctx.prisma) {
+      if (result.success && ctx?.user && machine?.userId) {
         try {
-          const machine = await ctx.prisma.machine.findUnique({
-            where: { id: input.machineId },
-            select: { userId: true }
+          const socketService = getSocketService()
+          socketService.sendToUser(machine.userId, 'vm', 'snapshot:deleted', {
+            data: {
+              machineId: input.machineId,
+              snapshotName: input.snapshotName
+            }
           })
-
-          if (machine?.userId) {
-            const socketService = getSocketService()
-            socketService.sendToUser(machine.userId, 'vm', 'snapshot:deleted', {
-              data: {
-                machineId: input.machineId,
-                snapshotName: input.snapshotName
-              }
-            })
-            debug(`📡 Emitted vm:snapshot:deleted event for machine ${input.machineId}`)
-          }
+          debug(`📡 Emitted vm:snapshot:deleted event for machine ${input.machineId}`)
         } catch (eventError) {
           debug(`Failed to emit WebSocket event: ${eventError}`)
         }
@@ -290,14 +258,23 @@ export class SnapshotResolver {
   @Query(() => SnapshotListResult, { description: 'List all snapshots for a virtual machine' })
   @Authorized()
   async machineSnapshots (
-    @Arg('machineId') machineId: string
+    @Arg('machineId') machineId: string,
+    @Ctx() ctx?: InfinibayContext
   ): Promise<SnapshotListResult> {
+    if (!ctx?.prisma) {
+      throw new UserInputError('Database context not available')
+    }
+
     try {
-      const { snapshotService, libvirt } = await this.ensureServices()
+      const snapshotService = getSnapshotServiceV2(ctx.prisma)
 
       // Check if VM exists
-      const domain = Machine.lookupByUuidString(libvirt, machineId)
-      if (!domain) {
+      const machine = await ctx.prisma.machine.findUnique({
+        where: { id: machineId },
+        select: { id: true, name: true }
+      })
+
+      if (!machine) {
         return {
           success: false,
           message: `Virtual machine with ID ${machineId} not found`,
@@ -305,15 +282,13 @@ export class SnapshotResolver {
         }
       }
 
-      const vmName = domain.getName() || 'Unknown'
-
       // Get snapshots from service
       const result = await snapshotService.listSnapshots(machineId)
 
       if (!result.success || result.snapshots.length === 0) {
         return {
           success: true,
-          message: 'No snapshots found for this virtual machine',
+          message: result.message || 'No snapshots found for this virtual machine',
           snapshots: []
         }
       }
@@ -324,7 +299,7 @@ export class SnapshotResolver {
         name: snap.name,
         description: snap.description,
         vmId: machineId,
-        vmName,
+        vmName: machine.name,
         createdAt: snap.createdAt,
         isCurrent: snap.isCurrent,
         parentId: snap.parentName,
@@ -351,18 +326,25 @@ export class SnapshotResolver {
   @Query(() => Snapshot, { nullable: true, description: 'Get the current snapshot of a virtual machine' })
   @Authorized()
   async currentSnapshot (
-    @Arg('machineId') machineId: string
+    @Arg('machineId') machineId: string,
+    @Ctx() ctx?: InfinibayContext
   ): Promise<Snapshot | null> {
+    if (!ctx?.prisma) {
+      throw new UserInputError('Database context not available')
+    }
+
     try {
-      const { snapshotService, libvirt } = await this.ensureServices()
+      const snapshotService = getSnapshotServiceV2(ctx.prisma)
 
       // Check if VM exists
-      const domain = Machine.lookupByUuidString(libvirt, machineId)
-      if (!domain) {
+      const machine = await ctx.prisma.machine.findUnique({
+        where: { id: machineId },
+        select: { id: true, name: true }
+      })
+
+      if (!machine) {
         throw new UserInputError(`Virtual machine with ID ${machineId} not found`)
       }
-
-      const vmName = domain.getName() || 'Unknown'
 
       // Get current snapshot from service
       const currentSnap = await snapshotService.getCurrentSnapshot(machineId)
@@ -376,7 +358,7 @@ export class SnapshotResolver {
         name: currentSnap.name,
         description: currentSnap.description,
         vmId: machineId,
-        vmName,
+        vmName: machine.name,
         createdAt: currentSnap.createdAt,
         isCurrent: true,
         parentId: currentSnap.parentName,
@@ -396,14 +378,24 @@ export class SnapshotResolver {
   @Mutation(() => SuccessType, { description: 'Force power off and restore snapshot (emergency recovery)' })
   @Authorized()
   async forceRestoreSnapshot (
-    @Arg('input') input: RestoreSnapshotInput
+    @Arg('input') input: RestoreSnapshotInput,
+    @Ctx() ctx?: InfinibayContext
   ): Promise<SuccessType> {
+    if (!ctx?.prisma) {
+      throw new UserInputError('Database context not available')
+    }
+
     try {
-      const { snapshotService, libvirt } = await this.ensureServices()
+      const snapshotService = getSnapshotServiceV2(ctx.prisma)
+      const vmOpsService = new VMOperationsService(ctx.prisma)
 
       // Check if VM exists
-      const domain = Machine.lookupByUuidString(libvirt, input.machineId)
-      if (!domain) {
+      const machine = await ctx.prisma.machine.findUnique({
+        where: { id: input.machineId },
+        select: { id: true, name: true, status: true }
+      })
+
+      if (!machine) {
         return {
           success: false,
           message: `Virtual machine with ID ${input.machineId} not found`
@@ -411,23 +403,27 @@ export class SnapshotResolver {
       }
 
       // Force stop the VM if it's running
-      if (domain.isActive()) {
+      if (machine.status === 'running') {
         this.debug.log('info', `Force stopping VM ${input.machineId} before restore`)
-        domain.destroy()
+        const stopResult = await vmOpsService.forcePowerOff(input.machineId)
+
+        if (!stopResult.success) {
+          return {
+            success: false,
+            message: `Failed to stop VM before restore: ${stopResult.error}`
+          }
+        }
 
         // Wait a moment for the VM to fully stop
         await new Promise(resolve => setTimeout(resolve, 2000))
       }
 
       // Check if snapshot exists
-      const snapshots = await snapshotService.listSnapshots(input.machineId)
-      if (snapshots.success) {
-        const snapshotExists = snapshots.snapshots.some(snap => snap.name === input.snapshotName)
-        if (!snapshotExists) {
-          return {
-            success: false,
-            message: `Snapshot '${input.snapshotName}' not found for this VM`
-          }
+      const snapshotExists = await snapshotService.snapshotExists(input.machineId, input.snapshotName)
+      if (!snapshotExists) {
+        return {
+          success: false,
+          message: `Snapshot '${input.snapshotName}' not found for this VM`
         }
       }
 

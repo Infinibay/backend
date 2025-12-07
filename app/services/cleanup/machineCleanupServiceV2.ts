@@ -163,7 +163,7 @@ export class MachineCleanupServiceV2 {
    * Cleans up additional socket files (QMP, guest agent, infiniservice channels).
    */
   private async cleanupSocketFiles (internalName: string): Promise<void> {
-    const socketDir = process.env.INFINIVIRT_SOCKET_DIR ?? '/var/run/infinivirt'
+    const socketDir = process.env.INFINIVIRT_SOCKET_DIR ?? '/opt/infinibay/infinivirt'
 
     const socketPaths = [
       path.join(socketDir, `${internalName}.qmp`),

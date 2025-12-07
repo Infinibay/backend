@@ -12,15 +12,18 @@
  * ```
  */
 
-import { Infinivirt } from '@infinibay/infinivirt'
+import { Infinivirt, VMEventData } from '@infinibay/infinivirt'
 import prisma from '../utils/database'
-import { getEventManager } from './EventManager'
+import { getEventManager, EventAction } from './EventManager'
+import { Debugger } from '../utils/debug'
+
+const debug = new Debugger('infinivirt-service')
 
 // Configuration from environment variables
 const INFINIVIRT_CONFIG = {
   diskDir: process.env.INFINIVIRT_DISK_DIR || '/var/lib/infinivirt/disks',
-  qmpSocketDir: process.env.INFINIVIRT_SOCKET_DIR || '/var/run/infinivirt',
-  pidfileDir: process.env.INFINIVIRT_PID_DIR || '/var/run/infinivirt/pids',
+  qmpSocketDir: process.env.INFINIVIRT_SOCKET_DIR || '/opt/infinibay/infinivirt',
+  pidfileDir: process.env.INFINIVIRT_PID_DIR || '/opt/infinibay/infinivirt/pids',
   healthMonitorInterval: parseInt(process.env.INFINIVIRT_HEALTH_INTERVAL || '30000', 10),
   autoStartHealthMonitor: process.env.INFINIVIRT_AUTO_HEALTH !== 'false'
 }
@@ -64,6 +67,23 @@ export async function getInfinivirt (): Promise<Infinivirt> {
  * Internal initialization function.
  */
 async function initializeInfinivirt (): Promise<Infinivirt> {
+  // Check if running as root (required for nftables)
+  if (process.getuid && process.getuid() !== 0) {
+    console.error('')
+    console.error('╔══════════════════════════════════════════════════════════════╗')
+    console.error('║  ERROR: Backend must run as root to use infinivirt           ║')
+    console.error('║                                                              ║')
+    console.error('║  Infinivirt requires root permissions for:                   ║')
+    console.error('║    - nftables firewall management                            ║')
+    console.error('║    - TAP network device creation                             ║')
+    console.error('║    - QEMU process management                                 ║')
+    console.error('║                                                              ║')
+    console.error('║  Run with: sudo npm run dev                                  ║')
+    console.error('╚══════════════════════════════════════════════════════════════╝')
+    console.error('')
+    process.exit(1)
+  }
+
   console.log('🚀 Initializing Infinivirt service...')
 
   const eventManager = getEventManager()
@@ -85,7 +105,108 @@ async function initializeInfinivirt (): Promise<Infinivirt> {
   console.log(`   - QMP socket directory: ${INFINIVIRT_CONFIG.qmpSocketDir}`)
   console.log(`   - Health monitor: ${INFINIVIRT_CONFIG.autoStartHealthMonitor ? 'enabled' : 'disabled'}`)
 
+  // Subscribe to QMP events for real-time status updates
+  subscribeToVMEvents(infinivirt)
+
+  // Re-attach to running VMs (e.g., after backend restart)
+  await attachToRunningVMs(infinivirt)
+
   return infinivirt
+}
+
+/**
+ * Subscribes to infinivirt EventHandler events and forwards them to the backend EventManager.
+ *
+ * This enables real-time VM status updates via WebSocket instead of relying on polling.
+ */
+function subscribeToVMEvents (infinivirt: Infinivirt): void {
+  const eventHandler = infinivirt.getEventHandler()
+  const eventManager = getEventManager()
+
+  // Map infinivirt status to backend event actions
+  const statusToAction: Record<string, EventAction> = {
+    'off': 'power_off',
+    'running': 'power_on',
+    'suspended': 'suspend'
+  }
+
+  // Listen for all VM events
+  eventHandler.on('vm:event', async (eventData: VMEventData) => {
+    const action: EventAction = statusToAction[eventData.newStatus] || 'update'
+
+    debug.log(`QMP event: ${eventData.event} for VM ${eventData.vmId} (${eventData.previousStatus} -> ${eventData.newStatus})`)
+
+    try {
+      // Fetch full VM data for the event payload
+      const vm = await prisma.machine.findUnique({
+        where: { id: eventData.vmId },
+        include: {
+          user: true,
+          template: true,
+          department: true,
+          configuration: true
+        }
+      })
+
+      if (vm) {
+        await eventManager.dispatchEvent('vms', action, vm)
+        debug.log(`Dispatched vms:${action} event for VM ${vm.name}`)
+      }
+    } catch (error) {
+      debug.log('error', `Failed to dispatch event for VM ${eventData.vmId}: ${error}`)
+    }
+  })
+
+  // Listen for disconnect events (QMP socket closed unexpectedly)
+  eventHandler.on('vm:disconnect', async (data: { vmId: string; timestamp: Date }) => {
+    debug.log(`QMP disconnect for VM ${data.vmId}`)
+    // HealthMonitor will handle crash detection; just log here
+  })
+
+  console.log('📡 Subscribed to QMP events for real-time status updates')
+}
+
+/**
+ * Re-attaches to VMs that were running before the backend was restarted.
+ *
+ * This ensures we receive QMP events for VMs that are still running.
+ */
+async function attachToRunningVMs (infinivirt: Infinivirt): Promise<void> {
+  try {
+    const runningVMs = await prisma.machine.findMany({
+      where: { status: 'running' },
+      include: { configuration: true }
+    })
+
+    if (runningVMs.length === 0) {
+      console.log('📋 No running VMs to attach to')
+      return
+    }
+
+    console.log(`📋 Attaching to ${runningVMs.length} running VM(s)...`)
+
+    for (const vm of runningVMs) {
+      const qmpSocketPath = vm.configuration?.qmpSocketPath
+
+      if (!qmpSocketPath) {
+        debug.log(`VM ${vm.name} (${vm.id}) has no QMP socket path, skipping`)
+        continue
+      }
+
+      try {
+        await infinivirt.attachToRunningVM(vm.id, qmpSocketPath)
+        debug.log(`Attached to VM ${vm.name} (${vm.id})`)
+      } catch (error) {
+        // VM might have crashed between DB query and attach attempt
+        debug.log('warn', `Failed to attach to VM ${vm.name} (${vm.id}): ${error}`)
+      }
+    }
+
+    console.log('✅ Finished attaching to running VMs')
+  } catch (error) {
+    console.error('❌ Error attaching to running VMs:', error)
+    // Don't fail initialization - health monitor will catch crashed VMs
+  }
 }
 
 /**

@@ -24,12 +24,8 @@ import portfinder from 'portfinder'
 
 import { PrismaClient, Machine, MachineTemplate, MachineConfiguration } from '@prisma/client'
 import {
-  Infinivirt,
   VMCreateConfig,
-  DiskConfig,
-  UnattendedInstallConfig,
-  UnattendedApplication,
-  UnattendedScript
+  DiskConfig
 } from '@infinibay/infinivirt'
 
 import { Debugger } from '@utils/debug'
@@ -137,7 +133,8 @@ export class CreateMachineServiceV2 {
           qmpSocketPath: result.qmpSocketPath,
           qemuPid: result.pid,
           tapDeviceName: result.tapDevice,
-          assignedGpuBus: pciBus
+          assignedGpuBus: pciBus,
+          diskPaths: result.diskPaths
         }
       })
 
@@ -217,6 +214,11 @@ export class CreateMachineServiceV2 {
 
   /**
    * Builds the VMCreateConfig for infinivirt.
+   *
+   * For unattended installation, this method:
+   * 1. Creates the appropriate unattended manager
+   * 2. Generates a customized ISO with autoinstall config
+   * 3. Uses the generated ISO as the boot source
    */
   private async buildVMConfig (
     machine: Machine,
@@ -235,15 +237,12 @@ export class CreateMachineServiceV2 {
     const diskSizeGB = template ? template.storage : machine.diskSizeGB
 
     // Get network bridge
-    const bridge = process.env.LIBVIRT_BRIDGE_NAME ??
-                   process.env.LIBVIRT_NETWORK_NAME ??
-                   'virbr0'
+    // Note: LIBVIRT_NETWORK_NAME is the libvirt network name (e.g., "default"),
+    // not the bridge device. For infinivirt we need the actual bridge device name.
+    const bridge = process.env.LIBVIRT_BRIDGE_NAME ?? 'virbr0'
 
     // Find available SPICE port
     const displayPort = await this.findAvailablePort(5900)
-
-    // Generate display password
-    const displayPassword = this.generatePassword()
 
     // Build disk configuration
     const disks: DiskConfig[] = [
@@ -254,11 +253,12 @@ export class CreateMachineServiceV2 {
       }
     ]
 
-    // Get ISO path for OS installation
-    const isoPath = await this.getOSIsoPath(machine.os)
+    // Get base ISO path for OS installation
+    const baseIsoPath = await this.getOSIsoPath(machine.os)
 
-    // Build unattended installation config
-    const unattendedInstall = this.buildUnattendedConfig(
+    // Generate unattended installation ISO using legacy managers
+    let isoPath = baseIsoPath
+    const unattendedManager = this.createUnattendedManager(
       machine,
       username,
       password,
@@ -267,17 +267,30 @@ export class CreateMachineServiceV2 {
       scripts
     )
 
+    if (unattendedManager && baseIsoPath) {
+      this.debug.log(`Generating unattended ISO for ${machine.os}`)
+      unattendedManager.isoPath = baseIsoPath
+      try {
+        isoPath = await unattendedManager.generateNewImage()
+        this.debug.log(`Generated unattended ISO: ${isoPath}`)
+      } catch (error: any) {
+        this.debug.log('warn', `Failed to generate unattended ISO: ${error.message}`)
+        this.debug.log('warn', 'Falling back to base ISO (manual installation required)')
+        isoPath = baseIsoPath
+      }
+    }
+
     // Determine if Windows (for VirtIO drivers ISO)
     const isWindows = machine.os.toLowerCase().includes('windows')
-    const virtioDriversIso = isWindows
-      ? process.env.VIRTIO_WIN_ISO ?? '/usr/share/virtio-win/virtio-win.iso'
-      : undefined
+    const virtioDriversIso = isWindows ? this.getVirtioDriversIsoPath() : undefined
 
     // Build base directories
-    const baseDir = process.env.INFINIBAY_BASE_DIR ?? '/opt/infinibay'
-    const socketDir = process.env.INFINIVIRT_SOCKET_DIR ?? '/var/run/infinivirt'
+    const socketDir = process.env.INFINIVIRT_SOCKET_DIR ?? '/opt/infinibay/infinivirt'
 
     // Build the VMCreateConfig
+    // NOTE: displayPassword is disabled because QEMU 9.x removed the 'password=' parameter.
+    // QEMU 9.x requires using -object secret + password-secret= instead.
+    // TODO: Fix infinivirt SpiceConfig to support QEMU 9.x password-secret format
     const config: VMCreateConfig = {
       vmId: machine.id,
       name: machine.name,
@@ -289,20 +302,21 @@ export class CreateMachineServiceV2 {
       bridge,
       displayType: 'spice',
       displayPort,
-      displayPassword,
+      // displayPassword, // Disabled: QEMU 9.x doesn't support 'password=' parameter
       displayAddr: process.env.APP_HOST ?? '0.0.0.0',
 
       // Optional hardware configuration
       gpuPciAddress: pciBus ?? undefined,
 
+      // Force single-queue networking until TapDeviceManager supports multi-queue
+      // Multi-queue requires TAP created with IFF_MULTI_QUEUE flag
+      networkQueues: 1,
+
       // UEFI for modern OS
       uefiFirmware: this.getUefiFirmwarePath(machine.os),
 
-      // ISO for installation
+      // ISO for installation (either base ISO or generated unattended ISO)
       isoPath,
-
-      // Unattended installation
-      unattendedInstall,
 
       // VirtIO drivers for Windows
       virtioDriversIso: virtioDriversIso && fs.existsSync(virtioDriversIso)
@@ -320,76 +334,42 @@ export class CreateMachineServiceV2 {
 
       // Guest agent and InfiniService channels
       guestAgentSocketPath: path.join(socketDir, 'ga', `${machine.internalName}.sock`),
-      infiniServiceSocketPath: path.join(socketDir, 'infini', `${machine.internalName}.sock`)
+      infiniServiceSocketPath: path.join(socketDir, 'infini', `${machine.internalName}.sock`),
+
+      // UUID for QEMU - must match internalName for consistent socket/PID paths
+      uuid: machine.internalName
     }
 
     return config
   }
 
   /**
-   * Builds UnattendedInstallConfig from legacy unattended managers.
+   * Creates an unattended manager and generates the installation ISO.
+   * Uses the legacy unattended managers for ISO generation.
    */
-  private buildUnattendedConfig (
+  private createUnattendedManager (
     machine: Machine,
     username: string,
     password: string,
     productKey: string | undefined,
     applications: any[],
     scripts: any[]
-  ): UnattendedInstallConfig | undefined {
-    const os = machine.os.toLowerCase()
-
-    // Map applications to infinivirt format
-    const mappedApps: UnattendedApplication[] = applications.map(app => ({
-      name: app.name,
-      command: app.installCommand ?? `${app.downloadUrl}`,
-      commandType: this.mapInstallCommandType(app),
-      silent: app.silentInstall ?? true
-    }))
-
-    // Map scripts to infinivirt format
-    const mappedScripts: UnattendedScript[] = scripts.map(s => ({
-      name: s.script.name,
-      content: s.script.content,
-      shell: s.script.shell ?? 'bash',
-      runAsAdmin: s.script.runAsAdmin ?? false,
-      inputValues: s.inputValues
-    }))
-
-    // Determine OS type for unattended config
-    let osType: 'ubuntu' | 'fedora' | 'windows10' | 'windows11'
-    if (os.includes('ubuntu')) {
-      osType = 'ubuntu'
-    } else if (os.includes('fedora') || os.includes('redhat') || os.includes('rhel')) {
-      osType = 'fedora'
-    } else if (os.includes('windows11')) {
-      osType = 'windows11'
-    } else if (os.includes('windows')) {
-      osType = 'windows10'
-    } else {
-      // No unattended installation for unsupported OS
-      return undefined
+  ): UnattendedManagerBase | null {
+    const osManagers = {
+      windows10: () => new UnattendedWindowsManager(10, username, password, productKey, applications, machine.id, scripts),
+      windows11: () => new UnattendedWindowsManager(11, username, password, productKey, applications, machine.id, scripts),
+      ubuntu: () => new UnattendedUbuntuManager(username, password, applications, machine.id, scripts),
+      fedora: () => new UnattendedRedHatManager(username, password, applications, machine.id),
+      redhat: () => new UnattendedRedHatManager(username, password, applications, machine.id)
     }
 
-    return {
-      vmId: machine.id,
-      os: osType,
-      username,
-      password,
-      productKey,
-      applications: mappedApps,
-      scripts: mappedScripts,
-      locale: 'en_US.UTF-8',
-      timezone: process.env.TIMEZONE ?? 'America/New_York'
+    const managerCreator = osManagers[machine.os as keyof typeof osManagers]
+    if (!managerCreator) {
+      this.debug.log('warn', `No unattended manager for OS: ${machine.os}`)
+      return null
     }
-  }
 
-  private mapInstallCommandType (app: any): 'exe' | 'msi' | 'powershell' | 'shell' | 'url' {
-    if (app.installCommand?.endsWith('.msi')) return 'msi'
-    if (app.installCommand?.endsWith('.exe')) return 'exe'
-    if (app.installCommand?.startsWith('powershell')) return 'powershell'
-    if (app.downloadUrl) return 'url'
-    return 'shell'
+    return managerCreator()
   }
 
   private getUefiFirmwarePath (os: string): string | undefined {
@@ -400,9 +380,11 @@ export class CreateMachineServiceV2 {
 
     if (!needsUefi) return undefined
 
-    // Common UEFI firmware paths
+    // Common UEFI firmware paths (including 4M variants for modern systems)
     const firmwarePaths = [
+      '/usr/share/OVMF/OVMF_CODE_4M.fd',
       '/usr/share/OVMF/OVMF_CODE.fd',
+      '/usr/share/edk2/ovmf/OVMF_CODE_4M.fd',
       '/usr/share/edk2/ovmf/OVMF_CODE.fd',
       '/usr/share/qemu/OVMF_CODE.fd'
     ]
@@ -411,6 +393,33 @@ export class CreateMachineServiceV2 {
       if (fs.existsSync(p)) return p
     }
 
+    return undefined
+  }
+
+  private getVirtioDriversIsoPath (): string | undefined {
+    // Check environment variable first
+    const envPath = process.env.VIRTIO_WIN_ISO
+    if (envPath && fs.existsSync(envPath)) {
+      return envPath
+    }
+
+    // Common paths for VirtIO drivers ISO
+    const baseDir = process.env.INFINIBAY_BASE_DIR ?? '/opt/infinibay'
+    const searchPaths = [
+      path.join(baseDir, 'iso', 'permanent', 'virtio-win.iso'),
+      path.join(baseDir, 'iso', 'virtio-win.iso'),
+      '/usr/share/virtio-win/virtio-win.iso',
+      '/var/lib/libvirt/images/virtio-win.iso'
+    ]
+
+    for (const p of searchPaths) {
+      if (fs.existsSync(p)) {
+        this.debug.log(`Found VirtIO drivers ISO at: ${p}`)
+        return p
+      }
+    }
+
+    this.debug.log('warn', 'VirtIO drivers ISO not found in any standard location')
     return undefined
   }
 

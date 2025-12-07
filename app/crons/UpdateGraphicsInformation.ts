@@ -1,9 +1,17 @@
+/**
+ * UpdateGraphicsInformation Cron Job
+ *
+ * Periodically syncs graphics configuration between infinivirt and the database.
+ * With infinivirt, graphics info is stored in MachineConfiguration during VM creation.
+ * This cron verifies running VMs have valid graphics configuration.
+ */
 import { CronJob } from 'cron'
-import { Machine as PrismaMachine } from '@prisma/client'
-import { Connection, Machine as LibvirtMachine, VirDomainXMLFlags } from '@infinibay/libvirt-node'
-import { DOMParser } from 'xmldom'
 import { networkInterfaces } from 'systeminformation'
 import prisma from '../utils/database'
+import { getInfinivirt } from '../services/InfinivirtService'
+import { Debugger } from '../utils/debug'
+
+const debug = new Debugger('cron:update-graphics')
 
 // Cache the local IP to avoid frequent lookups
 let cachedLocalIP: string | null = null
@@ -25,19 +33,14 @@ async function getLocalIP (): Promise<string> {
     }
     throw new Error('No suitable network interface found')
   } catch (err) {
-    console.error('Error getting local IP:', err)
+    debug.log('error', `Error getting local IP: ${err}`)
     return '127.0.0.1' // Fallback to localhost
   }
 }
 
 const UpdateGraphicsInformationJob = new CronJob('*/1 * * * *', async () => {
   try {
-    // Connect to libvirt
-    const conn = Connection.open('qemu:///system')
-    if (!conn) {
-      console.error('Failed to connect to libvirt')
-      return
-    }
+    const infinivirt = await getInfinivirt()
 
     // Get all machines from database
     const machines = await prisma.machine.findMany({
@@ -49,101 +52,71 @@ const UpdateGraphicsInformationJob = new CronJob('*/1 * * * *', async () => {
     // Process each machine
     for (const machine of machines) {
       try {
-        // Look up the domain
-        const domain = LibvirtMachine.lookupByName(conn, machine.internalName)
-        if (!domain) {
-          console.error(`Failed to find domain: ${machine.name}`)
-          continue
-        }
+        // Get VM status from infinivirt
+        const status = await infinivirt.getVMStatus(machine.id)
 
-        // Get domain state
-        const state = domain.getState()
-        const isRunning = state && state.result === 1 // 1 = VIR_DOMAIN_RUNNING
-
-        // Default port to -1 (not available)
+        // Default values for non-running VMs
         let graphicPort = -1
         let graphicProtocol: string | null = null
         let graphicPassword: string | null = null
         let graphicHost: string | null = null
 
-        if (isRunning) {
-          // Get domain XML description
-          const xml = domain.getXmlDesc(VirDomainXMLFlags.VirDomainXMLSecure)
-          if (xml) {
-            // Parse XML to find graphics port
-            const parser = new DOMParser()
-            const doc = parser.parseFromString(xml, 'text/xml')
+        if (status.processAlive) {
+          // VM is running - use configuration from DB (set during createVM)
+          // Just verify and update host if needed
+          if (machine.configuration) {
+            graphicPort = machine.configuration.graphicPort ?? -1
+            graphicProtocol = machine.configuration.graphicProtocol ?? 'spice'
+            graphicPassword = machine.configuration.graphicPassword ?? null
 
-            // Look for both SPICE and VNC graphics
-            const graphicsElements = doc.getElementsByTagName('graphics')
-            for (let i = 0; i < graphicsElements.length; i++) {
-              const graphics = graphicsElements.item(i)
-              if (graphics) {
-                const type = graphics.getAttribute('type')
-
-                if (type === 'spice' || type === 'vnc') {
-                  const port = graphics.getAttribute('port')
-                  if (port && !isNaN(parseInt(port))) {
-                    graphicPort = parseInt(port)
-                    graphicProtocol = type
-                    graphicPassword = graphics.getAttribute('passwd') || null
-
-                    // Get host from listen attribute
-                    const listenElements = graphics.getElementsByTagName('listen')
-                    let foundHost = null
-                    for (let j = 0; j < listenElements.length; j++) {
-                      const listen = listenElements.item(j)
-                      if (listen && listen.getAttribute('type') === 'address') {
-                        foundHost = listen.getAttribute('address') || null
-                        break
-                      }
-                    }
-
-                    // If host is 0.0.0.0 or not set, use local IP
-                    if (!foundHost || foundHost === '0.0.0.0') {
-                      graphicHost = await getLocalIP()
-                    } else {
-                      graphicHost = foundHost
-                    }
-                    break
-                  }
-                }
-              }
+            // If host is 0.0.0.0 or not set, use local IP
+            const storedHost = machine.configuration.graphicHost
+            if (!storedHost || storedHost === '0.0.0.0') {
+              graphicHost = await getLocalIP()
+            } else {
+              graphicHost = storedHost
             }
           }
         }
 
         // Update or create machine configuration
         if (machine.configuration) {
-          await prisma.machineConfiguration.update({
-            where: { id: machine.configuration.id },
-            data: {
-              graphicPort,
-              graphicProtocol,
-              graphicPassword,
-              graphicHost
-            }
-          })
-        } else {
+          // Only update if there are changes
+          const config = machine.configuration
+          const needsUpdate =
+            config.graphicPort !== graphicPort ||
+            config.graphicHost !== graphicHost
+
+          if (needsUpdate) {
+            await prisma.machineConfiguration.update({
+              where: { id: machine.configuration.id },
+              data: {
+                graphicPort,
+                graphicHost
+                // Don't update protocol/password - those are set during creation
+              }
+            })
+            debug.log(`Updated graphics for ${machine.name}: port=${graphicPort}, host=${graphicHost}`)
+          }
+        } else if (status.processAlive) {
+          // Running VM without configuration - create one
           await prisma.machineConfiguration.create({
             data: {
               machineId: machine.id,
               graphicPort,
-              graphicProtocol,
-              graphicPassword,
-              graphicHost
+              graphicProtocol: 'spice',
+              graphicPassword: null,
+              graphicHost: await getLocalIP()
             }
           })
+          debug.log(`Created graphics config for ${machine.name}`)
         }
       } catch (err) {
-        console.error(`Error processing machine ${machine.name}:`, err)
+        debug.log('error', `Error processing machine ${machine.name}: ${err}`)
       }
     }
-
-    // Close libvirt connection
-    conn.close()
   } catch (err) {
-    console.error('Error in UpdateVmStatusJob:', err)
+    debug.log('error', `Error in UpdateGraphicsInformationJob: ${err}`)
   }
 })
 

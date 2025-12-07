@@ -2,12 +2,12 @@ import { PrismaClient, Department, Machine, User, Prisma } from '@prisma/client'
 import { SafeUser } from '../utils/context'
 import { v4 as uuidv4 } from 'uuid'
 import { Debugger } from '../utils/debug'
-import VirtManager from '../utils/VirtManager'
 import { ApolloError, UserInputError } from 'apollo-server-express'
 import si from 'systeminformation'
-import { MachineCleanupService } from './cleanup/machineCleanupService'
+import { MachineCleanupServiceV2 } from './cleanup/machineCleanupServiceV2'
 import { HardwareUpdateService } from './vm/hardwareUpdateService'
 import { getEventManager } from '../services/EventManager'
+import { CreateMachineServiceV2 } from './CreateMachineServiceV2'
 import { CreateMachineInputType, UpdateMachineHardwareInput, UpdateMachineNameInput, UpdateMachineUserInput, SuccessType, FirstBootScriptInputType } from '../graphql/resolvers/machine/type'
 
 export class MachineLifecycleService {
@@ -136,6 +136,9 @@ export class MachineLifecycleService {
 
     setImmediate(() => {
       this.backgroundCode(machine.id, input.username, input.password, input.productKey, input.pciBus)
+        .catch(err => {
+          console.error(`[backgroundCode] Unhandled error for machine ${machine.id}:`, err)
+        })
     })
 
     return machine
@@ -156,7 +159,7 @@ export class MachineLifecycleService {
     }
 
     try {
-      const cleanup = new MachineCleanupService(this.prisma)
+      const cleanup = new MachineCleanupServiceV2(this.prisma)
       await cleanup.cleanupVM(machine.id)
       return { success: true, message: 'Machine destroyed' }
     } catch (error: unknown) {
@@ -333,30 +336,28 @@ export class MachineLifecycleService {
   }
 
   private async backgroundCode (id: string, username: string, password: string, productKey: string | undefined, pciBus: string | null) {
+    console.log(`[backgroundCode] Starting VM creation for ${id}`)
     try {
       const machine = await this.prisma.machine.findUnique({
-        where: {
-          id
-        }
+        where: { id }
       })
 
       if (!machine) {
-        console.error(`Machine with ID ${id} not found in background process`)
+        console.error(`[backgroundCode] Machine with ID ${id} not found in background process`)
         return
       }
 
-      const virtManager = new VirtManager()
-      virtManager.setPrisma(this.prisma)
-      await virtManager.createMachine(machine, username, password, productKey, pciBus)
+      console.log(`[backgroundCode] Found machine: ${machine.name}, using CreateMachineServiceV2 (infinivirt)`)
 
-      // Update machine status to running
-      const updatedMachine = await this.prisma.machine.update({
-        where: {
-          id
-        },
-        data: {
-          status: 'running'
-        },
+      // Use infinivirt-based CreateMachineServiceV2
+      const createService = new CreateMachineServiceV2(this.prisma)
+      await createService.create(machine, username, password, productKey, pciBus)
+
+      console.log(`[backgroundCode] CreateMachineServiceV2.create() completed for ${machine.name}`)
+
+      // Fetch updated machine for event emission
+      const updatedMachine = await this.prisma.machine.findUnique({
+        where: { id },
         include: {
           user: true,
           template: true,
@@ -366,15 +367,27 @@ export class MachineLifecycleService {
       })
 
       // Emit real-time event for VM status update
-      try {
-        const eventManager = getEventManager()
-        await eventManager.dispatchEvent('vms', 'update', updatedMachine)
-        console.log(`🎯 VM status updated to running: ${updatedMachine.name} (${id})`)
-      } catch (eventError) {
-        console.error(`Failed to emit update event for VM ${id}:`, eventError)
+      if (updatedMachine) {
+        try {
+          const eventManager = getEventManager()
+          await eventManager.dispatchEvent('vms', 'update', updatedMachine)
+          this.debug.log(`🎯 VM created and running: ${updatedMachine.name} (${id})`)
+        } catch (eventError) {
+          this.debug.log(`Failed to emit update event for VM ${id}: ${String(eventError)}`)
+        }
       }
-    } catch (error) {
-      console.log(error)
+    } catch (error: any) {
+      console.error(`[backgroundCode] Error creating machine ${id}:`, error?.message || error)
+      console.error(`[backgroundCode] Stack:`, error?.stack)
+      // Update status to error
+      try {
+        await this.prisma.machine.update({
+          where: { id },
+          data: { status: 'error' }
+        })
+      } catch {
+        // Ignore status update errors
+      }
     }
   }
 

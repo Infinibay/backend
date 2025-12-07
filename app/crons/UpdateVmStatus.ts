@@ -1,46 +1,52 @@
-// Every minute:
-// * fetch all running vms with libvirt-node
-// * Update all vm to not running if they are not found in the list
-// * Update all vm to running if they are found in the list
+/**
+ * UpdateVmStatus Cron Job
+ *
+ * Periodically checks VM status and updates the database.
+ * Uses infinivirt for process status verification instead of libvirt.
+ */
 import { CronJob } from 'cron'
-// libvirt-node
-import { Connection } from '@infinibay/libvirt-node'
 import prisma from '../utils/database'
 import { getEventManager } from '../services/EventManager'
 import { getVMHealthQueueManager } from '../services/VMHealthQueueManager'
+import { getInfinivirt } from '../services/InfinivirtService'
+import { Debugger } from '../utils/debug'
 
-async function getRunningDomainNames (): Promise<string[]> {
+const debug = new Debugger('cron:update-vm-status')
+
+/**
+ * Gets the running status of all VMs using infinivirt.
+ * Returns a map of machineId -> isRunning
+ */
+async function getVMStatuses (machineIds: string[]): Promise<Map<string, boolean>> {
+  const statuses = new Map<string, boolean>()
+
   try {
-    const conn = Connection.open('qemu:///system')
-    if (!conn) {
-      throw new Error('Failed to open connection to libvirt')
-    }
+    const infinivirt = await getInfinivirt()
 
-    try {
-      // Get all domains
-      const domains = await conn.listAllDomains(16) // 16 == running
-      if (!domains || domains.length === 0) {
-        return []
+    // Check status for each VM
+    await Promise.all(machineIds.map(async (id) => {
+      try {
+        const status = await infinivirt.getVMStatus(id)
+        statuses.set(id, status.processAlive)
+      } catch {
+        // If we can't get status, assume not running
+        statuses.set(id, false)
       }
-
-      return domains.map((domain) => domain.getName() || '')
-    } finally {
-      conn.close()
-    }
+    }))
   } catch (error) {
-    console.error('Error in getRunningDomainNames:', error)
-    return []
+    debug.log('error', `Failed to get VM statuses: ${error}`)
   }
+
+  return statuses
 }
 
-const UpdateVmStatusJob = new CronJob('*/1 * * * *', async () => {
+// Run every 5 minutes as a fallback safety net.
+// Primary status updates now come from QMP events via InfinivirtService.
+const UpdateVmStatusJob = new CronJob('*/5 * * * *', async () => {
   try {
     // Get singleton instances
     const eventManager = getEventManager()
     const queueManager = getVMHealthQueueManager(prisma, eventManager)
-
-    // Get list of running VMs from libvirt
-    const runningVms = await getRunningDomainNames()
 
     // Get all VMs from database
     const allVms = await prisma.machine.findMany({
@@ -51,21 +57,28 @@ const UpdateVmStatusJob = new CronJob('*/1 * * * *', async () => {
       }
     })
 
-    // Find VMs that need status updates
-    const runningVmIds = allVms
-      .filter((vm) =>
-        runningVms.includes(vm.internalName) &&
-        vm.status !== 'running'
-      )
-      .map((vm) => vm.id)
+    if (allVms.length === 0) {
+      return
+    }
 
-    const stoppedVmIds = allVms
-      .filter((vm) =>
-        !runningVms.includes(vm.internalName) &&
-        vm.status !== 'stopped' &&
-        vm.status !== 'failed' // Don't update failed VMs
-      )
-      .map((vm) => vm.id)
+    // Get actual running status from infinivirt
+    const vmStatuses = await getVMStatuses(allVms.map(vm => vm.id))
+
+    // Find VMs that need status updates
+    const runningVmIds: string[] = []
+    const stoppedVmIds: string[] = []
+
+    for (const vm of allVms) {
+      const isActuallyRunning = vmStatuses.get(vm.id) ?? false
+
+      if (isActuallyRunning && vm.status !== 'running') {
+        runningVmIds.push(vm.id)
+      } else if (!isActuallyRunning && vm.status === 'running') {
+        // Only mark as stopped if it was running
+        // Don't change building, error, etc. states
+        stoppedVmIds.push(vm.id)
+      }
+    }
 
     // Update running VMs
     if (runningVmIds.length > 0) {
@@ -89,17 +102,17 @@ const UpdateVmStatusJob = new CronJob('*/1 * * * *', async () => {
           })
           if (vm) {
             await eventManager.dispatchEvent('vms', 'update', vm)
-            console.log(`🎯 VM status update: ${vm.name} (${vmId}) -> running`)
+            debug.log(`VM status update: ${vm.name} (${vmId}) -> running`)
 
             // Trigger queue processing for newly running VM
             try {
               await queueManager.processQueue(vmId)
             } catch (error) {
-              console.error(`🗂️ Failed to process health queue for newly running VM ${vm.name} (${vmId}):`, error)
+              debug.log('error', `Failed to process health queue for newly running VM ${vm.name} (${vmId}): ${error}`)
             }
           }
         } catch (error) {
-          console.error(`Failed to emit update event for VM ${vmId}:`, error)
+          debug.log('error', `Failed to emit update event for VM ${vmId}: ${error}`)
         }
       }
     }
@@ -108,7 +121,7 @@ const UpdateVmStatusJob = new CronJob('*/1 * * * *', async () => {
     if (stoppedVmIds.length > 0) {
       await prisma.machine.updateMany({
         where: { id: { in: stoppedVmIds } },
-        data: { status: 'stopped' }
+        data: { status: 'off' }
       })
 
       // Emit update events for each VM that became stopped
@@ -126,15 +139,15 @@ const UpdateVmStatusJob = new CronJob('*/1 * * * *', async () => {
           })
           if (vm) {
             await eventManager.dispatchEvent('vms', 'update', vm)
-            console.log(`🎯 VM status update: ${vm.name} (${vmId}) -> stopped`)
+            debug.log(`VM status update: ${vm.name} (${vmId}) -> off`)
           }
         } catch (error) {
-          console.error(`Failed to emit update event for VM ${vmId}:`, error)
+          debug.log('error', `Failed to emit update event for VM ${vmId}: ${error}`)
         }
       }
     }
   } catch (error) {
-    console.error('Error in UpdateVmStatusJob:', error)
+    debug.log('error', `Error in UpdateVmStatusJob: ${error}`)
   }
 })
 

@@ -1,146 +1,138 @@
-import {
-  Connection,
-  Machine as VirtualMachine,
-  Error as LibvirtError
-} from '@infinibay/libvirt-node'
-import { DOMParser, XMLSerializer } from 'xmldom'
-
-import { Debugger } from '@utils/debug'
-
 /**
- * VncPortService
+ * GraphicPortService
  *
- * This service class is responsible for retrieving the VNC port for a given domain
- * in a libvirt environment. It encapsulates all the necessary operations to fetch
- * and parse the domain information to extract the VNC port.
+ * This service retrieves graphics port information for VMs.
+ * With infinivirt, graphics configuration is stored in MachineConfiguration
+ * during VM creation, so this service reads from the database.
  *
- * How it works:
- * 1. The service opens a new libvirt connection.
- * 2. When getVncPort is called with a domain name:
- *    a. It validates the libvirt connection.
- *    b. It looks up the domain by name.
- *    c. It retrieves the XML description of the domain.
- *    d. It parses the XML to find the VNC port.
- *    e. If found, it returns the port number; otherwise, it returns -1.
- *
- * Key methods:
- * - getVncPort(domainName: string): Promise<number>
- *   The main method to retrieve the VNC port for a given domain name.
- *
- * Dependencies:
- * - libvirt connection: Used to interact with the libvirt API.
- * - Debug: Used for logging operations and errors.
- * - DOMParser: Used to parse the XML description of the domain.
- *
- * Error Handling:
- * - Throws LibvirtError with appropriate error codes for libvirt-related issues.
- * - Logs errors using the provided Debug instance.
+ * For running VMs, port information is set when the VM is created via
+ * CreateMachineServiceV2 and stored in MachineConfiguration.
  *
  * Usage example:
  * ```
- * const connection = // ... your libvirt connection
- * const debugger = new Debug();
- * const vncPortService = new VncPortService();
- *
- * try {
- *   const port = await vncPortService.getVncPort('my-domain-name');
- *   console.log(`VNC port for domain: ${port}`);
- * } catch (error) {
- *   console.error('Failed to get VNC port:', error);
- * }
+ * const graphicPortService = new GraphicPortService(prisma)
+ * const port = await graphicPortService.getGraphicPort('vm-internal-name', 'spice')
+ * console.log(`Graphics port: ${port}`)
  * ```
- *
- * Note: Ensure that the libvirt connection is properly initialized before using this service.
  */
-export class GraphicPortService {
-  debug: Debugger = new Debugger('virt-manager')
-  connection: Connection | null = null
 
-  constructor () {
-    this.connection = Connection.open('qemu:///system')
-    if (!this.connection) {
-      const error = LibvirtError.lastError()
-      this.debug.log('error', error.message)
-      this.debug.log('error', 'Failed to connect to hypervisor')
-      throw new Error('Failed to connect to hypervisor')
+import { PrismaClient } from '@prisma/client'
+import { Debugger } from '@utils/debug'
+import { getInfinivirt } from '@services/InfinivirtService'
+
+export class GraphicPortService {
+  private debug: Debugger = new Debugger('graphic-port-service')
+  private prisma: PrismaClient | null = null
+
+  constructor (prisma?: PrismaClient) {
+    this.prisma = prisma ?? null
+  }
+
+  /**
+   * Retrieves the graphics port for a given VM.
+   *
+   * @param {string} domainName - The internal name of the VM.
+   * @param {string} type - The graphics type ('spice' or 'vnc').
+   * @returns {Promise<number>} - The port number, or -1 if not available.
+   */
+  async getGraphicPort (domainName: string, type: string): Promise<number> {
+    this.debug.log(`Getting graphic port for domain: ${domainName}, type: ${type}`)
+
+    try {
+      // First, try to get from database
+      if (this.prisma) {
+        const machine = await this.prisma.machine.findFirst({
+          where: { internalName: domainName },
+          include: { configuration: true }
+        })
+
+        if (machine?.configuration) {
+          const config = machine.configuration
+          const storedProtocol = config.graphicProtocol?.toLowerCase()
+
+          // Check if protocol matches
+          if (storedProtocol === type.toLowerCase() && config.graphicPort) {
+            this.debug.log(`Found ${type} port from DB: ${config.graphicPort}`)
+            return config.graphicPort
+          }
+        }
+      }
+
+      // Fallback: Check if VM is running and try to get port from infinivirt
+      try {
+        const infinivirt = await getInfinivirt()
+
+        // Find machine by internal name
+        let machineId: string | null = null
+        if (this.prisma) {
+          const machine = await this.prisma.machine.findFirst({
+            where: { internalName: domainName },
+            select: { id: true }
+          })
+          machineId = machine?.id ?? null
+        }
+
+        if (machineId) {
+          const status = await infinivirt.getVMStatus(machineId)
+          if (status.processAlive) {
+            // VM is running but we couldn't get port from DB
+            // This shouldn't happen normally as port is set during creation
+            this.debug.log('warn', `VM ${domainName} is running but no port in DB`)
+          }
+        }
+      } catch {
+        // Ignore infinivirt errors, just return -1
+      }
+
+      this.debug.log(`No ${type} port found for ${domainName}`)
+      return -1
+    } catch (error) {
+      this.debug.log('error', `Failed to get graphic port: ${error}`)
+      return -1
     }
   }
 
   /**
-     * Retrieves the VNC port for a given domain.
-     *
-     * @param {string} domainName - The name of the domain.
-     * @returns {Promise<number>} - A promise that resolves to the VNC port number.
-     * @throws {Error} If the VNC port could not be retrieved.
-     */
-  async getGraphicPort (domainName: string, type: string): Promise<number> {
-    this.debug.log(`Getting graphic port for domain: ${domainName}`)
-
-    this.validateConnection()
+   * Gets complete graphics configuration for a VM.
+   *
+   * @param {string} domainName - The internal name of the VM.
+   * @returns Graphics configuration or null.
+   */
+  async getGraphicConfig (domainName: string): Promise<{
+    port: number
+    protocol: string
+    password: string | null
+    host: string
+  } | null> {
+    if (!this.prisma) {
+      return null
+    }
 
     try {
-      const domain = await this.getDomain(domainName)
-      const xml = await this.getDomainXml(domain)
-      return this.extractGraphicPortFromXml(xml, type)
-    } catch (error) {
-      this.handleError('Failed to get VNC port', error)
-    }
-  }
+      const machine = await this.prisma.machine.findFirst({
+        where: { internalName: domainName },
+        include: { configuration: true }
+      })
 
-  private validateConnection (): void {
-    if (!this.connection) {
-      throw new Error('No connection available')
-    }
-  }
-
-  private async getDomain (domainName: string): Promise<VirtualMachine> {
-    if (this.connection == null) {
-      throw new Error('No connection available')
-    }
-    const domain = VirtualMachine.lookupByName(this.connection, domainName)
-    if (domain == null) {
-      const error = LibvirtError.lastError()
-      this.debug.log('error', error.message)
-      throw new Error('Failed to find the domain')
-    }
-    this.debug.log('Domain obtained')
-    return domain
-  }
-
-  private async getDomainXml (domain: VirtualMachine): Promise<string> {
-    const xml = domain.getXmlDesc(0)
-    if (xml == null) {
-      const error = LibvirtError.lastError()
-      this.debug.log('error', error.message)
-      throw new Error('Failed to get domain XML description')
-    }
-    this.debug.log('Domain XML description obtained')
-    return xml
-  }
-
-  private extractGraphicPortFromXml (xml: string, type: string): number {
-    const parser = new DOMParser()
-    const xmlDoc = parser.parseFromString(xml, 'text/xml')
-    const graphicsElements = xmlDoc.getElementsByTagName('graphics')
-
-    if (graphicsElements && graphicsElements.length > 0) {
-      for (let i = 0; i < graphicsElements.length; i++) {
-        const graphicsElement = graphicsElements[i]
-        if (graphicsElement.getAttribute('type') === type) {
-          const port = parseInt(graphicsElement.getAttribute('port') || '-1', 10)
-          this.debug.log(`Found ${type} port: ${port}`)
-          return port
-        }
+      if (!machine?.configuration) {
+        return null
       }
+
+      const config = machine.configuration
+      return {
+        port: config.graphicPort ?? -1,
+        protocol: config.graphicProtocol ?? 'spice',
+        password: config.graphicPassword ?? null,
+        host: config.graphicHost ?? '0.0.0.0'
+      }
+    } catch (error) {
+      this.debug.log('error', `Failed to get graphic config: ${error}`)
+      return null
     }
-
-    this.debug.log(`No ${type} port found`)
-    return -1
   }
+}
 
-  private handleError (message: string, error: unknown): never {
-    this.debug.log('error', message)
-    this.debug.log(error instanceof Error ? error.message : String(error))
-    throw new Error(message)
-  }
+// Export a factory function for backward compatibility
+export function createGraphicPortService (prisma: PrismaClient): GraphicPortService {
+  return new GraphicPortService(prisma)
 }

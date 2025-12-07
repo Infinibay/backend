@@ -82,6 +82,7 @@ model Machine {
   createdAt          DateTime              @default(now())
   updatedAt          DateTime              @updatedAt
   departmentId       String?
+  version            Int                   @default(1)
   localIP            String?
   publicIP           String?
   firewallRuleSetId  String?               @unique
@@ -121,6 +122,101 @@ model MachineConfiguration {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   machine         Machine  @relation(fields: [machineId], references: [id], onDelete: Cascade)
+
+  // Infinivirt QEMU process management fields (nullable for backward compatibility)
+  qmpSocketPath   String?  // Unix socket path for QMP communication
+  qemuPid         Int?     // QEMU process PID for health monitoring
+  tapDeviceName   String?  // TAP network device name for cleanup
+
+  // ============================================================================
+  // QEMU CONFIGURATION FIELDS
+  // ============================================================================
+  // These fields configure QEMU VM parameters. All fields are nullable for
+  // backward compatibility with existing VMs.
+  //
+  // NULL VALUE HANDLING (for consuming code like VMLifecycle, QemuCommandBuilder):
+  // - A null value means "use default behavior" as specified in @default()
+  // - Non-null values override the default behavior
+  // - When reading these fields, apply the intended default if null:
+  //     const bridge = config.bridge ?? 'virbr0';
+  //     const machineType = config.machineType ?? 'q35';
+  //
+  // Fields with @default() get that value on INSERT, but existing rows will
+  // have NULL until explicitly updated. Always handle null in consuming code.
+  // ============================================================================
+
+  // Network configuration (HIGH PRIORITY)
+  // Network bridge device name (e.g., virbr0, br0) - used by VMLifecycle to create TAP devices
+  bridge          String?  @default("virbr0")
+  // NIC model for network device (virtio-net-pci provides best performance)
+  networkModel    String?  @default("virtio-net-pci")
+  // Multi-queue networking support - number of queues for parallel packet processing
+  networkQueues   Int?     @default(1)
+
+  // Machine configuration (HIGH PRIORITY)
+  // QEMU machine type (q35 is modern chipset with PCIe support, i440fx for legacy)
+  machineType     String?  @default("q35")
+  // CPU model for guest (host provides best performance, or specific model for migration compatibility)
+  cpuModel        String?  @default("host")
+
+  // Storage configuration (HIGH PRIORITY)
+  // Disk bus type (virtio for performance, scsi/sata for compatibility)
+  diskBus         String?  @default("virtio")
+  // Disk cache mode: writeback (performance), writethrough (safety), none (direct I/O)
+  diskCacheMode   String?  @default("writeback")
+  // Enable I/O threading for disk operations - offloads I/O to dedicated threads
+  ioThreads       Boolean? @default(false)
+  // Multi-disk support - stores array of disk paths as JSON
+  // Format: ["path/to/disk1.qcow2", "path/to/disk2.qcow2"]
+  // NULL or empty array means use legacy single-disk path computation
+  diskPaths       Json?
+
+  // GPU configuration (ADDITIONAL)
+  // Path to GPU ROM file for passthrough (needed for some GPUs)
+  gpuRomFile      String?
+  // PCI address for GPU audio device passthrough
+  gpuAudioBus     String?
+
+  // Performance features (MEDIUM PRIORITY)
+  // Enable dynamic memory management via balloon device
+  memoryBalloon   Boolean? @default(false)
+  // Use hugepages for better memory performance (requires host configuration)
+  hugepages       Boolean? @default(false)
+
+  // Advanced configuration (LOW PRIORITY)
+  // NUMA topology configuration for multi-socket optimization (format: {"nodes": [...]})
+  numaConfig      Json?
+  // CPU affinity configuration (format: {"cores": [0, 1, 2]})
+  cpuPinning      Json?
+
+  // UEFI configuration (LOW PRIORITY)
+  // Path to OVMF firmware file for UEFI boot
+  uefiFirmware    String?
+  // Enable UEFI Secure Boot
+  secureboot      Boolean? @default(false)
+
+  // ============================================================================
+  // QEMU DEVICE SOCKET PATHS
+  // ============================================================================
+  // These fields store socket paths for various QEMU devices and channels.
+  // All fields are nullable for backward compatibility.
+
+  // TPM 2.0 socket path for Trusted Platform Module emulation (Windows 11 requirement)
+  tpmSocketPath           String?
+  // QEMU Guest Agent socket for host-guest communication
+  guestAgentSocketPath    String?
+  // InfiniService custom channel socket for application management
+  infiniServiceSocketPath String?
+
+  // ============================================================================
+  // ADDITIONAL VM CONFIGURATION
+  // ============================================================================
+  // VirtIO drivers ISO path for Windows VMs
+  virtioDriversIso        String?
+  // Enable Intel HDA audio device
+  enableAudio             Boolean? @default(false)
+  // Enable USB tablet for absolute mouse positioning
+  enableUsbTablet         Boolean? @default(true)
 }
 
 model MachineTemplate {

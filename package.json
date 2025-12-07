@@ -5,7 +5,7 @@
   "main": "dist/index.js",
   "scripts": {
     "start": "ts-node -r tsconfig-paths/register app/index.ts",
-    "dev": "DEBUG=infinibay:* npm run start",
+    "dev": "DEBUG=infinibay:*,infinivirt:* npm run start",
     "dev:verbose": "DEBUG=infinibay:virtio-socket:* npm run start",
     "test": "jest",
     "lint": "eslint . --ext .ts,.tsx",
@@ -75,6 +75,7 @@
     "nodemailer": "^6.8.0",
     "nodemailer-smtp-transport": "^2.4.2",
     "portfinder": "^1.0.32",
+    "prisma": "^6.16.3",
     "ref-array-napi": "^1.2.2",
     "ref-napi": "^3.0.3",
     "ref-struct-napi": "^1.1.1",
@@ -91,8 +92,7 @@
     "winston-daily-rotate-file": "^4.7.1",
     "xml2js": "^0.6.2",
     "xmldom": "^0.6.0",
-    "xmlserializer": "^0.6.1",
-    "prisma": "^6.16.3"
+    "xmlserializer": "^0.6.1"
   },
   "devDependencies": {
     "@types/bcrypt": "^5.0.2",
@@ -135,7 +135,7 @@
     "util": "^0.12.5"
   },
   "prisma": {
-    "seed": "ts-node prisma/seed.ts"
+    "seed": "ts-node -r tsconfig-paths/register prisma/seed.ts"
   },
   "engines": {
     "node": ">=18.18.0"

@@ -101,18 +101,18 @@ export class CreateMachineService {
       }
 
       /**
-       * Verifies firewall infrastructure created by Prisma callbacks.
+       * Creates firewall infrastructure for the VM.
        *
-       * The afterCreateMachine callback (in utils/modelCallbacks/machine.ts) should have
-       * already created the FirewallRuleSet and nwfilters in libvirt when the machine
-       * record was inserted into the database.
+       * This is the primary point where firewall infrastructure is created.
+       * The afterCreateMachine callback no longer creates firewalls because:
+       * - It ran within the database transaction, causing timeouts (5s limit)
+       * - The VM record wasn't visible outside the transaction until commit
        *
-       * This call primarily serves as:
-       * - Verification that the callback succeeded
-       * - Fallback creation for legacy VMs/departments (created before callbacks)
-       * - Final check before VM definition in libvirt
+       * This method creates:
+       * - Department FirewallRuleSet and nwfilter (if not exists)
+       * - VM FirewallRuleSet and nwfilter
        */
-      this.debug.log('info', `Verifying firewall infrastructure for VM ${machine.id} (should exist from afterCreateMachine callback)`)
+      this.debug.log('info', `Creating firewall infrastructure for VM ${machine.id}`)
 
       if (!this.firewallManager) {
         throw new Error('FirewallManager not initialized')
@@ -122,7 +122,7 @@ export class CreateMachineService {
       }
 
       const firewallResult = await this.firewallManager.ensureFirewallForVM(machine.id, machine.departmentId)
-      this.debug.log('info', `Firewall verification: dept=${firewallResult.departmentRulesApplied} rules, vm=${firewallResult.vmRulesApplied} rules (infrastructure created by callbacks)`)
+      this.debug.log('info', `Firewall created: dept=${firewallResult.departmentRulesApplied} rules, vm=${firewallResult.vmRulesApplied} rules`)
 
       // Generate XML with the actual disk path (now includes nwfilter refs)
       const xmlGenerator = await this.generateXML(machine, template, configuration, newIsoPath, pciBus, diskPath)
