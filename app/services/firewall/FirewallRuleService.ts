@@ -205,7 +205,8 @@ export class FirewallRuleService {
   }
 
   /**
-   * Updates rule set sync status after applying to libvirt
+   * Updates rule set sync status after applying to libvirt (legacy)
+   * @deprecated Use updateRuleSetSyncTimestamp for nftables-based firewall
    */
   async updateRuleSetSyncStatus (
     ruleSetId: string,
@@ -222,6 +223,21 @@ export class FirewallRuleService {
     })
 
     debug.log('info', `Updated sync status for rule set: ${ruleSetId}`)
+  }
+
+  /**
+   * Updates rule set sync timestamp after applying rules via nftables.
+   * This method only updates lastSyncedAt, as nftables doesn't use UUIDs or XML.
+   */
+  async updateRuleSetSyncTimestamp (ruleSetId: string): Promise<void> {
+    await this.prisma.firewallRuleSet.update({
+      where: { id: ruleSetId },
+      data: {
+        lastSyncedAt: new Date()
+      }
+    })
+
+    debug.log('info', `Updated sync timestamp for rule set: ${ruleSetId}`)
   }
 
   /**

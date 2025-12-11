@@ -1,3 +1,7 @@
+/**
+ * @deprecated These tests are for legacy libvirt-based firewall services.
+ * See FirewallManagerV2.test.ts and InfinivirtFirewallService tests for current implementation.
+ */
 import { LibvirtNWFilterService } from '@services/firewall/LibvirtNWFilterService'
 
 // Mock the libvirt-node module

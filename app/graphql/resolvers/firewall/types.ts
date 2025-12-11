@@ -124,10 +124,10 @@ export class FirewallRuleSetType {
   @Field(() => Boolean)
     isActive!: boolean
 
-  @Field(() => String, { nullable: true })
+  @Field(() => String, { nullable: true, deprecationReason: 'Este campo es legacy de la arquitectura libvirt y ya no se utiliza con nftables' })
     libvirtUuid?: string
 
-  @Field(() => String, { nullable: true })
+  @Field(() => String, { nullable: true, deprecationReason: 'Este campo es legacy de la arquitectura libvirt y ya no se utiliza con nftables' })
     xmlContent?: string
 
   @Field(() => Date, { nullable: true })
@@ -194,7 +194,7 @@ export class ValidationResultType {
 }
 
 // ============================================================================
-// Operation Result Types
+// Operation Result Types (nftables-based architecture)
 // ============================================================================
 
 @ObjectType()
@@ -208,7 +208,10 @@ export class FlushResultType {
   @Field(() => Int)
     rulesApplied!: number
 
-  @Field(() => String)
+  @Field(() => String, { description: 'Nombre del chain de nftables donde se aplicaron las reglas' })
+    chainName!: string
+
+  @Field(() => String, { deprecationReason: 'Use chainName instead. This field is from the legacy libvirt architecture.' })
     libvirtFilterName!: string
 
   @Field(() => Date)
@@ -245,11 +248,22 @@ export class CleanupResultType {
     filterNames!: string[]
 }
 
-@ObjectType()
-export class LibvirtFilterInfoType {
-  @Field(() => String)
+/**
+ * Representa información de un chain de nftables asociado a una VM.
+ * Mantiene el nombre GraphQL 'LibvirtFilterInfoType' para compatibilidad hacia atrás con clientes existentes.
+ * Los campos internos usan nomenclatura nftables.
+ */
+@ObjectType('LibvirtFilterInfoType', { description: 'Información de un chain de nftables asociado a una VM (anteriormente filtro libvirt)' })
+export class NftablesChainInfoType {
+  @Field(() => String, { description: 'Nombre del chain de nftables' })
+    chainName!: string
+
+  @Field(() => String, { nullable: true, description: 'ID de la VM asociada al chain' })
+    vmId?: string
+
+  @Field(() => String, { deprecationReason: 'Use chainName instead. This field is from the legacy libvirt architecture.' })
     name!: string
 
-  @Field(() => String, { nullable: true })
+  @Field(() => String, { nullable: true, deprecationReason: 'Use vmId instead. This field is from the legacy libvirt architecture.' })
     uuid?: string
 }

@@ -246,3 +246,39 @@ export function isInfinivirtInitialized (): boolean {
 export function getInfinivirtConfig (): typeof INFINIVIRT_CONFIG {
   return { ...INFINIVIRT_CONFIG }
 }
+
+/**
+ * Ejects all CD-ROM devices from a VM after installation completes.
+ *
+ * This removes Windows ISO, VirtIO drivers ISO, and autounattend ISO.
+ * The operation is non-blocking and tolerant to failures.
+ *
+ * @param vmId - The VM identifier
+ */
+export async function ejectAllCdroms (vmId: string): Promise<void> {
+  const infinivirt = await getInfinivirt()
+
+  try {
+    // Query block devices to find CD-ROMs
+    const blocks = await infinivirt.queryBlockDevices(vmId)
+
+    // Find and eject all CD-ROM devices
+    for (const block of blocks) {
+      if (block.removable) {
+        debug.log(`Ejecting CD-ROM device: ${block.device} from VM ${vmId}`)
+        try {
+          await infinivirt.ejectCdrom(vmId, block.device)
+          debug.log(`CD-ROM device ${block.device} ejected successfully`)
+        } catch (ejectError: any) {
+          // Individual eject failures shouldn't stop the process
+          debug.log('warn', `Failed to eject ${block.device}: ${ejectError.message}`)
+        }
+      }
+    }
+
+    debug.log(`All CD-ROMs ejected from VM ${vmId}`)
+  } catch (error: any) {
+    debug.log('warn', `Failed to eject CD-ROMs from VM ${vmId}: ${error.message}`)
+    // Non-fatal: VM can continue running with ISOs mounted
+  }
+}

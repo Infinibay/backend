@@ -10,6 +10,12 @@ import { FirewallRuleService } from './FirewallRuleService'
 const debug = new Debugger('infinibay:service:firewall:manager')
 
 /**
+ * @deprecated Esta es la versión legacy del FirewallManager que utiliza libvirt nwfilters.
+ * Para nuevas implementaciones, usar FirewallManagerV2 que utiliza nftables.
+ *
+ * Este manager se mantiene para compatibilidad con VMs existentes que aún usan nwfilters.
+ * Se recomienda migrar a FirewallManagerV2 para aprovechar las ventajas de nftables.
+ *
  * Result object returned by ensureFirewallForVM operation.
  */
 export interface FirewallSetupResult {
@@ -67,6 +73,12 @@ export interface VMFirewallResyncResult {
 }
 
 /**
+ * @deprecated Esta es la versión legacy del FirewallManager que utiliza libvirt nwfilters.
+ * Para nuevas implementaciones, usar FirewallManagerV2 que utiliza nftables.
+ *
+ * Este manager se mantiene para compatibilidad con VMs existentes que aún usan nwfilters.
+ * Se recomienda migrar a FirewallManagerV2 para aprovechar las ventajas de nftables.
+ *
  * Facade that simplifies complex firewall initialization operations.
  *
  * This manager coordinates between multiple services to provide a clean,

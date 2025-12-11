@@ -1,68 +1,68 @@
-import { FirewallRule, PrismaClient, RuleSetType } from '@prisma/client'
+import { FirewallRule, PrismaClient } from '@prisma/client'
 
+import { type FirewallApplyResult } from '@infinibay/infinivirt'
 import { Debugger } from '@utils/debug'
 
 import { FirewallRuleService } from './FirewallRuleService'
 import { FirewallValidationService } from './FirewallValidationService'
-import { LibvirtNWFilterService } from './LibvirtNWFilterService'
-import { NWFilterXMLGeneratorService } from './NWFilterXMLGeneratorService'
+import { InfinivirtFirewallService } from './InfinivirtFirewallService'
 
 const debug = new Debugger('infinibay:service:firewall:orchestration')
 
 export interface ApplyRulesResult {
-  filterName: string;
   rulesApplied: number;
+  rulesFailed: number;
   success: boolean;
+  chainName: string;
 }
 
 export interface SyncResult {
   errors: string[];
-  filtersCreated: number;
-  filtersUpdated: number;
   success: boolean;
+  vmsProcessed: number;
+  vmsSkipped: number;
   vmsUpdated: number;
 }
 
 /**
  * Orchestration service for firewall rule management operations.
  *
- * This service coordinates validation, XML generation, and libvirt operations
+ * This service coordinates validation, rule conversion, and nftables operations
  * for applying and syncing firewall rules to EXISTING VMs and departments.
  *
  * **Relationship with FirewallManager:**
- * - FirewallManager: Used during VM CREATION to ensure rulesets and filters exist
+ * - FirewallManager: Used during VM CREATION to ensure rulesets exist
  * - FirewallOrchestrationService: Used for RULE MANAGEMENT on existing VMs/departments
  *
  * **Primary Use Cases:**
  * - Apply updated rules to existing VMs (applyVMRules)
  * - Apply updated department rules to all VMs (applyDepartmentRules)
  * - Get effective rules for display (getEffectiveRules)
- * - Sync all firewall state to libvirt (syncAllToLibvirt)
+ * - Sync all firewall state to nftables (syncAllToNftables)
  * - Validate rule conflicts (validateVMRuleAgainstDepartment)
  *
  * **Used By:**
  * - GraphQL resolver: /home/andres/infinibay/backend/app/graphql/resolvers/firewall/resolver.ts
  * - Mutations: createDepartmentFirewallRule, createVMFirewallRule, updateFirewallRule,
- *   deleteFirewallRule, flushFirewallRules, syncFirewallToLibvirt
+ *   deleteFirewallRule, flushFirewallRules, syncFirewallToNftables
  * - Queries: getEffectiveFirewallRules
  *
  * **Design Pattern:** Service Layer with Dependency Injection
  * Coordinates between: FirewallRuleService, FirewallValidationService,
- * NWFilterXMLGeneratorService, LibvirtNWFilterService
+ * InfinivirtFirewallService (nftables-based)
  */
 export class FirewallOrchestrationService {
   constructor (
     private prisma: PrismaClient,
     private ruleService: FirewallRuleService,
     private validationService: FirewallValidationService,
-    private xmlGenerator: NWFilterXMLGeneratorService,
-    private libvirtService: LibvirtNWFilterService
+    private infinivirtService: InfinivirtFirewallService
   ) { }
 
   /**
-   * Calculates effective rules for a VM by merging department and VM rules
-   * NOTE: This method is now only used for preview/display purposes.
-   * Actual firewall enforcement uses filter inheritance in libvirt.
+   * Calculates effective rules for a VM by merging department and VM rules.
+   * NOTE: This method is only used for preview/display purposes.
+   * Actual firewall enforcement applies rules directly via nftables.
    */
   async getEffectiveRules (vmId: string): Promise<FirewallRule[]> {
     const vm = await this.prisma.machine.findUnique({
@@ -110,12 +110,11 @@ export class FirewallOrchestrationService {
   }
 
   /**
-   * Applies firewall rules to a VM using filter inheritance.
-   * VM filter inherits from department filter via <filterref>.
-   * Only VM-specific rules are stored in the VM filter.
+   * Applies firewall rules to a VM via nftables.
+   * Department and VM-specific rules are merged and applied directly to the TAP device.
    *
-   * NOTE: This method ONLY creates/updates the nwfilter in libvirt.
-   * It does NOT modify the VM's XML - that must be done via XMLGenerator during VM creation/update.
+   * NOTE: This method applies rules directly via nftables to the VM's TAP device.
+   * The VM must have a TAP device configured (typically happens when the VM is running).
    */
   async applyVMRules (vmId: string): Promise<ApplyRulesResult> {
     debug.log('info', `Applying VM rules for ${vmId}`)
@@ -145,12 +144,8 @@ export class FirewallOrchestrationService {
       throw new Error(`VM ${vmId} has no department assigned`)
     }
 
-    // Ensure department filter exists first
-    if (vm.department.firewallRuleSet) {
-      await this.applyDepartmentRules(vm.department.id)
-    }
-
-    // Get VM-specific rules only (not department rules - those are inherited)
+    // Get rules from both department and VM
+    const deptRules = vm.department.firewallRuleSet?.rules || []
     const vmRules = vm.firewallRuleSet?.rules || []
 
     // Validate VM rules for conflicts
@@ -161,50 +156,39 @@ export class FirewallOrchestrationService {
       throw new Error(errorMsg)
     }
 
-    // Generate filter names
-    const vmFilterName = this.xmlGenerator.generateFilterName(RuleSetType.VM, vmId)
-    const deptFilterName = this.xmlGenerator.generateFilterName(
-      RuleSetType.DEPARTMENT,
-      vm.department.id
+    // Convert Prisma rules to nftables input format
+    const deptRulesInput = this.infinivirtService.convertPrismaRulesToInput(deptRules)
+    const vmRulesInput = this.infinivirtService.convertPrismaRulesToInput(vmRules)
+
+    // Apply rules via nftables
+    const result: FirewallApplyResult = await this.infinivirtService.applyVMRules(
+      vmId,
+      deptRulesInput,
+      vmRulesInput
     )
 
-    // Get existing UUID if filter already exists (for redefinition)
-    const existingUuid = await this.libvirtService.getFilterUuid(vmFilterName)
-
-    // Generate VM filter XML with department filter reference
-    const filterXML = await this.xmlGenerator.generateFilterXML(
-      {
-        name: vmFilterName,
-        rules: vmRules
-      },
-      deptFilterName, // Inherit from department filter
-      existingUuid || undefined // Use existing UUID if available
-    )
-
-    // Apply in libvirt (creates/updates the nwfilter definition)
-    const libvirtUuid = await this.libvirtService.defineFilter(filterXML)
-
-    // Update rule set sync status
+    // Update rule set sync status (timestamp only)
     if (vm.firewallRuleSet?.id) {
-      await this.ruleService.updateRuleSetSyncStatus(vm.firewallRuleSet.id, libvirtUuid, filterXML)
+      await this.ruleService.updateRuleSetSyncTimestamp(vm.firewallRuleSet.id)
     }
 
     debug.log(
       'info',
-      `Successfully created/updated VM nwfilter: ${vmRules.length} own rules + inherited from ${deptFilterName}`
+      `Successfully applied firewall rules to VM ${vmId}: ${result.appliedRules}/${result.totalRules} rules (${deptRules.length} dept + ${vmRules.length} vm)`
     )
 
     return {
-      success: true,
-      filterName: vmFilterName,
-      rulesApplied: vmRules.length
+      success: result.failedRules === 0,
+      rulesApplied: result.appliedRules,
+      rulesFailed: result.failedRules,
+      chainName: result.chainName
     }
   }
 
   /**
-   * Applies department rules by updating ONLY the department filter.
-   * All VMs automatically inherit changes via <filterref>.
-   * This is O(1) instead of O(N) where N = number of VMs.
+   * Applies department rules to all VMs in the department via nftables.
+   * Each VM receives both department and its own VM-specific rules.
+   * This is O(N) where N = number of VMs in the department.
    */
   async applyDepartmentRules (deptId: string): Promise<SyncResult> {
     debug.log('info', `Applying department rules for ${deptId}`)
@@ -212,7 +196,6 @@ export class FirewallOrchestrationService {
     const department = await this.prisma.department.findUnique({
       where: { id: deptId },
       include: {
-        machines: true,
         firewallRuleSet: {
           include: { rules: true }
         }
@@ -233,99 +216,123 @@ export class FirewallOrchestrationService {
       throw new Error(errorMsg)
     }
 
-    // Generate department filter name
-    const deptFilterName = this.xmlGenerator.generateFilterName(RuleSetType.DEPARTMENT, deptId)
+    // Convert department rules to nftables input format
+    const deptRulesInput = this.infinivirtService.convertPrismaRulesToInput(deptRules)
 
-    // Get existing UUID if filter already exists (for redefinition)
-    const existingUuid = await this.libvirtService.getFilterUuid(deptFilterName)
+    // Apply rules to all VMs in the department via InfinivirtFirewallService
+    const { totalVms, vmsUpdated, errors } = await this.infinivirtService.applyDepartmentRules(
+      deptId,
+      deptRulesInput
+    )
 
-    // Generate department filter XML (no parent - this is the base filter)
-    const filterXML = await this.xmlGenerator.generateFilterXML({
-      name: deptFilterName,
-      rules: deptRules
-    }, undefined, existingUuid || undefined)
-
-    debug.log('debug', `Generated department filter XML with ${existingUuid ? 'existing' : 'new'} UUID`)
-
-    // Apply in libvirt - this is the ONLY update needed
-    const libvirtUuid = await this.libvirtService.defineFilter(filterXML)
-
-    // Update rule set sync status
+    // Update rule set sync status (timestamp only)
     if (department.firewallRuleSet?.id) {
-      await this.ruleService.updateRuleSetSyncStatus(
-        department.firewallRuleSet.id,
-        libvirtUuid,
-        filterXML
-      )
+      await this.ruleService.updateRuleSetSyncTimestamp(department.firewallRuleSet.id)
     }
 
     debug.log(
       'info',
-      `Successfully updated department filter ${deptFilterName} with ${deptRules.length} rules. ${department.machines.length} VMs inherit automatically.`
+      `Department rules applied: ${vmsUpdated} VMs updated, ${errors.length} errors`
     )
 
-    // Note: VMs don't need individual updates - they inherit via <filterref>
-    const errors: string[] = []
-    const vmsUpdated = department.machines.length
+    // Consider success if the only errors are VMs without TAP devices (same semantics as syncAllToNftables)
+    const criticalErrors = errors.filter(e => !e.includes('no TAP device'))
 
     return {
-      success: errors.length === 0,
-      filtersCreated: 0,
-      filtersUpdated: vmsUpdated,
+      success: criticalErrors.length === 0,
+      vmsProcessed: totalVms,
+      vmsSkipped: errors.filter(e => e.includes('no TAP device')).length,
       vmsUpdated,
       errors
     }
   }
 
   /**
-   * Syncs all firewall configurations to libvirt
+   * Syncs all firewall configurations to nftables for all active VMs.
+   * Iterates over all VMs with TAP devices configured and applies their firewall rules.
    */
-  async syncAllToLibvirt (): Promise<SyncResult> {
-    debug.log('info', 'Starting full firewall sync to libvirt')
+  async syncAllToNftables (): Promise<SyncResult> {
+    debug.log('info', 'Starting full firewall sync to nftables')
 
-    const ruleSets = await this.ruleService.getAllActiveRuleSets()
+    // Get all VMs with their departments and rules
+    const machines = await this.prisma.machine.findMany({
+      include: {
+        configuration: true,
+        department: {
+          include: {
+            firewallRuleSet: {
+              include: { rules: true }
+            }
+          }
+        },
+        firewallRuleSet: {
+          include: { rules: true }
+        }
+      }
+    })
+
     const errors: string[] = []
-    let filtersCreated = 0
-    let filtersUpdated = 0
+    let vmsProcessed = 0
+    let vmsSkipped = 0
+    let vmsUpdated = 0
 
-    for (const ruleSet of ruleSets) {
+    for (const machine of machines) {
+      vmsProcessed++
+
+      // Skip VMs without TAP device configured
+      if (!machine.configuration?.tapDeviceName) {
+        const msg = `VM ${machine.id} (${machine.name}) has no TAP device configured, skipping`
+        debug.log('warn', msg)
+        errors.push(msg)
+        vmsSkipped++
+        continue
+      }
+
       try {
-        const filterName = this.xmlGenerator.generateFilterName(ruleSet.entityType, ruleSet.entityId)
+        // Get rules from both department and VM
+        const deptRules = machine.department?.firewallRuleSet?.rules || []
+        const vmRules = machine.firewallRuleSet?.rules || []
 
-        // Check if filter already exists and get its UUID
-        const exists = await this.libvirtService.filterExists(filterName)
-        const existingUuid = exists ? await this.libvirtService.getFilterUuid(filterName) : null
+        // Convert Prisma rules to nftables input format
+        const deptRulesInput = this.infinivirtService.convertPrismaRulesToInput(deptRules)
+        const vmRulesInput = this.infinivirtService.convertPrismaRulesToInput(vmRules)
 
-        const filterXML = await this.xmlGenerator.generateFilterXML({
-          name: filterName,
-          rules: ruleSet.rules
-        }, undefined, existingUuid || undefined)
+        // Apply rules via nftables
+        const result = await this.infinivirtService.applyVMRules(
+          machine.id,
+          deptRulesInput,
+          vmRulesInput
+        )
 
-        // Define/update filter
-        const libvirtUuid = await this.libvirtService.defineFilter(filterXML)
+        // Update sync timestamps
+        if (machine.firewallRuleSet?.id) {
+          await this.ruleService.updateRuleSetSyncTimestamp(machine.firewallRuleSet.id)
+        }
+        if (machine.department?.firewallRuleSet?.id) {
+          await this.ruleService.updateRuleSetSyncTimestamp(machine.department.firewallRuleSet.id)
+        }
 
-        // Update sync status
-        await this.ruleService.updateRuleSetSyncStatus(ruleSet.id, libvirtUuid, filterXML)
+        vmsUpdated++
 
-        if (exists) {
-          filtersUpdated++
-        } else {
-          filtersCreated++
+        if (result.failedRules > 0) {
+          const msg = `VM ${machine.id} (${machine.name}): ${result.failedRules}/${result.totalRules} rules failed`
+          debug.log('warn', msg)
+          errors.push(msg)
         }
       } catch (err) {
-        const errorMsg = `Failed to sync rule set ${ruleSet.id}: ${err}`
+        const errorMsg = `Failed to sync VM ${machine.id} (${machine.name}): ${err}`
         debug.log('error', errorMsg)
         errors.push(errorMsg)
       }
     }
 
-    debug.log('info', `Sync complete: ${filtersCreated} created, ${filtersUpdated} updated`)
+    debug.log('info', `Sync complete: ${vmsUpdated} VMs updated, ${vmsSkipped} skipped, ${errors.length} errors`)
 
     return {
-      success: errors.length === 0,
-      filtersCreated,
-      filtersUpdated,
-      vmsUpdated: 0,
+      success: errors.filter(e => !e.includes('no TAP device')).length === 0,
+      vmsProcessed,
+      vmsSkipped,
+      vmsUpdated,
       errors
     }
   }

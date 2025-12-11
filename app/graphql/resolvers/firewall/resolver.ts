@@ -4,13 +4,11 @@ import { UserInputError } from 'apollo-server-errors'
 import { getEventManager } from '@services/EventManager'
 import { InfinibayContext } from '@utils/context'
 import { Debugger } from '@utils/debug'
-import { getLibvirtConnection } from '@utils/libvirt'
 
 import { FirewallOrchestrationService } from '@services/firewall/FirewallOrchestrationService'
 import { FirewallRuleService } from '@services/firewall/FirewallRuleService'
 import { FirewallValidationService } from '@services/firewall/FirewallValidationService'
-import { LibvirtNWFilterService } from '@services/firewall/LibvirtNWFilterService'
-import { NWFilterXMLGeneratorService } from '@services/firewall/NWFilterXMLGeneratorService'
+import { InfinivirtFirewallService } from '@services/firewall/InfinivirtFirewallService'
 
 import { FirewallRule, RuleSetType } from '@prisma/client'
 
@@ -22,7 +20,7 @@ import {
   FirewallRuleSetType,
   FirewallRuleType,
   FlushResultType,
-  LibvirtFilterInfoType,
+  NftablesChainInfoType,
   SyncResultType,
   ValidationResultType
 } from './types'
@@ -72,20 +70,18 @@ export class FirewallResolver {
 
   // Initialize services
   private async getServices (ctx: InfinibayContext) {
-    const conn = await getLibvirtConnection()
     const ruleService = new FirewallRuleService(ctx.prisma)
     const validationService = new FirewallValidationService()
-    const xmlGenerator = new NWFilterXMLGeneratorService()
-    const libvirtService = new LibvirtNWFilterService(conn)
+    const infinivirtService = new InfinivirtFirewallService(ctx.prisma)
+    await infinivirtService.initialize()
     const orchestrationService = new FirewallOrchestrationService(
       ctx.prisma,
       ruleService,
       validationService,
-      xmlGenerator,
-      libvirtService
+      infinivirtService
     )
 
-    return { ruleService, validationService, xmlGenerator, libvirtService, orchestrationService }
+    return { ruleService, validationService, infinivirtService, orchestrationService }
   }
 
   // ============================================================================
@@ -208,18 +204,21 @@ export class FirewallResolver {
     return this.convertValidationResult(validation)
   }
 
-  @Query(() => [LibvirtFilterInfoType])
+  @Query(() => [NftablesChainInfoType])
   @Authorized('ADMIN')
   async listInfinibayFilters (
     @Ctx() ctx: InfinibayContext
-  ): Promise<LibvirtFilterInfoType[]> {
-    const { libvirtService } = await this.getServices(ctx)
+  ): Promise<NftablesChainInfoType[]> {
+    const { infinivirtService } = await this.getServices(ctx)
 
-    const filterNames = await libvirtService.listAllInfinibayFilters()
+    const vmChains = await infinivirtService.listVMChains()
 
-    return filterNames.map(name => ({
-      name,
-      uuid: undefined
+    return vmChains.map(chain => ({
+      chainName: chain.chainName,
+      vmId: chain.vmId,
+      // Deprecated fields for backward compatibility
+      name: chain.chainName,
+      uuid: chain.vmId
     }))
   }
 
@@ -234,7 +233,7 @@ export class FirewallResolver {
     @Arg('input') input: CreateFirewallRuleInput,
     @Ctx() ctx: InfinibayContext
   ): Promise<FirewallRuleType> {
-    const { ruleService, validationService, xmlGenerator, orchestrationService } = await this.getServices(ctx)
+    const { ruleService, validationService, orchestrationService } = await this.getServices(ctx)
 
     // Check if department exists
     const department = await ctx.prisma.department.findUnique({
@@ -253,7 +252,7 @@ export class FirewallResolver {
     // Create rule set if it doesn't exist
     let ruleSet = department.firewallRuleSet
     if (!ruleSet) {
-      const internalName = xmlGenerator.generateFilterName(RuleSetType.DEPARTMENT, departmentId)
+      const internalName = `department_${departmentId.substring(0, 8)}`
       ruleSet = await ruleService.createRuleSet(
         RuleSetType.DEPARTMENT,
         departmentId,
@@ -328,7 +327,7 @@ export class FirewallResolver {
     @Arg('input') input: CreateFirewallRuleInput,
     @Ctx() ctx: InfinibayContext
   ): Promise<FirewallRuleType> {
-    const { ruleService, validationService, xmlGenerator, orchestrationService } = await this.getServices(ctx)
+    const { ruleService, validationService, orchestrationService } = await this.getServices(ctx)
 
     // Check if VM exists
     const vm = await ctx.prisma.machine.findUnique({
@@ -347,7 +346,7 @@ export class FirewallResolver {
     // Create rule set if it doesn't exist
     let ruleSet = vm.firewallRuleSet
     if (!ruleSet) {
-      const internalName = xmlGenerator.generateFilterName(RuleSetType.VM, vmId)
+      const internalName = `vm_${vmId.substring(0, 8)}`
       ruleSet = await ruleService.createRuleSet(
         RuleSetType.VM,
         vmId,
@@ -541,7 +540,9 @@ export class FirewallResolver {
       success: result.success,
       vmId,
       rulesApplied: result.rulesApplied,
-      libvirtFilterName: result.filterName,
+      chainName: result.chainName,
+      // Deprecated field for backward compatibility
+      libvirtFilterName: result.chainName,
       timestamp: new Date()
     }
   }
@@ -553,9 +554,17 @@ export class FirewallResolver {
   ): Promise<SyncResultType> {
     const { orchestrationService } = await this.getServices(ctx)
 
-    const result = await orchestrationService.syncAllToLibvirt()
+    const result = await orchestrationService.syncAllToNftables()
 
-    return result
+    // Note: nftables always replaces chains, so there's no distinction between
+    // "create" and "update". Both fields reflect the count of VMs successfully synced.
+    return {
+      success: result.success,
+      filtersCreated: result.vmsUpdated,
+      filtersUpdated: result.vmsUpdated,
+      vmsUpdated: result.vmsUpdated,
+      errors: result.errors
+    }
   }
 
   @Mutation(() => CleanupResultType)
@@ -563,14 +572,26 @@ export class FirewallResolver {
   async cleanupInfinibayFirewall (
     @Ctx() ctx: InfinibayContext
   ): Promise<CleanupResultType> {
-    const { libvirtService } = await this.getServices(ctx)
+    const { infinivirtService } = await this.getServices(ctx)
 
-    const result = await libvirtService.cleanupAllInfinibayFilters()
+    const vmChains = await infinivirtService.listVMChains()
+
+    const removed: string[] = []
+    let hadErrors = false
+    for (const chain of vmChains) {
+      try {
+        await infinivirtService.removeVMFirewall(chain.vmId)
+        removed.push(chain.chainName)
+      } catch (error) {
+        hadErrors = true
+        debug.log('error', `Failed to remove chain ${chain.chainName}: ${error}`)
+      }
+    }
 
     return {
-      success: true,
-      filtersRemoved: result.removed.length,
-      filterNames: result.removed
+      success: !hadErrors,
+      filtersRemoved: removed.length,
+      filterNames: removed
     }
   }
 }

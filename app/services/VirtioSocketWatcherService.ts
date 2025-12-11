@@ -1005,6 +1005,9 @@ export class VirtioSocketWatcherService extends EventEmitter {
 
       switch (msgType) {
         case 'metrics':
+          // Check if this is the first message from infiniservice (VM just completed setup)
+          await this.handleFirstInfiniserviceMessage(connection.vmId)
+
           // Store metrics in database
           await this.storeMetrics(connection.vmId, message as MetricsMessage)
           break
@@ -1507,6 +1510,67 @@ export class VirtioSocketWatcherService extends EventEmitter {
       DiskCleanup: 'DiskSpace'
     }
     return mapping[commandType] || commandType
+  }
+
+  /**
+   * Handles the first message from infiniservice.
+   * Transitions VM from 'building' to 'running' and ejects installation ISOs.
+   */
+  private async handleFirstInfiniserviceMessage(vmId: string): Promise<void> {
+    try {
+      // Get machine with configuration
+      const machine = await prisma.machine.findUnique({
+        where: { id: vmId },
+        include: { configuration: true }
+      })
+
+      if (!machine || !machine.configuration) {
+        return
+      }
+
+      // Check if already setup complete - skip if already done
+      if (machine.configuration.setupComplete) {
+        return
+      }
+
+      // Check if VM is in 'building' state
+      if (machine.status !== 'building') {
+        return
+      }
+
+      this.debug.log('info', `First infiniservice message from VM ${vmId} - completing setup`)
+
+      // 1. Mark setup as complete
+      await prisma.machineConfiguration.update({
+        where: { machineId: vmId },
+        data: { setupComplete: true }
+      })
+
+      // 2. Update VM status to 'running'
+      await prisma.machine.update({
+        where: { id: vmId },
+        data: { status: 'running' }
+      })
+
+      // 3. Eject all CD-ROMs (async, non-blocking)
+      const { ejectAllCdroms } = await import('./InfinivirtService')
+      ejectAllCdroms(vmId).catch(err => {
+        this.debug.log('warn', `Failed to eject CD-ROMs: ${err.message}`)
+      })
+
+      // 4. Emit event to frontend
+      if (this.vmEventManager) {
+        await this.vmEventManager.handleEvent('update', {
+          id: vmId,
+          status: 'running'
+        })
+      }
+
+      this.debug.log('info', `VM ${vmId} setup complete - status changed to running`)
+
+    } catch (error: any) {
+      this.debug.log('error', `Error handling first infiniservice message: ${error.message}`)
+    }
   }
 
   // Store metrics in database

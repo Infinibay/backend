@@ -1,3 +1,7 @@
+/**
+ * @deprecated These tests are for legacy libvirt-based firewall services.
+ * See FirewallManagerV2.test.ts and InfinivirtFirewallService tests for current implementation.
+ */
 import type { Connection } from '@infinibay/libvirt-node'
 import { PrismaClient, RuleSetType } from '@prisma/client'
 

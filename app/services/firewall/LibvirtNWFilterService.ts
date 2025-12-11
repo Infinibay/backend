@@ -5,6 +5,14 @@ import { Debugger } from '@utils/debug'
 const debug = new Debugger('infinibay:service:firewall:libvirt')
 
 /**
+ * @deprecated Este servicio es parte de la arquitectura legacy basada en libvirt nwfilter.
+ * La nueva arquitectura utiliza nftables a través de InfinivirtFirewallService.
+ * Este servicio se mantiene solo para compatibilidad con código legacy y será eliminado en futuras versiones.
+ *
+ * Para nuevas implementaciones, usar:
+ * - InfinivirtFirewallService para operaciones de firewall
+ * - FirewallOrchestrationService para orquestación de alto nivel
+ *
  * Service responsible for interacting with libvirt nwfilter subsystem.
  * Handles defining and undefining network filters.
  * NOTE: Does NOT modify VM XML - that's XMLGenerator's responsibility.
@@ -13,6 +21,7 @@ export class LibvirtNWFilterService {
   constructor (private conn: Connection) { }
 
   /**
+   * @deprecated Use InfinivirtFirewallService.applyVMFirewall() instead
    * Defines a new nwfilter in libvirt from XML
    * @returns UUID of the created filter
    */
@@ -37,6 +46,7 @@ export class LibvirtNWFilterService {
   }
 
   /**
+   * @deprecated Use InfinivirtFirewallService.removeVMFirewall() instead
    * Removes a filter from libvirt
    */
   async undefineFilter (name: string): Promise<void> {
@@ -51,6 +61,7 @@ export class LibvirtNWFilterService {
   }
 
   /**
+   * @deprecated Use InfinivirtFirewallService.listVMChains() instead
    * Lists all nwfilters with 'ibay-' prefix
    */
   async listAllInfinibayFilters (): Promise<string[]> {
@@ -66,6 +77,7 @@ export class LibvirtNWFilterService {
   }
 
   /**
+   * @deprecated Use InfinivirtFirewallService to remove individual VM firewalls
    * Removes all Infinibay nwfilters (for cleanup/uninstall)
    * @returns List of removed filter names
    */
@@ -87,6 +99,7 @@ export class LibvirtNWFilterService {
   }
 
   /**
+   * @deprecated nftables architecture does not use XML descriptions
    * Gets filter XML description
    */
   async getFilterXML (filterName: string): Promise<string | null> {
@@ -100,6 +113,7 @@ export class LibvirtNWFilterService {
   }
 
   /**
+   * @deprecated Use InfinivirtFirewallService.listVMChains() to check for existing chains
    * Checks if a filter exists in libvirt.
    *
    * This method safely handles exceptions from lookupByName and returns
@@ -120,6 +134,7 @@ export class LibvirtNWFilterService {
   }
 
   /**
+   * @deprecated nftables architecture does not use UUIDs for chain identification
    * Gets the UUID of an existing filter by name.
    *
    * @param filterName - The name of the filter

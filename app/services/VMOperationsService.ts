@@ -97,7 +97,7 @@ export class VMOperationsService {
       const infinivirt = await getInfinivirt()
       const result = await infinivirt.stopVM(machineId, {
         graceful: true,
-        timeout: 30000, // 30 seconds
+        timeout: 120000, // 2 minutes
         force: true // Force kill if timeout
       })
 

@@ -1,3 +1,7 @@
+/**
+ * @deprecated These tests are for legacy libvirt-based firewall services.
+ * See FirewallManagerV2.test.ts and InfinivirtFirewallService tests for current implementation.
+ */
 import { NWFilterXMLGeneratorService } from '@services/firewall/NWFilterXMLGeneratorService'
 import { FirewallRule, RuleAction, RuleDirection, RuleSetType } from '@prisma/client'
 import xml2js from 'xml2js'

@@ -138,9 +138,11 @@ export class CreateMachineServiceV2 {
         }
       })
 
-      // Status is already set to 'running' by infinivirt
-      // Update anyway to ensure consistency
-      await this.updateMachineStatus(machine.id, 'running')
+      // Status remains 'building' until infiniservice connects for the first time.
+      // VirtioSocketWatcherService will change it to 'running' when it receives
+      // the first message from infiniservice, indicating the VM has completed
+      // its initial setup (OS installation, infiniservice startup).
+      this.debug.log('info', `VM ${machine.name} started - waiting for infiniservice connection`)
 
       return true
     } catch (error: any) {

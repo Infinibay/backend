@@ -340,12 +340,12 @@ type FirewallRuleSetType {
   internalName: String!
   isActive: Boolean!
   lastSyncedAt: DateTimeISO
-  libvirtUuid: String
+  libvirtUuid: String @deprecated(reason: "Este campo es legacy de la arquitectura libvirt y ya no se utiliza con nftables")
   name: String!
   priority: Int!
   rules: [FirewallRuleType!]!
   updatedAt: DateTimeISO!
-  xmlContent: String
+  xmlContent: String @deprecated(reason: "Este campo es legacy de la arquitectura libvirt y ya no se utiliza con nftables")
 }
 
 type FirewallRuleType {
@@ -377,7 +377,9 @@ input FirstBootScriptInputType {
 }
 
 type FlushResultType {
-  libvirtFilterName: String!
+  """Nombre del chain de nftables donde se aplicaron las reglas"""
+  chainName: String!
+  libvirtFilterName: String! @deprecated(reason: "Use chainName instead. This field is from the legacy libvirt architecture.")
   rulesApplied: Int!
   success: Boolean!
   timestamp: DateTimeISO!
@@ -550,9 +552,17 @@ type KeepAliveMetrics {
   successRate: String!
 }
 
+"""
+Información de un chain de nftables asociado a una VM (anteriormente filtro libvirt)
+"""
 type LibvirtFilterInfoType {
-  name: String!
-  uuid: String
+  """Nombre del chain de nftables"""
+  chainName: String!
+  name: String! @deprecated(reason: "Use chainName instead. This field is from the legacy libvirt architecture.")
+  uuid: String @deprecated(reason: "Use vmId instead. This field is from the legacy libvirt architecture.")
+
+  """ID de la VM asociada al chain"""
+  vmId: String
 }
 
 """Login response with user data and token"""

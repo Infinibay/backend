@@ -217,6 +217,13 @@ model MachineConfiguration {
   enableAudio             Boolean? @default(false)
   // Enable USB tablet for absolute mouse positioning
   enableUsbTablet         Boolean? @default(true)
+
+  // ============================================================================
+  // INSTALLATION STATE TRACKING
+  // ============================================================================
+  // true = VM has completed initial setup (infiniservice connected for first time)
+  // false/null = VM still in building/installation phase
+  setupComplete           Boolean? @default(false)
 }
 
 model MachineTemplate {
