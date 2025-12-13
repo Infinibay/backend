@@ -1,7 +1,6 @@
 import { PrismaClient, Machine } from '@prisma/client'
 import { VirtioSocketWatcherService, SafeCommandType, CommandResponse } from './VirtioSocketWatcherService'
-import { Machine as VirtualMachine } from '@infinibay/libvirt-node'
-import { getLibvirtConnection } from '@utils/libvirt'
+import { getInfinivirt } from './InfinivirtService'
 import Debug from 'debug'
 
 const debug = Debug('infinibay:process-manager')
@@ -47,9 +46,9 @@ export class ProcessManager {
   }
 
   /**
-   * Get domain and verify VM is running
+   * Get machine and verify VM is running
    */
-  private async getDomain (machineId: string): Promise<{ machine: Machine; domain: any } | null> {
+  private async getRunningMachine (machineId: string): Promise<{ machine: Machine } | null> {
     try {
       const machine = await this.prisma.machine.findUnique({
         where: { id: machineId }
@@ -60,32 +59,18 @@ export class ProcessManager {
         return null
       }
 
-      // Get shared libvirt connection
-      const conn = await getLibvirtConnection()
-      if (!conn) {
-        debug('Failed to get libvirt connection')
-        return null
-      }
+      // Check if VM is running via infinivirt
+      const infinivirt = await getInfinivirt()
+      const status = await infinivirt.getVMStatus(machineId)
 
-      // Try to get domain from libvirt regardless of database status
-      const domain = VirtualMachine.lookupByName(conn, machine.internalName)
-
-      if (!domain) {
-        debug(`Domain not found for machine ${machine.internalName}`)
-        return null
-      }
-
-      const stateResult = domain.getState()
-      const state = stateResult ? stateResult.result : null
-      // VIR_DOMAIN_RUNNING = 1
-      if (state !== 1) {
-        debug(`Domain ${machine.internalName} is not in running state (state: ${state})`)
+      if (!status.processAlive) {
+        debug(`Machine ${machine.internalName} is not running (processAlive: false)`)
         return null
       }
 
       // Update machine status in DB if it's different
       if (machine.status !== 'running') {
-        debug(`Updating machine ${machineId} status from '${machine.status}' to 'running' based on libvirt state`)
+        debug(`Updating machine ${machineId} status from '${machine.status}' to 'running' based on infinivirt state`)
         await this.prisma.machine.update({
           where: { id: machineId },
           data: { status: 'running' }
@@ -93,9 +78,9 @@ export class ProcessManager {
         machine.status = 'running'
       }
 
-      return { machine, domain }
+      return { machine }
     } catch (error) {
-      debug(`Failed to get domain for machine ${machineId}: ${error}`)
+      debug(`Failed to verify machine ${machineId} is running: ${error}`)
       return null
     }
   }
@@ -105,8 +90,8 @@ export class ProcessManager {
    */
   async listProcesses (machineId: string, limit?: number): Promise<InternalProcessInfo[]> {
     try {
-      const domainInfo = await this.getDomain(machineId)
-      if (!domainInfo) {
+      const machineInfo = await this.getRunningMachine(machineId)
+      if (!machineInfo) {
         throw new Error(`Machine ${machineId} is not available`)
       }
 
@@ -150,8 +135,8 @@ export class ProcessManager {
     sortBy: ProcessSortBy = ProcessSortBy.CPU
   ): Promise<InternalProcessInfo[]> {
     try {
-      const domainInfo = await this.getDomain(machineId)
-      if (!domainInfo) {
+      const machineInfo = await this.getRunningMachine(machineId)
+      if (!machineInfo) {
         throw new Error(`Machine ${machineId} is not available`)
       }
 
@@ -197,8 +182,8 @@ export class ProcessManager {
     force: boolean = false
   ): Promise<InternalProcessControlResult> {
     try {
-      const domainInfo = await this.getDomain(machineId)
-      if (!domainInfo) {
+      const machineInfo = await this.getRunningMachine(machineId)
+      if (!machineInfo) {
         throw new Error(`Machine ${machineId} is not available`)
       }
 

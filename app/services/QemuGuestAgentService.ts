@@ -1,6 +1,6 @@
 import { Debugger } from '../utils/debug'
-import { getLibvirtConnection } from '../utils/libvirt'
-import { Connection, Machine } from '@infinibay/libvirt-node'
+import { getInfinivirt } from './InfinivirtService'
+import { Infinivirt } from '@infinibay/infinivirt'
 
 /**
  * Service for interacting with QEMU Guest Agent to debug VM issues
@@ -9,53 +9,48 @@ import { Connection, Machine } from '@infinibay/libvirt-node'
  */
 export class QemuGuestAgentService {
   private debug: Debugger
-  private libvirt: Connection | null = null
+  private infinivirt: Infinivirt | null = null
 
   constructor () {
     this.debug = new Debugger('qemu-guest-agent')
   }
 
   /**
-   * Initialize the service with libvirt connection
+   * Initialize the service with infinivirt connection
    */
   async initialize (): Promise<void> {
     try {
-      this.libvirt = await getLibvirtConnection()
+      this.infinivirt = await getInfinivirt()
       this.debug.log('info', 'QEMU Guest Agent Service initialized')
     } catch (error) {
-      this.debug.log('error', `Failed to initialize libvirt connection: ${error}`)
+      this.debug.log('error', `Failed to initialize infinivirt: ${error}`)
       throw error
     }
   }
 
   /**
    * Execute a command inside a VM using QEMU Guest Agent
-   * Note: This requires qemuAgentCommand to be implemented in libvirt-node
+   * Note: This requires qemuAgentCommand to be implemented in infinivirt
    */
   async executeCommand (
     vmId: string,
     command: string,
     args: string[] = []
   ): Promise<{ success: boolean; output?: string; error?: string }> {
-    if (!this.libvirt) {
+    if (!this.infinivirt) {
       throw new Error('Service not initialized. Call initialize() first.')
     }
 
     try {
-      const domain = Machine.lookupByUuidString(this.libvirt, vmId)
-      if (!domain) {
-        return { success: false, error: `VM ${vmId} not found` }
-      }
-
-      // Check if domain is running
-      const state = domain.getState()
-      if (state && state.result !== 1) { // 1 = VIR_DOMAIN_RUNNING
+      // Check if VM is running via infinivirt
+      const status = await this.infinivirt.getVMStatus(vmId)
+      if (!status.processAlive) {
         return { success: false, error: `VM ${vmId} is not running` }
       }
 
-      // Note: qemuAgentCommand is not yet implemented in libvirt-node
+      // Note: qemuAgentCommand is not yet implemented in infinivirt
       // This is a placeholder for when it becomes available
-      this.debug.log('warn', 'qemuAgentCommand is not yet implemented in libvirt-node')
+      this.debug.log('warn', 'qemuAgentCommand is not yet implemented in infinivirt')
 
       // For now, provide manual debugging instructions
       const virshCommand = this.buildVirshCommand(vmId, command, args)
@@ -67,7 +62,7 @@ export class QemuGuestAgentService {
         output: virshCommand
       }
 
-      // Future implementation when qemuAgentCommand is available:
+      // Future implementation when qemuAgentCommand is available in infinivirt:
       /*
       const guestExecCmd = {
         execute: 'guest-exec',
@@ -78,7 +73,7 @@ export class QemuGuestAgentService {
         }
       }
 
-      const result = await domain.qemuAgentCommand(JSON.stringify(guestExecCmd), 30, 0)
+      const result = await this.infinivirt.qemuAgentCommand(vmId, JSON.stringify(guestExecCmd), 30)
       const resultObj = JSON.parse(result)
 
       // Wait for command completion
@@ -90,7 +85,7 @@ export class QemuGuestAgentService {
           arguments: { pid: resultObj.pid }
         }
 
-        const status = await domain.qemuAgentCommand(JSON.stringify(statusCmd), 30, 0)
+        const status = await this.infinivirt.qemuAgentCommand(vmId, JSON.stringify(statusCmd), 30)
         const statusObj = JSON.parse(status)
 
         if (statusObj.exited) {
@@ -231,24 +226,18 @@ export class QemuGuestAgentService {
     diagnostics.push('')
 
     // Check VM state
-    if (this.libvirt) {
+    if (this.infinivirt) {
       try {
-        const domain = Machine.lookupByUuidString(this.libvirt, vmId)
-        if (domain) {
-          const state = domain.getState()
-          if (state) {
-            diagnostics.push(`VM State: ${this.getStateName(state.result)}`)
-
-            if (state.result !== 1) {
-              recommendations.push('• VM is not running. Start the VM first.')
-            }
-          }
+        const status = await this.infinivirt.getVMStatus(vmId)
+        if (status.processAlive) {
+          diagnostics.push('VM State: Running')
         } else {
-          diagnostics.push('VM State: Not found')
-          recommendations.push('• VM not found in libvirt. Check VM ID.')
+          diagnostics.push(`VM State: ${status.status || 'Not Running'}`)
+          recommendations.push('• VM is not running. Start the VM first.')
         }
       } catch (error) {
         diagnostics.push(`VM State: Error checking - ${error}`)
+        recommendations.push('• VM not found. Check VM ID.')
       }
     }
 
