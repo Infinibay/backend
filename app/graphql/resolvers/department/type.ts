@@ -19,6 +19,12 @@ export class DepartmentType {
 
   @Field(() => Number, { nullable: true })
     totalMachines?: number
+
+  @Field({ nullable: true })
+    bridgeName?: string
+
+  @Field({ nullable: true })
+    gatewayIP?: string
 }
 
 @InputType()

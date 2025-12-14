@@ -81,7 +81,7 @@ export class UnattendedManagerBase {
       }
       this.debug.log('Creating new ISO')
       await this.createISO(newIsoPath, extractDir)
-      // TODO: We may need to delete the iso file in the future, after finishing the installation process
+      // Note: Temp ISO cleanup is handled by ejectAllCdroms() in InfinivirtService.ts
 
       // Optional: Clean up extracted files
       this.debug.log('Cleaning up extracted files')

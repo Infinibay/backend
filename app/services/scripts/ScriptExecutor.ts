@@ -85,14 +85,20 @@ export class ScriptExecutor {
       }
 
       // Check OS compatibility
-      if (
-        script.os &&
-        script.os.length > 0 &&
-        !script.os.includes(machine.os as any)
-      ) {
-        throw new Error(
-          `Script is not compatible with OS ${machine.os}. Compatible OS: ${script.os.join(', ')}`
-        );
+      if (script.os && script.os.length > 0) {
+        const genericMachineOS = this.normalizeOSToGenericType(machine.os);
+
+        if (genericMachineOS === null) {
+          throw new Error(
+            `Machine "${machine.name}" has an unsupported OS type: ${machine.os}`
+          );
+        }
+
+        if (!script.os.includes(genericMachineOS as any)) {
+          throw new Error(
+            `Script is not compatible with OS ${machine.os}. Compatible OS: ${script.os.join(', ')}`
+          );
+        }
       }
 
       // 3. Validate input values
@@ -150,10 +156,10 @@ export class ScriptExecutor {
         executionType
       )
 
-      // 5. Interpolate script content
+      // 5. Interpolate script content (use scriptBody, not the full YAML content)
       debug('Interpolating script content');
       const interpolatedScript = this.templateEngine.interpolate(
-        script.content,
+        script.scriptBody,
         inputValues
       );
 
@@ -564,5 +570,31 @@ export class ScriptExecutor {
       debug('Error emitting execution event: %s', error.message);
       // Don't throw - event emission failures shouldn't block execution
     }
+  }
+
+  /**
+   * Helper: Map specific machine OS strings to generic OS enum values
+   * This allows scripts with generic OS types (WINDOWS, LINUX) to match machines
+   * with specific OS versions (windows11, ubuntu, etc.)
+   */
+  private normalizeOSToGenericType(machineOS: string): 'WINDOWS' | 'LINUX' | null {
+    const osLower = machineOS.toLowerCase();
+
+    // Check for Windows variants (e.g., "windows11", "win10", "Microsoft Windows 11")
+    if (osLower.startsWith('windows') || osLower.startsWith('win') || osLower.includes('windows')) {
+      return 'WINDOWS';
+    }
+
+    // Check for Linux variants
+    const linuxDistros = [
+      'ubuntu', 'fedora', 'debian', 'centos', 'rhel', 'arch', 'manjaro',
+      'suse', 'opensuse', 'alpine', 'rocky', 'alma', 'oracle', 'mint', 'pop', 'gentoo'
+    ];
+    if (linuxDistros.some(distro => osLower.includes(distro)) || osLower.includes('linux')) {
+      return 'LINUX';
+    }
+
+    // Unknown OS
+    return null;
   }
 }

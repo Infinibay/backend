@@ -1,4 +1,9 @@
 import { BaseCpuPinningStrategy, CpuPinningConfig } from './BasePinningStrategy'
+import {
+  calculateBasicPinning,
+  normalizeObjectTopology,
+  PinningAllocationResult
+} from './SharedAlgorithms'
 
 export class BasicStrategy extends BaseCpuPinningStrategy {
   /**
@@ -6,7 +11,7 @@ export class BasicStrategy extends BaseCpuPinningStrategy {
    *
    * This method:
    * 1. Retrieves the host's NUMA topology
-   * 2. Determines the best pinning strategy based on available resources
+   * 2. Delegates to shared algorithm for core selection
    * 3. Applies either NUMA-aware or round-robin pinning
    * 4. Creates a complete CPU pinning configuration with NUMA topology
    *
@@ -61,66 +66,32 @@ export class BasicStrategy extends BaseCpuPinningStrategy {
   /**
    * Optimizes CPU pinning using NUMA topology for better VM core detection.
    *
-   * This method implements best practices for libvirt CPU pinning:
-   * 1. Assigns each vCPU to a specific physical CPU core
-   * 2. Ensures consistent mapping between vCPUs and physical cores
-   * 3. Attempts to keep vCPUs within the same NUMA node when possible
-   * 4. Creates proper NUMA topology information for the guest
+   * This method delegates core selection to the shared algorithm and then:
+   * 1. Converts the allocation result to libvirt vcpupin format
+   * 2. Creates proper NUMA topology information for the guest
+   * 3. Adds CPU topology, cache, and maxphysaddr configuration
    *
    * @param vcpuCount Number of virtual CPUs for the VM
    * @param numaTopology Host NUMA topology information
    * @returns CPU pinning configuration
    */
   private optimizeNumaPinning (vcpuCount: number, numaTopology: { [key: string]: string[] }): CpuPinningConfig {
-    const vcpuPins: { vcpu: number; cpuset: string }[] = []
-    let vcpuIndex = 0
+    // Use shared algorithm for core selection
+    const normalized = normalizeObjectTopology(numaTopology)
+    const allocation = calculateBasicPinning(vcpuCount, normalized)
 
-    // Group CPUs by NUMA node for better allocation
-    const numaNodes = Object.keys(numaTopology)
-    const cpusPerNode: { [nodeId: string]: string[] } = {}
-
-    // Calculate how many vCPUs to allocate per NUMA node
-    const totalPhysicalCpus = Object.values(numaTopology).flat().length
-    const vCpusPerNode: { [nodeId: string]: number } = {}
-
-    numaNodes.forEach(nodeId => {
-      const nodeCpus = numaTopology[nodeId]
-      cpusPerNode[nodeId] = [...nodeCpus] // Create a copy to avoid modifying original
-
-      // Distribute vCPUs proportionally based on physical CPUs in each node
-      const nodeRatio = nodeCpus.length / totalPhysicalCpus
-      vCpusPerNode[nodeId] = Math.floor(vcpuCount * nodeRatio)
-
-      // Ensure we don't exceed the total by adjusting the last node
-      if (nodeId === numaNodes[numaNodes.length - 1]) {
-        const allocated = Object.values(vCpusPerNode).reduce((sum, count) => sum + count, 0)
-        if (allocated < vcpuCount) {
-          vCpusPerNode[nodeId] += (vcpuCount - allocated)
-        }
-      }
-    })
-
-    // Assign vCPUs to physical CPUs, keeping them within NUMA nodes when possible
-    for (const nodeId of numaNodes) {
-      const nodeCpus = cpusPerNode[nodeId]
-      const nodeVCpuCount = vCpusPerNode[nodeId]
-
-      for (let i = 0; i < nodeVCpuCount && vcpuIndex < vcpuCount; i++) {
-        // If we have more vCPUs than physical CPUs in this node, we'll need to share
-        const cpuIndex = i % nodeCpus.length
-        const physicalCpu = nodeCpus[cpuIndex]
-
-        vcpuPins.push({
-          vcpu: vcpuIndex,
-          cpuset: physicalCpu
-        })
-
-        vcpuIndex++
-      }
-    }
+    // Convert allocation to vcpupin format
+    const vcpuPins = this.allocationToVcpuPins(allocation)
 
     // Create the configuration with proper NUMA topology
     let config = this.createCpuPinningConfig(vcpuPins)
+
+    // Convert vcpuAssignments to vCpusPerNode format for generateNumaCells
+    const vCpusPerNode: { [nodeId: string]: number } = {}
+    allocation.vcpuAssignments.forEach((vcpus, nodeId) => {
+      vCpusPerNode[`node${nodeId}`] = vcpus.length
+    })
+
     const numaCells = this.generateNumaCells(vcpuCount, numaTopology, vCpusPerNode)
 
     // Add NUMA topology
@@ -138,43 +109,23 @@ export class BasicStrategy extends BaseCpuPinningStrategy {
    * Implements a round-robin CPU pinning strategy when NUMA optimization is not possible.
    *
    * This method:
-   * 1. Distributes vCPUs across all available physical CPUs in a round-robin fashion
-   * 2. Ensures each vCPU has a dedicated physical CPU when possible
-   * 3. Falls back to sharing physical CPUs when there are more vCPUs than physical CPUs
-   * 4. Creates a simpler configuration without NUMA topology information
+   * 1. Uses shared algorithm with basic strategy (which handles round-robin internally)
+   * 2. Creates a simpler NUMA topology with all vCPUs in one cell
+   * 3. Adds CPU topology, cache, and maxphysaddr
    *
    * @param vcpuCount Number of virtual CPUs for the VM
    * @param numaTopology Host NUMA topology information
    * @returns CPU pinning configuration
    */
   private optimizeRoundRobinPinning (vcpuCount: number, numaTopology: { [key: string]: string[] }): CpuPinningConfig {
-    const allCpus = Object.values(numaTopology).flat()
-    const totalCpus = allCpus.length
+    // Use shared algorithm for core selection
+    const normalized = normalizeObjectTopology(numaTopology)
+    const allocation = calculateBasicPinning(vcpuCount, normalized)
 
-    // When we have more vCPUs than physical CPUs, we need a different approach
-    if (vcpuCount > totalCpus) {
-      // Create CPU sets that assign multiple vCPUs to each physical CPU
-      // This is better than 1:1 mapping that would leave some vCPUs without physical cores
-      const vcpuPins = Array.from({ length: vcpuCount }, (_, vcpuIndex) => {
-        // Calculate which physical CPU to use
-        const physicalCpuIndex = vcpuIndex % totalCpus
+    // Convert allocation to vcpupin format
+    const vcpuPins = this.allocationToVcpuPins(allocation)
 
-        return {
-          vcpu: vcpuIndex,
-          cpuset: allCpus[physicalCpuIndex]
-        }
-      })
-
-      return this.createCpuPinningConfig(vcpuPins)
-    }
-
-    // Standard round-robin assignment when we have enough physical CPUs
-    const vcpuPins = Array.from({ length: vcpuCount }, (_, vcpuIndex) => ({
-      vcpu: vcpuIndex,
-      cpuset: allCpus[vcpuIndex % totalCpus]
-    }))
-
-    // Add basic NUMA topology information even for round-robin pinning
+    // Create configuration
     let config = this.createCpuPinningConfig(vcpuPins)
 
     // For round-robin, we'll create a simple NUMA topology with all vCPUs in one cell
@@ -196,6 +147,28 @@ export class BasicStrategy extends BaseCpuPinningStrategy {
     config = this.addCpuMaxPhysAddr(config)
 
     return config
+  }
+
+  /**
+   * Converts PinningAllocationResult to vcpupin format for libvirt.
+   *
+   * @param allocation - Result from shared pinning algorithm
+   * @returns Array of vcpu to cpuset mappings
+   */
+  private allocationToVcpuPins (allocation: PinningAllocationResult): { vcpu: number; cpuset: string }[] {
+    const vcpuPins: { vcpu: number; cpuset: string }[] = []
+
+    allocation.vcpuToCoreMapping.forEach((physicalCore, vcpuIndex) => {
+      vcpuPins.push({
+        vcpu: vcpuIndex,
+        cpuset: String(physicalCore)
+      })
+    })
+
+    // Sort by vCPU index for consistent output
+    vcpuPins.sort((a, b) => a.vcpu - b.vcpu)
+
+    return vcpuPins
   }
 
   /**

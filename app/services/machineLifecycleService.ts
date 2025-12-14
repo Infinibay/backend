@@ -231,7 +231,7 @@ export class MachineLifecycleService {
     })
 
     this.debug.log(
-      `Machine ${id} hardware updated in DB: ${JSON.stringify(updateData)}. Libvirt update required.`
+      `Machine ${id} hardware updated in DB: ${JSON.stringify(updateData)}. VM update required.`
     )
 
     // Use the new dedicated hardware update service
@@ -366,12 +366,15 @@ export class MachineLifecycleService {
         }
       })
 
-      // Emit real-time event for VM status update
+      // Emit real-time event for VM status update.
+      // NOTE: VM status is still 'building' at this point. The transition to 'running'
+      // happens later when VirtioSocketWatcherService receives the first message from
+      // InfiniService, indicating the VM has completed OS installation and booted.
       if (updatedMachine) {
         try {
           const eventManager = getEventManager()
           await eventManager.dispatchEvent('vms', 'update', updatedMachine)
-          this.debug.log(`🎯 VM created and running: ${updatedMachine.name} (${id})`)
+          this.debug.log(`🎯 VM created (status: ${updatedMachine.status}): ${updatedMachine.name} (${id}) - awaiting InfiniService connection`)
         } catch (eventError) {
           this.debug.log(`Failed to emit update event for VM ${id}: ${String(eventError)}`)
         }

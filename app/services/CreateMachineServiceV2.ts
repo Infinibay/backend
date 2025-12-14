@@ -30,6 +30,7 @@ import {
 
 import { Debugger } from '@utils/debug'
 import { getInfinivirt } from '@services/InfinivirtService'
+import { DepartmentNetworkService } from '@services/network/DepartmentNetworkService'
 import { UnattendedManagerBase } from '@services/unattendedManagerBase'
 import { UnattendedRedHatManager } from '@services/unattendedRedHatManager'
 import { UnattendedUbuntuManager } from '@services/unattendedUbuntuManager'
@@ -54,10 +55,12 @@ export interface CreateMachineResult {
 export class CreateMachineServiceV2 {
   private prisma: PrismaClient
   private debug: Debugger
+  private departmentNetworkService: DepartmentNetworkService
 
   constructor (prisma: PrismaClient) {
     this.debug = new Debugger('create-machine-v2')
     this.prisma = prisma
+    this.departmentNetworkService = new DepartmentNetworkService(prisma)
   }
 
   /**
@@ -134,7 +137,9 @@ export class CreateMachineServiceV2 {
           qemuPid: result.pid,
           tapDeviceName: result.tapDevice,
           assignedGpuBus: pciBus,
-          diskPaths: result.diskPaths
+          diskPaths: result.diskPaths,
+          bridge: vmConfig.bridge,
+          infiniServiceSocketPath: vmConfig.infiniServiceSocketPath
         }
       })
 
@@ -238,10 +243,20 @@ export class CreateMachineServiceV2 {
     const cpuCores = template ? template.cores : machine.cpuCores
     const diskSizeGB = template ? template.storage : machine.diskSizeGB
 
-    // Get network bridge
-    // Note: LIBVIRT_NETWORK_NAME is the libvirt network name (e.g., "default"),
-    // not the bridge device. For infinivirt we need the actual bridge device name.
-    const bridge = process.env.LIBVIRT_BRIDGE_NAME ?? 'virbr0'
+    // Get network bridge from the department
+    // Each department has its own isolated bridge with DHCP and NAT
+    // validatePreconditions() already ensures machine.departmentId is valid
+    const departmentBridge = await this.departmentNetworkService.getBridgeForDepartment(machine.departmentId!)
+
+    let bridge: string
+    if (departmentBridge) {
+      bridge = departmentBridge
+      this.debug.log('info', `Using bridge '${bridge}' (dept: ${machine.departmentId})`)
+    } else {
+      // Fallback to environment variables or default virbr0
+      bridge = process.env.LIBVIRT_BRIDGE_NAME ?? process.env.LIBVIRT_NETWORK_NAME ?? 'virbr0'
+      this.debug.log('warn', `Fallback to global bridge for dept ${machine.departmentId}`)
+    }
 
     // Find available SPICE port
     const displayPort = await this.findAvailablePort(5900)
@@ -287,7 +302,7 @@ export class CreateMachineServiceV2 {
     const virtioDriversIso = isWindows ? this.getVirtioDriversIsoPath() : undefined
 
     // Build base directories
-    const socketDir = process.env.INFINIVIRT_SOCKET_DIR ?? '/opt/infinibay/infinivirt'
+    const socketDir = process.env.INFINIVIRT_SOCKET_DIR ?? '/opt/infinibay/sockets'
 
     // Build the VMCreateConfig
     // NOTE: displayPassword is disabled because QEMU 9.x removed the 'password=' parameter.
@@ -331,12 +346,12 @@ export class CreateMachineServiceV2 {
 
       // TPM for Windows 11
       tpmSocketPath: machine.os.toLowerCase().includes('windows11')
-        ? path.join(socketDir, 'tpm', `${machine.internalName}.sock`)
+        ? path.join(socketDir, `${machine.internalName}-tpm.sock`)
         : undefined,
 
       // Guest agent and InfiniService channels
-      guestAgentSocketPath: path.join(socketDir, 'ga', `${machine.internalName}.sock`),
-      infiniServiceSocketPath: path.join(socketDir, 'infini', `${machine.internalName}.sock`),
+      guestAgentSocketPath: path.join(socketDir, `${machine.internalName}-ga.sock`),
+      infiniServiceSocketPath: path.join(socketDir, `${machine.id}.socket`),
 
       // UUID for QEMU - must match internalName for consistent socket/PID paths
       uuid: machine.internalName

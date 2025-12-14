@@ -52,65 +52,43 @@ const UpdateGraphicsInformationJob = new CronJob('*/1 * * * *', async () => {
     // Process each machine
     for (const machine of machines) {
       try {
+        // Skip machines without configuration - they haven't been properly created yet
+        if (!machine.configuration) {
+          continue
+        }
+
+        const config = machine.configuration
+
+        // Detect and log corrupted configurations (port -1 with protocol configured)
+        // This indicates the cron previously overwrote a valid port
+        if (config.graphicPort === -1 && config.graphicProtocol) {
+          debug.log('warn', `Corrupted graphics config detected for ${machine.name}: port=-1 but protocol=${config.graphicProtocol}. This VM may need repair.`)
+        }
+
         // Get VM status from infinivirt
         const status = await infinivirt.getVMStatus(machine.id)
 
-        // Default values for non-running VMs
-        let graphicPort = -1
-        let graphicProtocol: string | null = null
-        let graphicPassword: string | null = null
-        let graphicHost: string | null = null
-
         if (status.processAlive) {
-          // VM is running - use configuration from DB (set during createVM)
-          // Just verify and update host if needed
-          if (machine.configuration) {
-            graphicPort = machine.configuration.graphicPort ?? -1
-            graphicProtocol = machine.configuration.graphicProtocol ?? 'spice'
-            graphicPassword = machine.configuration.graphicPassword ?? null
-
-            // If host is 0.0.0.0 or not set, use local IP
-            const storedHost = machine.configuration.graphicHost
-            if (!storedHost || storedHost === '0.0.0.0') {
-              graphicHost = await getLocalIP()
-            } else {
-              graphicHost = storedHost
-            }
-          }
-        }
-
-        // Update or create machine configuration
-        if (machine.configuration) {
-          // Only update if there are changes
-          const config = machine.configuration
-          const needsUpdate =
-            config.graphicPort !== graphicPort ||
-            config.graphicHost !== graphicHost
-
-          if (needsUpdate) {
+          // VM is running - only update graphicHost if it's 0.0.0.0 or null
+          // NEVER touch graphicPort, graphicProtocol, or graphicPassword
+          // These are set during VM creation and must persist
+          const storedHost = config.graphicHost
+          if (!storedHost || storedHost === '0.0.0.0') {
+            const newHost = await getLocalIP()
             await prisma.machineConfiguration.update({
-              where: { id: machine.configuration.id },
+              where: { id: config.id },
               data: {
-                graphicPort,
-                graphicHost
-                // Don't update protocol/password - those are set during creation
+                graphicHost: newHost
+                // Explicitly NOT updating graphicPort, graphicProtocol, graphicPassword
               }
             })
-            debug.log(`Updated graphics for ${machine.name}: port=${graphicPort}, host=${graphicHost}`)
+            debug.log(`Updated graphicHost for running VM ${machine.name}: ${storedHost} -> ${newHost}`)
           }
-        } else if (status.processAlive) {
-          // Running VM without configuration - create one
-          await prisma.machineConfiguration.create({
-            data: {
-              machineId: machine.id,
-              graphicPort,
-              graphicProtocol: 'spice',
-              graphicPassword: null,
-              graphicHost: await getLocalIP()
-            }
-          })
-          debug.log(`Created graphics config for ${machine.name}`)
         }
+        // For stopped VMs: DO NOTHING
+        // Graphics configuration (port, protocol, password) was set during VM creation
+        // and must persist across power cycles. The port is statically assigned and
+        // doesn't change when the VM stops.
       } catch (err) {
         debug.log('error', `Error processing machine ${machine.name}: ${err}`)
       }

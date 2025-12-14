@@ -251,7 +251,9 @@ input DeleteSnapshotInput {
 }
 
 type DepartmentType {
+  bridgeName: String
   createdAt: DateTimeISO!
+  gatewayIP: String
   id: ID!
   internetSpeed: Int
   ipSubnet: String

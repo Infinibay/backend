@@ -39,15 +39,47 @@ async function transformMachine (prismaMachine: MachineWithRelations, prisma: Pr
   const template = prismaMachine.templateId ? await prisma.machineTemplate.findUnique({ where: { id: prismaMachine.templateId } }) : null
   const department = prismaMachine.departmentId ? await prisma.department.findUnique({ where: { id: prismaMachine.departmentId } }) : null
   const graphicHost = (prismaMachine.configuration?.graphicHost) || process.env.GRAPHIC_HOST || 'localhost'
-  let graphicPort
-  // Only try to get the graphic port if the VM is running
-  if (prismaMachine.status === 'running') {
-    try {
-      const protocol = prismaMachine.configuration?.graphicProtocol || 'vnc'
-      graphicPort = await new GraphicPortService().getGraphicPort(prismaMachine.internalName, protocol)
-    } catch (e) {
-      console.log(`Could not get graphic port for VM ${prismaMachine.internalName}:`, e)
+  let graphicPort: number | undefined
+
+  // Get graphic port from configuration if valid, regardless of VM status
+  // This allows configuration.graphic to be available based on persisted config
+  if (prismaMachine.configuration) {
+    const storedPort = prismaMachine.configuration.graphicPort
+    const storedProtocol = prismaMachine.configuration.graphicProtocol
+
+    // Only use the port if both protocol and port are valid
+    if (storedProtocol && storedPort !== null && storedPort > 0 && storedPort <= 65535) {
+      graphicPort = storedPort
+    } else if (prismaMachine.status === 'running') {
+      // Fallback: try to get from GraphicPortService if VM is running
+      try {
+        const protocol = storedProtocol || 'vnc'
+        const fetchedPort = await new GraphicPortService(prisma).getGraphicPort(prismaMachine.internalName, protocol)
+        // If port is invalid (-1), log warning and leave undefined
+        if (fetchedPort === -1) {
+          console.warn(`Invalid graphics port (-1) for running VM ${prismaMachine.internalName}. Configuration may be corrupted.`)
+        } else {
+          graphicPort = fetchedPort
+        }
+      } catch (e) {
+        console.log(`Could not get graphic port for VM ${prismaMachine.internalName}:`, e)
+      }
     }
+  }
+
+  // Build configuration object only if we have valid data
+  // Avoid constructing invalid URLs with port=-1 or undefined
+  let configurationField = null
+  if (prismaMachine.configuration && graphicPort && graphicPort > 0) {
+    const protocol = prismaMachine.configuration.graphicProtocol || 'vnc'
+    const password = prismaMachine.configuration.graphicPassword
+
+    // Build URL without embedding literal 'null' - omit password portion if not set
+    const graphic = password
+      ? `${protocol}://${password}@${graphicHost}:${graphicPort}`
+      : `${protocol}://${graphicHost}:${graphicPort}`
+
+    configurationField = { graphic }
   }
 
   return {
@@ -85,11 +117,7 @@ async function transformMachine (prismaMachine: MachineWithRelations, prisma: Pr
         ipSubnet: department.ipSubnet
       } as DepartmentType
       : undefined,
-    configuration: prismaMachine.configuration
-      ? {
-        graphic: prismaMachine.configuration.graphicProtocol + '://' + prismaMachine.configuration.graphicPassword + '@' + graphicHost + ':' + graphicPort
-      }
-      : null,
+    configuration: configurationField,
     status: prismaMachine.status as MachineStatus
   }
 }
@@ -149,7 +177,22 @@ export class MachineQueries {
 
     if (!machine || !machine.configuration) return null
 
-    const port = await new GraphicPortService().getGraphicPort(machine.internalName, machine.configuration.graphicProtocol || 'vnc')
+    const port = await new GraphicPortService(prisma).getGraphicPort(machine.internalName, machine.configuration.graphicProtocol || 'vnc')
+
+    // Validate port - detect corrupted configuration
+    if (port === -1) {
+      this.debug.log('error', `Invalid graphics port for VM ${machine.id} (${machine.name}): port=-1. Configuration may be corrupted.
+        - internalName: ${machine.internalName}
+        - storedProtocol: ${machine.configuration.graphicProtocol}
+        - storedPort: ${machine.configuration.graphicPort}
+        - storedHost: ${machine.configuration.graphicHost}
+        - vmStatus: ${machine.status}`)
+
+      throw new UserInputError(
+        'Graphics connection not available. The VM graphics configuration may be corrupted. Try restarting the VM or contact an administrator.'
+      )
+    }
+
     return {
       link: `${machine.configuration.graphicProtocol}://${machine.configuration.graphicHost || process.env.GRAPHIC_HOST || 'localhost'}:${port}`,
       password: machine.configuration.graphicPassword || '',
@@ -350,10 +393,14 @@ export class MachineMutations {
   /**
    * Changes the state of a virtual machine using VMOperationsService (infinivirt).
    *
+   * For the 'shutdown' action, this method performs additional post-operation verification
+   * to confirm that the QEMU process has actually terminated. This provides a defense-in-depth
+   * layer to detect edge cases where infinivirt reports success but the process remains alive.
+   *
    * @param id - The ID of the machine to change state.
    * @param prisma - The Prisma client for database operations.
    * @param user - The user requesting the state change.
-   * @param action - The action to perform: 'powerOn', 'destroy', or 'suspend'.
+   * @param action - The action to perform: 'powerOn', 'destroy', 'shutdown', or 'suspend'.
    * @param newStatus - The new status to set: 'running', 'off', or 'suspended'.
    * @returns A SuccessType object indicating the result of the operation.
    */
@@ -364,6 +411,8 @@ export class MachineMutations {
     action: 'powerOn' | 'destroy' | 'shutdown' | 'suspend',
     newStatus: 'running' | 'off' | 'suspended'
   ): Promise<SuccessType> {
+    const operationStartTime = Date.now()
+
     try {
       // Check if the user is an admin or the owner of the machine
       const isAdmin = user?.role === 'ADMIN'
@@ -374,6 +423,16 @@ export class MachineMutations {
       if (!machine) {
         return { success: false, message: 'Machine not found' }
       }
+
+      // Pre-operation logging
+      this.debug.log(`[changeMachineState] Starting operation:
+        - Machine ID: ${id}
+        - Machine Name: ${machine.name}
+        - Current DB Status: ${machine.status}
+        - Action: ${action}
+        - Target Status: ${newStatus}
+        - Requested by: ${user?.email || 'unknown'} (${user?.role || 'unknown'})
+        - Timestamp: ${new Date().toISOString()}`)
 
       // Use VMOperationsService for VM operations via infinivirt
       const vmOpsService = new VMOperationsService(prisma)
@@ -399,7 +458,79 @@ export class MachineMutations {
 
       // Check if the action was successful
       if (!result.success) {
+        const elapsedMs = Date.now() - operationStartTime
+        this.debug.log(`[changeMachineState] Operation failed after ${elapsedMs}ms:
+          - Machine ID: ${id}
+          - Action: ${action}
+          - Error: ${result.error || 'Unknown error'}`)
         return { success: false, message: result.error || `Error performing ${action} on machine` }
+      }
+
+      // Post-shutdown verification: Confirm QEMU process is actually dead
+      // This is a defense-in-depth layer to detect edge cases where infinivirt
+      // reports success but the process remains alive due to race conditions or partial errors
+      if (action === 'shutdown' && result.success) {
+        const VERIFICATION_TIMEOUT_MS = 5000
+
+        try {
+          // Use Promise.race to implement timeout for verification
+          const verificationPromise = vmOpsService.getStatus(id)
+          const timeoutPromise = new Promise<null>((resolve) => {
+            setTimeout(() => resolve(null), VERIFICATION_TIMEOUT_MS)
+          })
+
+          const vmStatus = await Promise.race([verificationPromise, timeoutPromise])
+
+          if (vmStatus === null) {
+            // Timeout expired or getStatus returned null
+            this.debug.log(`[changeMachineState] Warning: Post-shutdown verification timed out or failed
+              - Machine ID: ${id}
+              - Timeout: ${VERIFICATION_TIMEOUT_MS}ms
+              - Proceeding with assumed success based on infinivirt result`)
+          } else if (vmStatus.processAlive) {
+            // Process is still alive - this is an error condition
+            const elapsedMs = Date.now() - operationStartTime
+            this.debug.log(`[changeMachineState] ERROR: VM process still alive after shutdown:
+              - Machine ID: ${id}
+              - DB Status: ${vmStatus.status}
+              - Process Alive: ${vmStatus.processAlive}
+              - Consistent: ${vmStatus.consistent}
+              - Elapsed Time: ${elapsedMs}ms
+              - Note: ACPI shutdown may not have been acknowledged by guest OS`)
+            return {
+              success: false,
+              message: 'VM process is still running after shutdown attempt. Process may not have responded to ACPI shutdown.'
+            }
+          } else {
+            // Process is dead - shutdown was successful
+            const elapsedMs = Date.now() - operationStartTime
+
+            // Log a stronger warning if state is inconsistent (e.g., DB says running but process is dead)
+            if (vmStatus.consistent === false) {
+              this.debug.log('warn', `[changeMachineState] Post-shutdown verification: Inconsistent state detected:
+              - Machine ID: ${id}
+              - DB Status: ${vmStatus.status}
+              - Process Alive: ${vmStatus.processAlive}
+              - Consistent: false
+              - Elapsed Time: ${elapsedMs}ms
+              - Note: Database status may not reflect actual VM state. This could indicate a sync issue.`)
+            }
+
+            this.debug.log(`[changeMachineState] Post-shutdown verification successful:
+              - Machine ID: ${id}
+              - DB Status: ${vmStatus.status}
+              - Process Alive: ${vmStatus.processAlive}
+              - Consistent: ${vmStatus.consistent}
+              - Elapsed Time: ${elapsedMs}ms`)
+          }
+        } catch (verificationError) {
+          // Log verification error but don't fail the operation
+          // The infinivirt operation already reported success
+          this.debug.log(`[changeMachineState] Warning: Post-shutdown verification threw error:
+            - Machine ID: ${id}
+            - Error: ${(verificationError as Error).message}
+            - Proceeding with assumed success based on infinivirt result`)
+        }
       }
 
       // Fetch updated machine for event
@@ -433,10 +564,23 @@ export class MachineMutations {
         }
       }
 
+      // Final success logging
+      const totalElapsedMs = Date.now() - operationStartTime
+      this.debug.log(`[changeMachineState] Operation completed successfully:
+        - Machine ID: ${id}
+        - Action: ${action}
+        - New Status: ${newStatus}
+        - Total Elapsed Time: ${totalElapsedMs}ms`)
+
       return { success: true, message: `Machine ${newStatus}` }
     } catch (error) {
       // Log the error and return a failure response
-      this.debug.log(`Error changing machine state: ${error}`)
+      const totalElapsedMs = Date.now() - operationStartTime
+      this.debug.log(`[changeMachineState] Operation failed with exception after ${totalElapsedMs}ms:
+        - Machine ID: ${id}
+        - Action: ${action}
+        - Error: ${(error as Error).message || error}
+        - Stack: ${(error as Error).stack || 'N/A'}`)
       return { success: false, message: (error as Error).message || 'Error changing machine state' }
     }
   }

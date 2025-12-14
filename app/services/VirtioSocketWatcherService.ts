@@ -399,14 +399,20 @@ interface SafeCommandParams {
   drive?: string
   targets?: string[]
   // Maintenance parameters
+  /** Required for ExecutePowerShellScript (validated by || '') */
   script?: string
+  /** Optional, defaults to 'inline' */
   script_type?: string
   task_type?: string
   task_name?: string
   parameters?: Record<string, unknown>
+  /** Optional, allows 0 for no timeout. Use ?? to preserve falsy values. */
   timeout_seconds?: number
+  /** Optional working directory path */
   working_directory?: string
+  /** Optional environment variables map */
   environment_vars?: Record<string, string>
+  /** Optional, defaults to false. Use ?? to preserve false values. */
   run_as_admin?: boolean
   validate_before?: boolean
   validate_after?: boolean
@@ -610,6 +616,9 @@ export class VirtioSocketWatcherService extends EventEmitter {
       throw error
     }
 
+    // Clean up stale sockets from VMs that are no longer running
+    await this.cleanupStaleSockets()
+
     // Set up file watcher
     this.watcher = chokidar.watch(this.socketDir, {
       persistent: true,
@@ -650,6 +659,63 @@ export class VirtioSocketWatcherService extends EventEmitter {
     }
 
     this.debug.log('info', 'VirtioSocketWatcherService stopped')
+  }
+
+  /**
+   * Cleans up stale socket files from VMs that are no longer running.
+   * Called at service startup to remove orphaned sockets.
+   */
+  private async cleanupStaleSockets(): Promise<void> {
+    this.debug.log('info', 'Cleaning up stale socket files...')
+
+    try {
+      const files = await fs.promises.readdir(this.socketDir)
+      let cleanedCount = 0
+      let keptCount = 0
+
+      for (const file of files) {
+        // Only process .socket files
+        const match = file.match(/^(.+)\.socket$/)
+        if (!match) {
+          continue
+        }
+
+        const vmId = match[1]
+        const socketPath = path.join(this.socketDir, file)
+
+        try {
+          // Check if VM exists and is running
+          const vm = await this.prisma.machine.findUnique({
+            where: { id: vmId },
+            select: { id: true, status: true }
+          })
+
+          if (!vm || vm.status !== 'running') {
+            // Socket is orphaned - VM doesn't exist or isn't running
+            try {
+              await fs.promises.unlink(socketPath)
+              cleanedCount++
+              this.debug.log('debug', `Removed stale socket for VM ${vmId} (status: ${vm?.status ?? 'not found'})`)
+            } catch (unlinkError: any) {
+              // Silently ignore ENOENT (file disappeared between check and unlink)
+              if (unlinkError.code !== 'ENOENT') {
+                this.debug.log('warn', `Failed to remove stale socket ${socketPath}: ${unlinkError.message}`)
+              }
+            }
+          } else {
+            keptCount++
+            this.debug.log('debug', `Keeping socket for running VM ${vmId}`)
+          }
+        } catch (error: any) {
+          this.debug.log('warn', `Error checking VM ${vmId} for stale socket cleanup: ${error.message}`)
+        }
+      }
+
+      this.debug.log('info', `Stale socket cleanup complete: ${cleanedCount} removed, ${keptCount} kept`)
+    } catch (error: any) {
+      // Don't fail startup if cleanup fails - just log and continue
+      this.debug.log('warn', `Failed to clean up stale sockets: ${error.message}`)
+    }
   }
 
   // Handle new socket file detected
@@ -1863,7 +1929,18 @@ export class VirtioSocketWatcherService extends EventEmitter {
     }
   }
 
-  // Public method to send safe commands to a VM
+  /**
+   * Send a safe command to a VM
+   *
+   * @remarks
+   * Optional fields with `undefined` values are omitted during JSON serialization,
+   * which correctly maps to Rust's `Option::None`. Use nullish coalescing (??)
+   * for optional fields to preserve falsy values (0, false, '').
+   *
+   * @param vmId - VM identifier
+   * @param commandType - Safe command type with parameters
+   * @param timeout - Command timeout in milliseconds (default: 30000)
+   */
   public async sendSafeCommand(
     vmId: string,
     commandType: SafeCommandType,
@@ -1974,14 +2051,18 @@ export class VirtioSocketWatcherService extends EventEmitter {
           break
         // Maintenance commands
         case 'ExecutePowerShellScript':
+          // Validate required script parameter
+          if (!commandType.params?.script || typeof commandType.params.script !== 'string' || commandType.params.script.trim() === '') {
+            throw new Error('ExecutePowerShellScript requires a non-empty script parameter')
+          }
           commandTypeFormatted = {
             action: 'ExecutePowerShellScript',
-            script: commandType.params?.script || '',
-            script_type: commandType.params?.script_type || 'inline',
-            timeout_seconds: commandType.params?.timeout_seconds || undefined,
-            working_directory: commandType.params?.working_directory || undefined,
-            environment_vars: commandType.params?.environment_vars || undefined,
-            run_as_admin: commandType.params?.run_as_admin || false
+            script: commandType.params.script,
+            script_type: commandType.params.script_type || 'inline',  // Keep || for required string with default
+            timeout_seconds: commandType.params.timeout_seconds ?? undefined,  // Use ?? to preserve 0
+            working_directory: commandType.params.working_directory ?? undefined,  // Use ?? to preserve ''
+            environment_vars: commandType.params.environment_vars ?? undefined,  // Use ?? to preserve {}
+            run_as_admin: commandType.params.run_as_admin ?? false  // Use ?? for consistency
           }
           break
         case 'RunMaintenanceTask':
@@ -2407,9 +2488,9 @@ export class VirtioSocketWatcherService extends EventEmitter {
     // Add alternative socket paths for the VM
     const vmId = connection.vmId
     const alternativePaths = [
-      `/opt/infinibay/sockets/${vmId}.sock`,
-      `/tmp/infinibay/${vmId}.sock`,
-      `/run/infinibay/${vmId}.sock`
+      `/opt/infinibay/sockets/${vmId}.socket`,
+      `/tmp/infinibay/${vmId}.socket`,
+      `/run/infinibay/${vmId}.socket`
     ]
 
     // Add paths that don't already exist in the pool

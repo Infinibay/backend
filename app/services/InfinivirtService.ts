@@ -12,6 +12,8 @@
  * ```
  */
 
+import fs from 'fs'
+import path from 'path'
 import { Infinivirt, VMEventData } from '@infinibay/infinivirt'
 import prisma from '../utils/database'
 import { getEventManager, EventAction } from './EventManager'
@@ -22,8 +24,8 @@ const debug = new Debugger('infinivirt-service')
 // Configuration from environment variables
 const INFINIVIRT_CONFIG = {
   diskDir: process.env.INFINIVIRT_DISK_DIR || '/var/lib/infinivirt/disks',
-  qmpSocketDir: process.env.INFINIVIRT_SOCKET_DIR || '/opt/infinibay/infinivirt',
-  pidfileDir: process.env.INFINIVIRT_PID_DIR || '/opt/infinibay/infinivirt/pids',
+  qmpSocketDir: process.env.INFINIVIRT_SOCKET_DIR || '/opt/infinibay/sockets',
+  pidfileDir: process.env.INFINIVIRT_PID_DIR || '/opt/infinibay/pids',
   healthMonitorInterval: parseInt(process.env.INFINIVIRT_HEALTH_INTERVAL || '30000', 10),
   autoStartHealthMonitor: process.env.INFINIVIRT_AUTO_HEALTH !== 'false'
 }
@@ -82,6 +84,26 @@ async function initializeInfinivirt (): Promise<Infinivirt> {
     console.error('╚══════════════════════════════════════════════════════════════╝')
     console.error('')
     process.exit(1)
+  }
+
+  // Ensure all required directories exist before creating Infinivirt instance.
+  // These directories are used by VMLifecycle for:
+  // - diskDir: VM disk images (qcow2 files)
+  // - qmpSocketDir: QMP sockets, InfiniService virtio-serial channels, and guest-agent sockets
+  // - pidfileDir: QEMU process PID files
+  const fs = await import('fs')
+
+  const requiredDirs = [
+    { path: INFINIVIRT_CONFIG.diskDir, name: 'disk' },
+    { path: INFINIVIRT_CONFIG.qmpSocketDir, name: 'socket' },
+    { path: INFINIVIRT_CONFIG.pidfileDir, name: 'pidfile' }
+  ]
+
+  for (const dir of requiredDirs) {
+    if (!fs.existsSync(dir.path)) {
+      fs.mkdirSync(dir.path, { recursive: true, mode: 0o755 })
+      console.log(`📁 Created ${dir.name} directory: ${dir.path}`)
+    }
   }
 
   console.log('🚀 Initializing Infinivirt service...')
@@ -251,20 +273,32 @@ export function getInfinivirtConfig (): typeof INFINIVIRT_CONFIG {
  * Ejects all CD-ROM devices from a VM after installation completes.
  *
  * This removes Windows ISO, VirtIO drivers ISO, and autounattend ISO.
+ * After ejection, temporary ISOs in the temp directory are deleted.
  * The operation is non-blocking and tolerant to failures.
  *
  * @param vmId - The VM identifier
  */
 export async function ejectAllCdroms (vmId: string): Promise<void> {
   const infinivirt = await getInfinivirt()
+  const baseDir = process.env.INFINIBAY_BASE_DIR ?? '/opt/infinibay'
+  const tempIsoDir = process.env.INFINIBAY_ISO_TEMP_DIR ?? path.join(baseDir, 'iso', 'temp')
 
   try {
     // Query block devices to find CD-ROMs
     const blocks = await infinivirt.queryBlockDevices(vmId)
+    const tempIsosToDelete: string[] = []
 
     // Find and eject all CD-ROM devices
     for (const block of blocks) {
       if (block.removable) {
+        // Capture ISO path before ejecting if it's in the temp directory
+        if (block.inserted?.file) {
+          const isoPath = block.inserted.file
+          if (isoPath.startsWith(tempIsoDir)) {
+            tempIsosToDelete.push(isoPath)
+          }
+        }
+
         debug.log(`Ejecting CD-ROM device: ${block.device} from VM ${vmId}`)
         try {
           await infinivirt.ejectCdrom(vmId, block.device)
@@ -277,6 +311,21 @@ export async function ejectAllCdroms (vmId: string): Promise<void> {
     }
 
     debug.log(`All CD-ROMs ejected from VM ${vmId}`)
+
+    // Delete temporary ISOs after successful ejection
+    for (const isoPath of tempIsosToDelete) {
+      try {
+        await fs.promises.unlink(isoPath)
+        debug.log(`Deleted temp ISO: ${isoPath}`)
+      } catch (unlinkError: any) {
+        // Non-fatal: log warning but don't fail the operation
+        debug.log('warn', `Failed to delete temp ISO ${isoPath}: ${unlinkError.message}`)
+      }
+    }
+
+    if (tempIsosToDelete.length > 0) {
+      debug.log(`Cleaned up ${tempIsosToDelete.length} temporary ISO(s) for VM ${vmId}`)
+    }
   } catch (error: any) {
     debug.log('warn', `Failed to eject CD-ROMs from VM ${vmId}: ${error.message}`)
     // Non-fatal: VM can continue running with ISOs mounted

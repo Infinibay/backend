@@ -51,6 +51,8 @@ export interface ScriptFilters {
 
 export interface ScriptWithContent extends Script {
   content: string;
+  /** The actual executable script body extracted from the 'script' field in YAML/JSON */
+  scriptBody: string;
   parsedInputs: ScriptInputDefinition[];
   hasInputs: boolean;
   inputCount: number;
@@ -472,6 +474,7 @@ export class ScriptManager {
     return {
       ...script,
       content,
+      scriptBody: parsed.script,
       parsedInputs,
       hasInputs,
       inputCount

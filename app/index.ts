@@ -21,6 +21,7 @@ import { InfinibayContext, createUserValidationHelpers, SafeUser } from './utils
 import { verifyRequestAuth } from './utils/jwtAuth'
 
 import { checkGpuAffinity } from './utils/checkGpuAffinity'
+import { DepartmentNetworkService } from './services/network/DepartmentNetworkService'
 
 // Real-time Services
 import { createSocketService } from './services/SocketService'
@@ -48,6 +49,16 @@ async function bootstrap (): Promise<void> {
   try {
     // Clean up stale GPU assignments before server starts
     await checkGpuAffinity(prisma)
+
+    // Restore department network infrastructure (bridges, dnsmasq, NAT)
+    try {
+      const networkService = new DepartmentNetworkService(prisma)
+      await networkService.restoreAllNetworks()
+      console.log('🌐 Department networks restored successfully')
+    } catch (networkError) {
+      console.error('⚠️ Failed to restore department networks:', networkError)
+      // Don't fail server startup - networks can be restored later
+    }
 
     // Initialize Express and HTTP server
     const app = express()

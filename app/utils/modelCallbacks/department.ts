@@ -1,6 +1,5 @@
 import { PrismaClient, Prisma, RuleSetType } from '@prisma/client'
-import { getLibvirtConnection } from '@utils/libvirt'
-import { FirewallManager } from '@services/firewall/FirewallManager'
+import { FirewallManagerV2 } from '@services/firewall/FirewallManagerV2'
 import { Debugger } from '@utils/debug'
 
 const debug = new Debugger('infinibay:callback:department')
@@ -8,21 +7,12 @@ const debug = new Debugger('infinibay:callback:department')
 /**
  * Callback executed after a department is created in the database.
  *
- * **TRANSACTION SIDE-EFFECTS WARNING:**
+ * This callback creates the FirewallRuleSet (database record only) and establishes
+ * the foreign key relationship by updating Department.firewallRuleSetId.
  *
- * This callback performs external side-effects (creating libvirt nwfilters) within
- * a database transaction context. If the transaction rolls back after this callback
- * executes, the libvirt filters will remain orphaned.
- *
- * **Mitigation:**
- * - Errors are caught and logged without throwing (graceful degradation)
- * - Libvirt defineFilter is idempotent (safe to call multiple times)
- * - ensureFirewallForVM serves as a fallback to detect/repair missing filters
- * - Future: Consider implementing a cleanup job to remove orphaned filters
- *
- * This callback creates the FirewallRuleSet and establishes the foreign key relationship
- * by updating Department.firewallRuleSetId. This ensures subsequent queries with
- * include: { firewallRuleSet } will find the ruleset.
+ * Note: nftables chains are created by infinivirt during VM startup, not here.
+ * The ruleset serves as the database container for firewall rules that will be
+ * applied when VMs in this department start.
  *
  * @param prisma - Prisma client instance
  * @param args - Creation arguments
@@ -39,13 +29,10 @@ export async function afterCreateDepartment (
   try {
     debug.log('info', `Creating firewall infrastructure for department ${departmentId} (${departmentName})`)
 
-    // Get libvirt connection
-    const libvirt = await getLibvirtConnection()
+    // Create FirewallManagerV2 instance (nftables-based, no libvirt needed)
+    const firewallManager = new FirewallManagerV2(prisma)
 
-    // Create FirewallManager instance
-    const firewallManager = new FirewallManager(prisma, libvirt)
-
-    // Create firewall infrastructure (ruleset + empty nwfilter)
+    // Create firewall infrastructure (database ruleset only)
     debug.log('info', `Calling ensureFirewallInfrastructure for department ${departmentId}`)
     const infraResult = await firewallManager.ensureFirewallInfrastructure(
       RuleSetType.DEPARTMENT,
@@ -53,7 +40,7 @@ export async function afterCreateDepartment (
       `Department Firewall: ${departmentName}`
     )
 
-    debug.log('info', `Firewall infrastructure result: ruleSetCreated=${infraResult.ruleSetCreated}, filterCreated=${infraResult.filterCreated}`)
+    debug.log('info', `Firewall infrastructure result: ruleSetCreated=${infraResult.ruleSetCreated}`)
 
     // Verify the FK was set
     const updatedDept = await prisma.department.findUnique({

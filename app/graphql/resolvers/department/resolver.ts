@@ -4,6 +4,7 @@ import { DepartmentType, UpdateDepartmentNameInput } from './type'
 import { InfinibayContext } from '../../../utils/context'
 import { getEventManager } from '../../../services/EventManager'
 import { DepartmentCleanupService } from '../../../services/cleanup/departmentCleanupService'
+import { DepartmentNetworkService } from '../../../services/network/DepartmentNetworkService'
 
 @Resolver(DepartmentType)
 export class DepartmentResolver {
@@ -22,6 +23,8 @@ export class DepartmentResolver {
         createdAt: dep.createdAt,
         internetSpeed: dep.internetSpeed || undefined,
         ipSubnet: dep.ipSubnet || undefined,
+        bridgeName: dep.bridgeName || undefined,
+        gatewayIP: dep.gatewayIP || undefined,
         totalMachines: dep.machines.length
       })
     }
@@ -50,6 +53,8 @@ export class DepartmentResolver {
       createdAt: department.createdAt,
       internetSpeed: department.internetSpeed || undefined,
       ipSubnet: department.ipSubnet || undefined,
+      bridgeName: department.bridgeName || undefined,
+      gatewayIP: department.gatewayIP || undefined,
       totalMachines: department.machines.length
     }
   }
@@ -60,9 +65,38 @@ export class DepartmentResolver {
     @Arg('name') name: string,
     @Ctx() { prisma, user }: InfinibayContext
   ): Promise<DepartmentType> {
+    // Auto-assign the next available subnet
+    const ipSubnet = await this.getNextAvailableSubnet(prisma)
+
+    // Create department with ipSubnet
     const department = await prisma.department.create({
-      data: { name }
+      data: {
+        name,
+        ipSubnet
+      }
     })
+
+    // Configure network infrastructure (bridge, dnsmasq, NAT)
+    // If this fails, the department creation should fail
+    const networkService = new DepartmentNetworkService(prisma)
+    try {
+      await networkService.configureNetwork(department.id, ipSubnet)
+    } catch (networkError) {
+      // Network configuration failed - delete the department and throw
+      console.error(`Failed to configure network for department ${department.id}:`, networkError)
+      await prisma.department.delete({ where: { id: department.id } })
+      const errorMessage = networkError instanceof Error ? networkError.message : String(networkError)
+      throw new UserInputError(`Failed to configure department network: ${errorMessage}`)
+    }
+
+    // Get updated department with network info
+    const updatedDepartment = await prisma.department.findUnique({
+      where: { id: department.id }
+    })
+
+    if (!updatedDepartment) {
+      throw new UserInputError('Department was created but could not be retrieved')
+    }
 
     // Trigger real-time event for department creation
     try {
@@ -75,11 +109,13 @@ export class DepartmentResolver {
     }
 
     return {
-      id: department.id,
-      name: department.name,
-      createdAt: department.createdAt,
-      internetSpeed: department.internetSpeed || undefined,
-      ipSubnet: department.ipSubnet || undefined,
+      id: updatedDepartment.id,
+      name: updatedDepartment.name,
+      createdAt: updatedDepartment.createdAt,
+      internetSpeed: updatedDepartment.internetSpeed || undefined,
+      ipSubnet: updatedDepartment.ipSubnet || undefined,
+      bridgeName: updatedDepartment.bridgeName || undefined,
+      gatewayIP: updatedDepartment.gatewayIP || undefined,
       totalMachines: 0
     }
   }
@@ -126,6 +162,8 @@ export class DepartmentResolver {
       createdAt: department.createdAt,
       internetSpeed: department.internetSpeed || undefined,
       ipSubnet: department.ipSubnet || undefined,
+      bridgeName: department.bridgeName || undefined,
+      gatewayIP: department.gatewayIP || undefined,
       totalMachines: 0
     }
   }
@@ -188,6 +226,8 @@ export class DepartmentResolver {
       createdAt: updatedDepartment.createdAt,
       internetSpeed: updatedDepartment.internetSpeed || undefined,
       ipSubnet: updatedDepartment.ipSubnet || undefined,
+      bridgeName: updatedDepartment.bridgeName || undefined,
+      gatewayIP: updatedDepartment.gatewayIP || undefined,
       totalMachines: updatedDepartment.machines.length
     }
   }
@@ -212,7 +252,43 @@ export class DepartmentResolver {
       createdAt: department.createdAt,
       internetSpeed: department.internetSpeed || undefined,
       ipSubnet: department.ipSubnet || undefined,
+      bridgeName: department.bridgeName || undefined,
+      gatewayIP: department.gatewayIP || undefined,
       totalMachines: department.machines.length
     }
+  }
+
+  /**
+   * Finds the next available subnet for a new department.
+   * Uses pattern 10.10.X.0/24 where X starts at 1 and increments.
+   * Finds gaps in existing subnets to reuse freed numbers.
+   */
+  private async getNextAvailableSubnet (prisma: any): Promise<string> {
+    // Get all existing subnets
+    const departments = await prisma.department.findMany({
+      where: { ipSubnet: { not: null } },
+      select: { ipSubnet: true }
+    })
+
+    // Extract the third octet from each subnet (10.10.X.0/24)
+    const usedOctets = new Set<number>()
+    for (const dept of departments) {
+      if (dept.ipSubnet) {
+        const match = dept.ipSubnet.match(/^10\.10\.(\d+)\.0\/24$/)
+        if (match && match[1]) {
+          usedOctets.add(parseInt(match[1], 10))
+        }
+      }
+    }
+
+    // Find the first available octet starting from 1
+    // Max is 254 (10.10.254.0/24)
+    for (let octet = 1; octet <= 254; octet++) {
+      if (!usedOctets.has(octet)) {
+        return `10.10.${octet}.0/24`
+      }
+    }
+
+    throw new UserInputError('No available subnets remaining. Maximum of 254 departments reached.')
   }
 }

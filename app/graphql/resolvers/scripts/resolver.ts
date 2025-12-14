@@ -482,7 +482,10 @@ export class ScriptResolver {
       }
 
       // Extract usernames from response
-      const users = (response.data as any[]).map((user: any) => user.username)
+      // Infiniservice returns { users: [...], count: N } where each user has "name" field
+      const userData = response.data as { users?: any[], count?: number }
+      const userList = userData.users || []
+      const users = userList.map((user: any) => user.name).filter(Boolean)
 
       // Always include OS-aware defaults
       const userSet = new Set([...defaultUsers, ...users])

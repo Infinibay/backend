@@ -25,7 +25,8 @@ jest.mock('fs', () => ({
   ...jest.requireActual('fs'),
   promises: {
     mkdir: jest.fn().mockResolvedValue(undefined),
-    unlink: jest.fn().mockResolvedValue(undefined)
+    unlink: jest.fn().mockResolvedValue(undefined),
+    readdir: jest.fn().mockResolvedValue([]) // Default to empty directory
   },
   access: jest.fn((path, mode, cb) => cb(null)),
   existsSync: jest.fn().mockReturnValue(true)
@@ -530,6 +531,97 @@ describe('VirtioSocketWatcherService', () => {
     })
   })
 
+  describe('Stale Socket Cleanup', () => {
+    it('should remove stale sockets for VMs that do not exist on startup', async () => {
+      // Mock readdir to return socket files
+      const mockReaddir = fs.promises.readdir as jest.Mock
+      mockReaddir.mockResolvedValue(['orphan-vm.socket', 'running-vm.socket', 'random.txt'])
+
+      // Mock database lookup: orphan-vm doesn't exist, running-vm exists and is running
+      mockPrisma.machine.findUnique
+        .mockResolvedValueOnce(null) // orphan-vm doesn't exist
+        .mockResolvedValueOnce({ id: 'running-vm', status: 'running' } as Machine) // running-vm exists
+
+      await service.start()
+
+      // Should have tried to delete the orphan socket
+      expect(fs.promises.unlink).toHaveBeenCalledWith(
+        expect.stringContaining('orphan-vm.socket')
+      )
+      // Should NOT have tried to delete the running VM's socket
+      expect(fs.promises.unlink).not.toHaveBeenCalledWith(
+        expect.stringContaining('running-vm.socket')
+      )
+    })
+
+    it('should remove stale sockets for VMs that exist but are not running', async () => {
+      const mockReaddir = fs.promises.readdir as jest.Mock
+      mockReaddir.mockResolvedValue(['stopped-vm.socket'])
+
+      // Mock database lookup: VM exists but is stopped
+      mockPrisma.machine.findUnique.mockResolvedValue({
+        id: 'stopped-vm',
+        status: 'off'
+      } as Machine)
+
+      await service.start()
+
+      // Should have tried to delete the stopped VM's socket
+      expect(fs.promises.unlink).toHaveBeenCalledWith(
+        expect.stringContaining('stopped-vm.socket')
+      )
+    })
+
+    it('should keep sockets for running VMs', async () => {
+      const mockReaddir = fs.promises.readdir as jest.Mock
+      mockReaddir.mockResolvedValue(['running-vm.socket'])
+
+      // Reset unlink mock
+      ;(fs.promises.unlink as jest.Mock).mockClear()
+
+      mockPrisma.machine.findUnique.mockResolvedValue({
+        id: 'running-vm',
+        status: 'running'
+      } as Machine)
+
+      await service.start()
+
+      // Should NOT have tried to delete the running VM's socket
+      expect(fs.promises.unlink).not.toHaveBeenCalledWith(
+        expect.stringContaining('running-vm.socket')
+      )
+    })
+
+    it('should silently ignore ENOENT errors during cleanup', async () => {
+      const mockReaddir = fs.promises.readdir as jest.Mock
+      mockReaddir.mockResolvedValue(['disappearing-vm.socket'])
+
+      mockPrisma.machine.findUnique.mockResolvedValue(null) // VM doesn't exist
+
+      // Simulate socket disappearing between check and unlink
+      ;(fs.promises.unlink as jest.Mock).mockRejectedValue({ code: 'ENOENT' })
+
+      // Should not throw
+      await expect(service.start()).resolves.not.toThrow()
+    })
+
+    it('should ignore non-.socket files during cleanup', async () => {
+      const mockReaddir = fs.promises.readdir as jest.Mock
+      mockReaddir.mockResolvedValue(['some-file.txt', 'another.sock', 'config.json'])
+
+      // Reset mocks
+      mockPrisma.machine.findUnique.mockClear()
+      ;(fs.promises.unlink as jest.Mock).mockClear()
+
+      await service.start()
+
+      // Should NOT have queried database for non-.socket files
+      expect(mockPrisma.machine.findUnique).not.toHaveBeenCalled()
+      // Should NOT have tried to delete any files
+      expect(fs.promises.unlink).not.toHaveBeenCalled()
+    })
+  })
+
   describe('Command Execution', () => {
     beforeEach(async () => {
       await service.start()
@@ -730,6 +822,117 @@ describe('VirtioSocketWatcherService', () => {
           params: null,
           timeout: expect.any(Number)
         })
+
+        // Complete the command
+        const response = {
+          type: 'response',
+          id: commandData.id,
+          success: true,
+          data: []
+        }
+        mockSocket.emit('data', Buffer.from(JSON.stringify(response) + '\n'))
+        await commandPromise
+      })
+
+      it('should send ExecutePowerShellScript command with all parameters', async () => {
+        const commandPromise = service.sendSafeCommand('test-vm', {
+          action: 'ExecutePowerShellScript',
+          params: {
+            script: 'Write-Host "Hello World"',
+            script_type: 'inline',
+            timeout_seconds: 300,
+            working_directory: 'C:\\Scripts',
+            environment_vars: { VAR1: 'value1', VAR2: 'value2' },
+            run_as_admin: true
+          }
+        })
+
+        await new Promise(resolve => setTimeout(resolve, 50))
+
+        const sentMessage = mockSocket.write.mock.calls[0][0] as string
+        const commandData = JSON.parse(sentMessage.replace('\n', ''))
+
+        expect(commandData).toMatchObject({
+          type: 'SafeCommand',
+          id: expect.any(String),
+          command_type: {
+            action: 'ExecutePowerShellScript',
+            script: 'Write-Host "Hello World"',
+            script_type: 'inline',
+            timeout_seconds: 300,
+            working_directory: 'C:\\Scripts',
+            environment_vars: { VAR1: 'value1', VAR2: 'value2' },
+            run_as_admin: true
+          },
+          params: null,
+          timeout: expect.any(Number)
+        })
+
+        // Complete the command
+        const response = {
+          type: 'response',
+          id: commandData.id,
+          success: true,
+          exit_code: 0,
+          stdout: 'Hello World',
+          stderr: ''
+        }
+        mockSocket.emit('data', Buffer.from(JSON.stringify(response) + '\n'))
+        await commandPromise
+      })
+
+      it('should send ExecutePowerShellScript with minimal parameters', async () => {
+        const commandPromise = service.sendSafeCommand('test-vm', {
+          action: 'ExecutePowerShellScript',
+          params: {
+            script: 'Get-Date'
+          }
+        })
+
+        await new Promise(resolve => setTimeout(resolve, 50))
+
+        const sentMessage = mockSocket.write.mock.calls[0][0] as string
+        const commandData = JSON.parse(sentMessage.replace('\n', ''))
+
+        expect(commandData.command_type).toMatchObject({
+          action: 'ExecutePowerShellScript',
+          script: 'Get-Date',
+          script_type: 'inline',  // Default value
+          run_as_admin: false  // Default value
+        })
+
+        // Optional fields should be omitted (undefined)
+        expect(commandData.command_type.timeout_seconds).toBeUndefined()
+        expect(commandData.command_type.working_directory).toBeUndefined()
+        expect(commandData.command_type.environment_vars).toBeUndefined()
+
+        // Complete the command
+        const response = {
+          type: 'response',
+          id: commandData.id,
+          success: true,
+          data: []
+        }
+        mockSocket.emit('data', Buffer.from(JSON.stringify(response) + '\n'))
+        await commandPromise
+      })
+
+      it('should preserve timeout_seconds value of 0', async () => {
+        const commandPromise = service.sendSafeCommand('test-vm', {
+          action: 'ExecutePowerShellScript',
+          params: {
+            script: 'Test-Script',
+            timeout_seconds: 0  // Should be preserved, not converted to undefined
+          }
+        })
+
+        await new Promise(resolve => setTimeout(resolve, 50))
+
+        const sentMessage = mockSocket.write.mock.calls[0][0] as string
+        const commandData = JSON.parse(sentMessage.replace('\n', ''))
+
+        // With ?? operator, 0 should be preserved
+        expect(commandData.command_type.timeout_seconds).toBe(0)
 
         // Complete the command
         const response = {

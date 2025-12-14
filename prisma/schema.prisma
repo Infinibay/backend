@@ -186,8 +186,14 @@ model MachineConfiguration {
   // Advanced configuration (LOW PRIORITY)
   // NUMA topology configuration for multi-socket optimization (format: {"nodes": [...]})
   numaConfig      Json?
-  // CPU affinity configuration (format: {"cores": [0, 1, 2]})
+  // CPU affinity configuration (format: {"cores": [0, 1, 2]}) - uses cgroups v2
   cpuPinning      Json?
+
+  // NUMA-aware CPU pinning via numactl process wrapper
+  // When enabled, QEMU is launched with numactl to pin CPUs and memory to NUMA nodes
+  enableNumaCtlPinning  Boolean? @default(false)
+  // Strategy for automatic CPU pinning: 'basic' (sequential) or 'hybrid' (randomized)
+  cpuPinningStrategy    String?  @default("basic")
 
   // UEFI configuration (LOW PRIORITY)
   // Path to OVMF firmware file for UEFI boot
@@ -308,6 +314,15 @@ model Department {
   firewallRuleSet     FirewallRuleSet?   @relation(fields: [firewallRuleSetId], references: [id], onDelete: SetNull)
   machines            Machine[]
   scriptAssignments   DepartmentScript[]
+
+  // Network infrastructure fields
+  bridgeName          String?            // Linux bridge name: "infinibr-{shortId}" (max 15 chars)
+  gatewayIP           String?            // Gateway IP on bridge: "10.10.100.1"
+  dhcpRangeStart      String?            // DHCP pool start: "10.10.100.10"
+  dhcpRangeEnd        String?            // DHCP pool end: "10.10.100.254"
+  dnsmasqPid          Int?               // PID of dnsmasq process for this bridge
+
+  @@index([bridgeName])
 }
 
 model SystemMetrics {

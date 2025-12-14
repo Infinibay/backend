@@ -1,6 +1,27 @@
 import { BaseCpuPinningStrategy, CpuPinningConfig } from './BasePinningStrategy'
+import {
+  calculateHybridPinning,
+  normalizeObjectTopology,
+  formatCpuRanges,
+  PinningAllocationResult,
+  HybridPinningOptions
+} from './SharedAlgorithms'
 
 export class HybridRandomStrategy extends BaseCpuPinningStrategy {
+  private seed?: number
+
+  /**
+   * Create a HybridRandomStrategy.
+   *
+   * @param xml - Libvirt XML configuration object
+   * @param seed - Optional seed for reproducible random pinning. If not provided,
+   *               pinning is non-deterministic (different each run).
+   */
+  constructor (xml: any, seed?: number) {
+    super(xml)
+    this.seed = seed
+  }
+
   /**
    * Sets the CPU pinning configuration using a hybrid random strategy.
    * This strategy shuffles the NUMA nodes and CPUs within each node to distribute vCPUs randomly
@@ -16,36 +37,27 @@ export class HybridRandomStrategy extends BaseCpuPinningStrategy {
     console.log(`Setting CPU pinning for ${vcpuCount} vCPUs with HybridRandom strategy. NUMA topology:`,
       Object.entries(numaTopology).map(([node, cpus]) => `${node}: ${cpus.join(',')}`).join(' | '))
 
-    // Shuffle the NUMA nodes for random distribution
-    const numaNodes = this.shuffleArray(Object.keys(numaTopology))
-    const vcpuPins: { vcpu: number; cpuset: string }[] = []
-
-    // Track vCPU assignments to NUMA nodes for topology creation
-    const vCpuAssignments: { [nodeId: string]: number[] } = {}
-    numaNodes.forEach(nodeId => { vCpuAssignments[nodeId] = [] })
-
-    let vcpuIndex = 0
-
-    // First pass: assign vCPUs to physical cores in a shuffled manner
-    while (vcpuIndex < vcpuCount) {
-      for (const nodeId of numaNodes) {
-        const cpus = this.shuffleArray(numaTopology[nodeId])
-        for (const cpu of cpus) {
-          if (vcpuIndex >= vcpuCount) break
-
-          vcpuPins.push({ vcpu: vcpuIndex, cpuset: cpu })
-          vCpuAssignments[nodeId].push(vcpuIndex)
-          vcpuIndex++
-        }
-        if (vcpuIndex >= vcpuCount) break
-      }
+    // Use shared algorithm for hybrid pinning
+    const normalized = normalizeObjectTopology(numaTopology)
+    const options: HybridPinningOptions = {}
+    if (this.seed !== undefined) {
+      options.seed = this.seed
+      console.log(`Using deterministic hybrid pinning with seed: ${this.seed}`)
     }
+
+    const allocation = calculateHybridPinning(vcpuCount, normalized, options)
+
+    // Log the pinning result for reproducibility tracking
+    console.log(`Hybrid pinning result: cores [${allocation.selectedCores.join(',')}], NUMA nodes [${allocation.usedNodes.join(',')}]`)
+
+    // Convert allocation to vcpupin format
+    const vcpuPins = this.allocationToVcpuPins(allocation)
 
     // Create the CPU pinning configuration
     let config = this.createCpuPinningConfig(vcpuPins)
 
     // Generate NUMA cells based on vCPU assignments
-    const numaCells = this.generateNumaCells(vCpuAssignments)
+    const numaCells = this.generateNumaCells(allocation)
 
     // Add NUMA topology to the configuration
     config = this.addNumaToConfig(config, numaCells)
@@ -59,28 +71,53 @@ export class HybridRandomStrategy extends BaseCpuPinningStrategy {
   }
 
   /**
+   * Converts PinningAllocationResult to vcpupin format for libvirt.
+   *
+   * @param allocation - Result from shared pinning algorithm
+   * @returns Array of vcpu to cpuset mappings
+   */
+  private allocationToVcpuPins (allocation: PinningAllocationResult): { vcpu: number; cpuset: string }[] {
+    const vcpuPins: { vcpu: number; cpuset: string }[] = []
+
+    allocation.vcpuToCoreMapping.forEach((physicalCore, vcpuIndex) => {
+      vcpuPins.push({
+        vcpu: vcpuIndex,
+        cpuset: String(physicalCore)
+      })
+    })
+
+    // Sort by vCPU index for consistent output
+    vcpuPins.sort((a, b) => a.vcpu - b.vcpu)
+
+    return vcpuPins
+  }
+
+  /**
    * Generates NUMA cell configuration for the VM based on vCPU assignments.
    *
-   * @param vCpuAssignments Mapping of NUMA node IDs to assigned vCPU indices
+   * @param allocation - Result from shared pinning algorithm with vcpuAssignments
    * @returns Array of NUMA cell configurations for libvirt XML
    */
-  private generateNumaCells (vCpuAssignments: { [nodeId: string]: number[] }): any[] {
+  private generateNumaCells (allocation: PinningAllocationResult): any[] {
     const vmMemory = this.getVmMemory()
     const numaCells: any[] = []
 
     // Get total number of vCPUs across all nodes
-    const totalVCpus = Object.values(vCpuAssignments)
-      .reduce((sum, vcpus) => sum + vcpus.length, 0)
+    let totalVCpus = 0
+    allocation.vcpuAssignments.forEach(vcpus => {
+      totalVCpus += vcpus.length
+    })
 
     // Create NUMA cells for the guest
-    Object.entries(vCpuAssignments).forEach(([nodeId, vcpus], index) => {
+    let cellIndex = 0
+    allocation.vcpuAssignments.forEach((vcpus, nodeId) => {
       if (vcpus.length === 0) return // Skip nodes with no vCPUs
 
       // Sort vCPUs for better representation
-      vcpus.sort((a, b) => a - b)
+      const sortedVcpus = [...vcpus].sort((a, b) => a - b)
 
-      // Format vCPU list as ranges where possible (e.g., "0-3,5,7-9" instead of "0,1,2,3,5,7,8,9")
-      const cpuRanges = this.formatCpuRanges(vcpus)
+      // Format vCPU list as ranges using shared utility
+      const cpuRanges = formatCpuRanges(sortedVcpus)
 
       // Calculate memory allocation for this NUMA node proportional to vCPU count
       const memoryRatio = vcpus.length / totalVCpus
@@ -88,62 +125,16 @@ export class HybridRandomStrategy extends BaseCpuPinningStrategy {
 
       numaCells.push({
         $: {
-          id: String(index),
+          id: String(cellIndex),
           cpus: cpuRanges,
           memory: String(nodeMemory),
           unit: 'MiB'
         }
       })
+
+      cellIndex++
     })
 
     return numaCells
-  }
-
-  /**
-   * Formats a list of CPU indices into a compact range representation.
-   * For example, [0,1,2,3,5,7,8,9] becomes "0-3,5,7-9"
-   *
-   * @param cpus Array of CPU indices to format
-   * @returns Formatted CPU range string
-   */
-  private formatCpuRanges (cpus: number[]): string {
-    if (cpus.length === 0) return ''
-    if (cpus.length === 1) return cpus[0].toString()
-
-    const sortedCpus = [...cpus].sort((a, b) => a - b)
-    const ranges: string[] = []
-
-    let rangeStart = sortedCpus[0]
-    let rangeEnd = rangeStart
-
-    for (let i = 1; i < sortedCpus.length; i++) {
-      if (sortedCpus[i] === rangeEnd + 1) {
-        // Continue the current range
-        rangeEnd = sortedCpus[i]
-      } else {
-        // End the current range and start a new one
-        ranges.push(rangeStart === rangeEnd ? `${rangeStart}` : `${rangeStart}-${rangeEnd}`)
-        rangeStart = rangeEnd = sortedCpus[i]
-      }
-    }
-
-    // Add the last range
-    ranges.push(rangeStart === rangeEnd ? `${rangeStart}` : `${rangeStart}-${rangeEnd}`)
-
-    return ranges.join(',')
-  }
-
-  /**
-   * Shuffles an array using the Fisher-Yates algorithm.
-   * @param array The array to shuffle.
-   * @returns The shuffled array.
-   */
-  private shuffleArray<T> (array: T[]): T[] {
-    const shuffled = array.slice()
-    for (let i = shuffled.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]
-    }
-    return shuffled
   }
 }

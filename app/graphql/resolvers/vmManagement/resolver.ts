@@ -1,7 +1,6 @@
 import { Resolver, Query, Mutation, Arg, ID, Ctx, Authorized } from 'type-graphql'
 import { UserInputError } from 'apollo-server-core'
 import { InfinibayContext } from '@utils/context'
-import { VirtManager } from '@utils/VirtManager'
 import {
   ServiceInfo,
   PackageInfo,
@@ -50,7 +49,6 @@ interface InfiniPackageData {
 @Resolver()
 export class VMManagementResolver {
   constructor (
-    private virtManager: VirtManager,
     private virtioSocketWatcher: VirtioSocketWatcherService
   ) {}
 
