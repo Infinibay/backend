@@ -88,7 +88,7 @@ model Machine {
   firewallRuleSetId  String?               @unique
   applicationUsage   ApplicationUsage[]
   department         Department?           @relation(fields: [departmentId], references: [id])
-  firewallRuleSet    FirewallRuleSet?      @relation(fields: [firewallRuleSetId], references: [id])
+  firewallRuleSet    FirewallRuleSet?      @relation(fields: [firewallRuleSetId], references: [id], onDelete: SetNull)
   template           MachineTemplate?      @relation(fields: [templateId], references: [id])
   user               User?                 @relation(fields: [userId], references: [id])
   applications       MachineApplication[]
@@ -279,7 +279,7 @@ model MachineApplication {
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
   application   Application @relation(fields: [applicationId], references: [id])
-  machine       Machine     @relation(fields: [machineId], references: [id])
+  machine       Machine     @relation(fields: [machineId], references: [id], onDelete: Cascade)
 
   @@id([machineId, applicationId])
 }
@@ -291,7 +291,7 @@ model PendingCommand {
   parameters Json
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
-  machine    Machine  @relation(fields: [machineId], references: [id])
+  machine    Machine  @relation(fields: [machineId], references: [id], onDelete: Cascade)
 
   @@index([machineId])
 }

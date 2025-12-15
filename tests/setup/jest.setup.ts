@@ -115,8 +115,6 @@ process.env.FRONTEND_URL = 'http://localhost:3000'
 process.env.APP_HOST = '192.168.1.100'
 process.env.GRAPHIC_HOST = '192.168.1.100'
 process.env.INFINIBAY_BASE_DIR = '/tmp/infinibay-test'
-process.env.INFINIBAY_STORAGE_POOL_NAME = 'infinibay-test'
-process.env.LIBVIRT_NETWORK_NAME = 'default'
 process.env.VIRTIO_WIN_ISO_PATH = '/tmp/virtio-win.iso'
 
 // Reset mocks before each test

@@ -197,6 +197,14 @@ export class MachineCleanupServiceV2 {
   /**
    * Destroys VM resources via infinivirt.
    * This permanently removes TAP device, firewall rules, and stops the process.
+   *
+   * IMPORTANT: This calls infinivirt.destroyVM() which:
+   * - Stops QEMU process if running
+   * - Permanently destroys TAP device (ip link del)
+   * - Permanently removes nftables firewall chain and all rules
+   * - Clears machine configuration from database
+   *
+   * This is different from stop() which only detaches resources for reuse.
    */
   private async cleanupVMResources (machineId: string, summary: CleanupSummary): Promise<ResourceCleanupResult> {
     const startTime = Date.now()
@@ -440,6 +448,7 @@ export class MachineCleanupServiceV2 {
 
     try {
       let appCount = 0
+      let pendingCmdCount = 0
       let scriptCount = 0
       let firewallRuleCount = 0
 
@@ -461,6 +470,13 @@ export class MachineCleanupServiceV2 {
         appCount = appResult.count
         this.debug.log('info', `Deleting ${appCount} machine applications...`)
 
+        // Delete pending commands
+        const pendingCmdResult = await tx.pendingCommand.deleteMany({
+          where: { machineId }
+        })
+        pendingCmdCount = pendingCmdResult.count
+        this.debug.log('info', `Deleting ${pendingCmdCount} pending commands...`)
+
         // Delete script executions
         const scriptResult = await tx.scriptExecution.deleteMany({
           where: { machineId }
@@ -481,8 +497,8 @@ export class MachineCleanupServiceV2 {
 
       result.duration = Date.now() - startTime
       result.success = true
-      result.details = `Configuration, ${appCount} applications, ${scriptCount} scripts, ${firewallRuleCount} firewall rules`
-      this.debug.log('info', `✓ Database records removed in ${result.duration}ms (config, ${appCount} apps, ${scriptCount} scripts, ${firewallRuleCount} firewall rules, machine)`)
+      result.details = `Configuration, ${appCount} applications, ${pendingCmdCount} pending commands, ${scriptCount} scripts, ${firewallRuleCount} firewall rules`
+      this.debug.log('info', `✓ Database records removed in ${result.duration}ms (config, ${appCount} apps, ${pendingCmdCount} pending commands, ${scriptCount} scripts, ${firewallRuleCount} firewall rules, machine)`)
     } catch (e: any) {
       result.duration = Date.now() - startTime
       result.success = false

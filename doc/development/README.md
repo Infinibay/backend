@@ -77,12 +77,10 @@ FRONTEND_URL="http://localhost:3000"
 
 # Virtualization
 RPC_URL="http://localhost:9090"
-VIRTIO_WIN_ISO_PATH="/var/lib/libvirt/driver/virtio-win-0.1.229.iso"
+VIRTIO_WIN_ISO_PATH="/opt/infinibay/iso/permanent/virtio-win.iso"
 APP_HOST="192.168.1.100"
 INFINIBAY_BASE_DIR="/opt/infinibay"
-INFINIBAY_STORAGE_POOL_NAME="infinibay"
 GRAPHIC_HOST="192.168.1.100"
-LIBVIRT_NETWORK_NAME="default"
 
 # Security
 BCRYPT_ROUNDS=10
