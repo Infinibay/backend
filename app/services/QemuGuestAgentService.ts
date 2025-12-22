@@ -1,6 +1,6 @@
 import { Debugger } from '../utils/debug'
-import { getInfinivirt } from './InfinivirtService'
-import { Infinivirt } from '@infinibay/infinivirt'
+import { getInfinization } from './InfinizationService'
+import { Infinization } from '@infinibay/infinization'
 
 /**
  * Service for interacting with QEMU Guest Agent to debug VM issues
@@ -9,48 +9,48 @@ import { Infinivirt } from '@infinibay/infinivirt'
  */
 export class QemuGuestAgentService {
   private debug: Debugger
-  private infinivirt: Infinivirt | null = null
+  private infinization: Infinization | null = null
 
   constructor () {
     this.debug = new Debugger('qemu-guest-agent')
   }
 
   /**
-   * Initialize the service with infinivirt connection
+   * Initialize the service with infinization connection
    */
   async initialize (): Promise<void> {
     try {
-      this.infinivirt = await getInfinivirt()
+      this.infinization = await getInfinization()
       this.debug.log('info', 'QEMU Guest Agent Service initialized')
     } catch (error) {
-      this.debug.log('error', `Failed to initialize infinivirt: ${error}`)
+      this.debug.log('error', `Failed to initialize infinization: ${error}`)
       throw error
     }
   }
 
   /**
    * Execute a command inside a VM using QEMU Guest Agent
-   * Note: This requires qemuAgentCommand to be implemented in infinivirt
+   * Note: This requires qemuAgentCommand to be implemented in infinization
    */
   async executeCommand (
     vmId: string,
     command: string,
     args: string[] = []
   ): Promise<{ success: boolean; output?: string; error?: string }> {
-    if (!this.infinivirt) {
+    if (!this.infinization) {
       throw new Error('Service not initialized. Call initialize() first.')
     }
 
     try {
-      // Check if VM is running via infinivirt
-      const status = await this.infinivirt.getVMStatus(vmId)
+      // Check if VM is running via infinization
+      const status = await this.infinization.getVMStatus(vmId)
       if (!status.processAlive) {
         return { success: false, error: `VM ${vmId} is not running` }
       }
 
-      // Note: qemuAgentCommand is not yet implemented in infinivirt
+      // Note: qemuAgentCommand is not yet implemented in infinization
       // This is a placeholder for when it becomes available
-      this.debug.log('warn', 'qemuAgentCommand is not yet implemented in infinivirt')
+      this.debug.log('warn', 'qemuAgentCommand is not yet implemented in infinization')
 
       // For now, provide manual debugging instructions
       const virshCommand = this.buildVirshCommand(vmId, command, args)
@@ -62,7 +62,7 @@ export class QemuGuestAgentService {
         output: virshCommand
       }
 
-      // Future implementation when qemuAgentCommand is available in infinivirt:
+      // Future implementation when qemuAgentCommand is available in infinization:
       /*
       const guestExecCmd = {
         execute: 'guest-exec',
@@ -73,7 +73,7 @@ export class QemuGuestAgentService {
         }
       }
 
-      const result = await this.infinivirt.qemuAgentCommand(vmId, JSON.stringify(guestExecCmd), 30)
+      const result = await this.infinization.qemuAgentCommand(vmId, JSON.stringify(guestExecCmd), 30)
       const resultObj = JSON.parse(result)
 
       // Wait for command completion
@@ -85,7 +85,7 @@ export class QemuGuestAgentService {
           arguments: { pid: resultObj.pid }
         }
 
-        const status = await this.infinivirt.qemuAgentCommand(vmId, JSON.stringify(statusCmd), 30)
+        const status = await this.infinization.qemuAgentCommand(vmId, JSON.stringify(statusCmd), 30)
         const statusObj = JSON.parse(status)
 
         if (statusObj.exited) {
@@ -226,9 +226,9 @@ export class QemuGuestAgentService {
     diagnostics.push('')
 
     // Check VM state
-    if (this.infinivirt) {
+    if (this.infinization) {
       try {
-        const status = await this.infinivirt.getVMStatus(vmId)
+        const status = await this.infinization.getVMStatus(vmId)
         if (status.processAlive) {
           diagnostics.push('VM State: Running')
         } else {

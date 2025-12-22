@@ -1,9 +1,9 @@
 /**
- * SharedAlgorithms - Core CPU pinning algorithms shared between backend and infinivirt
+ * SharedAlgorithms - Core CPU pinning algorithms shared between backend and infinization
  *
  * This module provides pure functions for calculating NUMA-aware CPU pinning
  * without any dependency on libvirt XML or numactl specifics. Both backend
- * strategies (for libvirt XML generation) and infinivirt's CpuPinningAdapter
+ * strategies (for libvirt XML generation) and infinization's CpuPinningAdapter
  * (for numactl wrapper generation) delegate to these shared algorithms.
  *
  * @module SharedAlgorithms

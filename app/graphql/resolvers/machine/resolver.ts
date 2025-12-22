@@ -377,11 +377,11 @@ export class MachineMutations {
       }
 
       // TODO: Implement guest agent command execution via QMP guest-exec
-      // infinivirt needs to implement QMPClient.guestExec() for this feature
+      // infinization needs to implement QMPClient.guestExec() for this feature
       // For now, return not implemented
       return {
         success: false,
-        message: 'QEMU Guest Agent command execution is not yet implemented. This feature requires guest-agent support in infinivirt.'
+        message: 'QEMU Guest Agent command execution is not yet implemented. This feature requires guest-agent support in infinization.'
       }
     } catch (error) {
       // Log the error and return a failure response
@@ -391,11 +391,11 @@ export class MachineMutations {
   }
 
   /**
-   * Changes the state of a virtual machine using VMOperationsService (infinivirt).
+   * Changes the state of a virtual machine using VMOperationsService (infinization).
    *
    * For the 'shutdown' action, this method performs additional post-operation verification
    * to confirm that the QEMU process has actually terminated. This provides a defense-in-depth
-   * layer to detect edge cases where infinivirt reports success but the process remains alive.
+   * layer to detect edge cases where infinization reports success but the process remains alive.
    *
    * @param id - The ID of the machine to change state.
    * @param prisma - The Prisma client for database operations.
@@ -434,7 +434,7 @@ export class MachineMutations {
         - Requested by: ${user?.email || 'unknown'} (${user?.role || 'unknown'})
         - Timestamp: ${new Date().toISOString()}`)
 
-      // Use VMOperationsService for VM operations via infinivirt
+      // Use VMOperationsService for VM operations via infinization
       const vmOpsService = new VMOperationsService(prisma)
 
       // Perform the requested action
@@ -467,7 +467,7 @@ export class MachineMutations {
       }
 
       // Post-shutdown verification: Confirm QEMU process is actually dead
-      // This is a defense-in-depth layer to detect edge cases where infinivirt
+      // This is a defense-in-depth layer to detect edge cases where infinization
       // reports success but the process remains alive due to race conditions or partial errors
       if (action === 'shutdown' && result.success) {
         const VERIFICATION_TIMEOUT_MS = 5000
@@ -486,7 +486,7 @@ export class MachineMutations {
             this.debug.log(`[changeMachineState] Warning: Post-shutdown verification timed out or failed
               - Machine ID: ${id}
               - Timeout: ${VERIFICATION_TIMEOUT_MS}ms
-              - Proceeding with assumed success based on infinivirt result`)
+              - Proceeding with assumed success based on infinization result`)
           } else if (vmStatus.processAlive) {
             // Process is still alive - this is an error condition
             const elapsedMs = Date.now() - operationStartTime
@@ -525,11 +525,11 @@ export class MachineMutations {
           }
         } catch (verificationError) {
           // Log verification error but don't fail the operation
-          // The infinivirt operation already reported success
+          // The infinization operation already reported success
           this.debug.log(`[changeMachineState] Warning: Post-shutdown verification threw error:
             - Machine ID: ${id}
             - Error: ${(verificationError as Error).message}
-            - Proceeding with assumed success based on infinivirt result`)
+            - Proceeding with assumed success based on infinization result`)
         }
       }
 

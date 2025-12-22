@@ -10,7 +10,7 @@ const debug = new Debugger('infinibay:callback:department')
  * This callback creates the FirewallRuleSet (database record only) and establishes
  * the foreign key relationship by updating Department.firewallRuleSetId.
  *
- * Note: nftables chains are created by infinivirt during VM startup, not here.
+ * Note: nftables chains are created by infinization during VM startup, not here.
  * The ruleset serves as the database container for firewall rules that will be
  * applied when VMs in this department start.
  *

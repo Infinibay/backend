@@ -5,7 +5,7 @@
   "main": "dist/index.js",
   "scripts": {
     "start": "ts-node -r tsconfig-paths/register app/index.ts",
-    "dev": "DEBUG=infinibay:*,infinivirt:* npm run start",
+    "dev": "DEBUG=infinibay:*,infinization:* npm run start",
     "dev:verbose": "DEBUG=infinibay:virtio-socket:* npm run start",
     "test": "jest",
     "lint": "eslint . --ext .ts,.tsx",
@@ -31,7 +31,7 @@
   "dependencies": {
     "@apollo/server": "^4.3.0",
     "@graphql-tools/jest-transform": "^1.2.2",
-    "@infinibay/infinivirt": "file:../infinivirt",
+    "@infinibay/infinization": "file:../infinization",
     "@prisma/client": "^6.16.3",
     "@types/axios": "^0.14.0",
     "@types/chokidar": "^2.1.7",

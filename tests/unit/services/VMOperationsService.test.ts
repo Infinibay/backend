@@ -2,8 +2,8 @@ import 'reflect-metadata'
 import { VMOperationsService } from '../../../app/services/VMOperationsService'
 import { PrismaClient } from '@prisma/client'
 
-// Mock InfinivirtService
-const mockInfinivirt = {
+// Mock InfinizationService
+const mockInfinization = {
   startVM: jest.fn(),
   stopVM: jest.fn(),
   restartVM: jest.fn(),
@@ -13,8 +13,8 @@ const mockInfinivirt = {
   getVMStatus: jest.fn()
 }
 
-jest.mock('../../../app/services/InfinivirtService', () => ({
-  getInfinivirt: jest.fn(() => Promise.resolve(mockInfinivirt))
+jest.mock('../../../app/services/InfinizationService', () => ({
+  getInfinization: jest.fn(() => Promise.resolve(mockInfinization))
 }))
 
 describe('VMOperationsService', () => {
@@ -31,7 +31,7 @@ describe('VMOperationsService', () => {
     const machineId = 'vm-123'
 
     it('should successfully start a machine', async () => {
-      mockInfinivirt.startVM.mockResolvedValue({
+      mockInfinization.startVM.mockResolvedValue({
         success: true,
         message: 'VM started successfully'
       })
@@ -40,11 +40,11 @@ describe('VMOperationsService', () => {
 
       expect(result.success).toBe(true)
       expect(result.message).toBe('VM started successfully')
-      expect(mockInfinivirt.startVM).toHaveBeenCalledWith(machineId)
+      expect(mockInfinization.startVM).toHaveBeenCalledWith(machineId)
     })
 
     it('should handle start failure', async () => {
-      mockInfinivirt.startVM.mockResolvedValue({
+      mockInfinization.startVM.mockResolvedValue({
         success: false,
         error: 'VM already running'
       })
@@ -56,7 +56,7 @@ describe('VMOperationsService', () => {
     })
 
     it('should handle exceptions', async () => {
-      mockInfinivirt.startVM.mockRejectedValue(new Error('Connection failed'))
+      mockInfinization.startVM.mockRejectedValue(new Error('Connection failed'))
 
       const result = await service.startMachine(machineId)
 
@@ -69,7 +69,7 @@ describe('VMOperationsService', () => {
     const machineId = 'vm-123'
 
     it('should successfully force power off a machine', async () => {
-      mockInfinivirt.stopVM.mockResolvedValue({
+      mockInfinization.stopVM.mockResolvedValue({
         success: true,
         message: 'VM forcefully stopped'
       })
@@ -77,14 +77,14 @@ describe('VMOperationsService', () => {
       const result = await service.forcePowerOff(machineId)
 
       expect(result.success).toBe(true)
-      expect(mockInfinivirt.stopVM).toHaveBeenCalledWith(machineId, {
+      expect(mockInfinization.stopVM).toHaveBeenCalledWith(machineId, {
         graceful: false,
         force: true
       })
     })
 
     it('should handle force power off failure', async () => {
-      mockInfinivirt.stopVM.mockResolvedValue({
+      mockInfinization.stopVM.mockResolvedValue({
         success: false,
         error: 'VM not found'
       })
@@ -100,7 +100,7 @@ describe('VMOperationsService', () => {
     const machineId = 'vm-123'
 
     it('should successfully gracefully power off a machine', async () => {
-      mockInfinivirt.stopVM.mockResolvedValue({
+      mockInfinization.stopVM.mockResolvedValue({
         success: true,
         message: 'VM powered off'
       })
@@ -108,7 +108,7 @@ describe('VMOperationsService', () => {
       const result = await service.gracefulPowerOff(machineId)
 
       expect(result.success).toBe(true)
-      expect(mockInfinivirt.stopVM).toHaveBeenCalledWith(machineId, {
+      expect(mockInfinization.stopVM).toHaveBeenCalledWith(machineId, {
         graceful: true,
         timeout: 30000,
         force: true
@@ -120,7 +120,7 @@ describe('VMOperationsService', () => {
     const machineId = 'vm-123'
 
     it('should successfully restart a machine', async () => {
-      mockInfinivirt.restartVM.mockResolvedValue({
+      mockInfinization.restartVM.mockResolvedValue({
         success: true,
         message: 'VM restarted'
       })
@@ -128,7 +128,7 @@ describe('VMOperationsService', () => {
       const result = await service.restartMachine(machineId)
 
       expect(result.success).toBe(true)
-      expect(mockInfinivirt.restartVM).toHaveBeenCalledWith(machineId)
+      expect(mockInfinization.restartVM).toHaveBeenCalledWith(machineId)
     })
   })
 
@@ -136,7 +136,7 @@ describe('VMOperationsService', () => {
     const machineId = 'vm-123'
 
     it('should successfully reset a machine', async () => {
-      mockInfinivirt.resetVM.mockResolvedValue({
+      mockInfinization.resetVM.mockResolvedValue({
         success: true,
         message: 'VM reset'
       })
@@ -144,7 +144,7 @@ describe('VMOperationsService', () => {
       const result = await service.resetMachine(machineId)
 
       expect(result.success).toBe(true)
-      expect(mockInfinivirt.resetVM).toHaveBeenCalledWith(machineId)
+      expect(mockInfinization.resetVM).toHaveBeenCalledWith(machineId)
     })
   })
 
@@ -152,7 +152,7 @@ describe('VMOperationsService', () => {
     const machineId = 'vm-123'
 
     it('should successfully suspend a machine', async () => {
-      mockInfinivirt.suspendVM.mockResolvedValue({
+      mockInfinization.suspendVM.mockResolvedValue({
         success: true,
         message: 'VM suspended'
       })
@@ -160,7 +160,7 @@ describe('VMOperationsService', () => {
       const result = await service.suspendMachine(machineId)
 
       expect(result.success).toBe(true)
-      expect(mockInfinivirt.suspendVM).toHaveBeenCalledWith(machineId)
+      expect(mockInfinization.suspendVM).toHaveBeenCalledWith(machineId)
     })
   })
 
@@ -168,7 +168,7 @@ describe('VMOperationsService', () => {
     const machineId = 'vm-123'
 
     it('should successfully resume a machine', async () => {
-      mockInfinivirt.resumeVM.mockResolvedValue({
+      mockInfinization.resumeVM.mockResolvedValue({
         success: true,
         message: 'VM resumed'
       })
@@ -176,7 +176,7 @@ describe('VMOperationsService', () => {
       const result = await service.resumeMachine(machineId)
 
       expect(result.success).toBe(true)
-      expect(mockInfinivirt.resumeVM).toHaveBeenCalledWith(machineId)
+      expect(mockInfinization.resumeVM).toHaveBeenCalledWith(machineId)
     })
   })
 
@@ -184,7 +184,7 @@ describe('VMOperationsService', () => {
     const machineId = 'vm-123'
 
     it('should return VM status', async () => {
-      mockInfinivirt.getVMStatus.mockResolvedValue({
+      mockInfinization.getVMStatus.mockResolvedValue({
         status: 'running',
         processAlive: true,
         consistent: true
@@ -200,7 +200,7 @@ describe('VMOperationsService', () => {
     })
 
     it('should return null on error', async () => {
-      mockInfinivirt.getVMStatus.mockRejectedValue(new Error('Failed'))
+      mockInfinization.getVMStatus.mockRejectedValue(new Error('Failed'))
 
       const result = await service.getStatus(machineId)
 
@@ -212,7 +212,7 @@ describe('VMOperationsService', () => {
     const machineId = 'vm-123'
 
     it('should restart on first attempt if successful', async () => {
-      mockInfinivirt.restartVM.mockResolvedValue({
+      mockInfinization.restartVM.mockResolvedValue({
         success: true,
         message: 'VM restarted'
       })
@@ -220,19 +220,19 @@ describe('VMOperationsService', () => {
       const result = await service.performGracefulRestart(machineId)
 
       expect(result.success).toBe(true)
-      expect(mockInfinivirt.restartVM).toHaveBeenCalledTimes(1)
+      expect(mockInfinization.restartVM).toHaveBeenCalledTimes(1)
     })
 
     it('should retry up to maxRetries on failure', async () => {
-      mockInfinivirt.restartVM.mockResolvedValue({
+      mockInfinization.restartVM.mockResolvedValue({
         success: false,
         error: 'Restart failed'
       })
-      mockInfinivirt.stopVM.mockResolvedValue({
+      mockInfinization.stopVM.mockResolvedValue({
         success: true,
         message: 'VM stopped'
       })
-      mockInfinivirt.startVM.mockResolvedValue({
+      mockInfinization.startVM.mockResolvedValue({
         success: true,
         message: 'VM started'
       })
@@ -240,9 +240,9 @@ describe('VMOperationsService', () => {
       const result = await service.performGracefulRestart(machineId, 2)
 
       // 2 restart attempts + 1 force stop + 1 start
-      expect(mockInfinivirt.restartVM).toHaveBeenCalledTimes(2)
-      expect(mockInfinivirt.stopVM).toHaveBeenCalledTimes(1)
-      expect(mockInfinivirt.startVM).toHaveBeenCalledTimes(1)
+      expect(mockInfinization.restartVM).toHaveBeenCalledTimes(2)
+      expect(mockInfinization.stopVM).toHaveBeenCalledTimes(1)
+      expect(mockInfinization.startVM).toHaveBeenCalledTimes(1)
       expect(result.success).toBe(true)
     }, 15000) // Increase timeout due to retry delays
   })

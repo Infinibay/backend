@@ -1,13 +1,13 @@
 import { PrismaClient } from '@prisma/client'
 import { Debugger } from '../../utils/debug'
 
-// TODO: This service needs to be migrated to use infinivirt instead of libvirt-node
+// TODO: This service needs to be migrated to use infinization instead of libvirt-node
 // For now, hardware updates should be done by recreating the VM with new settings
 
 /**
  * Service responsible for updating VM hardware configurations
  *
- * @deprecated This service used libvirt-node which has been replaced by infinivirt.
+ * @deprecated This service used libvirt-node which has been replaced by infinization.
  * Hardware updates are not currently supported - VMs should be recreated with new settings.
  */
 export class HardwareUpdateService {
@@ -24,7 +24,7 @@ export class HardwareUpdateService {
   /**
    * Main method to update VM hardware
    * @deprecated Hardware updates via libvirt are not currently supported.
-   * VMs managed by infinivirt should be recreated with new settings.
+   * VMs managed by infinization should be recreated with new settings.
    */
   async updateHardware (): Promise<void> {
     this.debug.log('warn', `Hardware update requested for ${this.machineId} but this feature is temporarily disabled`)

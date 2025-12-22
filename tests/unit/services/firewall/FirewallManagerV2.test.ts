@@ -10,9 +10,9 @@ const mockNftables = {
   flushVMRules: jest.fn()
 }
 
-// Mock InfinivirtService
-jest.mock('../../../../app/services/InfinivirtService', () => ({
-  getInfinivirt: jest.fn(() => Promise.resolve({
+// Mock InfinizationService
+jest.mock('../../../../app/services/InfinizationService', () => ({
+  getInfinization: jest.fn(() => Promise.resolve({
     getNftablesService: () => mockNftables
   }))
 }))

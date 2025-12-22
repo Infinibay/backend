@@ -347,9 +347,9 @@ export class MachineLifecycleService {
         return
       }
 
-      console.log(`[backgroundCode] Found machine: ${machine.name}, using CreateMachineServiceV2 (infinivirt)`)
+      console.log(`[backgroundCode] Found machine: ${machine.name}, using CreateMachineServiceV2 (infinization)`)
 
-      // Use infinivirt-based CreateMachineServiceV2
+      // Use infinization-based CreateMachineServiceV2
       const createService = new CreateMachineServiceV2(this.prisma)
       await createService.create(machine, username, password, productKey, pciBus)
 

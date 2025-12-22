@@ -1,13 +1,13 @@
 /**
- * VMOperationsService - VM power operations using infinivirt.
+ * VMOperationsService - VM power operations using infinization.
  *
  * This service provides VM lifecycle operations (start, stop, restart, reset)
- * using the infinivirt library instead of direct libvirt calls.
+ * using the infinization library instead of direct libvirt calls.
  */
 
 import { PrismaClient } from '@prisma/client'
 import { Debugger } from '@utils/debug'
-import { getInfinivirt } from './InfinivirtService'
+import { getInfinization } from './InfinizationService'
 
 export interface VMOperationResult {
   success: boolean
@@ -31,8 +31,8 @@ export class VMOperationsService {
     this.debug.log(`Restarting machine ${machineId}`)
 
     try {
-      const infinivirt = await getInfinivirt()
-      const result = await infinivirt.restartVM(machineId)
+      const infinization = await getInfinization()
+      const result = await infinization.restartVM(machineId)
 
       if (result.success) {
         return {
@@ -61,8 +61,8 @@ export class VMOperationsService {
     this.debug.log(`Force powering off machine ${machineId}`)
 
     try {
-      const infinivirt = await getInfinivirt()
-      const result = await infinivirt.stopVM(machineId, {
+      const infinization = await getInfinization()
+      const result = await infinization.stopVM(machineId, {
         graceful: false,
         force: true
       })
@@ -94,8 +94,8 @@ export class VMOperationsService {
     this.debug.log(`Gracefully powering off machine ${machineId}`)
 
     try {
-      const infinivirt = await getInfinivirt()
-      const result = await infinivirt.stopVM(machineId, {
+      const infinization = await getInfinization()
+      const result = await infinization.stopVM(machineId, {
         graceful: true,
         timeout: 120000, // 2 minutes
         force: true // Force kill if timeout
@@ -128,8 +128,8 @@ export class VMOperationsService {
     this.debug.log(`Resetting machine ${machineId}`)
 
     try {
-      const infinivirt = await getInfinivirt()
-      const result = await infinivirt.resetVM(machineId)
+      const infinization = await getInfinization()
+      const result = await infinization.resetVM(machineId)
 
       if (result.success) {
         return {
@@ -158,8 +158,8 @@ export class VMOperationsService {
     this.debug.log(`Starting machine ${machineId}`)
 
     try {
-      const infinivirt = await getInfinivirt()
-      const result = await infinivirt.startVM(machineId)
+      const infinization = await getInfinization()
+      const result = await infinization.startVM(machineId)
 
       if (result.success) {
         return {
@@ -188,8 +188,8 @@ export class VMOperationsService {
     this.debug.log(`Suspending machine ${machineId}`)
 
     try {
-      const infinivirt = await getInfinivirt()
-      const result = await infinivirt.suspendVM(machineId)
+      const infinization = await getInfinization()
+      const result = await infinization.suspendVM(machineId)
 
       if (result.success) {
         return {
@@ -218,8 +218,8 @@ export class VMOperationsService {
     this.debug.log(`Resuming machine ${machineId}`)
 
     try {
-      const infinivirt = await getInfinivirt()
-      const result = await infinivirt.resumeVM(machineId)
+      const infinization = await getInfinization()
+      const result = await infinization.resumeVM(machineId)
 
       if (result.success) {
         return {
@@ -250,8 +250,8 @@ export class VMOperationsService {
     consistent: boolean
   } | null> {
     try {
-      const infinivirt = await getInfinivirt()
-      const result = await infinivirt.getVMStatus(machineId)
+      const infinization = await getInfinization()
+      const result = await infinization.getVMStatus(machineId)
 
       return {
         status: result.status,
@@ -303,10 +303,10 @@ export class VMOperationsService {
   }
 
   /**
-   * Close connection (no-op for infinivirt, kept for API compatibility)
-   * @deprecated No longer needed with infinivirt
+   * Close connection (no-op for infinization, kept for API compatibility)
+   * @deprecated No longer needed with infinization
    */
   async close (): Promise<void> {
-    // No-op: infinivirt manages its own connections
+    // No-op: infinization manages its own connections
   }
 }

@@ -1,52 +1,52 @@
 /**
- * InfinivirtService - Singleton service for VM operations via infinivirt library.
+ * InfinizationService - Singleton service for VM operations via infinization library.
  *
- * This service replaces direct libvirt-node usage with the infinivirt library,
+ * This service replaces direct libvirt-node usage with the infinization library,
  * providing a unified API for VM lifecycle management, health monitoring,
  * and state synchronization.
  *
  * @example
  * ```typescript
- * const infinivirt = await getInfinivirt()
- * const result = await infinivirt.createVM(config)
+ * const infinization = await getInfinization()
+ * const result = await infinization.createVM(config)
  * ```
  */
 
 import fs from 'fs'
 import path from 'path'
-import { Infinivirt, VMEventData } from '@infinibay/infinivirt'
+import { Infinization, VMEventData } from '@infinibay/infinization'
 import prisma from '../utils/database'
 import { getEventManager, EventAction } from './EventManager'
 import { Debugger } from '../utils/debug'
 
-const debug = new Debugger('infinivirt-service')
+const debug = new Debugger('infinization-service')
 
 // Configuration from environment variables
-const INFINIVIRT_CONFIG = {
-  diskDir: process.env.INFINIVIRT_DISK_DIR || '/var/lib/infinivirt/disks',
-  qmpSocketDir: process.env.INFINIVIRT_SOCKET_DIR || '/opt/infinibay/sockets',
-  pidfileDir: process.env.INFINIVIRT_PID_DIR || '/opt/infinibay/pids',
-  healthMonitorInterval: parseInt(process.env.INFINIVIRT_HEALTH_INTERVAL || '30000', 10),
-  autoStartHealthMonitor: process.env.INFINIVIRT_AUTO_HEALTH !== 'false'
+const INFINIZATION_CONFIG = {
+  diskDir: process.env.INFINIZATION_DISK_DIR || '/var/lib/infinization/disks',
+  qmpSocketDir: process.env.INFINIZATION_SOCKET_DIR || '/opt/infinibay/sockets',
+  pidfileDir: process.env.INFINIZATION_PID_DIR || '/opt/infinibay/pids',
+  healthMonitorInterval: parseInt(process.env.INFINIZATION_HEALTH_INTERVAL || '30000', 10),
+  autoStartHealthMonitor: process.env.INFINIZATION_AUTO_HEALTH !== 'false'
 }
 
 // Singleton instance
-let infinivirtInstance: Infinivirt | null = null
-let initializationPromise: Promise<Infinivirt> | null = null
+let infinizationInstance: Infinization | null = null
+let initializationPromise: Promise<Infinization> | null = null
 
 /**
- * Gets or creates the Infinivirt singleton instance.
+ * Gets or creates the Infinization singleton instance.
  *
  * This function is safe to call multiple times - it will return the same
  * instance and handle concurrent initialization properly.
  *
- * @returns Promise resolving to the initialized Infinivirt instance
+ * @returns Promise resolving to the initialized Infinization instance
  * @throws Error if initialization fails
  */
-export async function getInfinivirt (): Promise<Infinivirt> {
+export async function getInfinization (): Promise<Infinization> {
   // Return existing instance if available
-  if (infinivirtInstance) {
-    return infinivirtInstance
+  if (infinizationInstance) {
+    return infinizationInstance
   }
 
   // Return pending initialization if in progress
@@ -55,11 +55,11 @@ export async function getInfinivirt (): Promise<Infinivirt> {
   }
 
   // Start initialization
-  initializationPromise = initializeInfinivirt()
+  initializationPromise = initializeInfinization()
 
   try {
-    infinivirtInstance = await initializationPromise
-    return infinivirtInstance
+    infinizationInstance = await initializationPromise
+    return infinizationInstance
   } finally {
     initializationPromise = null
   }
@@ -68,14 +68,14 @@ export async function getInfinivirt (): Promise<Infinivirt> {
 /**
  * Internal initialization function.
  */
-async function initializeInfinivirt (): Promise<Infinivirt> {
+async function initializeInfinization (): Promise<Infinization> {
   // Check if running as root (required for nftables)
   if (process.getuid && process.getuid() !== 0) {
     console.error('')
     console.error('╔══════════════════════════════════════════════════════════════╗')
-    console.error('║  ERROR: Backend must run as root to use infinivirt           ║')
+    console.error('║  ERROR: Backend must run as root to use infinization         ║')
     console.error('║                                                              ║')
-    console.error('║  Infinivirt requires root permissions for:                   ║')
+    console.error('║  Infinization requires root permissions for:                 ║')
     console.error('║    - nftables firewall management                            ║')
     console.error('║    - TAP network device creation                             ║')
     console.error('║    - QEMU process management                                 ║')
@@ -86,7 +86,7 @@ async function initializeInfinivirt (): Promise<Infinivirt> {
     process.exit(1)
   }
 
-  // Ensure all required directories exist before creating Infinivirt instance.
+  // Ensure all required directories exist before creating Infinization instance.
   // These directories are used by VMLifecycle for:
   // - diskDir: VM disk images (qcow2 files)
   // - qmpSocketDir: QMP sockets, InfiniService virtio-serial channels, and guest-agent sockets
@@ -94,9 +94,9 @@ async function initializeInfinivirt (): Promise<Infinivirt> {
   const fs = await import('fs')
 
   const requiredDirs = [
-    { path: INFINIVIRT_CONFIG.diskDir, name: 'disk' },
-    { path: INFINIVIRT_CONFIG.qmpSocketDir, name: 'socket' },
-    { path: INFINIVIRT_CONFIG.pidfileDir, name: 'pidfile' }
+    { path: INFINIZATION_CONFIG.diskDir, name: 'disk' },
+    { path: INFINIZATION_CONFIG.qmpSocketDir, name: 'socket' },
+    { path: INFINIZATION_CONFIG.pidfileDir, name: 'pidfile' }
   ]
 
   for (const dir of requiredDirs) {
@@ -106,46 +106,46 @@ async function initializeInfinivirt (): Promise<Infinivirt> {
     }
   }
 
-  console.log('🚀 Initializing Infinivirt service...')
+  console.log('🚀 Initializing Infinization service...')
 
   const eventManager = getEventManager()
 
-  const infinivirt = new Infinivirt({
+  const infinization = new Infinization({
     prismaClient: prisma,
     eventManager,
-    diskDir: INFINIVIRT_CONFIG.diskDir,
-    qmpSocketDir: INFINIVIRT_CONFIG.qmpSocketDir,
-    pidfileDir: INFINIVIRT_CONFIG.pidfileDir,
-    healthMonitorInterval: INFINIVIRT_CONFIG.healthMonitorInterval,
-    autoStartHealthMonitor: INFINIVIRT_CONFIG.autoStartHealthMonitor
+    diskDir: INFINIZATION_CONFIG.diskDir,
+    qmpSocketDir: INFINIZATION_CONFIG.qmpSocketDir,
+    pidfileDir: INFINIZATION_CONFIG.pidfileDir,
+    healthMonitorInterval: INFINIZATION_CONFIG.healthMonitorInterval,
+    autoStartHealthMonitor: INFINIZATION_CONFIG.autoStartHealthMonitor
   })
 
-  await infinivirt.initialize()
+  await infinization.initialize()
 
-  console.log('✅ Infinivirt service initialized successfully')
-  console.log(`   - Disk directory: ${INFINIVIRT_CONFIG.diskDir}`)
-  console.log(`   - QMP socket directory: ${INFINIVIRT_CONFIG.qmpSocketDir}`)
-  console.log(`   - Health monitor: ${INFINIVIRT_CONFIG.autoStartHealthMonitor ? 'enabled' : 'disabled'}`)
+  console.log('✅ Infinization service initialized successfully')
+  console.log(`   - Disk directory: ${INFINIZATION_CONFIG.diskDir}`)
+  console.log(`   - QMP socket directory: ${INFINIZATION_CONFIG.qmpSocketDir}`)
+  console.log(`   - Health monitor: ${INFINIZATION_CONFIG.autoStartHealthMonitor ? 'enabled' : 'disabled'}`)
 
   // Subscribe to QMP events for real-time status updates
-  subscribeToVMEvents(infinivirt)
+  subscribeToVMEvents(infinization)
 
   // Re-attach to running VMs (e.g., after backend restart)
-  await attachToRunningVMs(infinivirt)
+  await attachToRunningVMs(infinization)
 
-  return infinivirt
+  return infinization
 }
 
 /**
- * Subscribes to infinivirt EventHandler events and forwards them to the backend EventManager.
+ * Subscribes to infinization EventHandler events and forwards them to the backend EventManager.
  *
  * This enables real-time VM status updates via WebSocket instead of relying on polling.
  */
-function subscribeToVMEvents (infinivirt: Infinivirt): void {
-  const eventHandler = infinivirt.getEventHandler()
+function subscribeToVMEvents (infinization: Infinization): void {
+  const eventHandler = infinization.getEventHandler()
   const eventManager = getEventManager()
 
-  // Map infinivirt status to backend event actions
+  // Map infinization status to backend event actions
   const statusToAction: Record<string, EventAction> = {
     'off': 'power_off',
     'running': 'power_on',
@@ -193,7 +193,7 @@ function subscribeToVMEvents (infinivirt: Infinivirt): void {
  *
  * This ensures we receive QMP events for VMs that are still running.
  */
-async function attachToRunningVMs (infinivirt: Infinivirt): Promise<void> {
+async function attachToRunningVMs (infinization: Infinization): Promise<void> {
   try {
     const runningVMs = await prisma.machine.findMany({
       where: { status: 'running' },
@@ -216,7 +216,7 @@ async function attachToRunningVMs (infinivirt: Infinivirt): Promise<void> {
       }
 
       try {
-        await infinivirt.attachToRunningVM(vm.id, qmpSocketPath)
+        await infinization.attachToRunningVM(vm.id, qmpSocketPath)
         debug.log(`Attached to VM ${vm.name} (${vm.id})`)
       } catch (error) {
         // VM might have crashed between DB query and attach attempt
@@ -232,41 +232,41 @@ async function attachToRunningVMs (infinivirt: Infinivirt): Promise<void> {
 }
 
 /**
- * Shuts down the Infinivirt service gracefully.
+ * Shuts down the Infinization service gracefully.
  *
  * Should be called during application shutdown to clean up resources.
  */
-export async function shutdownInfinivirt (): Promise<void> {
-  if (!infinivirtInstance) {
+export async function shutdownInfinization (): Promise<void> {
+  if (!infinizationInstance) {
     return
   }
 
-  console.log('🛑 Shutting down Infinivirt service...')
+  console.log('🛑 Shutting down Infinization service...')
 
   try {
-    await infinivirtInstance.shutdown()
-    console.log('✅ Infinivirt service shut down successfully')
+    await infinizationInstance.shutdown()
+    console.log('✅ Infinization service shut down successfully')
   } catch (error) {
-    console.error('❌ Error shutting down Infinivirt:', error)
+    console.error('❌ Error shutting down Infinization:', error)
     throw error
   } finally {
-    infinivirtInstance = null
+    infinizationInstance = null
     initializationPromise = null
   }
 }
 
 /**
- * Checks if Infinivirt is initialized.
+ * Checks if Infinization is initialized.
  */
-export function isInfinivirtInitialized (): boolean {
-  return infinivirtInstance !== null && infinivirtInstance.isInitialized()
+export function isInfinizationInitialized (): boolean {
+  return infinizationInstance !== null && infinizationInstance.isInitialized()
 }
 
 /**
  * Gets the current configuration (for debugging/logging).
  */
-export function getInfinivirtConfig (): typeof INFINIVIRT_CONFIG {
-  return { ...INFINIVIRT_CONFIG }
+export function getInfinizationConfig (): typeof INFINIZATION_CONFIG {
+  return { ...INFINIZATION_CONFIG }
 }
 
 /**
@@ -279,13 +279,13 @@ export function getInfinivirtConfig (): typeof INFINIVIRT_CONFIG {
  * @param vmId - The VM identifier
  */
 export async function ejectAllCdroms (vmId: string): Promise<void> {
-  const infinivirt = await getInfinivirt()
+  const infinization = await getInfinization()
   const baseDir = process.env.INFINIBAY_BASE_DIR ?? '/opt/infinibay'
   const tempIsoDir = process.env.INFINIBAY_ISO_TEMP_DIR ?? path.join(baseDir, 'iso', 'temp')
 
   try {
     // Query block devices to find CD-ROMs
-    const blocks = await infinivirt.queryBlockDevices(vmId)
+    const blocks = await infinization.queryBlockDevices(vmId)
     const tempIsosToDelete: string[] = []
 
     // Find and eject all CD-ROM devices
@@ -301,7 +301,7 @@ export async function ejectAllCdroms (vmId: string): Promise<void> {
 
         debug.log(`Ejecting CD-ROM device: ${block.device} from VM ${vmId}`)
         try {
-          await infinivirt.ejectCdrom(vmId, block.device)
+          await infinization.ejectCdrom(vmId, block.device)
           debug.log(`CD-ROM device ${block.device} ejected successfully`)
         } catch (ejectError: any) {
           // Individual eject failures shouldn't stop the process
@@ -331,3 +331,4 @@ export async function ejectAllCdroms (vmId: string): Promise<void> {
     // Non-fatal: VM can continue running with ISOs mounted
   }
 }
+

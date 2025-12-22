@@ -1,12 +1,12 @@
 /**
- * MachineCleanupServiceV2 - VM cleanup using infinivirt.
+ * MachineCleanupServiceV2 - VM cleanup using infinization.
  *
  * This service replaces the libvirt-based MachineCleanupService with
- * infinivirt, providing direct QEMU management.
+ * infinization, providing direct QEMU management.
  *
  * Key differences from V1:
- * - Uses infinivirt.destroyVM() for full cleanup (process, TAP, firewall chain)
- * - No nwfilter cleanup needed (infinivirt uses nftables)
+ * - Uses infinization.destroyVM() for full cleanup (process, TAP, firewall chain)
+ * - No nwfilter cleanup needed (infinization uses nftables)
  * - Keeps database and VirtioSocket cleanup logic
  */
 
@@ -15,7 +15,7 @@ import { unlink } from 'fs/promises'
 import path from 'path'
 
 import { Debugger } from '../../utils/debug'
-import { getInfinivirt } from '@services/InfinivirtService'
+import { getInfinization } from '@services/InfinizationService'
 import { getVirtioSocketWatcherService } from '../VirtioSocketWatcherService'
 
 interface ResourceCleanupResult {
@@ -57,7 +57,7 @@ export class MachineCleanupServiceV2 {
    * Cleans up a VM and all associated resources.
    *
    * This method:
-   * 1. Stops the VM if running (via infinivirt)
+   * 1. Stops the VM if running (via infinization)
    * 2. Deletes VM resources (disks, network, firewall)
    * 3. Cleans up VirtioSocket connections
    * 4. Removes all database records
@@ -96,7 +96,7 @@ export class MachineCleanupServiceV2 {
       return
     }
 
-    // 1. Stop and clean up VM via infinivirt
+    // 1. Stop and clean up VM via infinization
     this.debug.log('info', `[1/6] Cleaning VM resources (TAP, firewall)`)
     const vmResourcesResult = await this.cleanupVMResources(machineId, summary)
     summary.operations.push(vmResourcesResult)
@@ -195,10 +195,10 @@ export class MachineCleanupServiceV2 {
   }
 
   /**
-   * Destroys VM resources via infinivirt.
+   * Destroys VM resources via infinization.
    * This permanently removes TAP device, firewall rules, and stops the process.
    *
-   * IMPORTANT: This calls infinivirt.destroyVM() which:
+   * IMPORTANT: This calls infinization.destroyVM() which:
    * - Stops QEMU process if running
    * - Permanently destroys TAP device (ip link del)
    * - Permanently removes nftables firewall chain and all rules
@@ -228,10 +228,10 @@ export class MachineCleanupServiceV2 {
       const tapDeviceName = machineWithConfig?.configuration?.tapDeviceName ?? `tap-${machineId}`
       const firewallChainName = machineWithConfig?.firewallRuleSet?.internalName ?? `chain-${machineId}`
 
-      const infinivirt = await getInfinivirt()
+      const infinization = await getInfinization()
 
       this.debug.log('info', `Destroying VM resources for ${machineId} (TAP device: ${tapDeviceName}, Firewall chain: ${firewallChainName})`)
-      const destroyResult = await infinivirt.destroyVM(machineId)
+      const destroyResult = await infinization.destroyVM(machineId)
 
       result.duration = Date.now() - startTime
 
@@ -265,7 +265,7 @@ export class MachineCleanupServiceV2 {
       duration: 0
     }
 
-    const diskDir = process.env.INFINIVIRT_DISK_DIR ?? '/var/lib/infinivirt/disks'
+    const diskDir = process.env.INFINIZATION_DISK_DIR ?? '/var/lib/infinization/disks'
     const diskPatterns = [
       path.join(diskDir, `${internalName}.qcow2`),
       path.join(diskDir, `${internalName}-main.qcow2`),
@@ -385,7 +385,7 @@ export class MachineCleanupServiceV2 {
       duration: 0
     }
 
-    const socketDir = process.env.INFINIVIRT_SOCKET_DIR ?? '/opt/infinibay/sockets'
+    const socketDir = process.env.INFINIZATION_SOCKET_DIR ?? '/opt/infinibay/sockets'
 
     const socketPaths = [
       path.join(socketDir, `${internalName}.qmp`),

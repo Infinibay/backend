@@ -1619,7 +1619,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
       })
 
       // 3. Eject all CD-ROMs (async, non-blocking)
-      const { ejectAllCdroms } = await import('./InfinivirtService')
+      const { ejectAllCdroms } = await import('./InfinizationService')
       ejectAllCdroms(vmId).catch(err => {
         this.debug.log('warn', `Failed to eject CD-ROMs: ${err.message}`)
       })

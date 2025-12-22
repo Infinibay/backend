@@ -1,8 +1,8 @@
 /**
- * SnapshotServiceV2 - VM snapshot management using infinivirt.
+ * SnapshotServiceV2 - VM snapshot management using infinization.
  *
  * This service replaces the libvirt-based SnapshotService with
- * infinivirt's SnapshotManager, using qemu-img directly.
+ * infinization's SnapshotManager, using qemu-img directly.
  *
  * Key differences from V1:
  * - Uses qemu-img instead of libvirt domain snapshots
@@ -14,15 +14,15 @@
 import { PrismaClient } from '@prisma/client'
 import {
   SnapshotManager,
-  SnapshotInfo as InfinivirtSnapshotInfo,
+  SnapshotInfo as InfinizationSnapshotInfo,
   SnapshotCreateOptions,
   StorageError
-} from '@infinibay/infinivirt'
+} from '@infinibay/infinization'
 import path from 'path'
 import fs from 'fs'
 
 import { Debugger } from '@utils/debug'
-import { getInfinivirt } from '@services/InfinivirtService'
+import { getInfinization } from '@services/InfinizationService'
 
 /**
  * Snapshot information compatible with the original SnapshotService interface.
@@ -57,7 +57,7 @@ export interface SnapshotListResult {
 }
 
 /**
- * Service for managing VM snapshots using infinivirt's SnapshotManager.
+ * Service for managing VM snapshots using infinization's SnapshotManager.
  *
  * Note: Unlike libvirt snapshots, qemu-img snapshots require the VM to be stopped.
  * This service will check VM status before operations and return appropriate errors.
@@ -166,20 +166,20 @@ export class SnapshotServiceV2 {
       }
 
       // List snapshots via SnapshotManager
-      const infinivirtSnapshots = await this.snapshotManager.listSnapshots(diskPath)
+      const infinizationSnapshots = await this.snapshotManager.listSnapshots(diskPath)
 
       // Get metadata from database for descriptions
       const metadataMap = await this.getSnapshotMetadataMap(vmId)
 
       // Convert to our interface
-      const snapshots: SnapshotInfo[] = infinivirtSnapshots.map((snap, index) => {
+      const snapshots: SnapshotInfo[] = infinizationSnapshots.map((snap, index) => {
         const metadata = metadataMap.get(snap.name)
         return {
           name: snap.name,
           description: metadata?.description,
           createdAt: snap.date ? new Date(snap.date) : new Date(),
           state: 'shutoff', // qemu-img snapshots are always from shutoff state
-          isCurrent: index === infinivirtSnapshots.length - 1, // Last snapshot is "current"
+          isCurrent: index === infinizationSnapshots.length - 1, // Last snapshot is "current"
           vmSize: snap.vmSize
         }
       })
@@ -373,7 +373,7 @@ export class SnapshotServiceV2 {
    * Gets the disk path for a VM.
    */
   private getDiskPath (internalName: string): string {
-    const diskDir = process.env.INFINIVIRT_DISK_DIR ?? '/var/lib/infinivirt/disks'
+    const diskDir = process.env.INFINIZATION_DISK_DIR ?? '/var/lib/infinization/disks'
 
     // Try common naming patterns
     const patterns = [

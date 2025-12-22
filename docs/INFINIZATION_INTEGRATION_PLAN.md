@@ -1,14 +1,14 @@
-# Plan de Integración: infinivirt → backend
+# Plan de Integración: infinization → backend
 
 ## Resumen Ejecutivo
 
-Este documento detalla el plan para integrar `infinivirt` en el backend de Infinibay, reemplazando `libvirt-node` y consolidando la gestión de VMs.
+Este documento detalla el plan para integrar `infinization` en el backend de Infinibay, reemplazando `libvirt-node` y consolidando la gestión de VMs.
 
-### Qué Reemplaza infinivirt
+### Qué Reemplaza infinization
 
-| Componente Actual | Reemplazo con infinivirt | Beneficio |
+| Componente Actual | Reemplazo con infinization | Beneficio |
 |-------------------|-------------------------|-----------|
-| `@infinibay/libvirt-node` | `Infinivirt` class | API unificada, sin binding nativo |
+| `@infinibay/libvirt-node` | `Infinization` class | API unificada, sin binding nativo |
 | XML generation manual | `QemuCommandBuilder` | Type-safe, validación integrada |
 | Cron `UpdateVmStatus` | `HealthMonitor` + `EventHandler` | Tiempo real via QMP |
 | `LibvirtNWFilterService` | `NftablesService` | Firewall moderno (nftables vs iptables) |
@@ -19,53 +19,53 @@ Este documento detalla el plan para integrar `infinivirt` en el backend de Infin
 
 ## Fase 1: Preparación (Sin cambios funcionales)
 
-### 1.1 Agregar infinivirt como dependencia
+### 1.1 Agregar infinization como dependencia
 
 ```bash
 # En backend/
-npm install file:../infinivirt
+npm install file:../infinization
 ```
 
 **Archivo**: `package.json`
 ```json
 {
   "dependencies": {
-    "@infinibay/infinivirt": "file:../infinivirt"
+    "@infinibay/infinization": "file:../infinization"
   }
 }
 ```
 
-### 1.2 Crear servicio singleton de Infinivirt
+### 1.2 Crear servicio singleton de Infinization
 
-**Nuevo archivo**: `app/services/InfinivirtService.ts`
+**Nuevo archivo**: `app/services/InfinizationService.ts`
 
 ```typescript
-import { Infinivirt, PrismaAdapter } from '@infinibay/infinivirt'
+import { Infinization, PrismaAdapter } from '@infinibay/infinization'
 import { prisma } from '../utils/prisma'
 import { getEventManager } from './EventManager'
 
-let infinivirtInstance: Infinivirt | null = null
+let infinizationInstance: Infinization | null = null
 
-export async function getInfinivirt(): Promise<Infinivirt> {
-  if (!infinivirtInstance) {
-    infinivirtInstance = new Infinivirt({
+export async function getInfinization(): Promise<Infinization> {
+  if (!infinizationInstance) {
+    infinizationInstance = new Infinization({
       prismaClient: prisma,
       eventManager: getEventManager(),
-      diskDir: process.env.INFINIVIRT_DISK_DIR || '/var/lib/infinivirt/disks',
-      qmpSocketDir: process.env.INFINIVIRT_SOCKET_DIR || '/var/run/infinivirt',
-      pidfileDir: process.env.INFINIVIRT_PID_DIR || '/var/run/infinivirt/pids',
+      diskDir: process.env.INFINIZATION_DISK_DIR || '/var/lib/infinization/disks',
+      qmpSocketDir: process.env.INFINIZATION_SOCKET_DIR || '/var/run/infinization',
+      pidfileDir: process.env.INFINIZATION_PID_DIR || '/var/run/infinization/pids',
       healthMonitorInterval: 30000,
       autoStartHealthMonitor: true
     })
-    await infinivirtInstance.initialize()
+    await infinizationInstance.initialize()
   }
-  return infinivirtInstance
+  return infinizationInstance
 }
 
-export async function shutdownInfinivirt(): Promise<void> {
-  if (infinivirtInstance) {
-    await infinivirtInstance.shutdown()
-    infinivirtInstance = null
+export async function shutdownInfinization(): Promise<void> {
+  if (infinizationInstance) {
+    await infinizationInstance.shutdown()
+    infinizationInstance = null
   }
 }
 ```
@@ -85,20 +85,20 @@ emitCRUD(resource: string, action: string, id: string, data?: unknown): void {
 
 ## Fase 2: Migración de Operaciones de VM
 
-### 2.1 Mapeo de APIs: libvirt-node → infinivirt
+### 2.1 Mapeo de APIs: libvirt-node → infinization
 
-| Operación | libvirt-node | infinivirt |
+| Operación | libvirt-node | infinization |
 |-----------|--------------|-----------|
-| Crear VM | `VirtualMachine.defineXml()` + `vm.create()` | `infinivirt.createVM(config)` |
-| Iniciar VM | `domain.create()` | `infinivirt.startVM(vmId)` |
-| Apagar VM (graceful) | `domain.shutdown()` | `infinivirt.stopVM(vmId, {graceful: true})` |
-| Apagar VM (force) | `domain.destroy()` | `infinivirt.stopVM(vmId, {force: true})` |
-| Reiniciar VM | `domain.shutdown()` + `domain.create()` | `infinivirt.restartVM(vmId)` |
-| Suspender VM | `domain.suspend()` | `infinivirt.suspendVM(vmId)` |
-| Reanudar VM | `domain.resume()` | `infinivirt.resumeVM(vmId)` |
-| Reset hardware | `domain.reset()` | `infinivirt.resetVM(vmId)` |
-| Estado VM | `domain.getState()` | `infinivirt.getVMStatus(vmId)` |
-| Destruir VM | `domain.destroy()` + `domain.undefine()` | `infinivirt.stopVM()` + cleanup manual |
+| Crear VM | `VirtualMachine.defineXml()` + `vm.create()` | `infinization.createVM(config)` |
+| Iniciar VM | `domain.create()` | `infinization.startVM(vmId)` |
+| Apagar VM (graceful) | `domain.shutdown()` | `infinization.stopVM(vmId, {graceful: true})` |
+| Apagar VM (force) | `domain.destroy()` | `infinization.stopVM(vmId, {force: true})` |
+| Reiniciar VM | `domain.shutdown()` + `domain.create()` | `infinization.restartVM(vmId)` |
+| Suspender VM | `domain.suspend()` | `infinization.suspendVM(vmId)` |
+| Reanudar VM | `domain.resume()` | `infinization.resumeVM(vmId)` |
+| Reset hardware | `domain.reset()` | `infinization.resetVM(vmId)` |
+| Estado VM | `domain.getState()` | `infinization.getVMStatus(vmId)` |
+| Destruir VM | `domain.destroy()` + `domain.undefine()` | `infinization.stopVM()` + cleanup manual |
 
 ### 2.2 Migrar VMOperationsService
 
@@ -114,15 +114,15 @@ async startMachine(machineId: string) {
 }
 ```
 
-#### Después (infinivirt):
+#### Después (infinization):
 ```typescript
 async startMachine(machineId: string) {
-  const infinivirt = await getInfinivirt()
-  const result = await infinivirt.startVM(machineId)
+  const infinization = await getInfinization()
+  const result = await infinization.startVM(machineId)
   if (!result.success) {
     throw new Error(result.error || 'Failed to start VM')
   }
-  // DB update handled by infinivirt via PrismaAdapter
+  // DB update handled by infinization via PrismaAdapter
 }
 ```
 
@@ -133,14 +133,14 @@ async startMachine(machineId: string) {
 #### Cambios principales:
 
 1. **Eliminar**: XML generation, StoragePool/StorageVol creation
-2. **Reemplazar con**: `infinivirt.createVM(config)`
+2. **Reemplazar con**: `infinization.createVM(config)`
 
 ```typescript
-import { getInfinivirt } from '../../services/InfinivirtService'
-import { VMCreateConfig } from '@infinibay/infinivirt'
+import { getInfinization } from '../../services/InfinizationService'
+import { VMCreateConfig } from '@infinibay/infinization'
 
 async create(machine: Machine, username: string, password: string, productKey?: string) {
-  const infinivirt = await getInfinivirt()
+  const infinization = await getInfinization()
 
   const config: VMCreateConfig = {
     vmId: machine.id,
@@ -167,7 +167,7 @@ async create(machine: Machine, username: string, password: string, productKey?: 
     }
   }
 
-  const result = await infinivirt.createVM(config)
+  const result = await infinization.createVM(config)
 
   if (!result.success) {
     throw new Error('VM creation failed')
@@ -188,11 +188,11 @@ async create(machine: Machine, username: string, password: string, productKey?: 
 
 ```typescript
 async cleanupVM(machineId: string) {
-  const infinivirt = await getInfinivirt()
+  const infinization = await getInfinization()
 
   // 1. Stop VM if running
   try {
-    await infinivirt.stopVM(machineId, { graceful: false, force: true })
+    await infinization.stopVM(machineId, { graceful: false, force: true })
   } catch (e) {
     // VM might already be stopped
   }
@@ -202,15 +202,15 @@ async cleanupVM(machineId: string) {
     where: { machineId }
   })
 
-  // 3. Clean up disks manually (infinivirt doesn't delete disks)
+  // 3. Clean up disks manually (infinization doesn't delete disks)
   if (config?.diskPaths) {
     for (const diskPath of config.diskPaths as string[]) {
       await fs.promises.unlink(diskPath).catch(() => {})
     }
   }
 
-  // 4. Clean up firewall (infinivirt's NftablesService)
-  const nftables = infinivirt.getNftablesService()
+  // 4. Clean up firewall (infinization's NftablesService)
+  const nftables = infinization.getNftablesService()
   await nftables.removeVMChain(machineId)
 
   // 5. DB cleanup
@@ -245,13 +245,13 @@ async cleanupVM(machineId: string) {
 // Antes: usa LibvirtNWFilterService
 import { LibvirtNWFilterService } from './LibvirtNWFilterService'
 
-// Después: usa NftablesService de infinivirt
-import { getInfinivirt } from '../InfinivirtService'
+// Después: usa NftablesService de infinization
+import { getInfinization } from '../InfinizationService'
 
 class FirewallManager {
   async ensureFirewallForVM(vmId: string, departmentId: string) {
-    const infinivirt = await getInfinivirt()
-    const nftables = infinivirt.getNftablesService()
+    const infinization = await getInfinization()
+    const nftables = infinization.getNftablesService()
 
     // Get TAP device from config
     const config = await prisma.machineConfiguration.findUnique({
@@ -286,7 +286,7 @@ class FirewallManager {
 **Archivo**: `app/services/SnapshotService.ts`
 
 ```typescript
-import { SnapshotManager } from '@infinibay/infinivirt'
+import { SnapshotManager } from '@infinibay/infinization'
 
 class SnapshotService {
   private snapshotManager = new SnapshotManager()
@@ -316,8 +316,8 @@ class SnapshotService {
 
   async revertSnapshot(vmId: string, snapshotName: string) {
     // VM must be stopped first
-    const infinivirt = await getInfinivirt()
-    await infinivirt.stopVM(vmId, { force: true })
+    const infinization = await getInfinization()
+    await infinization.stopVM(vmId, { force: true })
 
     const config = await prisma.machineConfiguration.findUnique({
       where: { machineId: vmId }
@@ -357,10 +357,10 @@ class SnapshotService {
 
 | Archivo | Cambio |
 |---------|--------|
-| `app/services/VMOperationsService.ts` | Usar infinivirt |
-| `app/utils/VirtManager/createMachineService.ts` | Usar infinivirt.createVM() |
+| `app/services/VMOperationsService.ts` | Usar infinization |
+| `app/utils/VirtManager/createMachineService.ts` | Usar infinization.createVM() |
 | `app/utils/VirtManager/index.ts` | Eliminar imports libvirt |
-| `app/services/cleanup/machineCleanupService.ts` | Usar infinivirt |
+| `app/services/cleanup/machineCleanupService.ts` | Usar infinization |
 | `app/services/SnapshotService.ts` | Usar SnapshotManager |
 | `app/services/firewall/FirewallManager.ts` | Usar NftablesService |
 | `app/services/networkService.ts` | Evaluar si se necesita |
@@ -376,7 +376,7 @@ class SnapshotService {
     // "@infinibay/libvirt-node": "file:lib/libvirt-node/..."
 
     // AGREGAR:
-    "@infinibay/infinivirt": "file:../infinivirt"
+    "@infinibay/infinization": "file:../infinization"
   }
 }
 ```
@@ -389,21 +389,21 @@ class SnapshotService {
 
 **Archivo a eliminar**: `app/crons/UpdateVmStatus.ts`
 
-El `HealthMonitor` de infinivirt maneja esto automáticamente:
+El `HealthMonitor` de infinization maneja esto automáticamente:
 - Detecta VMs caídas via PID check
 - Sincroniza estado via QMP events
 - Limpia recursos huérfanos
 
-### 6.2 Suscribirse a eventos de infinivirt
+### 6.2 Suscribirse a eventos de infinization
 
 **Archivo**: `app/index.ts` (o donde se inicializa el servidor)
 
 ```typescript
-import { getInfinivirt } from './services/InfinivirtService'
+import { getInfinization } from './services/InfinizationService'
 
-async function setupInfinivirtEvents() {
-  const infinivirt = await getInfinivirt()
-  const healthMonitor = infinivirt.getHealthMonitor()
+async function setupInfinizationEvents() {
+  const infinization = await getInfinization()
+  const healthMonitor = infinization.getHealthMonitor()
 
   healthMonitor.on('crash', async (event) => {
     console.log(`VM ${event.vmId} crashed`)
@@ -430,17 +430,17 @@ async function setupInfinivirtEvents() {
 
 | Test File | Cambio |
 |-----------|--------|
-| `__tests__/services/VMOperationsService.test.ts` | Mock infinivirt |
+| `__tests__/services/VMOperationsService.test.ts` | Mock infinization |
 | `__tests__/services/SnapshotService.test.ts` | Mock SnapshotManager |
 | `__tests__/services/firewall/*.test.ts` | Mock NftablesService |
 
 ### 7.2 Tests de integración
 
 ```typescript
-describe('Infinivirt Integration', () => {
+describe('Infinization Integration', () => {
   it('should create and start a VM', async () => {
-    const infinivirt = await getInfinivirt()
-    const result = await infinivirt.createVM({
+    const infinization = await getInfinization()
+    const result = await infinization.createVM({
       vmId: 'test-vm',
       name: 'Test VM',
       // ...config
@@ -450,7 +450,7 @@ describe('Infinivirt Integration', () => {
   })
 
   it('should stop a running VM', async () => {
-    const result = await infinivirt.stopVM('test-vm')
+    const result = await infinization.stopVM('test-vm')
     expect(result.success).toBe(true)
   })
 })
@@ -462,8 +462,8 @@ describe('Infinivirt Integration', () => {
 
 ```
 Fase 1: Preparación
-├── 1.1 Agregar dependencia infinivirt
-├── 1.2 Crear InfinivirtService singleton
+├── 1.1 Agregar dependencia infinization
+├── 1.2 Crear InfinizationService singleton
 └── 1.3 Actualizar EventManager
 
 Fase 2: Migración VM Operations (CRÍTICO)
@@ -506,7 +506,7 @@ Si algo falla durante la migración:
 1. **Git revert**: Cada fase debe ser un commit separado
 2. **Feature flag**: Usar variable de entorno para alternar
    ```typescript
-   const useInfinivirt = process.env.USE_INFINIVIRT === 'true'
+   const useInfinization = process.env.USE_INFINIZATION === 'true'
    ```
 3. **Mantener libvirt-node**: No eliminar hasta validación completa
 
@@ -535,27 +535,27 @@ El `hardwareUpdateService.ts` actual hace:
 2. Get XML, modify, undefine, redefine
 3. Start VM
 
-Con infinivirt, esto cambia a:
-1. `infinivirt.stopVM(vmId)`
+Con infinization, esto cambia a:
+1. `infinization.stopVM(vmId)`
 2. Update DB configuration (cpuCores, ramGB, etc.)
-3. `infinivirt.startVM(vmId)` - reconstruye comando QEMU desde DB
+3. `infinization.startVM(vmId)` - reconstruye comando QEMU desde DB
 
-**No se necesita XML** - infinivirt lee config de DB y genera comando QEMU.
+**No se necesita XML** - infinization lee config de DB y genera comando QEMU.
 
 ### GPU Passthrough
 
-infinivirt soporta GPU passthrough via:
+infinization soporta GPU passthrough via:
 ```typescript
 {
   gpuPciAddress: '0000:01:00.0',
-  gpuRomfile: '/var/lib/infinivirt/roms/vbios.rom'
+  gpuRomfile: '/var/lib/infinization/roms/vbios.rom'
 }
 ```
 
 ### Unattended Installation
 
 Los managers de unattended (`UnattendedUbuntuManager`, etc.) siguen en el backend.
-infinivirt los invoca via `backendServicesPath`:
+infinization los invoca via `backendServicesPath`:
 ```typescript
 new UnattendedInstaller(config, {
   backendServicesPath: '/home/andres/infinibay/backend/app/services'
@@ -567,7 +567,7 @@ new UnattendedInstaller(config, {
 ## Próximos Pasos
 
 1. **Revisar este plan** - ¿Hay algo que falte?
-2. **Crear branch de feature** - `feature/infinivirt-integration` ✓
+2. **Crear branch de feature** - `feature/infinization-integration` ✓
 3. **Ejecutar Fase 1** - Preparación sin cambios funcionales
 4. **Tests manuales** - Crear VM de prueba con cada fase
 5. **Code review** - Antes de merge a main

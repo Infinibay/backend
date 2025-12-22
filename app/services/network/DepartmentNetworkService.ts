@@ -14,7 +14,7 @@
  */
 
 import { PrismaClient, Department } from '@prisma/client'
-import { BridgeManager, DepartmentNatService, TapDeviceManager } from '@infinibay/infinivirt'
+import { BridgeManager, DepartmentNatService, TapDeviceManager } from '@infinibay/infinization'
 import { execSync, spawn } from 'child_process'
 import { promises as fs } from 'fs'
 import path from 'path'

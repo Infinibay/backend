@@ -7,7 +7,7 @@ const debug = new Debugger('gpu-affinity')
 /**
  * Checks existing GPU assignments at startup and removes stale assignments.
  *
- * With infinivirt, VMs are not "defined" in libvirt - they're QEMU processes
+ * With infinization, VMs are not "defined" in libvirt - they're QEMU processes
  * managed directly. So we only need to update the database, and the VM will
  * pick up the updated configuration on the next start.
  */

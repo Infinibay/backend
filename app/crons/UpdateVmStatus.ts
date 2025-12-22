@@ -2,31 +2,31 @@
  * UpdateVmStatus Cron Job
  *
  * Periodically checks VM status and updates the database.
- * Uses infinivirt for process status verification instead of libvirt.
+ * Uses infinization for process status verification instead of libvirt.
  */
 import { CronJob } from 'cron'
 import prisma from '../utils/database'
 import { getEventManager } from '../services/EventManager'
 import { getVMHealthQueueManager } from '../services/VMHealthQueueManager'
-import { getInfinivirt } from '../services/InfinivirtService'
+import { getInfinization } from '../services/InfinizationService'
 import { Debugger } from '../utils/debug'
 
 const debug = new Debugger('cron:update-vm-status')
 
 /**
- * Gets the running status of all VMs using infinivirt.
+ * Gets the running status of all VMs using infinization.
  * Returns a map of machineId -> isRunning
  */
 async function getVMStatuses (machineIds: string[]): Promise<Map<string, boolean>> {
   const statuses = new Map<string, boolean>()
 
   try {
-    const infinivirt = await getInfinivirt()
+    const infinization = await getInfinization()
 
     // Check status for each VM
     await Promise.all(machineIds.map(async (id) => {
       try {
-        const status = await infinivirt.getVMStatus(id)
+        const status = await infinization.getVMStatus(id)
         statuses.set(id, status.processAlive)
       } catch {
         // If we can't get status, assume not running
@@ -41,7 +41,7 @@ async function getVMStatuses (machineIds: string[]): Promise<Map<string, boolean
 }
 
 // Run every 5 minutes as a fallback safety net.
-// Primary status updates now come from QMP events via InfinivirtService.
+// Primary status updates now come from QMP events via InfinizationService.
 const UpdateVmStatusJob = new CronJob('*/5 * * * *', async () => {
   try {
     // Get singleton instances
@@ -61,7 +61,7 @@ const UpdateVmStatusJob = new CronJob('*/5 * * * *', async () => {
       return
     }
 
-    // Get actual running status from infinivirt
+    // Get actual running status from infinization
     const vmStatuses = await getVMStatuses(allVms.map(vm => vm.id))
 
     // Find VMs that need status updates

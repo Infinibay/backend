@@ -123,7 +123,7 @@ model MachineConfiguration {
   updatedAt       DateTime @updatedAt
   machine         Machine  @relation(fields: [machineId], references: [id], onDelete: Cascade)
 
-  // Infinivirt QEMU process management fields (nullable for backward compatibility)
+  // Infinization QEMU process management fields (nullable for backward compatibility)
   qmpSocketPath   String?  // Unix socket path for QMP communication
   qemuPid         Int?     // QEMU process PID for health monitoring
   tapDeviceName   String?  // TAP network device name for cleanup

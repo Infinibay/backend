@@ -1,6 +1,6 @@
 import { PrismaClient, Machine } from '@prisma/client'
 import { VirtioSocketWatcherService, SafeCommandType, CommandResponse } from './VirtioSocketWatcherService'
-import { getInfinivirt } from './InfinivirtService'
+import { getInfinization } from './InfinizationService'
 import Debug from 'debug'
 
 const debug = Debug('infinibay:process-manager')
@@ -59,9 +59,9 @@ export class ProcessManager {
         return null
       }
 
-      // Check if VM is running via infinivirt
-      const infinivirt = await getInfinivirt()
-      const status = await infinivirt.getVMStatus(machineId)
+      // Check if VM is running via infinization
+      const infinization = await getInfinization()
+      const status = await infinization.getVMStatus(machineId)
 
       if (!status.processAlive) {
         debug(`Machine ${machine.internalName} is not running (processAlive: false)`)
@@ -70,7 +70,7 @@ export class ProcessManager {
 
       // Update machine status in DB if it's different
       if (machine.status !== 'running') {
-        debug(`Updating machine ${machineId} status from '${machine.status}' to 'running' based on infinivirt state`)
+        debug(`Updating machine ${machineId} status from '${machine.status}' to 'running' based on infinization state`)
         await this.prisma.machine.update({
           where: { id: machineId },
           data: { status: 'running' }

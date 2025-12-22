@@ -8,7 +8,7 @@ import { Debugger } from '@utils/debug'
 import { FirewallOrchestrationService } from '@services/firewall/FirewallOrchestrationService'
 import { FirewallRuleService } from '@services/firewall/FirewallRuleService'
 import { FirewallValidationService } from '@services/firewall/FirewallValidationService'
-import { InfinivirtFirewallService } from '@services/firewall/InfinivirtFirewallService'
+import { InfinizationFirewallService } from '@services/firewall/InfinizationFirewallService'
 
 import { FirewallRule, RuleSetType } from '@prisma/client'
 
@@ -72,16 +72,16 @@ export class FirewallResolver {
   private async getServices (ctx: InfinibayContext) {
     const ruleService = new FirewallRuleService(ctx.prisma)
     const validationService = new FirewallValidationService()
-    const infinivirtService = new InfinivirtFirewallService(ctx.prisma)
-    await infinivirtService.initialize()
+    const infinizationService = new InfinizationFirewallService(ctx.prisma)
+    await infinizationService.initialize()
     const orchestrationService = new FirewallOrchestrationService(
       ctx.prisma,
       ruleService,
       validationService,
-      infinivirtService
+      infinizationService
     )
 
-    return { ruleService, validationService, infinivirtService, orchestrationService }
+    return { ruleService, validationService, infinizationService, orchestrationService }
   }
 
   // ============================================================================
@@ -209,9 +209,9 @@ export class FirewallResolver {
   async listInfinibayFilters (
     @Ctx() ctx: InfinibayContext
   ): Promise<NftablesChainInfoType[]> {
-    const { infinivirtService } = await this.getServices(ctx)
+    const { infinizationService } = await this.getServices(ctx)
 
-    const vmChains = await infinivirtService.listVMChains()
+    const vmChains = await infinizationService.listVMChains()
 
     return vmChains.map(chain => ({
       chainName: chain.chainName,
@@ -572,15 +572,15 @@ export class FirewallResolver {
   async cleanupInfinibayFirewall (
     @Ctx() ctx: InfinibayContext
   ): Promise<CleanupResultType> {
-    const { infinivirtService } = await this.getServices(ctx)
+    const { infinizationService } = await this.getServices(ctx)
 
-    const vmChains = await infinivirtService.listVMChains()
+    const vmChains = await infinizationService.listVMChains()
 
     const removed: string[] = []
     let hadErrors = false
     for (const chain of vmChains) {
       try {
-        await infinivirtService.removeVMFirewall(chain.vmId)
+        await infinizationService.removeVMFirewall(chain.vmId)
         removed.push(chain.chainName)
       } catch (error) {
         hadErrors = true

@@ -1,14 +1,14 @@
 /**
  * UpdateGraphicsInformation Cron Job
  *
- * Periodically syncs graphics configuration between infinivirt and the database.
- * With infinivirt, graphics info is stored in MachineConfiguration during VM creation.
+ * Periodically syncs graphics configuration between infinization and the database.
+ * With infinization, graphics info is stored in MachineConfiguration during VM creation.
  * This cron verifies running VMs have valid graphics configuration.
  */
 import { CronJob } from 'cron'
 import { networkInterfaces } from 'systeminformation'
 import prisma from '../utils/database'
-import { getInfinivirt } from '../services/InfinivirtService'
+import { getInfinization } from '../services/InfinizationService'
 import { Debugger } from '../utils/debug'
 
 const debug = new Debugger('cron:update-graphics')
@@ -40,7 +40,7 @@ async function getLocalIP (): Promise<string> {
 
 const UpdateGraphicsInformationJob = new CronJob('*/1 * * * *', async () => {
   try {
-    const infinivirt = await getInfinivirt()
+    const infinization = await getInfinization()
 
     // Get all machines from database
     const machines = await prisma.machine.findMany({
@@ -65,8 +65,8 @@ const UpdateGraphicsInformationJob = new CronJob('*/1 * * * *', async () => {
           debug.log('warn', `Corrupted graphics config detected for ${machine.name}: port=-1 but protocol=${config.graphicProtocol}. This VM may need repair.`)
         }
 
-        // Get VM status from infinivirt
-        const status = await infinivirt.getVMStatus(machine.id)
+        // Get VM status from infinization
+        const status = await infinization.getVMStatus(machine.id)
 
         if (status.processAlive) {
           // VM is running - only update graphicHost if it's 0.0.0.0 or null

@@ -156,7 +156,7 @@ export class EventManager {
   }
 
   /**
-   * Emit CRUD event - compatibility method for infinivirt integration.
+   * Emit CRUD event - compatibility method for infinization integration.
    * Maps to dispatchEvent with proper data structure.
    *
    * @param resource - Resource type (e.g., 'machines', 'vms')
@@ -174,7 +174,7 @@ export class EventManager {
       ...(typeof data === 'object' && data !== null ? data as Record<string, unknown> : {})
     }
 
-    // Fire and forget - infinivirt doesn't await this
+    // Fire and forget - infinization doesn't await this
     this.dispatchEvent(mappedResource, action as EventAction, eventData).catch(err => {
       console.error(`Error in emitCRUD(${resource}, ${action}, ${id}):`, err)
     })

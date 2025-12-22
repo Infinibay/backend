@@ -1,11 +1,11 @@
 import { FirewallRule, PrismaClient } from '@prisma/client'
 
-import { type FirewallApplyResult } from '@infinibay/infinivirt'
+import { type FirewallApplyResult } from '@infinibay/infinization'
 import { Debugger } from '@utils/debug'
 
 import { FirewallRuleService } from './FirewallRuleService'
 import { FirewallValidationService } from './FirewallValidationService'
-import { InfinivirtFirewallService } from './InfinivirtFirewallService'
+import { InfinizationFirewallService } from './InfinizationFirewallService'
 
 const debug = new Debugger('infinibay:service:firewall:orchestration')
 
@@ -49,14 +49,14 @@ export interface SyncResult {
  *
  * **Design Pattern:** Service Layer with Dependency Injection
  * Coordinates between: FirewallRuleService, FirewallValidationService,
- * InfinivirtFirewallService (nftables-based)
+ * InfinizationFirewallService (nftables-based)
  */
 export class FirewallOrchestrationService {
   constructor (
     private prisma: PrismaClient,
     private ruleService: FirewallRuleService,
     private validationService: FirewallValidationService,
-    private infinivirtService: InfinivirtFirewallService
+    private infinizationService: InfinizationFirewallService
   ) { }
 
   /**
@@ -157,11 +157,11 @@ export class FirewallOrchestrationService {
     }
 
     // Convert Prisma rules to nftables input format
-    const deptRulesInput = this.infinivirtService.convertPrismaRulesToInput(deptRules)
-    const vmRulesInput = this.infinivirtService.convertPrismaRulesToInput(vmRules)
+    const deptRulesInput = this.infinizationService.convertPrismaRulesToInput(deptRules)
+    const vmRulesInput = this.infinizationService.convertPrismaRulesToInput(vmRules)
 
     // Apply rules via nftables
-    const result: FirewallApplyResult = await this.infinivirtService.applyVMRules(
+    const result: FirewallApplyResult = await this.infinizationService.applyVMRules(
       vmId,
       deptRulesInput,
       vmRulesInput
@@ -217,10 +217,10 @@ export class FirewallOrchestrationService {
     }
 
     // Convert department rules to nftables input format
-    const deptRulesInput = this.infinivirtService.convertPrismaRulesToInput(deptRules)
+    const deptRulesInput = this.infinizationService.convertPrismaRulesToInput(deptRules)
 
-    // Apply rules to all VMs in the department via InfinivirtFirewallService
-    const { totalVms, vmsUpdated, errors } = await this.infinivirtService.applyDepartmentRules(
+    // Apply rules to all VMs in the department via InfinizationFirewallService
+    const { totalVms, vmsUpdated, errors } = await this.infinizationService.applyDepartmentRules(
       deptId,
       deptRulesInput
     )
@@ -294,11 +294,11 @@ export class FirewallOrchestrationService {
         const vmRules = machine.firewallRuleSet?.rules || []
 
         // Convert Prisma rules to nftables input format
-        const deptRulesInput = this.infinivirtService.convertPrismaRulesToInput(deptRules)
-        const vmRulesInput = this.infinivirtService.convertPrismaRulesToInput(vmRules)
+        const deptRulesInput = this.infinizationService.convertPrismaRulesToInput(deptRules)
+        const vmRulesInput = this.infinizationService.convertPrismaRulesToInput(vmRules)
 
         // Apply rules via nftables
-        const result = await this.infinivirtService.applyVMRules(
+        const result = await this.infinizationService.applyVMRules(
           machine.id,
           deptRulesInput,
           vmRulesInput

@@ -1,9 +1,9 @@
 import { PrismaClient } from '@prisma/client'
-import { TapDeviceManager, generateVMChainName } from '@infinibay/infinivirt'
+import { TapDeviceManager, generateVMChainName } from '@infinibay/infinization'
 
 import { Debugger } from '../../utils/debug'
 import { DepartmentNetworkService, ForceDestroyResult } from '../network/DepartmentNetworkService'
-import { getInfinivirt } from '../InfinivirtService'
+import { getInfinization } from '../InfinizationService'
 
 interface OrphanedResource {
   vmId: string
@@ -326,16 +326,16 @@ export class DepartmentCleanupService {
     }
 
     const orphanedResources: OrphanedResource[] = []
-    let infinivirt
+    let infinization
     let nftablesService
     let tapManager
 
     try {
-      infinivirt = await getInfinivirt()
-      nftablesService = infinivirt.getNftablesService()
+      infinization = await getInfinization()
+      nftablesService = infinization.getNftablesService()
       tapManager = new TapDeviceManager()
     } catch (error) {
-      this.debug.log('warn', `Failed to initialize infinivirt for orphaned resource check: ${String(error)}`)
+      this.debug.log('warn', `Failed to initialize infinization for orphaned resource check: ${String(error)}`)
       // If we can't check, assume no orphaned resources and allow the operation
       return []
     }

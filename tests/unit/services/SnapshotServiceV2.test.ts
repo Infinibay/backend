@@ -12,8 +12,8 @@ const mockSnapshotManager = {
   snapshotExists: jest.fn()
 }
 
-// Mock infinivirt
-jest.mock('@infinibay/infinivirt', () => ({
+// Mock infinization
+jest.mock('@infinibay/infinization', () => ({
   SnapshotManager: jest.fn().mockImplementation(() => mockSnapshotManager),
   StorageError: class StorageError extends Error {
     constructor (message: string) {

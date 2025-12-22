@@ -1,8 +1,8 @@
 /**
- * CreateMachineServiceV2 - VM creation using infinivirt.
+ * CreateMachineServiceV2 - VM creation using infinization.
  *
  * This service replaces the libvirt-based CreateMachineService with
- * infinivirt, providing direct QEMU management via QMP protocol.
+ * infinization, providing direct QEMU management via QMP protocol.
  *
  * Key differences from V1:
  * - Uses QemuImgService instead of libvirt StoragePool/StorageVol
@@ -26,10 +26,10 @@ import { PrismaClient, Machine, MachineTemplate, MachineConfiguration } from '@p
 import {
   VMCreateConfig,
   DiskConfig
-} from '@infinibay/infinivirt'
+} from '@infinibay/infinization'
 
 import { Debugger } from '@utils/debug'
-import { getInfinivirt } from '@services/InfinivirtService'
+import { getInfinization } from '@services/InfinizationService'
 import { DepartmentNetworkService } from '@services/network/DepartmentNetworkService'
 import { UnattendedManagerBase } from '@services/unattendedManagerBase'
 import { UnattendedRedHatManager } from '@services/unattendedRedHatManager'
@@ -64,7 +64,7 @@ export class CreateMachineServiceV2 {
   }
 
   /**
-   * Creates and starts a new VM using infinivirt.
+   * Creates and starts a new VM using infinization.
    *
    * @param machine - Machine record from database
    * @param username - Username for unattended installation
@@ -80,7 +80,7 @@ export class CreateMachineServiceV2 {
     productKey: string | undefined,
     pciBus: string | null
   ): Promise<boolean> {
-    this.debug.log(`Creating machine ${machine.name} using infinivirt`)
+    this.debug.log(`Creating machine ${machine.name} using infinization`)
 
     try {
       // Validate preconditions
@@ -95,8 +95,8 @@ export class CreateMachineServiceV2 {
       // Update status to 'building'
       await this.updateMachineStatus(machine.id, 'building')
 
-      // Get infinivirt instance
-      const infinivirt = await getInfinivirt()
+      // Get infinization instance
+      const infinization = await getInfinization()
 
       // Prepare VM configuration
       const vmConfig = await this.buildVMConfig(
@@ -111,9 +111,9 @@ export class CreateMachineServiceV2 {
         pciBus
       )
 
-      // Create and start VM via infinivirt
-      this.debug.log('Creating VM via infinivirt')
-      const result = await infinivirt.createVM(vmConfig)
+      // Create and start VM via infinization
+      this.debug.log('Creating VM via infinization')
+      const result = await infinization.createVM(vmConfig)
 
       if (!result.success) {
         throw new Error(`Failed to create VM: ${result.vmId}`)
@@ -220,7 +220,7 @@ export class CreateMachineServiceV2 {
   }
 
   /**
-   * Builds the VMCreateConfig for infinivirt.
+   * Builds the VMCreateConfig for infinization.
    *
    * For unattended installation, this method:
    * 1. Creates the appropriate unattended manager
@@ -302,12 +302,12 @@ export class CreateMachineServiceV2 {
     const virtioDriversIso = isWindows ? this.getVirtioDriversIsoPath() : undefined
 
     // Build base directories
-    const socketDir = process.env.INFINIVIRT_SOCKET_DIR ?? '/opt/infinibay/sockets'
+    const socketDir = process.env.INFINIZATION_SOCKET_DIR ?? '/opt/infinibay/sockets'
 
     // Build the VMCreateConfig
     // NOTE: displayPassword is disabled because QEMU 9.x removed the 'password=' parameter.
     // QEMU 9.x requires using -object secret + password-secret= instead.
-    // TODO: Fix infinivirt SpiceConfig to support QEMU 9.x password-secret format
+    // TODO: Fix infinization SpiceConfig to support QEMU 9.x password-secret format
     const config: VMCreateConfig = {
       vmId: machine.id,
       name: machine.name,
@@ -504,13 +504,13 @@ export class CreateMachineServiceV2 {
     this.debug.log(`Rolling back machine ${machine.id}`)
 
     try {
-      // Get infinivirt and stop the VM if running
-      const infinivirt = await getInfinivirt()
-      const status = await infinivirt.getVMStatus(machine.id)
+      // Get infinization and stop the VM if running
+      const infinization = await getInfinization()
+      const status = await infinization.getVMStatus(machine.id)
 
       if (status.processAlive) {
         this.debug.log('Stopping VM during rollback')
-        await infinivirt.stopVM(machine.id, { force: true })
+        await infinization.stopVM(machine.id, { force: true })
       }
     } catch (error: any) {
       this.debug.log('warn', `Error during rollback stop: ${error.message}`)

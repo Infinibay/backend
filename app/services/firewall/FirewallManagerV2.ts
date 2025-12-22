@@ -1,5 +1,5 @@
 /**
- * FirewallManagerV2 - VM firewall management using nftables via infinivirt.
+ * FirewallManagerV2 - VM firewall management using nftables via infinization.
  *
  * This service replaces the libvirt nwfilter-based FirewallManager with
  * nftables, providing modern, performant firewall management.
@@ -17,10 +17,10 @@
  */
 
 import { PrismaClient, RuleSetType } from '@prisma/client'
-import { NftablesService, FirewallRuleInput } from '@infinibay/infinivirt'
+import { NftablesService, FirewallRuleInput } from '@infinibay/infinization'
 
 import { Debugger } from '@utils/debug'
-import { getInfinivirt } from '@services/InfinivirtService'
+import { getInfinization } from '@services/InfinizationService'
 
 const debug = new Debugger('firewall-manager-v2')
 
@@ -56,11 +56,11 @@ export class FirewallManagerV2 {
   }
 
   /**
-   * Gets the NftablesService instance from infinivirt.
+   * Gets the NftablesService instance from infinization.
    */
   private async getNftables (): Promise<NftablesService> {
-    const infinivirt = await getInfinivirt()
-    return infinivirt.getNftablesService()
+    const infinization = await getInfinization()
+    return infinization.getNftablesService()
   }
 
   /**

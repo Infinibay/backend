@@ -2,7 +2,7 @@
  * GraphicPortService
  *
  * This service retrieves graphics port information for VMs.
- * With infinivirt, graphics configuration is stored in MachineConfiguration
+ * With infinization, graphics configuration is stored in MachineConfiguration
  * during VM creation, so this service reads from the database.
  *
  * For running VMs, port information is set when the VM is created via
@@ -18,7 +18,7 @@
 
 import { PrismaClient } from '@prisma/client'
 import { Debugger } from '@utils/debug'
-import { getInfinivirt } from '@services/InfinivirtService'
+import { getInfinization } from '@services/InfinizationService'
 
 export class GraphicPortService {
   private debug: Debugger = new Debugger('graphic-port-service')
@@ -68,9 +68,9 @@ export class GraphicPortService {
         }
       }
 
-      // Fallback: Check if VM is running and try to get port from infinivirt
+      // Fallback: Check if VM is running and try to get port from infinization
       try {
-        const infinivirt = await getInfinivirt()
+        const infinization = await getInfinization()
 
         // Find machine by internal name
         let machineId: string | null = null
@@ -83,7 +83,7 @@ export class GraphicPortService {
         }
 
         if (machineId) {
-          const status = await infinivirt.getVMStatus(machineId)
+          const status = await infinization.getVMStatus(machineId)
           if (status.processAlive) {
             // VM is running but we couldn't get port from DB
             // This shouldn't happen normally as port is set during creation
@@ -91,7 +91,7 @@ export class GraphicPortService {
           }
         }
       } catch {
-        // Ignore infinivirt errors, just return -1
+        // Ignore infinization errors, just return -1
       }
 
       this.debug.log(`No ${type} port found for ${domainName}`)

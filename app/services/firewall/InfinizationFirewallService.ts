@@ -7,14 +7,14 @@ import {
   type ConnectionStateConfig,
   type NftablesError,
   VM_CHAIN_PREFIX
-} from '@infinibay/infinivirt'
+} from '@infinibay/infinization'
 import { Debugger } from '@utils/debug'
 
-const debug = new Debugger('service:firewall:infinivirt')
+const debug = new Debugger('service:firewall:infinization')
 
 /**
- * Service that adapts infinivirt's NftablesService for use in the backend.
- * Acts as a bridge between the backend's firewall orchestration and infinivirt's
+ * Service that adapts infinization's NftablesService for use in the backend.
+ * Acts as a bridge between the backend's firewall orchestration and infinization's
  * nftables-based firewall management.
  *
  * This service:
@@ -24,11 +24,11 @@ const debug = new Debugger('service:firewall:infinivirt')
  * - Provides error handling and logging
  *
  * @example
- * const service = new InfinivirtFirewallService(prisma)
+ * const service = new InfinizationFirewallService(prisma)
  * await service.initialize()
  * await service.applyVMRules(vmId, departmentRules, vmRules)
  */
-export class InfinivirtFirewallService {
+export class InfinizationFirewallService {
   private nftablesService: NftablesService
 
   constructor (private prisma: PrismaClient) {
@@ -42,19 +42,19 @@ export class InfinivirtFirewallService {
   /**
    * Initializes the nftables infrastructure.
    * Must be called before using any other methods.
-   * Creates the infinivirt table and base forward chain if they don't exist.
+   * Creates the infinization table and base forward chain if they don't exist.
    *
    * @throws Error if initialization fails
    */
   async initialize (): Promise<void> {
-    debug.log('Initializing InfinivirtFirewallService')
+    debug.log('Initializing InfinizationFirewallService')
 
     try {
       await this.nftablesService.initialize()
-      debug.log('info', 'InfinivirtFirewallService initialized successfully')
+      debug.log('info', 'InfinizationFirewallService initialized successfully')
     } catch (error) {
       const nftError = error as NftablesError | Error | unknown
-      const message = `Failed to initialize InfinivirtFirewallService: ${nftError instanceof Error ? nftError.message : String(nftError)}`
+      const message = `Failed to initialize InfinizationFirewallService: ${nftError instanceof Error ? nftError.message : String(nftError)}`
       debug.log('error', message)
 
       // Log structured error details if available

@@ -3,7 +3,7 @@
  *
  * Migration script to update socket paths in existing VMs.
  * This script helps transition from the old subdirectory structure
- * (/opt/infinibay/infinivirt/{ga,tpm,infini}/) to the new flat structure
+ * (/opt/infinibay/infinization/{ga,tpm,infini}/) to the new flat structure
  * (/opt/infinibay/sockets/).
  *
  * The script clears socket paths for stopped VMs so they regenerate
@@ -36,7 +36,7 @@ async function migrateSocketPaths (dryRun: boolean = false): Promise<void> {
   console.log(`Mode: ${dryRun ? 'DRY RUN (no changes will be made)' : 'LIVE (changes will be applied)'}`)
   console.log('')
   console.log('This script migrates VMs from the old socket structure:')
-  console.log('  /opt/infinibay/infinivirt/{ga,tpm,infini}/')
+  console.log('  /opt/infinibay/infinization/{ga,tpm,infini}/')
   console.log('To the new flat structure:')
   console.log('  /opt/infinibay/sockets/')
   console.log('')
@@ -178,7 +178,7 @@ Socket Path Migration Script
 This script migrates existing VMs from the old socket directory structure
 to the new flat structure used by VirtioSocketWatcherService.
 
-Old structure: /opt/infinibay/infinivirt/{ga,tpm,infini}/*.sock
+Old structure: /opt/infinibay/infinization/{ga,tpm,infini}/*.sock
 New structure: /opt/infinibay/sockets/*.sock
 
 Usage:
