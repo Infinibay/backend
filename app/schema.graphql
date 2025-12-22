@@ -92,6 +92,23 @@ type BackgroundHealthServiceStatus {
   totalVMsMonitored: Int!
 }
 
+type BrNetfilterDiagnosticsType {
+  callArptables: Int!
+  callIp6tables: Int!
+  callIptables: Int!
+  moduleLoaded: Boolean!
+  persistenceFileExists: Boolean!
+}
+
+type BridgeDiagnosticsType {
+  attachedInterfaces: [String!]!
+  exists: Boolean!
+  ipAddresses: [String!]!
+  isUp: Boolean!
+  mtu: Int
+  state: String
+}
+
 input BridgeNameInput {
   bridgeName: String! = ""
   networkName: String! = ""
@@ -250,15 +267,44 @@ input DeleteSnapshotInput {
   snapshotName: String!
 }
 
+type DepartmentNetworkDiagnosticsType {
+  brNetfilter: BrNetfilterDiagnosticsType!
+  bridge: BridgeDiagnosticsType!
+  departmentId: String!
+  departmentName: String!
+  dnsmasq: DnsmasqDiagnosticsType!
+  manualCommands: [String!]!
+  nat: NatDiagnosticsType!
+  recommendations: [String!]!
+  timestamp: Timestamp!
+}
+
 type DepartmentType {
   bridgeName: String
   createdAt: DateTimeISO!
+  dnsServers: [String!]
   gatewayIP: String
   id: ID!
   internetSpeed: Int
   ipSubnet: String
   name: String!
+  ntpServers: [String!]
   totalMachines: Float
+}
+
+type DhcpPacketSummaryType {
+  ackPackets: Int!
+  discoverPackets: Int!
+  offerPackets: Int!
+  requestPackets: Int!
+  totalPackets: Int!
+}
+
+type DhcpTrafficCaptureType {
+  bridgeName: String!
+  duration: Int!
+  packets: [String!]!
+  summary: DhcpPacketSummaryType!
 }
 
 type DiskCleanupResult {
@@ -290,6 +336,20 @@ type DiskSpaceInfo {
   timestamp: DateTimeISO!
   vmId: ID!
   warningThreshold: Float
+}
+
+type DnsmasqDiagnosticsType {
+  configExists: Boolean!
+  configPath: String!
+  isRunning: Boolean!
+  leaseFileExists: Boolean!
+  leasePath: String!
+  listeningPort: Boolean!
+  logExists: Boolean!
+  logPath: String!
+  pid: Int
+  pidMatches: Boolean!
+  recentLogLines: [String!]
 }
 
 type DyummyType {
@@ -872,6 +932,7 @@ type Mutation {
   updateAppSettings(input: AppSettingsInput!): AppSettings!
   updateApplication(id: String!, input: CreateApplicationInputType!): ApplicationType!
   updateDepartmentName(input: UpdateDepartmentNameInput!): DepartmentType!
+  updateDepartmentNetwork(input: UpdateDepartmentNetworkInput!): DepartmentType!
   updateFirewallRule(input: UpdateFirewallRuleInput!, ruleId: ID!): FirewallRuleType!
   updateMachineHardware(input: UpdateMachineHardwareInput!): Machine!
   updateMachineName(input: UpdateMachineNameInput!): Machine!
@@ -888,6 +949,14 @@ type Mutation {
 
   """Validate ISO file integrity"""
   validateISO(isoId: String!): Boolean!
+}
+
+type NatDiagnosticsType {
+  chainExists: Boolean!
+  ipForwardingEnabled: Boolean!
+  ruleDetails: String
+  ruleExists: Boolean!
+  tableExists: Boolean!
 }
 
 type Network {
@@ -1030,6 +1099,7 @@ type Query {
   """Get all available ISOs"""
   availableISOs: [ISO!]!
   backgroundHealthServiceStatus: BackgroundHealthServiceStatus!
+  captureDepartmentDhcpTraffic(departmentId: String!, durationSeconds: Int! = 30): DhcpTrafficCaptureType!
 
   """Check for application updates on a VM"""
   checkApplicationUpdates(vmId: ID!): ApplicationUpdates!
@@ -1060,6 +1130,7 @@ type Query {
   currentSnapshot(machineId: String!): Snapshot
   currentUser: UserType
   department(id: String!): DepartmentType
+  departmentNetworkDiagnostics(departmentId: String!): DepartmentNetworkDiagnosticsType!
   departmentScripts(departmentId: ID!): [ScriptType!]!
   departments: [DepartmentType!]!
   dueMaintenanceTasks: [MaintenanceTask!]!
@@ -1543,9 +1614,20 @@ type SystemResources {
   memory: SystemResourceMemory!
 }
 
+"""
+The javascript `Date` as integer. Type represents date and time as number of milliseconds from start of UNIX epoch.
+"""
+scalar Timestamp
+
 input UpdateDepartmentNameInput {
   id: ID! = ""
   name: String! = ""
+}
+
+input UpdateDepartmentNetworkInput {
+  dnsServers: [String!]
+  id: ID! = ""
+  ntpServers: [String!]
 }
 
 input UpdateFirewallRuleInput {

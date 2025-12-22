@@ -2,7 +2,7 @@ import { PrismaClient } from '@prisma/client'
 import { TapDeviceManager, generateVMChainName } from '@infinibay/infinivirt'
 
 import { Debugger } from '../../utils/debug'
-import { DepartmentNetworkService } from '../network/DepartmentNetworkService'
+import { DepartmentNetworkService, ForceDestroyResult } from '../network/DepartmentNetworkService'
 import { getInfinivirt } from '../InfinivirtService'
 
 interface OrphanedResource {
@@ -11,6 +11,28 @@ interface OrphanedResource {
   internalName: string
   tapDevice?: string
   nftablesChain?: string
+}
+
+interface CleanupOptions {
+  /** If true, attempt force cleanup even if normal cleanup fails */
+  forceCleanupOnFailure?: boolean
+  /** If true, continue with DB deletion even if network cleanup fails partially */
+  continueOnPartialFailure?: boolean
+}
+
+interface CleanupResult {
+  success: boolean
+  networkCleanup?: {
+    normalCleanupAttempted: boolean
+    normalCleanupSuccess: boolean
+    forceCleanupAttempted: boolean
+    forceCleanupResult?: ForceDestroyResult
+  }
+  databaseCleanup: {
+    attempted: boolean
+    success: boolean
+  }
+  errors: string[]
 }
 
 export class DepartmentCleanupService {
@@ -27,8 +49,25 @@ export class DepartmentCleanupService {
    *
    * Note: With nftables, firewall chains are per-VM, not per-department.
    * Department cleanup only involves database records (FirewallRuleSet).
+   *
+   * @param departmentId - The department ID to clean up
+   * @param options - Cleanup options for error handling behavior
    */
-  async cleanupDepartment (departmentId: string): Promise<void> {
+  async cleanupDepartment (departmentId: string, options: CleanupOptions = {}): Promise<CleanupResult> {
+    const {
+      forceCleanupOnFailure = true,
+      continueOnPartialFailure = false
+    } = options
+
+    const result: CleanupResult = {
+      success: false,
+      databaseCleanup: {
+        attempted: false,
+        success: false
+      },
+      errors: []
+    }
+
     const department = await this.prisma.department.findUnique({
       where: { id: departmentId },
       include: {
@@ -43,12 +82,15 @@ export class DepartmentCleanupService {
 
     if (!department) {
       this.debug.log(`Department ${departmentId} not found`)
-      return
+      result.errors.push(`Department ${departmentId} not found`)
+      return result
     }
 
     // Ensure no machines exist in the department
     if (department.machines.length > 0) {
-      throw new Error(`Cannot cleanup department ${departmentId}: ${department.machines.length} VMs still exist`)
+      const errorMsg = `Cannot cleanup department ${departmentId}: ${department.machines.length} VMs still exist`
+      result.errors.push(errorMsg)
+      throw new Error(errorMsg)
     }
 
     // Verify no orphaned VM resources exist
@@ -65,6 +107,7 @@ export class DepartmentCleanupService {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error)
       this.debug.log('error', `Orphaned resource validation failed: ${errorMessage}`)
+      result.errors.push(`Orphaned resource validation failed: ${errorMessage}`)
       throw new Error(
         `Cannot delete department: Orphaned-resource validation failed or timed out.\n\n` +
         `Error: ${errorMessage}\n\n` +
@@ -81,6 +124,8 @@ export class DepartmentCleanupService {
         return `VM: ${r.vmName} (${r.vmId})\n${items.join('\n')}`
       }).join('\n\n')
 
+      const errorMsg = `Found ${orphanedResources.length} orphaned VM resource(s)`
+      result.errors.push(errorMsg)
       throw new Error(
         `Cannot delete department: Found ${orphanedResources.length} orphaned VM resource(s) that must be cleaned up first:\n\n` +
         resourceList + '\n\n' +
@@ -92,19 +137,61 @@ export class DepartmentCleanupService {
 
     // Destroy network infrastructure (bridge, dnsmasq, NAT)
     if (department.bridgeName) {
+      result.networkCleanup = {
+        normalCleanupAttempted: true,
+        normalCleanupSuccess: false,
+        forceCleanupAttempted: false
+      }
+
+      const networkService = new DepartmentNetworkService(this.prisma)
+
+      // Try normal cleanup first
       try {
-        const networkService = new DepartmentNetworkService(this.prisma)
         await networkService.destroyNetwork(departmentId)
+        result.networkCleanup.normalCleanupSuccess = true
         this.debug.log(`Destroyed network infrastructure for department ${departmentId}`)
       } catch (networkError) {
-        this.debug.log(`Warning: Failed to destroy network for department ${departmentId}: ${String(networkError)}`)
-        // Continue with deletion - network might already be partially destroyed
+        const errorMessage = networkError instanceof Error ? networkError.message : String(networkError)
+        this.debug.log('error', `Network cleanup failed for department ${departmentId}: ${errorMessage}`)
+        result.errors.push(`Normal network cleanup failed: ${errorMessage}`)
+
+        // Try force cleanup if enabled
+        if (forceCleanupOnFailure) {
+          this.debug.log('info', `Attempting force cleanup for department ${departmentId}`)
+          result.networkCleanup.forceCleanupAttempted = true
+
+          const forceResult = await networkService.forceDestroyNetwork(departmentId)
+          result.networkCleanup.forceCleanupResult = forceResult
+
+          if (forceResult.success) {
+            this.debug.log('info', `Force cleanup succeeded for department ${departmentId}`)
+          } else {
+            // Log detailed failure info
+            const failedOps = Object.entries(forceResult.operations)
+              .filter(([_, op]) => op.attempted && !op.success)
+              .map(([name, op]) => `${name}: ${op.error || 'unknown error'}`)
+
+            if (failedOps.length > 0) {
+              this.debug.log('warn', `Force cleanup partial failure: ${failedOps.join(', ')}`)
+              result.errors.push(`Force cleanup partial failure: ${failedOps.join(', ')}`)
+            }
+
+            // Abort DB deletion if force cleanup failed and continueOnPartialFailure is false
+            if (!continueOnPartialFailure) {
+              throw new Error(`Network cleanup failed and force cleanup was incomplete: ${failedOps.join(', ')}`)
+            }
+          }
+        } else if (!continueOnPartialFailure) {
+          // Not attempting force cleanup and not continuing on failure
+          throw networkError
+        }
       }
     }
 
     // Remove DB records in correct order
-    await this.prisma.$transaction(async tx => {
-      try {
+    result.databaseCleanup.attempted = true
+    try {
+      await this.prisma.$transaction(async tx => {
         // Delete firewall rules and ruleset (if exists)
         await this.cleanupFirewallRuleSet(tx, department.firewallRuleSetId)
 
@@ -112,11 +199,63 @@ export class DepartmentCleanupService {
         await tx.department.delete({ where: { id: departmentId } })
 
         this.debug.log(`Successfully cleaned up department ${departmentId}`)
-      } catch (e) {
-        this.debug.log(`Error removing DB records: ${String(e)}`)
-        throw e
+      })
+      result.databaseCleanup.success = true
+    } catch (e) {
+      const errorMessage = e instanceof Error ? e.message : String(e)
+      this.debug.log('error', `Error removing DB records: ${errorMessage}`)
+      result.errors.push(`Database cleanup failed: ${errorMessage}`)
+      throw e
+    }
+
+    // Log summary
+    this.logCleanupSummary(departmentId, result)
+
+    result.success = result.databaseCleanup.success &&
+      (!result.networkCleanup || result.networkCleanup.normalCleanupSuccess ||
+        (result.networkCleanup.forceCleanupResult?.success ?? false))
+
+    return result
+  }
+
+  /**
+   * Logs a detailed summary of the cleanup operation
+   */
+  private logCleanupSummary (departmentId: string, result: CleanupResult): void {
+    this.debug.log('info', `=== Cleanup Summary for Department ${departmentId} ===`)
+    this.debug.log('info', `Overall success: ${result.success}`)
+
+    if (result.networkCleanup) {
+      this.debug.log('info', `Network cleanup:`)
+      this.debug.log('info', `  - Normal cleanup attempted: ${result.networkCleanup.normalCleanupAttempted}`)
+      this.debug.log('info', `  - Normal cleanup success: ${result.networkCleanup.normalCleanupSuccess}`)
+      this.debug.log('info', `  - Force cleanup attempted: ${result.networkCleanup.forceCleanupAttempted}`)
+
+      if (result.networkCleanup.forceCleanupResult) {
+        this.debug.log('info', `  - Force cleanup success: ${result.networkCleanup.forceCleanupResult.success}`)
+        const ops = result.networkCleanup.forceCleanupResult.operations
+        this.debug.log('info', `  - TAP devices: ${ops.tapDevicesCleanup.success ? 'cleaned' : 'failed'}`)
+        this.debug.log('info', `  - dnsmasq: ${ops.dnsmasqStop.success ? 'stopped' : 'failed'}`)
+        this.debug.log('info', `  - NAT: ${ops.natRemoval.success ? 'removed' : 'failed'}`)
+        this.debug.log('info', `  - Bridge: ${ops.bridgeDestruction.success ? 'destroyed' : 'failed'}`)
+        this.debug.log('info', `  - Files: ${ops.fileCleanup.success ? 'cleaned' : 'failed'}`)
+        this.debug.log('info', `  - Database: ${ops.databaseUpdate.success ? 'updated' : 'failed'}`)
+        this.debug.log('info', `  - System files: ${ops.systemFilesCleanup.success ? 'cleaned' : 'failed'}`)
       }
-    })
+    }
+
+    this.debug.log('info', `Database cleanup:`)
+    this.debug.log('info', `  - Attempted: ${result.databaseCleanup.attempted}`)
+    this.debug.log('info', `  - Success: ${result.databaseCleanup.success}`)
+
+    if (result.errors.length > 0) {
+      this.debug.log('warn', `Errors encountered (${result.errors.length}):`)
+      for (const error of result.errors) {
+        this.debug.log('warn', `  - ${error}`)
+      }
+    }
+
+    this.debug.log('info', `=== End Cleanup Summary ===`)
   }
 
   /**

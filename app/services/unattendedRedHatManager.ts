@@ -246,6 +246,95 @@ export class UnattendedRedHatManager extends UnattendedManagerBase {
   }
 
   /**
+   * Extracts xorriso parameters from the original ISO using report_el_torito.
+   * This ensures the rebuilt ISO has correct boot parameters matching the original.
+   *
+   * @param {string} isoPath - Path to the original ISO
+   * @returns {Promise<string[]>} - Array of xorriso command arguments
+   */
+  private async getXorrisoParamsFromISO (isoPath: string): Promise<string[]> {
+    try {
+      this.debug.log(`[XORRISO] Extracting boot parameters from: ${isoPath}`)
+
+      // Run xorriso to get the mkisofs-compatible parameters
+      const output = await this.executeCommand([
+        'xorriso', '-indev', isoPath, '-report_el_torito', 'as_mkisofs'
+      ])
+
+      this.debug.log(`[XORRISO] Raw report_el_torito output:\n${output}`)
+
+      // Parse the output to extract useful parameters
+      // The output contains mkisofs-style arguments that we can use
+      const lines = output.split('\n').filter(line => line.trim())
+
+      // Build the command from the report
+      const params: string[] = []
+
+      for (const line of lines) {
+        // Skip comment lines
+        if (line.trim().startsWith('#')) continue
+
+        // Each line is a mkisofs-compatible argument
+        // Parse it respecting quoted strings (e.g., Volume ID with spaces)
+        const trimmedLine = line.trim()
+        if (trimmedLine) {
+          // Use shell-style argument parsing to handle quotes properly
+          const parts = this.parseShellArgs(trimmedLine)
+          params.push(...parts)
+        }
+      }
+
+      this.debug.log(`[XORRISO] Extracted ${params.length} parameters: ${params.join(' ')}`)
+      return params
+    } catch (error) {
+      this.debug.log('error', `[XORRISO] Failed to extract parameters from ISO: ${error}`)
+      // Return empty array, caller will use default parameters
+      return []
+    }
+  }
+
+  /**
+   * Parses a shell-style argument string respecting single and double quotes.
+   * For example: "-V 'Fedora 41 x86_64'" becomes ["-V", "Fedora 41 x86_64"]
+   *
+   * @param {string} line - The line to parse
+   * @returns {string[]} - Array of parsed arguments
+   */
+  private parseShellArgs (line: string): string[] {
+    const args: string[] = []
+    let current = ''
+    let inSingleQuote = false
+    let inDoubleQuote = false
+
+    for (let i = 0; i < line.length; i++) {
+      const char = line[i]
+
+      if (char === "'" && !inDoubleQuote) {
+        inSingleQuote = !inSingleQuote
+        // Don't include the quote character in the argument
+      } else if (char === '"' && !inSingleQuote) {
+        inDoubleQuote = !inDoubleQuote
+        // Don't include the quote character in the argument
+      } else if (char === ' ' && !inSingleQuote && !inDoubleQuote) {
+        // Space outside quotes - end current argument
+        if (current.length > 0) {
+          args.push(current)
+          current = ''
+        }
+      } else {
+        current += char
+      }
+    }
+
+    // Don't forget the last argument
+    if (current.length > 0) {
+      args.push(current)
+    }
+
+    return args
+  }
+
+  /**
    * Creates a new ISO image with the Kickstart configuration.
    *
    * @param {string} newIsoPath - The path to the new ISO image file
@@ -258,7 +347,7 @@ export class UnattendedRedHatManager extends UnattendedManagerBase {
       throw new Error(`Extraction directory does not exist: ${extractDir}`)
     }
 
-    this.debug.log('Creating Kickstart configuration file...')
+    this.debug.log('[ISO] Creating Kickstart configuration file...')
 
     // Generate the configuration
     const config = await this.generateConfig()
@@ -266,7 +355,7 @@ export class UnattendedRedHatManager extends UnattendedManagerBase {
     // Write ks.cfg to the root of the extracted directory
     const kickstartPath = path.join(extractDir, 'ks.cfg')
     await fs.promises.writeFile(kickstartPath, config)
-    this.debug.log(`Kickstart configuration written to ${kickstartPath}`)
+    this.debug.log(`[KICKSTART] Configuration written to ${kickstartPath}`)
 
     // Find and modify GRUB configurations
     // Common paths for GRUB config in Fedora/RHEL ISOs
@@ -278,116 +367,123 @@ export class UnattendedRedHatManager extends UnattendedManagerBase {
     let grubModified = false
     for (const grubPath of potentialGrubPaths) {
       if (fs.existsSync(grubPath)) {
+        this.debug.log(`[GRUB] Modifying GRUB configuration at ${grubPath}`)
         await this.modifyGrubConfigForKickstart(grubPath)
-        grubModified = true // Assume modification attempt means success for this flag
+        grubModified = true
       }
     }
 
     if (!grubModified) {
-      this.debug.log('warning', 'Could not find any GRUB configuration files at expected paths to modify for Kickstart.')
-      // Consider if this is a fatal error
+      this.debug.log('warning', '[GRUB] Could not find any GRUB configuration files at expected paths to modify for Kickstart.')
     }
 
     // Extract the original Volume ID from the source ISO
     let volumeId = 'INFINIBAY-FEDORA' // Default fallback
     try {
-      this.debug.log(`Extracting Volume ID using isoinfo from: ${this.isoPath}`)
-      console.log(`Extracting Volume ID using isoinfo from: ${this.isoPath}`)
+      this.debug.log(`[ISO] Extracting Volume ID using isoinfo from: ${this.isoPath}`)
       const volIdOutput = await this.executeCommand(['isoinfo', '-d', '-i', this.isoPath as string]) as string
 
       // Match 'Volume id: VALUE' from isoinfo output
       const match = volIdOutput.match(/^Volume id:\s*(.*)$/m)
-      console.log(`Volume ID output: ${volIdOutput}`)
-      console.log(`Volume ID match: ${match}`)
       if (match && match[1]) {
-        volumeId = match[1]
-        this.debug.log(`Extracted original volume ID: ${volumeId}`)
+        volumeId = match[1].trim()
+        this.debug.log(`[ISO] Extracted original volume ID: ${volumeId}`)
       } else {
-        console.log('warning', `Could not parse volume ID from isoinfo output string: ${volIdOutput}. Using default: ${volumeId}`)
-        this.debug.log(`warning', 'Could not parse volume ID from isoinfo output string: ${volIdOutput}. Using default: ${volumeId}`)
+        this.debug.log('warning', `[ISO] Could not parse volume ID from isoinfo output. Using default: ${volumeId}`)
       }
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error)
-      console.log('error', `Failed to extract volume ID from ${this.isoPath}: ${errorMsg}. Using default: ${volumeId}`)
-      this.debug.log(`error', 'Failed to extract volume ID from ${this.isoPath}: ${errorMsg}. Using default: ${volumeId}`)
+      this.debug.log('warning', `[ISO] Failed to extract volume ID from ${this.isoPath}: ${errorMsg}. Using default: ${volumeId}`)
     }
 
-    this.debug.log('Checking necessary files for ISO recreation...')
+    this.debug.log('[ISO] Checking necessary files for ISO recreation...')
     // Paths derived from xorriso report for Fedora
     const biosBootImg = path.join(extractDir, 'images/eltorito.img')
-    const efiBootPath = path.join(extractDir, 'EFI/BOOT') // Directory for EFI boot files
+    const efiBootPath = path.join(extractDir, 'EFI/BOOT')
 
     if (!fs.existsSync(biosBootImg)) {
-      this.debug.log('warning', `BIOS boot image not found at expected path: ${biosBootImg}. ISO creation might fail.`)
+      this.debug.log('warning', `[ISO] BIOS boot image not found at: ${biosBootImg}`)
     }
     if (!fs.existsSync(efiBootPath)) {
-      this.debug.log('warning', `EFI boot directory not found at expected path: ${efiBootPath}. ISO creation might fail.`)
+      this.debug.log('warning', `[ISO] EFI boot directory not found at: ${efiBootPath}`)
     }
 
-    this.debug.log('Constructing xorriso command...')
+    // Get dynamic xorriso parameters from the original ISO
+    const dynamicParams = await this.getXorrisoParamsFromISO(this.isoPath as string)
 
-    // Arguments inspired by the xorriso report for Fedora
-    // Paths like `/images/eltorito.img` are relative to extractDir when running mkisofs
-    // Intervals referencing this.isoPath need to be correct
-    const isoCreationCommandParts = [
-      'xorriso',
-      '-as', 'mkisofs',
-      '-V', volumeId,
-      // MBR and GPT specifics from report
-      '--grub2-mbr', `--interval:local_fs:0s-15s:zero_mbrpt,zero_gpt:${this.isoPath}`,
-      '--protective-msdos-label',
-      '-partition_cyl_align', 'off',
-      '-partition_offset', '16',
-      '-partition_hd_cyl', '64',
-      '-partition_sec_hd', '32',
-      // Appended partition for EFI - critical to get right
-      // Using the partition details directly from the report, referencing this.isoPath
-      '-append_partition', '2', '28732ac11ff8d211ba4b00a0c93ec93b', `--interval:local_fs:1819116d-1844979d::${this.isoPath}`,
-      '-appended_part_as_gpt',
-      '-iso_mbr_part_type', 'a2a0d0ebe5b9334487c068b6b72699c7',
-      // Boot options
-      '--boot-catalog-hide', // From report
-      '-b', 'images/eltorito.img', // BIOS boot image path (relative to extractDir)
-      '-no-emul-boot',
-      '-boot-load-size', '4',
-      '-boot-info-table',
-      '--grub2-boot-info',
-      // EFI boot option
-      '-eltorito-alt-boot',
-      // Reference the EFI boot image via interval - use the one from report
-      '-e', '--interval:appended_partition_2_start_454779s_size_25864d:all::', // Updated interval from Fedora report
-      '-no-emul-boot',
-      // boot-load-size must match the size of the EFI image referenced by -e
-      // The Fedora report showed 25864 * 512 bytes for EFI image size. boot-load-size is in 512-byte sectors.
-      '-boot-load-size', '25864', // Updated size from Fedora report
-      // Output file
-      '-o', newIsoPath,
-      // Source directory
-      extractDir
-    ]
+    let isoCreationCommandParts: string[]
+
+    if (dynamicParams.length > 0) {
+      // Use dynamic parameters from the original ISO
+      this.debug.log('[XORRISO] Using dynamic parameters extracted from original ISO')
+
+      isoCreationCommandParts = [
+        'xorriso',
+        '-as', 'mkisofs',
+        ...dynamicParams.map(param => {
+          // Keep references to original ISO for interval reads
+          if (param.includes(this.isoPath as string)) {
+            return param
+          }
+          return param
+        }),
+        '-o', newIsoPath,
+        extractDir
+      ]
+    } else {
+      // Fallback to default parameters if extraction failed
+      this.debug.log('[XORRISO] Using fallback parameters (extraction failed)')
+
+      isoCreationCommandParts = [
+        'xorriso',
+        '-as', 'mkisofs',
+        '-V', volumeId,
+        '--grub2-mbr', `--interval:local_fs:0s-15s:zero_mbrpt,zero_gpt:${this.isoPath}`,
+        '--protective-msdos-label',
+        '-partition_cyl_align', 'off',
+        '-partition_offset', '16',
+        '-partition_hd_cyl', '64',
+        '-partition_sec_hd', '32',
+        '-append_partition', '2', '28732ac11ff8d211ba4b00a0c93ec93b', `--interval:local_fs:1819116d-1844979d::${this.isoPath}`,
+        '-appended_part_as_gpt',
+        '-iso_mbr_part_type', 'a2a0d0ebe5b9334487c068b6b72699c7',
+        '--boot-catalog-hide',
+        '-b', 'images/eltorito.img',
+        '-no-emul-boot',
+        '-boot-load-size', '4',
+        '-boot-info-table',
+        '--grub2-boot-info',
+        '-eltorito-alt-boot',
+        '-e', '--interval:appended_partition_2_start_454779s_size_25864d:all::',
+        '-no-emul-boot',
+        '-boot-load-size', '25864',
+        '-o', newIsoPath,
+        extractDir
+      ]
+    }
 
     // Execute the command
     try {
-      this.debug.log(`Creating Kickstart ISO with command: ${isoCreationCommandParts.join(' ')}`)
+      this.debug.log(`[XORRISO] Creating Kickstart ISO with command:\n${isoCreationCommandParts.join(' ')}`)
       await this.executeCommand(isoCreationCommandParts)
-      this.debug.log(`Successfully created Kickstart ISO at ${newIsoPath}`)
+      this.debug.log(`[ISO] Successfully created Kickstart ISO at ${newIsoPath}`)
 
       // Clean up the extracted directory
-      this.debug.log(`Removing temporary directory: ${extractDir}`)
+      this.debug.log(`[ISO] Removing temporary directory: ${extractDir}`)
       await this.executeCommand(['rm', '-rf', extractDir])
-      this.debug.log(`Removed temporary directory ${extractDir}`)
+      this.debug.log(`[ISO] Removed temporary directory ${extractDir}`)
     } catch (error) {
-      this.debug.log('error', `Failed to create Kickstart ISO: ${error}`)
+      this.debug.log('error', `[ISO] Failed to create Kickstart ISO: ${error}`)
       // Attempt cleanup even on failure
       try {
         if (fs.existsSync(extractDir)) {
-          this.debug.log(`Attempting cleanup of failed build directory: ${extractDir}`)
+          this.debug.log(`[ISO] Attempting cleanup of failed build directory: ${extractDir}`)
           await this.executeCommand(['rm', '-rf', extractDir])
         }
       } catch (cleanupError) {
-        this.debug.log('error', `Failed to cleanup temporary directory ${extractDir} after error: ${cleanupError}`)
+        this.debug.log('error', `[ISO] Failed to cleanup temporary directory ${extractDir} after error: ${cleanupError}`)
       }
-      throw error // Re-throw the original error
+      throw error
     }
   }
 

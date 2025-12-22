@@ -321,6 +321,9 @@ model Department {
   dhcpRangeStart      String?            // DHCP pool start: "10.10.100.10"
   dhcpRangeEnd        String?            // DHCP pool end: "10.10.100.254"
   dnsmasqPid          Int?               // PID of dnsmasq process for this bridge
+  dnsServers          String[]           @default(["8.8.8.8", "8.8.4.4", "1.1.1.1"]) // DNS servers for DHCP clients
+  ntpServers          String[]           @default(["216.239.35.0", "162.159.200.1"]) // NTP servers for DHCP clients (Google: 216.239.35.0, Cloudflare: 162.159.200.1)
+  mtu                 Int?               @default(1500) // MTU for DHCP clients (default: 1500 for standard Ethernet)
 
   @@index([bridgeName])
 }

@@ -53,15 +53,10 @@ export class UnattendedUbuntuManager extends UnattendedManagerBase {
           update: true,
           channel: 'latest/stable'
         },
-        // Default apt configuration. Based on IP.
+        // Use default apt configuration - let Ubuntu auto-detect mirrors
+        // Note: Do NOT override apt sources as it breaks package installation
         apt: {
-          preserve_sources_list: false, // Limpia los mirrors generados por defecto
-          primary: [
-            {
-              arches: ['amd64'], // arquitectura
-              uri: 'http://archive.ubuntu.com/ubuntu' // o tu mirror local
-            }
-          ]
+          geoip: true // Let Ubuntu select the best mirror automatically
         },
         codecs: {
           install: true
@@ -87,34 +82,57 @@ export class UnattendedUbuntuManager extends UnattendedManagerBase {
 
         locale: 'en_US',
 
-        network: {
-          version: 2,
-          ethernets: {
-            enp1s0: {
-              match: {
-                name: 'en*' // <-- This should be the one used by libvirt
-              },
-              dhcp4: true
-            },
-            eth1: {
-              match: {
-                name: 'eth*' // This is here just in case, but provably can be removved
-              },
-              dhcp4: true
-            }
-          }
-        },
+        // Network configuration removed - Ubuntu autoinstall uses DHCP by default
+        // for interfaces matching 'eth*' or 'en*'. Manual network configuration
+        // was causing DHCP issues. See: https://canonical-subiquity.readthedocs-hosted.com/
+
+        // Early commands to force DHCP before installation begins
+        // This ensures network connectivity before subiquity tries to configure the network
+        'early-commands': [
+          // Log network state before any configuration
+          'echo "=== Initial Network State ===" | tee -a /var/log/installer/network-debug.log',
+          'ip addr show | tee -a /var/log/installer/network-debug.log',
+          'ip route show | tee -a /var/log/installer/network-debug.log',
+
+          // Restart systemd-networkd to ensure clean state
+          'systemctl restart systemd-networkd',
+          'sleep 2',
+
+          // Force DHCP on all ethernet interfaces
+          'for iface in $(ip -o link show | grep -E "en[op][0-9]s[0-9]" | awk -F: \'{print $2}\' | tr -d \' \'); do echo "Configuring $iface for DHCP..." | tee -a /var/log/installer/network-debug.log; ip link set $iface up; dhclient -v $iface 2>&1 | tee -a /var/log/installer/network-debug.log; done',
+
+          // Wait for IP assignment with retries (only check for global scope, non-loopback addresses)
+          'for attempt in $(seq 1 10); do echo "Checking for IP (attempt $attempt/10)..." | tee -a /var/log/installer/network-debug.log; if ip -4 addr show scope global | grep -q "inet "; then echo "IP assigned successfully" | tee -a /var/log/installer/network-debug.log; ip -4 addr show scope global | tee -a /var/log/installer/network-debug.log; break; fi; sleep 2; done',
+
+          // Configure DNS manually as fallback
+          'echo "nameserver 8.8.8.8" > /etc/resolv.conf',
+          'echo "nameserver 1.1.1.1" >> /etc/resolv.conf',
+          'echo "nameserver 8.8.4.4" >> /etc/resolv.conf',
+
+          // Test connectivity
+          'echo "=== Testing Connectivity ===" | tee -a /var/log/installer/network-debug.log',
+          'ping -c 2 8.8.8.8 2>&1 | tee -a /var/log/installer/network-debug.log || echo "Ping failed" | tee -a /var/log/installer/network-debug.log',
+          'getent hosts ubuntu.com 2>&1 | tee -a /var/log/installer/network-debug.log || echo "DNS resolution failed" | tee -a /var/log/installer/network-debug.log',
+
+          // Log final state
+          'echo "=== Final Network State ===" | tee -a /var/log/installer/network-debug.log',
+          'ip addr show | tee -a /var/log/installer/network-debug.log',
+          'cat /etc/resolv.conf | tee -a /var/log/installer/network-debug.log'
+        ],
 
         timezone: 'UTC', // TODO: Autodetect timezone or get it form system configuration.
 
-        // Install Ubuntu desktop and essential packages
-        packages: [
-          'qemu-guest-agent',
-          'ubuntu-desktop',
-          'openssh-server',
-          'curl', // Required for downloading InfiniService
-          'wget' // Alternative download method
-        ],
+        // Source specifies which installation variant to use from the Desktop ISO
+        // This is required for Desktop ISO - do NOT use packages: [ubuntu-desktop]
+        source: {
+          id: 'ubuntu-desktop', // Full desktop installation
+          search_drivers: true
+        },
+
+        // Note: Additional packages (curl, wget, qemu-guest-agent) are installed
+        // in late-commands after apt is configured, since Desktop ISOs don't
+        // include these packages and the packages: section may run before
+        // apt has full repository access.
 
         // Use the entire disk with a single partition
         // lets try the default (full disk 1 partition). This do not work
@@ -142,6 +160,118 @@ export class UnattendedUbuntuManager extends UnattendedManagerBase {
    */
   private generateLateCommands (): string[] {
     const commands = [
+      // Network configuration is now handled by DHCP - no need to manually set DNS
+      // Ubuntu's systemd-resolved will use DNS servers from DHCP
+
+      // Create network validation helper script
+      `cat > /target/usr/local/bin/wait-for-network.sh << 'NETWORK_HELPER_EOF'
+#!/bin/bash
+# Network validation helper with exponential backoff
+# Usage: wait-for-network.sh [max_attempts] [initial_delay]
+
+MAX_ATTEMPTS=\${1:-15}
+INITIAL_DELAY=\${2:-1}
+CURRENT_DELAY=\$INITIAL_DELAY
+
+log_network_config() {
+    echo "=== Network Configuration Debug Info ==="
+    echo "Timestamp: \$(date)"
+    echo ""
+    echo "--- IP Addresses ---"
+    ip addr show || true
+    echo ""
+    echo "--- Routing Table ---"
+    ip route show || true
+    echo ""
+    echo "--- DNS Configuration ---"
+    cat /etc/resolv.conf || true
+    echo ""
+    echo "--- Active Network Interfaces ---"
+    ip link show | grep -E "^[0-9]+:" || true
+    echo "========================================"
+}
+
+test_connectivity() {
+    local test_name=\$1
+    local test_command=\$2
+
+    if eval "\$test_command" >/dev/null 2>&1; then
+        echo "[OK] \$test_name: SUCCESS"
+        return 0
+    else
+        echo "[FAIL] \$test_name: FAILED"
+        return 1
+    fi
+}
+
+echo "Starting network connectivity validation..."
+log_network_config
+
+for attempt in \$(seq 1 \$MAX_ATTEMPTS); do
+    echo ""
+    echo "Attempt \$attempt/\$MAX_ATTEMPTS (delay: \${CURRENT_DELAY}s)"
+
+    # Test multiple connectivity methods
+    PING_PASSED=0
+    DNS_PASSED=0
+
+    # Test 1: Ping Google DNS
+    test_connectivity "Ping 8.8.8.8" "ping -c 1 -W 2 8.8.8.8" && PING_PASSED=1
+
+    # Test 2: Ping Cloudflare DNS
+    if [ \$PING_PASSED -eq 0 ]; then
+        test_connectivity "Ping 1.1.1.1" "ping -c 1 -W 2 1.1.1.1" && PING_PASSED=1
+    fi
+
+    # Test 3: DNS Resolution (REQUIRED for success)
+    # Use getent hosts instead of nslookup as it's available by default (nslookup requires dnsutils)
+    test_connectivity "DNS Resolution" "getent hosts archive.ubuntu.com" && DNS_PASSED=1
+
+    # Success requires: Ping must pass AND DNS must pass
+    if [ \$PING_PASSED -eq 1 ] && [ \$DNS_PASSED -eq 1 ]; then
+        echo ""
+        echo "[OK] Network connectivity validated (Ping + DNS passed)"
+        log_network_config
+        exit 0
+    fi
+
+    if [ \$PING_PASSED -eq 0 ]; then
+        echo "Network unreachable - no IP connectivity"
+    fi
+    if [ \$DNS_PASSED -eq 0 ]; then
+        echo "DNS resolution FAILED - this is required for apt/downloads to work"
+    fi
+    echo "Tests passed: Ping=\$PING_PASSED, DNS=\$DNS_PASSED, retrying..."
+
+    # Exponential backoff with max delay of 30s
+    sleep \$CURRENT_DELAY
+    CURRENT_DELAY=\$((CURRENT_DELAY * 2))
+    [ \$CURRENT_DELAY -gt 30 ] && CURRENT_DELAY=30
+done
+
+echo ""
+echo "[FAIL] Network connectivity validation FAILED after \$MAX_ATTEMPTS attempts"
+log_network_config
+exit 1
+NETWORK_HELPER_EOF`,
+
+      'chmod +x /target/usr/local/bin/wait-for-network.sh',
+
+      // Validate network connectivity before attempting any network operations
+      'echo "=== Validating network connectivity before package installation ==="',
+      'curtin in-target -- /usr/local/bin/wait-for-network.sh 15 1',
+
+      // Ensure network is still working after early-commands
+      'echo "=== Re-validating network before package installation ==="',
+      'curtin in-target -- systemctl status systemd-networkd || curtin in-target -- systemctl restart systemd-networkd',
+      'sleep 3',
+
+      // Install required packages (must be in late-commands after apt is configured)
+      // Desktop ISOs don't include curl/wget, and packages: section may run before apt has repository access
+      'curtin in-target -- apt-get update',
+      'curtin in-target -- apt-get install -y curl wget qemu-guest-agent',
+      'curtin in-target -- systemctl enable qemu-guest-agent',
+
       // Create directory for per-instance scripts
       'mkdir -p /target/var/lib/cloud/scripts/per-instance',
 
@@ -163,7 +293,12 @@ EOF`,
       ...this.generateAppScriptCommands(),
 
       // Run the post-installation script
-      'curtin in-target -- /var/lib/cloud/scripts/per-instance/post_install.py'
+      'curtin in-target -- /var/lib/cloud/scripts/per-instance/post_install.py',
+
+      // Log final network status
+      'echo "=== Final Network Status ==="',
+      'curtin in-target -- /usr/local/bin/wait-for-network.sh 5 1 || echo "Warning: Network validation failed at end of installation"',
+      'echo "=== Installation Complete ==="'
     ]
 
     return commands
@@ -187,27 +322,57 @@ EOF`,
 set -e
 
 LOG_FILE="/var/log/infiniservice_install.log"
-echo "Starting InfiniService installation" | tee -a \$LOG_FILE
+MAX_DOWNLOAD_RETRIES=5
+RETRY_DELAY=3
+
+log_message() {
+    echo "\$(date '+%Y-%m-%d %H:%M:%S') - \$1" | tee -a \$LOG_FILE
+}
+
+download_with_retry() {
+    local url=\$1
+    local output=\$2
+    local description=\$3
+    local current_delay=\$RETRY_DELAY
+
+    for attempt in \$(seq 1 \$MAX_DOWNLOAD_RETRIES); do
+        log_message "Downloading \$description (attempt \$attempt/\$MAX_DOWNLOAD_RETRIES)..."
+
+        if curl -f --connect-timeout 10 --max-time 60 -o "\$output" "\$url" 2>&1 | tee -a \$LOG_FILE; then
+            log_message "[OK] \$description downloaded successfully"
+            return 0
+        fi
+
+        log_message "[FAIL] Download failed, retrying in \${current_delay}s..."
+        sleep \$current_delay
+        current_delay=\$((current_delay * 2))
+        [ \$current_delay -gt 30 ] && current_delay=30
+    done
+
+    log_message "[FAIL] Failed to download \$description after \$MAX_DOWNLOAD_RETRIES attempts"
+    return 1
+}
+
+log_message "=== Starting InfiniService Installation ==="
+
+# Wait for network connectivity
+log_message "Validating network connectivity..."
+if ! /usr/local/bin/wait-for-network.sh 15 2 2>&1 | tee -a \$LOG_FILE; then
+    log_message "[FAIL] Network validation failed, cannot proceed"
+    exit 1
+fi
 
 # Create temp directory
 mkdir -p /tmp/infiniservice
 cd /tmp/infiniservice
 
-# Download InfiniService binary
-echo "Downloading InfiniService binary..." | tee -a \$LOG_FILE
-if curl -f -o infiniservice "${baseUrl}/infiniservice/linux/binary" 2>&1 | tee -a \$LOG_FILE; then
-    echo "Binary downloaded successfully" | tee -a \$LOG_FILE
-else
-    echo "Failed to download InfiniService binary" | tee -a \$LOG_FILE
+# Download InfiniService binary with retry
+if ! download_with_retry "${baseUrl}/infiniservice/linux/binary" "infiniservice" "InfiniService binary"; then
     exit 1
 fi
 
-# Download installation script
-echo "Downloading InfiniService installation script..." | tee -a \$LOG_FILE
-if curl -f -o install-linux.sh "${baseUrl}/infiniservice/linux/script" 2>&1 | tee -a \$LOG_FILE; then
-    echo "Script downloaded successfully" | tee -a \$LOG_FILE
-else
-    echo "Failed to download InfiniService installation script" | tee -a \$LOG_FILE
+# Download installation script with retry
+if ! download_with_retry "${baseUrl}/infiniservice/linux/script" "install-linux.sh" "InfiniService installation script"; then
     exit 1
 fi
 
@@ -215,11 +380,11 @@ fi
 chmod +x infiniservice install-linux.sh
 
 # Run installation script with VM ID
-echo "Installing InfiniService with VM ID: ${this.vmId}" | tee -a \$LOG_FILE
+log_message "Installing InfiniService with VM ID: ${this.vmId}"
 if ./install-linux.sh normal "${this.vmId}" 2>&1 | tee -a \$LOG_FILE; then
-    echo "InfiniService installed successfully" | tee -a \$LOG_FILE
+    log_message "[OK] InfiniService installed successfully"
 else
-    echo "InfiniService installation failed" | tee -a \$LOG_FILE
+    log_message "[FAIL] InfiniService installation failed"
     exit 1
 fi
 
@@ -227,7 +392,7 @@ fi
 cd /
 rm -rf /tmp/infiniservice
 
-echo "InfiniService installation completed" | tee -a \$LOG_FILE
+log_message "=== InfiniService Installation Completed ==="
 EOF`,
 
       // Make the InfiniService installation script executable
@@ -266,6 +431,13 @@ set -e
 
 LOG_FILE="${logFile}"
 echo "Starting script: ${script.name}" | tee -a \\$LOG_FILE
+
+# Wait for network before downloading script
+if ! /usr/local/bin/wait-for-network.sh 10 2 2>&1 | tee -a \\$LOG_FILE; then
+    echo "Network validation failed before script download" | tee -a \\$LOG_FILE
+    /usr/local/bin/infiniservice report-script-completion --execution-id ${executionId} --exit-code 1 --log-file \\$LOG_FILE
+    exit 1
+fi
 
 # Download script content with interpolated inputs
 if curl -f -o /tmp/${scriptNameSafe}.sh "${baseUrl}/scripts/${script.id}/content?vmId=${this.vmId}&executionId=${executionId}&format=bash" 2>&1 | tee -a \\$LOG_FILE; then
@@ -414,31 +586,66 @@ LOG_FILE="/var/log/app_install_${app.name.replace(/\s+/g, '_')}.log"
 
   /**
    * Modifies the GRUB configuration to add autoinstall options.
+   * Sets timeout and default entry for automatic boot without user intervention.
    *
    * @param {string} grubCfgPath - Path to the GRUB configuration file
+   * @param {string} vmlinuzPath - Path to the kernel (relative to ISO root)
+   * @param {string} initrdPath - Path to the initrd (relative to ISO root)
    * @returns {Promise<void>}
    */
-  private async modifyGrubConfig (grubCfgPath: string): Promise<void> {
+  private async modifyGrubConfig (
+    grubCfgPath: string,
+    vmlinuzPath: string = '/casper/vmlinuz',
+    initrdPath: string = '/casper/initrd'
+  ): Promise<void> {
     try {
-      const content = await fsPromises.readFile(grubCfgPath, 'utf8')
+      let content = await fsPromises.readFile(grubCfgPath, 'utf8')
+      this.debug.log(`[GRUB] Original config (first 500 chars):\n${content.substring(0, 500)}...`)
 
-      // Create a new autoinstall entry using the hardcoded paths
-      // For Ubuntu Server, these paths are standard
+      // Set timeout for automatic boot (like Fedora does)
+      const timeoutRegex = /^\s*set\s+timeout\s*=\s*\d+\s*$/gm
+      if (timeoutRegex.test(content)) {
+        content = content.replace(timeoutRegex, (match) => {
+          const indent = match.match(/^\s*/)?.[0] || ''
+          this.debug.log(`[GRUB] Changing timeout: ${match.trim()} -> ${indent}set timeout=3`)
+          return `${indent}set timeout=3`
+        })
+      } else {
+        // Add timeout setting if not found - insert after first few lines
+        const lines = content.split('\n')
+        let insertIndex = 0
+
+        // Find a good insertion point - after initial comments and set commands
+        for (let i = 0; i < Math.min(10, lines.length); i++) {
+          if (lines[i].trim().startsWith('set ') || lines[i].trim().startsWith('#')) {
+            insertIndex = i + 1
+          }
+        }
+
+        lines.splice(insertIndex, 0, 'set timeout=3')
+        content = lines.join('\n')
+        this.debug.log(`[GRUB] Added timeout setting at line ${insertIndex + 1}: set timeout=3`)
+      }
+
+      // Create a new autoinstall entry with set default=0 to auto-select it
+      // The entry is prepended so it becomes the first (index 0) menu entry
       const newEntry = `
 # Added by Infinibay for autoinstall
+set default=0
 menuentry "Automatic Install Ubuntu" {
   set gfxpayload=keep
-  linux /casper/vmlinuz autoinstall ds=nocloud\\;s=/cdrom/nocloud/ ---
-  initrd /casper/initrd
+  linux ${vmlinuzPath} autoinstall ds=nocloud\\;s=/cdrom/nocloud/ ---
+  initrd ${initrdPath}
 }
 
 `
 
       const newContent = newEntry + content
       await fsPromises.writeFile(grubCfgPath, newContent, 'utf8')
-      this.debug.log(`Added new autoinstall entry to GRUB configuration at ${grubCfgPath}`)
+      this.debug.log(`[GRUB] Modified config (first 500 chars):\n${newContent.substring(0, 500)}...`)
+      this.debug.log(`[GRUB] Added autoinstall entry with auto-boot (default=0, timeout=3) to ${grubCfgPath}`)
     } catch (error) {
-      this.debug.log('error', `Failed to modify GRUB configuration: ${error}`)
+      this.debug.log('error', `[GRUB] Failed to modify GRUB configuration: ${error}`)
       throw error
     }
   }
@@ -462,6 +669,147 @@ menuentry "Automatic Install Ubuntu" {
   }
 
   /**
+   * Finds the kernel (vmlinuz) and initrd paths in the extracted ISO.
+   * Checks standard locations used by Ubuntu live ISOs.
+   *
+   * @param {string} extractDir - The directory containing the extracted ISO
+   * @returns {Promise<{vmlinuz: string, initrd: string}>} - Paths relative to ISO root
+   */
+  private async findKernelPaths (extractDir: string): Promise<{vmlinuz: string, initrd: string}> {
+    // Standard locations for Ubuntu live ISOs
+    const searchPaths = [
+      { vmlinuz: '/casper/vmlinuz', initrd: '/casper/initrd' }, // Ubuntu Desktop/Server live
+      { vmlinuz: '/casper/vmlinuz.efi', initrd: '/casper/initrd.lz' }, // Older Ubuntu
+      { vmlinuz: '/install/vmlinuz', initrd: '/install/initrd.gz' }, // Alternative installer
+      { vmlinuz: '/boot/vmlinuz', initrd: '/boot/initrd' } // Fallback
+    ]
+
+    for (const paths of searchPaths) {
+      const vmlinuzPath = path.join(extractDir, paths.vmlinuz.substring(1))
+      const initrdPath = path.join(extractDir, paths.initrd.substring(1))
+
+      if (fs.existsSync(vmlinuzPath) && fs.existsSync(initrdPath)) {
+        this.debug.log(`[KERNEL] Found kernel at ${paths.vmlinuz} and initrd at ${paths.initrd}`)
+        return paths
+      }
+    }
+
+    // If standard paths not found, search for files
+    this.debug.log('[KERNEL] Standard paths not found, searching for kernel files...')
+
+    // Check casper directory first (most common for Ubuntu)
+    const casperDir = path.join(extractDir, 'casper')
+    if (fs.existsSync(casperDir)) {
+      const files = await fsPromises.readdir(casperDir)
+
+      const vmlinuzFile = files.find(f => f.startsWith('vmlinuz'))
+      const initrdFile = files.find(f => f.startsWith('initrd'))
+
+      if (vmlinuzFile && initrdFile) {
+        const result = {
+          vmlinuz: `/casper/${vmlinuzFile}`,
+          initrd: `/casper/${initrdFile}`
+        }
+        this.debug.log(`[KERNEL] Found kernel: ${result.vmlinuz}, initrd: ${result.initrd}`)
+        return result
+      }
+    }
+
+    // Default fallback
+    this.debug.log('[KERNEL] Using default paths: /casper/vmlinuz, /casper/initrd')
+    return { vmlinuz: '/casper/vmlinuz', initrd: '/casper/initrd' }
+  }
+
+  /**
+   * Parses a shell-style argument string respecting single and double quotes.
+   * For example: "-V 'Ubuntu 25.10 amd64'" becomes ["-V", "Ubuntu 25.10 amd64"]
+   *
+   * @param {string} line - The line to parse
+   * @returns {string[]} - Array of parsed arguments
+   */
+  private parseShellArgs (line: string): string[] {
+    const args: string[] = []
+    let current = ''
+    let inSingleQuote = false
+    let inDoubleQuote = false
+
+    for (let i = 0; i < line.length; i++) {
+      const char = line[i]
+
+      if (char === "'" && !inDoubleQuote) {
+        inSingleQuote = !inSingleQuote
+        // Don't include the quote character in the argument
+      } else if (char === '"' && !inSingleQuote) {
+        inDoubleQuote = !inDoubleQuote
+        // Don't include the quote character in the argument
+      } else if (char === ' ' && !inSingleQuote && !inDoubleQuote) {
+        // Space outside quotes - end current argument
+        if (current.length > 0) {
+          args.push(current)
+          current = ''
+        }
+      } else {
+        current += char
+      }
+    }
+
+    // Don't forget the last argument
+    if (current.length > 0) {
+      args.push(current)
+    }
+
+    return args
+  }
+
+  /**
+   * Extracts xorriso parameters from the original ISO using report_el_torito.
+   * This ensures the rebuilt ISO has correct boot parameters matching the original.
+   *
+   * @param {string} isoPath - Path to the original ISO
+   * @returns {Promise<string[]>} - Array of xorriso command arguments
+   */
+  private async getXorrisoParamsFromISO (isoPath: string): Promise<string[]> {
+    try {
+      this.debug.log(`[XORRISO] Extracting boot parameters from: ${isoPath}`)
+
+      // Run xorriso to get the mkisofs-compatible parameters
+      const output = await this.executeCommand([
+        'xorriso', '-indev', isoPath, '-report_el_torito', 'as_mkisofs'
+      ])
+
+      this.debug.log(`[XORRISO] Raw report_el_torito output:\n${output}`)
+
+      // Parse the output to extract useful parameters
+      // The output contains mkisofs-style arguments that we can use
+      const lines = output.split('\n').filter(line => line.trim())
+
+      // Build the command from the report
+      const params: string[] = []
+
+      for (const line of lines) {
+        // Skip comment lines
+        if (line.trim().startsWith('#')) continue
+
+        // Each line is a mkisofs-compatible argument
+        // Parse it respecting quoted strings (e.g., Volume ID with spaces)
+        const trimmedLine = line.trim()
+        if (trimmedLine) {
+          // Use shell-style argument parsing to handle quotes properly
+          const parts = this.parseShellArgs(trimmedLine)
+          params.push(...parts)
+        }
+      }
+
+      this.debug.log(`[XORRISO] Extracted ${params.length} parameters: ${params.join(' ')}`)
+      return params
+    } catch (error) {
+      this.debug.log('error', `[XORRISO] Failed to extract parameters from ISO: ${error}`)
+      // Return empty array, caller will use default parameters
+      return []
+    }
+  }
+
+  /**
    * Creates a new ISO image with the autoinstall configuration.
    *
    * @param {string} newIsoPath - The path to the new ISO image file
@@ -474,7 +822,7 @@ menuentry "Automatic Install Ubuntu" {
       throw new Error('Extraction directory does not exist.')
     }
 
-    this.debug.log('Creating autoinstall configuration files...')
+    this.debug.log('[ISO] Creating autoinstall configuration files...')
 
     // Create nocloud directory for autoinstall files as per Ubuntu documentation
     const noCloudDir = path.join(extractDir, 'nocloud')
@@ -487,72 +835,104 @@ menuentry "Automatic Install Ubuntu" {
     await fsPromises.writeFile(path.join(noCloudDir, 'meta-data'), '')
     await fsPromises.writeFile(path.join(noCloudDir, 'user-data'), config)
     await fsPromises.writeFile(path.join(noCloudDir, 'vendor-data'), '')
+    this.debug.log('[NOCLOUD] Files created: user-data, meta-data, vendor-data in /nocloud/')
 
     // Also place copies in the root directory for compatibility
     await fsPromises.writeFile(path.join(extractDir, 'meta-data'), '')
     await fsPromises.writeFile(path.join(extractDir, 'user-data'), config)
     await fsPromises.writeFile(path.join(extractDir, 'vendor-data'), '')
+    this.debug.log('[NOCLOUD] Files also created at root for compatibility')
+
+    // Find kernel paths dynamically
+    const kernelPaths = await this.findKernelPaths(extractDir)
 
     // Find and modify GRUB configurations
     const grubCfgPath = path.join(extractDir, 'boot/grub/grub.cfg')
     if (fs.existsSync(grubCfgPath)) {
-      await this.modifyGrubConfig(grubCfgPath)
-      this.debug.log(`Modified GRUB configuration at ${grubCfgPath}`)
+      await this.modifyGrubConfig(grubCfgPath, kernelPaths.vmlinuz, kernelPaths.initrd)
+      this.debug.log(`[GRUB] Modified GRUB configuration at ${grubCfgPath}`)
     } else {
-      this.debug.log('warning', 'Could not find GRUB configuration file at expected path')
+      this.debug.log('warning', '[GRUB] Could not find GRUB configuration file at expected path')
     }
 
-    this.debug.log('Examining ISO structure...')
+    this.debug.log('[ISO] Examining ISO structure...')
 
     // Check for crucial paths and files
     if (!fs.existsSync(path.join(extractDir, 'boot/grub/i386-pc/eltorito.img'))) {
-      this.debug.log('error', 'BIOS boot image not found at expected path')
+      this.debug.log('warning', '[ISO] BIOS boot image not found at boot/grub/i386-pc/eltorito.img')
     }
 
     if (!fs.existsSync(path.join(extractDir, 'EFI/boot/bootx64.efi'))) {
-      this.debug.log('error', 'EFI boot image not found at expected path')
+      this.debug.log('warning', '[ISO] EFI boot image not found at EFI/boot/bootx64.efi')
     }
 
-    // xorriso -indev /opt/infinibay/iso/ubuntu.iso -report_el_torito as_mkisofs
-    // That command outputs all the command needed to reuild the iso.
-    const isoCreationCommandParts = [
-      'xorriso',
-      '-as', 'mkisofs',
-      '-V', 'UBUNTU', // Volume ID (must be ≤ 16 chars)
-      '--grub2-mbr', `--interval:local_fs:0s-15s:zero_mbrpt,zero_gpt:${this.isoPath}`,
-      '--protective-msdos-label',
-      '-partition_cyl_align', 'off',
-      '-partition_offset', '16',
-      '--mbr-force-bootable',
-      '-append_partition', '2', '28732ac11ff8d211ba4b00a0c93ec93b', `--interval:local_fs:4087764d-4097891d::${this.isoPath}`,
-      '-appended_part_as_gpt',
-      '-iso_mbr_part_type', 'a2a0d0ebe5b9334487c068b6b72699c7',
-      '-c', '/boot.catalog',
-      '-b', '/boot/grub/i386-pc/eltorito.img',
-      '-no-emul-boot',
-      '-boot-load-size', '4',
-      '-boot-info-table',
-      '--grub2-boot-info',
-      '-eltorito-alt-boot',
-      '-e', '--interval:appended_partition_2_start_1021941s_size_10128d:all::',
-      '-no-emul-boot',
-      '-boot-load-size', '10128',
-      '-o', newIsoPath, // Output path
-      // Source directory
-      extractDir
-    ]
+    // Get dynamic xorriso parameters from the original ISO
+    const dynamicParams = await this.getXorrisoParamsFromISO(this.isoPath as string)
+
+    let isoCreationCommandParts: string[]
+
+    if (dynamicParams.length > 0) {
+      // Use dynamic parameters from the original ISO
+      // We need to:
+      // 1. Replace the source ISO references with extractDir
+      // 2. Add our output path
+      this.debug.log('[XORRISO] Using dynamic parameters extracted from original ISO')
+
+      isoCreationCommandParts = [
+        'xorriso',
+        '-as', 'mkisofs',
+        ...dynamicParams.map(param => {
+          // Replace references to the source ISO with the correct path
+          if (param.includes(this.isoPath as string)) {
+            return param // Keep references to original ISO for interval reads
+          }
+          return param
+        }),
+        '-o', newIsoPath,
+        extractDir
+      ]
+    } else {
+      // Fallback to default parameters if extraction failed
+      this.debug.log('[XORRISO] Using fallback parameters (extraction failed)')
+
+      isoCreationCommandParts = [
+        'xorriso',
+        '-as', 'mkisofs',
+        '-V', 'UBUNTU', // Volume ID (must be ≤ 16 chars)
+        '--grub2-mbr', `--interval:local_fs:0s-15s:zero_mbrpt,zero_gpt:${this.isoPath}`,
+        '--protective-msdos-label',
+        '-partition_cyl_align', 'off',
+        '-partition_offset', '16',
+        '--mbr-force-bootable',
+        '-append_partition', '2', '28732ac11ff8d211ba4b00a0c93ec93b', `--interval:local_fs:4087764d-4097891d::${this.isoPath}`,
+        '-appended_part_as_gpt',
+        '-iso_mbr_part_type', 'a2a0d0ebe5b9334487c068b6b72699c7',
+        '-c', '/boot.catalog',
+        '-b', '/boot/grub/i386-pc/eltorito.img',
+        '-no-emul-boot',
+        '-boot-load-size', '4',
+        '-boot-info-table',
+        '--grub2-boot-info',
+        '-eltorito-alt-boot',
+        '-e', '--interval:appended_partition_2_start_1021941s_size_10128d:all::',
+        '-no-emul-boot',
+        '-boot-load-size', '10128',
+        '-o', newIsoPath,
+        extractDir
+      ]
+    }
 
     // Use the executeCommand method from the parent class
     try {
-      this.debug.log(`Creating ISO with command: ${isoCreationCommandParts.join(' ')}`)
+      this.debug.log(`[XORRISO] Creating ISO with command:\n${isoCreationCommandParts.join(' ')}`)
       await this.executeCommand(isoCreationCommandParts)
-      this.debug.log(`Created ISO at ${newIsoPath}`)
+      this.debug.log(`[ISO] Created ISO successfully at ${newIsoPath}`)
 
       // Remove the extracted directory
       await this.executeCommand(['rm', '-rf', extractDir])
-      this.debug.log(`Removed extracted directory ${extractDir}`)
+      this.debug.log(`[ISO] Removed extracted directory ${extractDir}`)
     } catch (error) {
-      this.debug.log('error', `Failed to create ISO: ${error}`)
+      this.debug.log('error', `[ISO] Failed to create ISO: ${error}`)
       throw error
     }
   }

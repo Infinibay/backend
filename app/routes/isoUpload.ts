@@ -4,12 +4,18 @@ import path from 'node:path'
 import cors from 'cors'
 import fs from 'fs/promises'
 import multer from 'multer'
+import { exec } from 'child_process'
+import { promisify } from 'util'
+import * as yaml from 'js-yaml'
+import * as os from 'os'
 
 // Import admin authentication middleware
 import { adminAuthMiddleware } from '../middleware/adminAuth'
 
 // Import ISO Service
 import ISOService from '../services/ISOService'
+
+const execAsync = promisify(exec)
 
 // Types
 interface UploadMetadata {
@@ -52,6 +58,87 @@ async function validateMetadata (
     fileName,
     os: normalizedOs,
     fileSize
+  }
+}
+
+/**
+ * Validates that an Ubuntu ISO is a Desktop variant, not Server.
+ * Reads casper/install-sources.yaml from the ISO to check available installation sources.
+ *
+ * @param isoPath - Path to the uploaded ISO file
+ * @returns Object with valid boolean and optional error message
+ */
+async function validateUbuntuDesktopISO (isoPath: string): Promise<{ valid: boolean; error?: string }> {
+  const tempDir = path.join(os.tmpdir(), `iso-validate-${Date.now()}`)
+
+  try {
+    // Create temp directory for extraction
+    await fs.mkdir(tempDir, { recursive: true })
+
+    // Extract only casper/install-sources.yaml from the ISO using 7z
+    try {
+      await execAsync(`7z e "${isoPath}" "casper/install-sources.yaml" -o"${tempDir}" -y`, {
+        timeout: 30000 // 30 second timeout
+      })
+    } catch (extractError) {
+      // If casper/install-sources.yaml doesn't exist, it's likely not a valid Ubuntu ISO
+      // or it's an older format - we'll allow it but log a warning
+      console.warn('Could not extract install-sources.yaml from ISO - may be an older Ubuntu format')
+      return { valid: true } // Allow for backwards compatibility
+    }
+
+    // Read and parse the install-sources.yaml
+    const installSourcesPath = path.join(tempDir, 'install-sources.yaml')
+
+    try {
+      await fs.access(installSourcesPath)
+    } catch {
+      // File wasn't extracted - likely not a standard Ubuntu ISO
+      console.warn('install-sources.yaml not found in ISO')
+      return { valid: true } // Allow for backwards compatibility
+    }
+
+    const content = await fs.readFile(installSourcesPath, 'utf-8')
+    const sources = yaml.load(content) as Array<{ id: string; [key: string]: unknown }>
+
+    if (!Array.isArray(sources)) {
+      console.warn('install-sources.yaml has unexpected format')
+      return { valid: true } // Allow for backwards compatibility
+    }
+
+    // Check if this is a Desktop ISO (has ubuntu-desktop or ubuntu-desktop-minimal)
+    const hasDesktopSource = sources.some(
+      source => source.id === 'ubuntu-desktop' || source.id === 'ubuntu-desktop-minimal'
+    )
+
+    // Check if this is a Server ISO (has ubuntu-server or ubuntu-server-minimal)
+    const hasServerSource = sources.some(
+      source => source.id === 'ubuntu-server' || source.id === 'ubuntu-server-minimal'
+    )
+
+    if (hasServerSource && !hasDesktopSource) {
+      return {
+        valid: false,
+        error: 'Este ISO es Ubuntu Server. Infinibay requiere Ubuntu Desktop para proporcionar ' +
+               'una experiencia de escritorio completa. Por favor descarga Ubuntu Desktop desde ' +
+               'https://ubuntu.com/download/desktop'
+      }
+    }
+
+    if (!hasDesktopSource && !hasServerSource) {
+      // Unknown ISO type - allow it but log
+      console.warn('ISO does not contain recognized ubuntu-desktop or ubuntu-server sources')
+      return { valid: true }
+    }
+
+    return { valid: true }
+  } finally {
+    // Clean up temp directory
+    try {
+      await fs.rm(tempDir, { recursive: true, force: true })
+    } catch {
+      // Ignore cleanup errors
+    }
   }
 }
 
@@ -108,6 +195,16 @@ router.post('/',
         req.body.os,
         req.file.size
       )
+
+      // For Ubuntu ISOs, validate that it's a Desktop variant (not Server)
+      if (uploadMetadata.os === 'ubuntu') {
+        const validation = await validateUbuntuDesktopISO(req.file.path)
+        if (!validation.valid) {
+          // Delete the uploaded temp file
+          await fs.unlink(req.file.path).catch(() => {})
+          throw new Error(validation.error || 'Invalid Ubuntu ISO')
+        }
+      }
 
       // Ensure ISO directory exists
       const baseDir = process.env.INFINIBAY_BASE_DIR

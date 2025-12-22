@@ -1,6 +1,6 @@
-import { Resolver, Query, Mutation, Arg, Ctx, Authorized } from 'type-graphql'
+import { Resolver, Query, Mutation, Arg, Ctx, Authorized, Int } from 'type-graphql'
 import { UserInputError } from 'apollo-server-errors'
-import { DepartmentType, UpdateDepartmentNameInput } from './type'
+import { DepartmentType, UpdateDepartmentNameInput, UpdateDepartmentNetworkInput, DepartmentNetworkDiagnosticsType, DhcpTrafficCaptureType } from './type'
 import { InfinibayContext } from '../../../utils/context'
 import { getEventManager } from '../../../services/EventManager'
 import { DepartmentCleanupService } from '../../../services/cleanup/departmentCleanupService'
@@ -25,6 +25,8 @@ export class DepartmentResolver {
         ipSubnet: dep.ipSubnet || undefined,
         bridgeName: dep.bridgeName || undefined,
         gatewayIP: dep.gatewayIP || undefined,
+        dnsServers: dep.dnsServers,
+        ntpServers: dep.ntpServers,
         totalMachines: dep.machines.length
       })
     }
@@ -55,6 +57,8 @@ export class DepartmentResolver {
       ipSubnet: department.ipSubnet || undefined,
       bridgeName: department.bridgeName || undefined,
       gatewayIP: department.gatewayIP || undefined,
+      dnsServers: department.dnsServers,
+      ntpServers: department.ntpServers,
       totalMachines: department.machines.length
     }
   }
@@ -116,6 +120,8 @@ export class DepartmentResolver {
       ipSubnet: updatedDepartment.ipSubnet || undefined,
       bridgeName: updatedDepartment.bridgeName || undefined,
       gatewayIP: updatedDepartment.gatewayIP || undefined,
+      dnsServers: updatedDepartment.dnsServers,
+      ntpServers: updatedDepartment.ntpServers,
       totalMachines: 0
     }
   }
@@ -164,6 +170,8 @@ export class DepartmentResolver {
       ipSubnet: department.ipSubnet || undefined,
       bridgeName: department.bridgeName || undefined,
       gatewayIP: department.gatewayIP || undefined,
+      dnsServers: department.dnsServers,
+      ntpServers: department.ntpServers,
       totalMachines: 0
     }
   }
@@ -228,6 +236,8 @@ export class DepartmentResolver {
       ipSubnet: updatedDepartment.ipSubnet || undefined,
       bridgeName: updatedDepartment.bridgeName || undefined,
       gatewayIP: updatedDepartment.gatewayIP || undefined,
+      dnsServers: updatedDepartment.dnsServers,
+      ntpServers: updatedDepartment.ntpServers,
       totalMachines: updatedDepartment.machines.length
     }
   }
@@ -254,7 +264,144 @@ export class DepartmentResolver {
       ipSubnet: department.ipSubnet || undefined,
       bridgeName: department.bridgeName || undefined,
       gatewayIP: department.gatewayIP || undefined,
+      dnsServers: department.dnsServers,
+      ntpServers: department.ntpServers,
       totalMachines: department.machines.length
+    }
+  }
+
+  @Mutation(() => DepartmentType)
+  @Authorized('ADMIN')
+  async updateDepartmentNetwork (
+    @Arg('input') input: UpdateDepartmentNetworkInput,
+    @Ctx() { prisma, user }: InfinibayContext
+  ): Promise<DepartmentType> {
+    const { id, dnsServers, ntpServers } = input
+
+    // Check if department exists
+    const department = await prisma.department.findUnique({
+      where: { id },
+      include: { machines: true }
+    })
+
+    if (!department) {
+      throw new UserInputError('Department not found')
+    }
+
+    // Validate DNS servers (IPv4 addresses or hostnames)
+    const ipv4Regex = /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/
+    const hostnameRegex = /^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/
+
+    if (dnsServers !== undefined) {
+      if (dnsServers.length === 0) {
+        throw new UserInputError('At least one DNS server is required')
+      }
+      for (const dns of dnsServers) {
+        if (!ipv4Regex.test(dns) && !hostnameRegex.test(dns)) {
+          throw new UserInputError(`Invalid DNS server: ${dns}. Must be a valid IPv4 address or hostname`)
+        }
+        // Reject invalid private IPs
+        if (dns.startsWith('127.') || dns.startsWith('169.254.')) {
+          throw new UserInputError(`Invalid DNS server: ${dns}. Loopback and link-local addresses are not allowed`)
+        }
+      }
+    }
+
+    if (ntpServers !== undefined) {
+      for (const ntp of ntpServers) {
+        if (!ipv4Regex.test(ntp) && !hostnameRegex.test(ntp)) {
+          throw new UserInputError(`Invalid NTP server: ${ntp}. Must be a valid IPv4 address or hostname`)
+        }
+      }
+    }
+
+    // Update department with new DNS/NTP servers
+    const updatedDepartment = await prisma.department.update({
+      where: { id },
+      data: {
+        ...(dnsServers !== undefined && { dnsServers }),
+        ...(ntpServers !== undefined && { ntpServers })
+      },
+      include: { machines: true }
+    })
+
+    // Restart dnsmasq to apply changes (if department has network configured)
+    if (department.bridgeName && department.ipSubnet && department.dnsmasqPid) {
+      const networkService = new DepartmentNetworkService(prisma)
+      try {
+        await networkService.restartDnsmasq(id)
+      } catch (networkError) {
+        console.error(`Failed to restart dnsmasq for department ${id}:`, networkError)
+        // Don't fail the mutation, just log the error - the new config will be applied on next restart
+      }
+    }
+
+    // Trigger real-time event for department update
+    try {
+      const eventManager = getEventManager()
+      await eventManager.dispatchEvent('departments', 'update', { id: updatedDepartment.id }, user?.id)
+      console.log(`🎯 Triggered real-time event: departments:update for department ${updatedDepartment.id}`)
+    } catch (eventError) {
+      console.error('Failed to trigger real-time event:', eventError)
+    }
+
+    return {
+      id: updatedDepartment.id,
+      name: updatedDepartment.name,
+      createdAt: updatedDepartment.createdAt,
+      internetSpeed: updatedDepartment.internetSpeed || undefined,
+      ipSubnet: updatedDepartment.ipSubnet || undefined,
+      bridgeName: updatedDepartment.bridgeName || undefined,
+      gatewayIP: updatedDepartment.gatewayIP || undefined,
+      dnsServers: updatedDepartment.dnsServers,
+      ntpServers: updatedDepartment.ntpServers,
+      totalMachines: updatedDepartment.machines.length
+    }
+  }
+
+  /**
+   * Gets comprehensive network diagnostics for a department.
+   * Checks bridge, dnsmasq, br_netfilter, and NAT status.
+   */
+  @Query(() => DepartmentNetworkDiagnosticsType)
+  @Authorized('ADMIN')
+  async departmentNetworkDiagnostics (
+    @Arg('departmentId') departmentId: string,
+    @Ctx() { prisma }: InfinibayContext
+  ): Promise<DepartmentNetworkDiagnosticsType> {
+    const networkService = new DepartmentNetworkService(prisma)
+
+    try {
+      return await networkService.diagnoseDepartmentNetwork(departmentId)
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error)
+      throw new UserInputError(`Failed to get network diagnostics: ${errorMessage}`)
+    }
+  }
+
+  /**
+   * Captures DHCP traffic on a department's bridge for debugging.
+   * Returns captured packets with summary statistics.
+   */
+  @Query(() => DhcpTrafficCaptureType)
+  @Authorized('ADMIN')
+  async captureDepartmentDhcpTraffic (
+    @Arg('departmentId') departmentId: string,
+    @Arg('durationSeconds', () => Int, { defaultValue: 30 }) durationSeconds: number,
+    @Ctx() { prisma }: InfinibayContext
+  ): Promise<DhcpTrafficCaptureType> {
+    // Validate duration
+    if (durationSeconds < 5 || durationSeconds > 120) {
+      throw new UserInputError('Duration must be between 5 and 120 seconds')
+    }
+
+    const networkService = new DepartmentNetworkService(prisma)
+
+    try {
+      return await networkService.captureDhcpTraffic(departmentId, durationSeconds)
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error)
+      throw new UserInputError(`Failed to capture DHCP traffic: ${errorMessage}`)
     }
   }
 
