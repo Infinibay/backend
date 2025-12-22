@@ -465,6 +465,9 @@ export class DepartmentNetworkService {
           debug.log('info', `Restored network for department ${dept.name}`)
         } else {
           // Bridge exists, just ensure dnsmasq is running
+          // Also ensure checksum offloading is disabled (may not be if bridge was created externally)
+          debug.log('info', `Ensuring checksum offloading is disabled for existing bridge ${dept.bridgeName}`)
+          await this.bridgeManager.disableChecksumOffloading(dept.bridgeName)
           await this.ensureDnsmasqRunning(dept)
           // Ensure NAT is configured
           const hasNat = await this.natService.hasMasquerade(dept.bridgeName)

@@ -49,10 +49,13 @@ export class UnattendedUbuntuManager extends UnattendedManagerBase {
       autoinstall: {
         version: 1,
 
-        'refresh-installer': {
-          update: true,
-          channel: 'latest/stable'
-        },
+        // Note: refresh-installer disabled because updated subiquity versions
+        // may have incompatible source schemas with the ISO's install-sources.yaml
+        // This caused SerializationError: 'kernel' is not a <class 'dict'>
+        // 'refresh-installer': {
+        //   update: true,
+        //   channel: 'latest/stable'
+        // },
         // Use default apt configuration - let Ubuntu auto-detect mirrors
         // Note: Do NOT override apt sources as it breaks package installation
         apt: {
