@@ -264,4 +264,23 @@ export class FirewallRuleService {
       }
     })
   }
+
+  /**
+   * Deletes all system-generated rules from a rule set.
+   * Used when changing firewall policy to clean up old preset rules.
+   *
+   * @param ruleSetId - The rule set ID
+   * @returns Number of deleted rules
+   */
+  async deleteSystemGeneratedRules (ruleSetId: string): Promise<number> {
+    const result = await this.prisma.firewallRule.deleteMany({
+      where: {
+        ruleSetId,
+        isSystemGenerated: true
+      }
+    })
+
+    debug.log('info', `Deleted ${result.count} system-generated rules from rule set ${ruleSetId}`)
+    return result.count
+  }
 }

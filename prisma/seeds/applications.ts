@@ -14,8 +14,21 @@ function generateAppEntry (name: string, description: string, os: string[], inst
 }
 
 // Helper function to generate Fedora Flatpak installation command
+// Note: Flatpak is pre-installed on Fedora Workstation, so we only need to add Flathub
 function getFedoraFlatpakCommand (flatpakId: string): string {
-  return `dnf install -y flatpak && flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo && flatpak install -y flathub ${flatpakId}`
+  return `flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo && flatpak install -y flathub ${flatpakId}`
+}
+
+// Correct Flatpak IDs for JetBrains IDEs on Flathub
+const jetbrainsFlatpakIds: Record<string, string> = {
+  'intellij-idea-ultimate': 'com.jetbrains.IntelliJ-IDEA-Ultimate',
+  'pycharm-professional': 'com.jetbrains.PyCharm-Professional',
+  'webstorm': 'com.jetbrains.WebStorm',
+  'rider': 'com.jetbrains.Rider',
+  'datagrip': 'com.jetbrains.DataGrip',
+  'clion': 'com.jetbrains.CLion',
+  'goland': 'com.jetbrains.GoLand',
+  'phpstorm': 'com.jetbrains.PhpStorm'
 }
 
 const createApplications = async (prisma: Prisma.TransactionClient | PrismaClient) => {
@@ -64,8 +77,8 @@ const createApplications = async (prisma: Prisma.TransactionClient | PrismaClien
       ['windows', 'ubuntu', 'fedora'],
       {
         windows: 'winget install -e --silent --source winget --accept-source-agreements --accept-package-agreements --id=Google.Chrome',
-        ubuntu: 'wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - && echo \'deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main\' > /etc/apt/sources.list.d/google-chrome.list && apt-get update && apt-get install -y google-chrome-stable',
-        fedora: 'dnf install -y fedora-workstation-repositories && dnf config-manager --set-enabled google-chrome && dnf install -y google-chrome-stable'
+        ubuntu: 'wget -O /tmp/google-chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb && apt-get install -y /tmp/google-chrome.deb && rm /tmp/google-chrome.deb',
+        fedora: 'dnf install -y fedora-workstation-repositories && dnf config-manager setopt google-chrome.enabled=1 && dnf install -y google-chrome-stable'
       }
     )
   })
@@ -189,28 +202,30 @@ const createApplications = async (prisma: Prisma.TransactionClient | PrismaClien
     )
   })
   // Notion
+  // Note: No official Linux client exists. Using unofficial snap for Ubuntu.
+  // Fedora removed as there's no reliable unofficial client.
   await prisma.application.create({
     data: generateAppEntry(
       'Notion',
       'Notion is an all-in-one workspace for your notes, tasks, wikis, and databases.',
-      ['windows', 'ubuntu', 'fedora'],
+      ['windows', 'ubuntu'],
       {
         windows: 'winget install -e --silent --source winget --accept-source-agreements --accept-package-agreements --id=Notion.Notion',
-        ubuntu: 'wget -O /tmp/notion.deb https://notion-desktop.s3.amazonaws.com/Notion-2.0.18.deb && apt-get install -y /tmp/notion.deb && rm /tmp/notion.deb',
-        fedora: getFedoraFlatpakCommand('md.obsidian.Obsidian')
+        ubuntu: 'snap install notion-snap-reborn'
       }
     )
   })
   // Evernote
+  // Note: No official Linux client exists. Using web client wrapper snap for Ubuntu.
+  // Fedora removed as the Flatpak ID doesn't exist.
   await prisma.application.create({
     data: generateAppEntry(
       'Evernote',
       'Evernote is a cross-platform app designed for note taking, organizing, and archiving.',
-      ['windows', 'ubuntu', 'fedora'],
+      ['windows', 'ubuntu'],
       {
         windows: 'winget install -e --silent --source winget --accept-source-agreements --accept-package-agreements --id=Evernote.Evernote',
-        ubuntu: 'snap install evernote-web-client',
-        fedora: getFedoraFlatpakCommand('com.github.nvim_doe.Evernote')
+        ubuntu: 'snap install evernote-web-client'
       }
     )
   })
@@ -259,8 +274,8 @@ const createApplications = async (prisma: Prisma.TransactionClient | PrismaClien
       ['windows', 'ubuntu', 'fedora'],
       {
         windows: 'winget install -e --silent --source winget --accept-source-agreements --accept-package-agreements --id=GitHub.GitHubDesktop',
-        ubuntu: 'wget -qO - https://apt.packages.shiftkey.dev/gpg.key | apt-key add - && sh -c \'echo "deb [arch=amd64] https://apt.packages.shiftkey.dev/ubuntu/ any main" > /etc/apt/sources.list.d/githubdesktop.list\' && apt-get update && apt-get install -y github-desktop',
-        fedora: 'rpm --import https://rpm.packages.shiftkey.dev/gpg.key && dnf config-manager --add-repo https://rpm.packages.shiftkey.dev/rpm/shiftkey-rpm.repo && dnf install -y github-desktop'
+        ubuntu: 'wget -qO - https://apt.packages.shiftkey.dev/gpg.key | gpg --dearmor | tee /usr/share/keyrings/shiftkey-packages.gpg > /dev/null && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/shiftkey-packages.gpg] https://apt.packages.shiftkey.dev/ubuntu/ any main" | tee /etc/apt/sources.list.d/shiftkey-packages.list > /dev/null && apt-get update && apt-get install -y github-desktop',
+        fedora: 'rpm --import https://rpm.packages.shiftkey.dev/gpg.key && dnf config-manager addrepo --from-repofile=https://rpm.packages.shiftkey.dev/rpm/shiftkey-rpm.repo && dnf install -y github-desktop'
       }
     )
   })
@@ -272,8 +287,8 @@ const createApplications = async (prisma: Prisma.TransactionClient | PrismaClien
       ['windows', 'ubuntu', 'fedora'],
       {
         windows: 'winget install -e --silent --source winget --accept-source-agreements --accept-package-agreements --id=Docker.DockerDesktop',
-        ubuntu: 'apt-get install -y apt-transport-https ca-certificates curl software-properties-common && curl -fsSL https://download.docker.com/linux/ubuntu/gpg | apt-key add - && add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" && apt-get update && apt-get install -y docker-ce docker-ce-cli containerd.io',
-        fedora: 'dnf -y install dnf-plugins-core && dnf config-manager --add-repo https://download.docker.com/linux/fedora/docker-ce.repo && dnf install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin'
+        ubuntu: 'apt-get install -y ca-certificates curl && install -m 0755 -d /etc/apt/keyrings && curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc && chmod a+r /etc/apt/keyrings/docker.asc && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null && apt-get update && apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin',
+        fedora: 'dnf -y install dnf-plugins-core && dnf config-manager addrepo --from-repofile=https://download.docker.com/linux/fedora/docker-ce.repo && dnf install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin'
       }
     )
   })
@@ -335,8 +350,8 @@ const createApplications = async (prisma: Prisma.TransactionClient | PrismaClien
       ['windows', 'ubuntu', 'fedora'],
       {
         windows: 'winget install -e --silent --source winget --accept-source-agreements --accept-package-agreements --id=OpenJS.NodeJS',
-        ubuntu: 'curl -fsSL https://deb.nodesource.com/setup_18.x | bash - && apt-get install -y nodejs',
-        fedora: 'dnf module install -y nodejs:18/default'
+        ubuntu: 'apt-get install -y ca-certificates curl gnupg && mkdir -p /etc/apt/keyrings && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" | tee /etc/apt/sources.list.d/nodesource.list && apt-get update && apt-get install -y nodejs',
+        fedora: 'dnf install -y nodejs'
       }
     )
   })
@@ -414,14 +429,27 @@ const createApplications = async (prisma: Prisma.TransactionClient | PrismaClien
         ? `snap install ${app.snapName} --classic`
         : `snap install ${app.snapName}`
 
-      installCommand.fedora = getFedoraFlatpakCommand(`com.jetbrains.${app.snapName.replace('-', '.')}`)
+      // Use explicit Flatpak ID mapping instead of generating incorrect IDs
+      const flatpakId = jetbrainsFlatpakIds[app.snapName]
+      if (flatpakId) {
+        installCommand.fedora = getFedoraFlatpakCommand(flatpakId)
+      }
+    }
+
+    // Determine supported OS based on available install commands
+    const supportedOs: string[] = ['windows']
+    if (app.snapName) {
+      supportedOs.push('ubuntu')
+      if (jetbrainsFlatpakIds[app.snapName]) {
+        supportedOs.push('fedora')
+      }
     }
 
     await prisma.application.create({
       data: generateAppEntry(
         app.name,
         app.description,
-        app.snapName ? ['windows', 'ubuntu', 'fedora'] : ['windows'],
+        supportedOs,
         installCommand
       )
     })

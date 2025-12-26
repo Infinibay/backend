@@ -62,6 +62,42 @@ async function validateMetadata (
 }
 
 /**
+ * Validates that a Fedora ISO is NOT a Live ISO (Live ISOs don't support kickstart).
+ * Uses isoinfo to check the Volume ID for "Live" in the name.
+ *
+ * @param isoPath - Path to the uploaded ISO file
+ * @returns Object with valid boolean and optional error message
+ */
+async function validateFedoraNetinstallISO (isoPath: string): Promise<{ valid: boolean; error?: string }> {
+  try {
+    // Use isoinfo to get the Volume ID
+    const { stdout } = await execAsync(`isoinfo -d -i "${isoPath}" 2>/dev/null | grep -i "Volume id"`, {
+      timeout: 30000
+    })
+
+    const volumeId = stdout.trim().replace(/^Volume id:\s*/i, '')
+    console.log(`Fedora ISO Volume ID: ${volumeId}`)
+
+    // Check if this is a Live ISO (Live ISOs don't support kickstart)
+    if (volumeId.toLowerCase().includes('live')) {
+      return {
+        valid: false,
+        error: 'Este ISO es Fedora Live. Los ISOs Live no soportan instalación automatizada con kickstart. ' +
+               'Por favor descarga Fedora Everything netinstall desde ' +
+               'https://download.fedoraproject.org/pub/fedora/linux/releases/41/Everything/x86_64/iso/ ' +
+               'o Fedora Server netinstall. El instalador incluirá automáticamente el entorno de escritorio GNOME.'
+      }
+    }
+
+    return { valid: true }
+  } catch (error) {
+    // If isoinfo fails, we can't validate - allow it but log warning
+    console.warn('Could not validate Fedora ISO type via isoinfo:', error)
+    return { valid: true } // Allow for backwards compatibility
+  }
+}
+
+/**
  * Validates that an Ubuntu ISO is a Desktop variant, not Server.
  * Reads casper/install-sources.yaml from the ISO to check available installation sources.
  *
@@ -203,6 +239,16 @@ router.post('/',
           // Delete the uploaded temp file
           await fs.unlink(req.file.path).catch(() => {})
           throw new Error(validation.error || 'Invalid Ubuntu ISO')
+        }
+      }
+
+      // For Fedora ISOs, validate that it's NOT a Live ISO (Live doesn't support kickstart)
+      if (uploadMetadata.os === 'fedora') {
+        const validation = await validateFedoraNetinstallISO(req.file.path)
+        if (!validation.valid) {
+          // Delete the uploaded temp file
+          await fs.unlink(req.file.path).catch(() => {})
+          throw new Error(validation.error || 'Invalid Fedora ISO')
         }
       }
 

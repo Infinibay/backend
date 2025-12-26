@@ -1,8 +1,7 @@
 #version=RHEL9
 
 # Use text install
-graphical
-xconfig  --startxonboot
+text
 # Automatically agree to the EULA
 eula --agreed
 
@@ -11,28 +10,16 @@ firstboot --enable
 # System services
 services --disabled="chronyd"
 # Keyboard layouts
-keyboard --vckeymap=us --xlayouts='us'
+keyboard --xlayouts='<%= it.keyboard %>'
 # System language
-lang en_US.UTF-8
+lang <%= it.locale %>
 
 
-url --mirrorlist=https://mirrors.fedoraproject.org/mirrorlist?repo=fedora-$releasever&arch=$basearch
+# Install from network (netinstall ISO requires downloading packages from mirrors)
+# Uses Fedora's official mirrorlist which auto-selects the fastest mirror
+url --mirrorlist="https://mirrors.fedoraproject.org/mirrorlist?repo=fedora-<%= it.fedoraVersion %>&arch=x86_64"
 
-repo --name=default --mirrorlist=https://mirrors.fedoraproject.org/mirrorlist?repo=fedora-$releasever&arch=$basearch
-repo --name=updates --mirrorlist=https://mirrors.fedoraproject.org/mirrorlist?repo=updates-released-f$releasever&arch=$basearch
-
-# RPM Fusion repositories
-repo --name=rpmfusion-free --mirrorlist=https://mirrors.rpmfusion.org/mirrorlist?repo=free-fedora-$releasever&arch=$basearch
-repo --name=rpmfusion-free-updates --mirrorlist=https://mirrors.rpmfusion.org/mirrorlist?repo=free-fedora-updates-released-$releasever&arch=$basearch
-repo --name=rpmfusion-nonfree --mirrorlist=https://mirrors.rpmfusion.org/mirrorlist?repo=nonfree-fedora-$releasever&arch=$basearch
-repo --name=rpmfusion-nonfree-updates --mirrorlist=https://mirrors.rpmfusion.org/mirrorlist?repo=nonfree-fedora-updates-released-$releasever&arch=$basearch
-
-# Additional third-party repositories
-repo --name=fedora-cisco-openh264 --baseurl=https://mirror.fedoraproject.org/metalink?repo=fedora-cisco-openh264-$releasever&arch=$basearch
-repo --name=google-chrome --baseurl=https://dl.google.com/linux/chrome/rpm/stable/$basearch
-repo --name=vscode --baseurl=https://packages.microsoft.com/yumrepos/vscode
-repo --name=docker-ce --baseurl=https://download.docker.com/linux/fedora/$releasever/$basearch/stable
-repo --name=flathub --baseurl=https://flathub.org/repo/flathub.flatpakrepo
+# Note: Third-party repositories (RPM Fusion, etc.) are configured in %post after installation
 
 # Enable selinux
 selinux --enforcing
@@ -44,8 +31,7 @@ network --bootproto=dhcp --onboot=on --activate
 rootpw --lock --iscrypted locked
 
 # System timezone
-# TODO: Read it from account configuration or something
-timezone America/New_York
+timezone <%= it.timezone %>
 
 # System bootloader configuration
 bootloader --timeout=1
@@ -86,18 +72,19 @@ firewall --enabled --ssh
 qemu-guest-agent
 spice-vdagent
 
+# Display manager (ensure GDM is installed for graphical login)
+gdm
+
 # Required for InfiniService installation
 curl
 wget
 
-# RPM Fusion package keys
-rpmfusion-free-release
-rpmfusion-nonfree-release
-
-# Additional third-party repository keys and packages
-# Note: Some of these will be installed in post-install scripts
+# Flatpak support (RPM Fusion and third-party repos configured in %post)
 flatpak
+<% if (parseInt(it.fedoraVersion) < 43) { %>
+# gnome-software-plugin-flatpak only exists in Fedora < 43
 gnome-software-plugin-flatpak
+<% } %>
 
 @workstation-product-environment
 @development-tools
@@ -115,8 +102,19 @@ gnome-software-plugin-flatpak
 <%= it.applicationsPostCommands %>
 <% } %>
 
-# Post-installation script to set up additional repositories
-%post
+# Post-installation script to configure graphical boot and third-party repositories
+%post --log=/root/ks-post-repos.log
+echo "Configuring system for graphical boot..."
+
+# Set default target to graphical (GDM/GNOME desktop)
+systemctl set-default graphical.target
+
+echo "Setting up third-party repositories..."
+
+# Install RPM Fusion repositories
+dnf -y install https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm
+dnf -y install https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-$(rpm -E %fedora).noarch.rpm
+
 # Set up Google Chrome repository
 rpm --import https://dl.google.com/linux/linux_signing_key.pub
 
@@ -135,9 +133,10 @@ dnf config-manager --add-repo https://brave-browser-rpm-release.s3.brave.com/x86
 flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
 
 # Enable third-party repositories in GNOME Software
-gsettings set org.gnome.software show-ratings true
-gsettings set org.gnome.software allow-updates true
-gsettings set org.gnome.software download-updates true
-gsettings set org.gnome.software enable-repos true
+gsettings set org.gnome.software show-ratings true 2>/dev/null || true
+gsettings set org.gnome.software allow-updates true 2>/dev/null || true
+gsettings set org.gnome.software download-updates true 2>/dev/null || true
+gsettings set org.gnome.software enable-repos true 2>/dev/null || true
 
+echo "Third-party repositories configured successfully"
 %end

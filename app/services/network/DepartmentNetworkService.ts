@@ -13,12 +13,15 @@
  * ```
  */
 
-import { PrismaClient, Department } from '@prisma/client'
+import { PrismaClient, Department, RuleSetType } from '@prisma/client'
 import { BridgeManager, DepartmentNatService, TapDeviceManager } from '@infinibay/infinization'
 import { execSync, spawn } from 'child_process'
 import { promises as fs } from 'fs'
 import path from 'path'
 import { Debugger } from '../../utils/debug'
+import { FirewallPolicyService } from '../firewall/FirewallPolicyService'
+import { FirewallRuleService } from '../firewall/FirewallRuleService'
+import { FirewallOrchestrationService } from '../firewall/FirewallOrchestrationService'
 
 // ===========================================================================
 // Network Cleanup Types
@@ -194,11 +197,22 @@ export class DepartmentNetworkService {
   private prisma: PrismaClient
   private bridgeManager: BridgeManager
   private natService: DepartmentNatService
+  private firewallRuleService?: FirewallRuleService
+  private firewallPolicyService?: FirewallPolicyService
+  private firewallOrchestrationService?: FirewallOrchestrationService
 
-  constructor (prisma: PrismaClient) {
+  constructor (
+    prisma: PrismaClient,
+    firewallRuleService?: FirewallRuleService,
+    firewallPolicyService?: FirewallPolicyService,
+    firewallOrchestrationService?: FirewallOrchestrationService
+  ) {
     this.prisma = prisma
     this.bridgeManager = new BridgeManager()
     this.natService = new DepartmentNatService()
+    this.firewallRuleService = firewallRuleService
+    this.firewallPolicyService = firewallPolicyService
+    this.firewallOrchestrationService = firewallOrchestrationService
   }
 
   /**
@@ -264,7 +278,10 @@ export class DepartmentNetworkService {
       created.nat = true
       debug.log('info', `Configured NAT for ${subnet}`)
 
-      // 7. Update database
+      // 7. Apply default firewall policy
+      await this.applyDefaultFirewallPolicy(departmentId)
+
+      // 8. Update database
       await this.prisma.department.update({
         where: { id: departmentId },
         data: {
@@ -404,6 +421,140 @@ export class DepartmentNetworkService {
     })
 
     return department?.bridgeName ?? null
+  }
+
+  /**
+   * Applies the default firewall policy rules to a department.
+   * This method creates a firewall rule set if one doesn't exist and applies
+   * the policy-based rules.
+   *
+   * @param departmentId - The department ID
+   */
+  private async applyDefaultFirewallPolicy (departmentId: string): Promise<void> {
+    // Skip if firewall services are not available
+    if (!this.firewallPolicyService || !this.firewallRuleService) {
+      debug.log('info', `Skipping firewall policy application - services not available`)
+      return
+    }
+
+    const department = await this.prisma.department.findUnique({
+      where: { id: departmentId },
+      include: { firewallRuleSet: true }
+    })
+
+    if (!department) {
+      debug.log('warn', `Department ${departmentId} not found for firewall policy`)
+      return
+    }
+
+    // Ensure department has a firewall rule set
+    let ruleSetId = department.firewallRuleSetId
+    if (!ruleSetId) {
+      const ruleSet = await this.firewallRuleService.createRuleSet(
+        RuleSetType.DEPARTMENT,
+        departmentId,
+        `${department.name} Firewall`,
+        `ibay-dept-${departmentId.substring(0, 8)}`
+      )
+      ruleSetId = ruleSet.id
+
+      // Link rule set to department
+      await this.prisma.department.update({
+        where: { id: departmentId },
+        data: { firewallRuleSetId: ruleSetId }
+      })
+
+      debug.log('info', `Created firewall rule set ${ruleSetId} for department ${departmentId}`)
+    }
+
+    // Apply policy rules - derive appropriate default based on policy type
+    let defaultConfig: string
+    if (department.firewallDefaultConfig) {
+      defaultConfig = department.firewallDefaultConfig
+    } else {
+      // Choose policy-appropriate default when config is null
+      defaultConfig = department.firewallPolicy === 'BLOCK_ALL' ? 'allow_outbound' : 'none'
+    }
+
+    await this.firewallPolicyService.applyPolicyToRuleSet(
+      ruleSetId,
+      department.firewallPolicy,
+      defaultConfig
+    )
+
+    debug.log('info', `Applied firewall policy ${department.firewallPolicy}/${defaultConfig} to department ${departmentId}`)
+  }
+
+  /**
+   * Restarts the network infrastructure for a department.
+   * Used when firewall policy changes require network reconfiguration.
+   *
+   * WARNING: This will cause temporary disconnection for all VMs in the department.
+   *
+   * @param departmentId - The department ID
+   */
+  async restartDepartmentSubnet (departmentId: string): Promise<void> {
+    debug.log('info', `Restarting subnet for department ${departmentId}`)
+
+    const department = await this.prisma.department.findUnique({
+      where: { id: departmentId },
+      include: { machines: true }
+    })
+
+    if (!department || !department.ipSubnet) {
+      throw new Error(`Department ${departmentId} has no network configured`)
+    }
+
+    const subnet = department.ipSubnet
+
+    // 1. Destroy existing network
+    await this.destroyNetwork(departmentId)
+
+    // 2. Reconfigure network with same subnet
+    await this.configureNetwork(departmentId, subnet)
+
+    // 3. Reapply firewall rules to all VMs in the department
+    await this.reapplyFirewallToAllVMs(departmentId)
+
+    debug.log('info', `Subnet restarted successfully for department ${departmentId}`)
+  }
+
+  /**
+   * Reapplies firewall rules to all VMs in a department.
+   * Called after network restart to ensure firewall rules are active on TAP devices.
+   *
+   * @param departmentId - The department ID
+   */
+  private async reapplyFirewallToAllVMs (departmentId: string): Promise<void> {
+    // Skip if firewall orchestration service is not available
+    if (!this.firewallOrchestrationService) {
+      debug.log('info', `Skipping firewall reapplication - orchestration service not available`)
+      return
+    }
+
+    const machines = await this.prisma.machine.findMany({
+      where: { departmentId },
+      include: { configuration: true }
+    })
+
+    debug.log('info', `Reapplying firewall rules to ${machines.length} VMs in department ${departmentId}`)
+
+    for (const machine of machines) {
+      // Skip VMs without TAP device (not running)
+      if (!machine.configuration?.tapDeviceName) {
+        debug.log('warn', `Skipping VM ${machine.id} (${machine.name}) - no TAP device`)
+        continue
+      }
+
+      try {
+        await this.firewallOrchestrationService.applyVMRules(machine.id)
+        debug.log('info', `Reapplied firewall rules to VM ${machine.id} (${machine.name})`)
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error)
+        debug.log('error', `Failed to reapply rules to VM ${machine.id} (${machine.name}): ${errorMessage}`)
+        // Continue with other VMs even if one fails
+      }
+    }
   }
 
   /**

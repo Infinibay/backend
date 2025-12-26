@@ -160,6 +160,12 @@ input CreateApplicationInputType {
   parameters: JSONObject = null
 }
 
+input CreateDepartmentFirewallInput {
+  firewallCustomRules: JSON
+  firewallDefaultConfig: String = "allow_outbound"
+  firewallPolicy: FirewallPolicy! = BLOCK_ALL
+}
+
 input CreateFirewallRuleInput {
   action: RuleAction!
   connectionState: JSONObject
@@ -186,12 +192,15 @@ input CreateMachineInputType {
   customStorage: Int
   departmentId: ID = ""
   firstBootScripts: [FirstBootScriptInputType!]! = []
+  keyboard: String
+  locale: String
   name: String! = ""
   os: MachineOs! = WINDOWS10
   password: String! = ""
   pciBus: String = null
   productKey: String
   templateId: String
+  timezone: String
   username: String! = ""
 }
 
@@ -283,6 +292,9 @@ type DepartmentType {
   bridgeName: String
   createdAt: DateTimeISO!
   dnsServers: [String!]
+  firewallCustomRules: JSON
+  firewallDefaultConfig: String
+  firewallPolicy: FirewallPolicy!
   gatewayIP: String
   id: ID!
   internetSpeed: Int
@@ -392,6 +404,14 @@ enum ExecutionType {
   FIRST_BOOT
   ON_DEMAND
   SCHEDULED
+}
+
+"""
+Política de firewall del departamento: ALLOW_ALL (Permitir Todo) o BLOCK_ALL (Bloquear Todo)
+"""
+enum FirewallPolicy {
+  ALLOW_ALL
+  BLOCK_ALL
 }
 
 type FirewallRuleSetType {
@@ -849,7 +869,7 @@ type Mutation {
   cancelScriptExecution(id: ID!): ScriptExecutionResponseType!
   cleanupInfinibayFirewall: CleanupResultType!
   createApplication(input: CreateApplicationInputType!): ApplicationType!
-  createDepartment(name: String!): DepartmentType!
+  createDepartment(firewallConfig: CreateDepartmentFirewallInput, name: String!): DepartmentType!
   createDepartmentFirewallRule(departmentId: ID!, input: CreateFirewallRuleInput!): FirewallRuleType!
   createMachine(input: CreateMachineInputType!): Machine!
   createMachineTemplate(input: MachineTemplateInputType!): MachineTemplateType!
@@ -931,6 +951,7 @@ type Mutation {
   unassignScriptFromDepartment(departmentId: ID!, scriptId: ID!): Boolean!
   updateAppSettings(input: AppSettingsInput!): AppSettings!
   updateApplication(id: String!, input: CreateApplicationInputType!): ApplicationType!
+  updateDepartmentFirewallPolicy(departmentId: String!, input: UpdateDepartmentFirewallPolicyInput!): DepartmentType!
   updateDepartmentName(input: UpdateDepartmentNameInput!): DepartmentType!
   updateDepartmentNetwork(input: UpdateDepartmentNetworkInput!): DepartmentType!
   updateFirewallRule(input: UpdateFirewallRuleInput!, ruleId: ID!): FirewallRuleType!
@@ -1618,6 +1639,12 @@ type SystemResources {
 The javascript `Date` as integer. Type represents date and time as number of milliseconds from start of UNIX epoch.
 """
 scalar Timestamp
+
+input UpdateDepartmentFirewallPolicyInput {
+  firewallCustomRules: JSON
+  firewallDefaultConfig: String! = "allow_outbound"
+  firewallPolicy: FirewallPolicy! = BLOCK_ALL
+}
 
 input UpdateDepartmentNameInput {
   id: ID! = ""

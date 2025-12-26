@@ -15,8 +15,14 @@ import { UnattendedManagerBase } from './unattendedManagerBase'
  * const unattendedManager = new UnattendedRedHatManager(username, password, applications);
  * const config = unattendedManager.generateConfig();
  *
+ * Locale/Keyboard/Timezone Configuration:
+ * - locale: Language and country code with optional encoding (e.g., 'en_US', 'es_ES', 'en_US.UTF-8')
+ * - keyboard: X keyboard layout (e.g., 'us', 'uk', 'es', 'fr', 'de', 'br')
+ * - timezone: IANA timezone (e.g., 'America/New_York', 'Europe/Madrid', 'UTC')
+ *
  * For more information on Kickstart installations, refer to the Red Hat documentation:
  * https://access.redhat.com/documentation/en-us/red_hat_enterprise_linux/7/html/installation_guide/chap-kickstart-installations
+ * https://docs.fedoraproject.org/en-US/fedora/latest/install-guide/appendixes/Kickstart_Syntax_Reference/
  */
 
 export class UnattendedRedHatManager extends UnattendedManagerBase {
@@ -24,9 +30,20 @@ export class UnattendedRedHatManager extends UnattendedManagerBase {
   private password: string
   private applications: Application[]
   private vmId: string = ''
+  private locale: string
+  private keyboard: string
+  private timezone: string
   // protected debug: Debugger = new Debugger('unattended-redhat-manager');
 
-  constructor (username: string, password: string, applications: Application[], vmId?: string) {
+  constructor (
+    username: string,
+    password: string,
+    applications: Application[],
+    vmId?: string,
+    locale?: string,
+    keyboard?: string,
+    timezone?: string
+  ) {
     super()
     this.debug.log('Initializing UnattendedRedHatManager')
     if (!username || !password) {
@@ -38,20 +55,50 @@ export class UnattendedRedHatManager extends UnattendedManagerBase {
     this.password = password
     this.applications = applications
     this.vmId = vmId || ''
+
+    // Store locale as-is, defaulting to en_US.UTF-8
+    this.locale = locale || 'en_US.UTF-8'
+
+    this.keyboard = keyboard || 'us'
+    this.timezone = timezone || 'America/New_York'
     this.configFileName = 'ks.cfg'
-    this.debug.log('UnattendedRedHatManager initialized')
+    this.debug.log(`UnattendedRedHatManager initialized with locale=${this.locale}, keyboard=${this.keyboard}, timezone=${this.timezone}`)
   }
 
   async generateConfig (): Promise<string> {
     this.debug.log('Generating RedHat kickstart configuration')
+
+    // Validate locale format (xx_XX with optional encoding suffix like .UTF-8)
+    if (!/^[a-z]{2}_[A-Z]{2}(\.[A-Za-z0-9-]+)?$/.test(this.locale)) {
+      this.debug.log('warn', `Invalid locale format: ${this.locale}, using default: en_US.UTF-8`)
+      this.locale = 'en_US.UTF-8'
+    }
+
+    // Validate keyboard layout (2-3 lowercase characters)
+    if (!/^[a-z]{2,3}$/.test(this.keyboard)) {
+      this.debug.log('warn', `Invalid keyboard layout: ${this.keyboard}, using default: us`)
+      this.keyboard = 'us'
+    }
+
+    // Validate timezone is not empty
+    if (!this.timezone || this.timezone.trim() === '') {
+      this.debug.log('warn', 'Empty timezone, using default: America/New_York')
+      this.timezone = 'America/New_York'
+    }
+
+    this.debug.log(`Validated configuration: locale=${this.locale}, keyboard=${this.keyboard}, timezone=${this.timezone}`)
+
     const applicationsPostCommands = await this.generateApplicationsConfig()
     const infiniServicePostCommands = this.generateInfiniServiceConfig()
-    this.debug.log('Applications and InfiniService post commands generated')
+    const fedoraVersion = await this.extractFedoraVersionFromISO()
+    this.debug.log(`Applications and InfiniService post commands generated (Fedora ${fedoraVersion})`)
 
     // Initialize Eta template engine
+    // IMPORTANT: autoEscape must be false for shell scripts (we don't want HTML escaping)
     const eta = new Eta({
       views: path.join(process.env.INFINIBAY_BASE_DIR ?? path.join(__dirname, '..'), 'templates'),
-      cache: true
+      cache: true,
+      autoEscape: false
     })
 
     try {
@@ -62,6 +109,10 @@ export class UnattendedRedHatManager extends UnattendedManagerBase {
       const renderedConfig = eta.renderString(templateContent, {
         username: this.username,
         password: this.password,
+        locale: this.locale,
+        keyboard: this.keyboard,
+        timezone: this.timezone,
+        fedoraVersion,
         applicationsPostCommands,
         infiniServicePostCommands
       })
@@ -88,28 +139,28 @@ export class UnattendedRedHatManager extends UnattendedManagerBase {
       return ''
     }
 
-    let postInstallScript = '%post --log=/root/ks-post.log\n'
-    postInstallScript += 'echo "Starting application installation..."\n'
+    let postInstallScript = '%post --log=/root/ks-post-apps.log\n'
+    postInstallScript += 'echo "Starting application installation..."\n\n'
 
-    const installCommands: string[] = []
+    let hasCommands = false
 
     redHatApps.forEach(app => {
-      // Find the Red Hat/Fedora OS index
-      const osIndex = app.os.findIndex(os => os === 'redhat' || os === 'fedora')
-      // Ensure installCommand is an array and the command exists for the found OS index
-      if (osIndex !== -1 && Array.isArray(app.installCommand) && app.installCommand.length > osIndex && app.installCommand[osIndex]) {
-        // Assuming installCommand contains the package name for dnf
-        installCommands.push(app.installCommand[osIndex] as string)
+      // installCommand is an object with OS keys (windows, ubuntu, fedora), not an array
+      const installCommands = app.installCommand as Record<string, string>
+      const fedoraCommand = installCommands?.fedora || installCommands?.redhat
+
+      if (fedoraCommand) {
+        hasCommands = true
+        postInstallScript += `echo "Installing ${app.name}..."\n`
+        postInstallScript += `${fedoraCommand} || echo "Failed to install ${app.name}"\n\n`
       }
     })
 
-    if (installCommands.length > 0) {
-      postInstallScript += `dnf install -y ${installCommands.join(' ')}\n`
-      postInstallScript += 'echo "Application installation finished."\n'
-    } else {
+    if (!hasCommands) {
       postInstallScript += 'echo "No compatible applications found or install commands missing."\n'
     }
 
+    postInstallScript += 'echo "Application installation finished."\n'
     postInstallScript += '%end\n'
 
     return postInstallScript
@@ -118,6 +169,7 @@ export class UnattendedRedHatManager extends UnattendedManagerBase {
   /**
    * Generates post-install commands to install InfiniService on RedHat/Fedora.
    * Downloads the binary and installation script from the backend server.
+   * Includes network waiting and retry logic similar to Ubuntu implementation.
    *
    * @returns Post-install script for InfiniService installation
    */
@@ -126,55 +178,159 @@ export class UnattendedRedHatManager extends UnattendedManagerBase {
     const backendPort = process.env.PORT || '4000'
     const baseUrl = `http://${backendHost}:${backendPort}`
 
-    let postInstallScript = '%post --log=/root/infiniservice-install.log\n'
-    postInstallScript += 'echo "Starting InfiniService installation..."\n'
-    postInstallScript += '\n'
-    postInstallScript += '# Create temp directory for InfiniService\n'
-    postInstallScript += 'mkdir -p /tmp/infiniservice\n'
-    postInstallScript += 'cd /tmp/infiniservice\n'
-    postInstallScript += '\n'
-    postInstallScript += '# Download InfiniService binary\n'
-    postInstallScript += 'echo "Downloading InfiniService binary..."\n'
-    postInstallScript += `if curl -f -o infiniservice "${baseUrl}/infiniservice/linux/binary"; then\n`
-    postInstallScript += '    echo "Binary downloaded successfully"\n'
-    postInstallScript += 'else\n'
-    postInstallScript += '    echo "Failed to download InfiniService binary"\n'
-    postInstallScript += '    exit 1\n'
-    postInstallScript += 'fi\n'
-    postInstallScript += '\n'
-    postInstallScript += '# Download installation script\n'
-    postInstallScript += 'echo "Downloading InfiniService installation script..."\n'
-    postInstallScript += `if curl -f -o install-linux.sh "${baseUrl}/infiniservice/linux/script"; then\n`
-    postInstallScript += '    echo "Script downloaded successfully"\n'
-    postInstallScript += 'else\n'
-    postInstallScript += '    echo "Failed to download InfiniService installation script"\n'
-    postInstallScript += '    exit 1\n'
-    postInstallScript += 'fi\n'
-    postInstallScript += '\n'
-    postInstallScript += '# Make files executable\n'
-    postInstallScript += 'chmod +x infiniservice install-linux.sh\n'
-    postInstallScript += '\n'
-    postInstallScript += '# Run installation script with VM ID\n'
-    postInstallScript += `echo "Installing InfiniService with VM ID: ${this.vmId}"\n`
-    postInstallScript += `if ./install-linux.sh normal "${this.vmId}"; then\n`
-    postInstallScript += '    echo "InfiniService installed successfully"\n'
-    postInstallScript += 'else\n'
-    postInstallScript += '    echo "InfiniService installation failed"\n'
-    postInstallScript += '    # Continue with installation even if InfiniService fails\n'
-    postInstallScript += 'fi\n'
-    postInstallScript += '\n'
-    postInstallScript += '# Clean up temp files\n'
-    postInstallScript += 'cd /\n'
-    postInstallScript += 'rm -rf /tmp/infiniservice\n'
-    postInstallScript += '\n'
-    postInstallScript += 'echo "InfiniService installation process completed"\n'
-    postInstallScript += '%end\n'
+    // Build a robust post-install script with network waiting and retries
+    const postInstallScript = `%post --log=/root/infiniservice-install.log
+echo "=== Starting InfiniService Installation ==="
+echo "Timestamp: $(date)"
+echo "Backend URL: ${baseUrl}"
+echo "VM ID: ${this.vmId}"
+
+# Function to wait for network connectivity
+wait_for_network() {
+    local max_attempts=\${1:-30}
+    local delay=\${2:-2}
+
+    echo "Waiting for network connectivity..."
+    for attempt in $(seq 1 $max_attempts); do
+        echo "Network check attempt $attempt/$max_attempts"
+
+        # Check if we have an IP address (non-loopback)
+        if ip -4 addr show scope global | grep -q "inet "; then
+            echo "IP address assigned"
+
+            # Test DNS resolution
+            if getent hosts ${backendHost} >/dev/null 2>&1 || ping -c 1 -W 2 8.8.8.8 >/dev/null 2>&1; then
+                echo "Network connectivity confirmed"
+                return 0
+            fi
+        fi
+
+        sleep $delay
+    done
+
+    echo "Network connectivity check failed after $max_attempts attempts"
+    return 1
+}
+
+# Function to download with retries
+download_with_retry() {
+    local url="\$1"
+    local output="\$2"
+    local description="\$3"
+    local max_retries=5
+    local retry_delay=3
+
+    for attempt in $(seq 1 $max_retries); do
+        echo "Downloading $description (attempt $attempt/$max_retries)..."
+        if curl -f -s --connect-timeout 10 --max-time 120 -o "\$output" "\$url"; then
+            echo "[OK] Downloaded $description successfully"
+            return 0
+        fi
+        echo "Download failed, retrying in \${retry_delay}s..."
+        sleep \$retry_delay
+    done
+
+    echo "[FAIL] Failed to download $description after $max_retries attempts"
+    return 1
+}
+
+# Wait for network
+if ! wait_for_network 30 2; then
+    echo "[FAIL] Network not available, skipping InfiniService installation"
+    echo "InfiniService can be installed manually later"
+    exit 0
+fi
+
+# Log network state
+echo "=== Network State ==="
+ip addr show
+ip route show
+cat /etc/resolv.conf
+echo "===================="
+
+# Create temp directory
+mkdir -p /tmp/infiniservice
+cd /tmp/infiniservice
+
+# Download InfiniService binary with retry
+if ! download_with_retry "${baseUrl}/infiniservice/linux/binary" "infiniservice" "InfiniService binary"; then
+    echo "[FAIL] Could not download InfiniService binary"
+    echo "InfiniService can be installed manually later"
+    cd / && rm -rf /tmp/infiniservice
+    exit 0
+fi
+
+# Download installation script with retry
+if ! download_with_retry "${baseUrl}/infiniservice/linux/script" "install-linux.sh" "InfiniService installation script"; then
+    echo "[FAIL] Could not download installation script"
+    echo "InfiniService can be installed manually later"
+    cd / && rm -rf /tmp/infiniservice
+    exit 0
+fi
+
+# Make files executable
+chmod +x infiniservice install-linux.sh
+
+# Run installation script with VM ID
+echo "Installing InfiniService with VM ID: ${this.vmId}"
+if ./install-linux.sh normal "${this.vmId}"; then
+    echo "[OK] InfiniService installed successfully"
+else
+    echo "[WARN] InfiniService installation script returned non-zero"
+    echo "Check /var/log for more details"
+fi
+
+# Clean up temp files
+cd /
+rm -rf /tmp/infiniservice
+
+echo "=== InfiniService Installation Completed ==="
+%end
+`
 
     return postInstallScript
   }
 
   /**
+   * Extracts the Fedora version number from the ISO's Volume ID.
+   * Volume ID format: "Fedora-E-dvd-x86_64-43" or "Fedora-S-dvd-x86_64-43"
+   *
+   * @returns The Fedora version number (e.g., "43", "41")
+   */
+  private async extractFedoraVersionFromISO (): Promise<string> {
+    try {
+      this.debug.log(`[ISO] Extracting Fedora version from: ${this.isoPath}`)
+      const volIdOutput = await this.executeCommand(['isoinfo', '-d', '-i', this.isoPath as string]) as string
+
+      // Match 'Volume id: ...' and extract the version number at the end
+      // Examples: "Fedora-E-dvd-x86_64-43", "Fedora-S-dvd-x86_64-41", "Fedora-WS-Live-x86_64-40"
+      const volIdMatch = volIdOutput.match(/Volume id:\s*(.*)/m)
+      if (volIdMatch && volIdMatch[1]) {
+        const volumeId = volIdMatch[1].trim()
+        this.debug.log(`[ISO] Volume ID: ${volumeId}`)
+
+        // Extract version number (last number in the Volume ID)
+        const versionMatch = volumeId.match(/-(\d+)$/)
+        if (versionMatch && versionMatch[1]) {
+          const version = versionMatch[1]
+          this.debug.log(`[ISO] Detected Fedora version: ${version}`)
+          return version
+        }
+      }
+
+      this.debug.log('warning', '[ISO] Could not detect Fedora version, assuming latest (99)')
+      return '99'
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error)
+      this.debug.log('warning', `[ISO] Failed to extract Fedora version: ${errorMsg}. Assuming latest (99)`)
+      return '99'
+    }
+  }
+
+  /**
    * Modifies the GRUB configuration file to add Kickstart parameters.
+   * Uses inst.ks=cdrom:/ks.cfg for reliable detection - explicit path to kickstart file.
+   *
    * @param grubCfgPath - Path to the grub.cfg file.
    */
   private async modifyGrubConfigForKickstart (grubCfgPath: string): Promise<void> {
@@ -188,22 +344,25 @@ export class UnattendedRedHatManager extends UnattendedManagerBase {
       let modified = false
 
       content = content.replace(linuxLineRegex, (match, indent, command, args) => {
-        // Avoid adding if already present (simple check)
-        if (args.includes('inst.ks=')) {
-          this.debug.log(`Kickstart parameter already found in line: ${match.trim()}`)
-          return match // Return original match
-        }
-        // Append the kickstart parameter
-        let modifiedLine = `${indent}${command}${args.trimEnd()} inst.ks=cdrom:/ks.cfg`
-        modifiedLine = modifiedLine.replace(/(\s*rd.live.check\s*)/gm, ' ')
-        modifiedLine = modifiedLine.replace(/(\s*rd.live.image\s*)/gm, ' ')
-        this.debug.log(`Modifying GRUB line: ${match.trim()} -> ${modifiedLine.trim()}`)
+        // Remove any existing inst.ks= parameter (we'll add the correct one)
+        let cleanedArgs = args.replace(/\s+inst\.ks=[^\s]*/g, '')
+        // Remove any existing inst.stage2= parameter (we'll add the correct one)
+        cleanedArgs = cleanedArgs.replace(/\s+inst\.stage2=[^\s]*/g, '')
+        // Remove rd.live.check (integrity check - slows boot)
+        cleanedArgs = cleanedArgs.replace(/\s+rd\.live\.check/g, '')
+        // Clean up any double spaces
+        cleanedArgs = cleanedArgs.replace(/\s+/g, ' ').trimEnd()
+
+        // Build the modified line for netinstall/Everything ISO kickstart:
+        // - inst.ks=cdrom:/ks.cfg tells Anaconda where to find the kickstart file
+        // - inst.stage2=cdrom tells Anaconda to use the CDROM as installation source
+        const modifiedLine = `${indent}${command}${cleanedArgs} inst.ks=cdrom:/ks.cfg inst.stage2=cdrom`
+        this.debug.log(`[GRUB] Modifying line: ${match.trim()} -> ${modifiedLine.trim()}`)
         modified = true
         return modifiedLine
       })
 
-      // AAAAAAAAAAAAA
-      // Set GRUB timeout to 3 seconds
+      // Set GRUB timeout to 3 seconds for automatic boot
       const timeoutRegex = /^\s*set\s+timeout\s*=\s*\d+\s*$/gm
       if (timeoutRegex.test(content)) {
         // Replace existing timeout setting
@@ -235,6 +394,15 @@ export class UnattendedRedHatManager extends UnattendedManagerBase {
       if (modified) {
         await fs.promises.writeFile(grubCfgPath, content, 'utf-8')
         this.debug.log(`Successfully modified GRUB config: ${grubCfgPath}`)
+
+        // Log modified lines for debugging
+        const modifiedLines = content.split('\n').filter(line =>
+          line.includes('inst.ks=cdrom:/ks.cfg') || line.includes('inst.stage2=cdrom')
+        )
+        this.debug.log(`[GRUB] Modified ${modifiedLines.length} boot entries with kickstart parameters`)
+        modifiedLines.forEach((line, idx) => {
+          this.debug.log(`[GRUB] Entry ${idx + 1}: ${line.trim()}`)
+        })
       } else {
         this.debug.log('warning', `No suitable linux/linuxefi lines found or modified in ${grubCfgPath}`)
       }
@@ -242,6 +410,62 @@ export class UnattendedRedHatManager extends UnattendedManagerBase {
       this.debug.log('error', `Failed to modify GRUB config ${grubCfgPath}: ${error}`)
       // Decide if this should be a fatal error or just a warning
       // For now, log as error but don't throw, ISO creation might still work if user manually specifies ks
+    }
+  }
+
+  /**
+   * Modifies the isolinux configuration file to add Kickstart parameters for BIOS boot.
+   * Uses inst.ks=cdrom:/ks.cfg for reliable detection - explicit path to kickstart file.
+   *
+   * @param isolinuxCfgPath - Path to the isolinux.cfg file.
+   */
+  private async modifyIsolinuxConfigForKickstart (isolinuxCfgPath: string): Promise<void> {
+    this.debug.log(`[ISOLINUX] Attempting to modify isolinux config: ${isolinuxCfgPath}`)
+    try {
+      let content = await fs.promises.readFile(isolinuxCfgPath, 'utf-8')
+
+      // Add ks parameter to append lines
+      // Regex to find append lines, capturing indentation and the rest of the line
+      const appendLineRegex = /^(\s*)(append)(\s+.*)$/gm
+      let modified = false
+
+      content = content.replace(appendLineRegex, (match, indent, command, args) => {
+        // Remove any existing ks= or inst.ks= parameter (we'll add the correct one)
+        let cleanedArgs = args.replace(/\s+ks=[^\s]*/g, '')
+        cleanedArgs = cleanedArgs.replace(/\s+inst\.ks=[^\s]*/g, '')
+        // Remove any existing inst.stage2= parameter (we'll add the correct one)
+        cleanedArgs = cleanedArgs.replace(/\s+inst\.stage2=[^\s]*/g, '')
+        // Remove rd.live.check (integrity check - slows boot)
+        cleanedArgs = cleanedArgs.replace(/\s+rd\.live\.check/g, '')
+        // Clean up any double spaces
+        cleanedArgs = cleanedArgs.replace(/\s+/g, ' ').trimEnd()
+
+        // Build the modified line for netinstall/Everything ISO kickstart:
+        // - inst.ks=cdrom:/ks.cfg tells Anaconda where to find the kickstart file
+        // - inst.stage2=cdrom tells Anaconda to use the CDROM as installation source
+        const modifiedLine = `${indent}${command}${cleanedArgs} inst.ks=cdrom:/ks.cfg inst.stage2=cdrom`
+        this.debug.log(`[ISOLINUX] Modifying line: ${match.trim()} -> ${modifiedLine.trim()}`)
+        modified = true
+        return modifiedLine
+      })
+
+      if (modified) {
+        await fs.promises.writeFile(isolinuxCfgPath, content, 'utf-8')
+        this.debug.log(`[ISOLINUX] Successfully modified isolinux config: ${isolinuxCfgPath}`)
+
+        // Log modified lines for debugging
+        const modifiedLines = content.split('\n').filter(line =>
+          line.includes('inst.ks=cdrom:/ks.cfg') || line.includes('inst.stage2=cdrom')
+        )
+        this.debug.log(`[ISOLINUX] Modified ${modifiedLines.length} boot entries with kickstart parameters`)
+        modifiedLines.forEach((line, idx) => {
+          this.debug.log(`[ISOLINUX] Entry ${idx + 1}: ${line.trim()}`)
+        })
+      } else {
+        this.debug.log('warning', `[ISOLINUX] No suitable append lines found or modified in ${isolinuxCfgPath}`)
+      }
+    } catch (error) {
+      this.debug.log('error', `[ISOLINUX] Failed to modify isolinux config ${isolinuxCfgPath}: ${error}`)
     }
   }
 
@@ -357,6 +581,14 @@ export class UnattendedRedHatManager extends UnattendedManagerBase {
     await fs.promises.writeFile(kickstartPath, config)
     this.debug.log(`[KICKSTART] Configuration written to ${kickstartPath}`)
 
+    // Verify kickstart file was written
+    const kickstartStats = await fs.promises.stat(kickstartPath)
+    this.debug.log(`[KICKSTART] File size: ${kickstartStats.size} bytes`)
+
+    // Log first few lines for debugging
+    const kickstartPreview = config.split('\n').slice(0, 10).join('\n')
+    this.debug.log(`[KICKSTART] Preview:\n${kickstartPreview}`)
+
     // Find and modify GRUB configurations
     // Common paths for GRUB config in Fedora/RHEL ISOs
     const potentialGrubPaths = [
@@ -377,7 +609,26 @@ export class UnattendedRedHatManager extends UnattendedManagerBase {
       this.debug.log('warning', '[GRUB] Could not find any GRUB configuration files at expected paths to modify for Kickstart.')
     }
 
-    // Extract the original Volume ID from the source ISO
+    // Find and modify isolinux configuration for BIOS boot
+    const potentialIsolinuxPaths = [
+      path.join(extractDir, 'isolinux/isolinux.cfg'),
+      path.join(extractDir, 'syslinux/isolinux.cfg')
+    ]
+
+    let isolinuxModified = false
+    for (const isolinuxPath of potentialIsolinuxPaths) {
+      if (fs.existsSync(isolinuxPath)) {
+        this.debug.log(`[ISOLINUX] Modifying isolinux configuration at ${isolinuxPath}`)
+        await this.modifyIsolinuxConfigForKickstart(isolinuxPath)
+        isolinuxModified = true
+      }
+    }
+
+    if (!isolinuxModified) {
+      this.debug.log('warning', '[ISOLINUX] Could not find isolinux.cfg (BIOS boot may not work)')
+    }
+
+    // Extract the original Volume ID from the source ISO (used for xorriso)
     let volumeId = 'INFINIBAY-FEDORA' // Default fallback
     try {
       this.debug.log(`[ISO] Extracting Volume ID using isoinfo from: ${this.isoPath}`)
@@ -468,6 +719,9 @@ export class UnattendedRedHatManager extends UnattendedManagerBase {
       await this.executeCommand(isoCreationCommandParts)
       this.debug.log(`[ISO] Successfully created Kickstart ISO at ${newIsoPath}`)
 
+      // Diagnose the generated ISO for debugging
+      await this.diagnoseGeneratedISO(newIsoPath)
+
       // Clean up the extracted directory
       this.debug.log(`[ISO] Removing temporary directory: ${extractDir}`)
       await this.executeCommand(['rm', '-rf', extractDir])
@@ -484,6 +738,56 @@ export class UnattendedRedHatManager extends UnattendedManagerBase {
         this.debug.log('error', `[ISO] Failed to cleanup temporary directory ${extractDir} after error: ${cleanupError}`)
       }
       throw error
+    }
+  }
+
+  /**
+   * Diagnoses the generated ISO for debugging purposes.
+   * Verifies the ISO structure and boot configuration.
+   *
+   * @param {string} isoPath - Path to the generated ISO
+   */
+  private async diagnoseGeneratedISO (isoPath: string): Promise<void> {
+    try {
+      this.debug.log(`[DIAGNOSE] Analyzing generated ISO: ${isoPath}`)
+
+      // Check ISO exists and get size
+      const stats = await fs.promises.stat(isoPath)
+      this.debug.log(`[DIAGNOSE] ISO size: ${(stats.size / (1024 * 1024)).toFixed(2)} MB`)
+
+      // List root files to verify ks.cfg is present
+      try {
+        const listOutput = await this.executeCommand(['isoinfo', '-l', '-i', isoPath])
+        const hasKickstart = listOutput.includes('ks.cfg') || listOutput.includes('KS.CFG')
+        this.debug.log(`[DIAGNOSE] ks.cfg present in ISO root: ${hasKickstart}`)
+
+        if (!hasKickstart) {
+          this.debug.log('warning', '[DIAGNOSE] WARNING: ks.cfg not found in ISO root! Kickstart may fail.')
+        }
+      } catch (listError) {
+        this.debug.log('warning', `[DIAGNOSE] Could not list ISO contents: ${listError}`)
+      }
+
+      // Get ISO info for Volume ID and boot flags
+      try {
+        const infoOutput = await this.executeCommand(['isoinfo', '-d', '-i', isoPath])
+        this.debug.log(`[DIAGNOSE] ISO info:\n${infoOutput}`)
+
+        // Extract Volume ID for verification
+        const volIdMatch = infoOutput.match(/^Volume id:\s*(.*)$/m)
+        if (volIdMatch && volIdMatch[1]) {
+          this.debug.log(`[DIAGNOSE] Generated ISO Volume ID: ${volIdMatch[1].trim()}`)
+        }
+
+        // Check for bootable flag
+        const isBootable = infoOutput.includes('Bootable') || infoOutput.includes('El Torito')
+        this.debug.log(`[DIAGNOSE] ISO appears bootable: ${isBootable}`)
+      } catch (infoError) {
+        this.debug.log('warning', `[DIAGNOSE] Could not get ISO info: ${infoError}`)
+      }
+    } catch (error) {
+      this.debug.log('warning', `[DIAGNOSE] ISO diagnosis failed: ${error}`)
+      // Don't throw - diagnosis is optional and shouldn't block ISO creation
     }
   }
 

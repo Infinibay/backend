@@ -23,7 +23,10 @@
     "cleanup:temp-isos": "ts-node -r tsconfig-paths/register scripts/cleanup-temp-isos.ts",
     "migrate:isos": "ts-node -r tsconfig-paths/register scripts/migrate-isos.ts",
     "download:windows": "ts-node -r tsconfig-paths/register scripts/download-windows-v2.ts",
-    "repair:graphics-ports": "ts-node -r tsconfig-paths/register scripts/repair-graphics-ports.ts"
+    "repair:graphics-ports": "ts-node -r tsconfig-paths/register scripts/repair-graphics-ports.ts",
+    "reset:system": "ts-node -r tsconfig-paths/register scripts/reset-system.ts",
+    "reset:system:dry-run": "ts-node -r tsconfig-paths/register scripts/reset-system.ts --dry-run",
+    "reset:system:force": "ts-node -r tsconfig-paths/register scripts/reset-system.ts --force"
   },
   "keywords": [],
   "author": "",

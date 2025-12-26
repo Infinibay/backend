@@ -71,6 +71,9 @@ export class CreateMachineServiceV2 {
    * @param password - Password for unattended installation
    * @param productKey - Windows product key (optional)
    * @param pciBus - GPU PCI address for passthrough (optional)
+   * @param locale - Locale for unattended installation (e.g., 'en_US.UTF-8')
+   * @param keyboard - Keyboard layout for unattended installation (e.g., 'us')
+   * @param timezone - Timezone for unattended installation (e.g., 'America/New_York')
    * @returns Promise<boolean> indicating success
    */
   async create (
@@ -78,7 +81,10 @@ export class CreateMachineServiceV2 {
     username: string,
     password: string,
     productKey: string | undefined,
-    pciBus: string | null
+    pciBus: string | null,
+    locale: string,
+    keyboard: string,
+    timezone: string
   ): Promise<boolean> {
     this.debug.log(`Creating machine ${machine.name} using infinization`)
 
@@ -108,7 +114,10 @@ export class CreateMachineServiceV2 {
         productKey,
         applications,
         scripts,
-        pciBus
+        pciBus,
+        locale,
+        keyboard,
+        timezone
       )
 
       // Create and start VM via infinization
@@ -236,7 +245,10 @@ export class CreateMachineServiceV2 {
     productKey: string | undefined,
     applications: any[],
     scripts: any[],
-    pciBus: string | null
+    pciBus: string | null,
+    locale: string,
+    keyboard: string,
+    timezone: string
   ): Promise<VMCreateConfig> {
     // Get hardware specs (template takes precedence)
     const ramGB = template ? template.ram : machine.ramGB
@@ -281,7 +293,10 @@ export class CreateMachineServiceV2 {
       password,
       productKey,
       applications,
-      scripts
+      scripts,
+      locale,
+      keyboard,
+      timezone
     )
 
     if (unattendedManager && baseIsoPath) {
@@ -370,14 +385,17 @@ export class CreateMachineServiceV2 {
     password: string,
     productKey: string | undefined,
     applications: any[],
-    scripts: any[]
+    scripts: any[],
+    locale: string,
+    keyboard: string,
+    timezone: string
   ): UnattendedManagerBase | null {
     const osManagers = {
       windows10: () => new UnattendedWindowsManager(10, username, password, productKey, applications, machine.id, scripts),
       windows11: () => new UnattendedWindowsManager(11, username, password, productKey, applications, machine.id, scripts),
       ubuntu: () => new UnattendedUbuntuManager(username, password, applications, machine.id, scripts),
-      fedora: () => new UnattendedRedHatManager(username, password, applications, machine.id),
-      redhat: () => new UnattendedRedHatManager(username, password, applications, machine.id)
+      fedora: () => new UnattendedRedHatManager(username, password, applications, machine.id, locale, keyboard, timezone),
+      redhat: () => new UnattendedRedHatManager(username, password, applications, machine.id, locale, keyboard, timezone)
     }
 
     const managerCreator = osManagers[machine.os as keyof typeof osManagers]

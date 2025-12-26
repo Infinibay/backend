@@ -226,6 +226,15 @@ export class CreateMachineInputType {
 
     @Field(() => Int, { nullable: true })
       customStorage?: number
+
+    @Field(() => String, { nullable: true })
+      locale?: string
+
+    @Field(() => String, { nullable: true })
+      keyboard?: string
+
+    @Field(() => String, { nullable: true })
+      timezone?: string
 }
 
 @InputType()

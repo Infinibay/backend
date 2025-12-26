@@ -1,10 +1,15 @@
 import { Resolver, Query, Mutation, Arg, Ctx, Authorized, Int } from 'type-graphql'
 import { UserInputError } from 'apollo-server-errors'
-import { DepartmentType, UpdateDepartmentNameInput, UpdateDepartmentNetworkInput, DepartmentNetworkDiagnosticsType, DhcpTrafficCaptureType } from './type'
+import { DepartmentType, UpdateDepartmentNameInput, UpdateDepartmentNetworkInput, CreateDepartmentFirewallInput, UpdateDepartmentFirewallPolicyInput, DepartmentNetworkDiagnosticsType, DhcpTrafficCaptureType } from './type'
 import { InfinibayContext } from '../../../utils/context'
 import { getEventManager } from '../../../services/EventManager'
 import { DepartmentCleanupService } from '../../../services/cleanup/departmentCleanupService'
 import { DepartmentNetworkService } from '../../../services/network/DepartmentNetworkService'
+import { FirewallRuleService } from '../../../services/firewall/FirewallRuleService'
+import { FirewallPolicyService } from '../../../services/firewall/FirewallPolicyService'
+import { FirewallOrchestrationService } from '../../../services/firewall/FirewallOrchestrationService'
+import { FirewallValidationService } from '../../../services/firewall/FirewallValidationService'
+import { InfinizationFirewallService } from '../../../services/firewall/InfinizationFirewallService'
 
 @Resolver(DepartmentType)
 export class DepartmentResolver {
@@ -27,7 +32,10 @@ export class DepartmentResolver {
         gatewayIP: dep.gatewayIP || undefined,
         dnsServers: dep.dnsServers,
         ntpServers: dep.ntpServers,
-        totalMachines: dep.machines.length
+        totalMachines: dep.machines.length,
+        firewallPolicy: dep.firewallPolicy,
+        firewallDefaultConfig: dep.firewallDefaultConfig || undefined,
+        firewallCustomRules: dep.firewallCustomRules || undefined
       })
     }
 
@@ -59,7 +67,10 @@ export class DepartmentResolver {
       gatewayIP: department.gatewayIP || undefined,
       dnsServers: department.dnsServers,
       ntpServers: department.ntpServers,
-      totalMachines: department.machines.length
+      totalMachines: department.machines.length,
+      firewallPolicy: department.firewallPolicy,
+      firewallDefaultConfig: department.firewallDefaultConfig || undefined,
+      firewallCustomRules: department.firewallCustomRules || undefined
     }
   }
 
@@ -67,22 +78,63 @@ export class DepartmentResolver {
   @Authorized('ADMIN')
   async createDepartment (
     @Arg('name') name: string,
+    @Arg('firewallConfig', { nullable: true }) firewallConfig: CreateDepartmentFirewallInput,
     @Ctx() { prisma, user }: InfinibayContext
   ): Promise<DepartmentType> {
     // Auto-assign the next available subnet
     const ipSubnet = await this.getNextAvailableSubnet(prisma)
 
-    // Create department with ipSubnet
+    // Determine firewall policy and validate/default the config
+    const firewallPolicy = firewallConfig?.firewallPolicy ?? 'BLOCK_ALL'
+    const validBlockAllConfigs = ['allow_internet', 'allow_outbound', 'block_all']
+    const validAllowAllConfigs = ['block_ssh', 'block_smb', 'block_databases', 'none']
+
+    // Choose default config based on policy, or validate provided config
+    let firewallDefaultConfig: string
+    if (firewallConfig?.firewallDefaultConfig) {
+      // Validate that the provided config matches the policy
+      if (firewallPolicy === 'BLOCK_ALL' && !validBlockAllConfigs.includes(firewallConfig.firewallDefaultConfig)) {
+        throw new UserInputError(`Invalid default config for BLOCK_ALL policy: ${firewallConfig.firewallDefaultConfig}`)
+      }
+      if (firewallPolicy === 'ALLOW_ALL' && !validAllowAllConfigs.includes(firewallConfig.firewallDefaultConfig)) {
+        throw new UserInputError(`Invalid default config for ALLOW_ALL policy: ${firewallConfig.firewallDefaultConfig}`)
+      }
+      firewallDefaultConfig = firewallConfig.firewallDefaultConfig
+    } else {
+      // Use appropriate default based on policy
+      firewallDefaultConfig = firewallPolicy === 'BLOCK_ALL' ? 'allow_outbound' : 'none'
+    }
+
+    // Create department with ipSubnet and firewall config
     const department = await prisma.department.create({
       data: {
         name,
-        ipSubnet
+        ipSubnet,
+        firewallPolicy,
+        firewallDefaultConfig,
+        firewallCustomRules: firewallConfig?.firewallCustomRules ?? null
       }
     })
 
-    // Configure network infrastructure (bridge, dnsmasq, NAT)
+    // Configure network infrastructure (bridge, dnsmasq, NAT, firewall)
     // If this fails, the department creation should fail
-    const networkService = new DepartmentNetworkService(prisma)
+    const firewallRuleService = new FirewallRuleService(prisma)
+    const firewallPolicyService = new FirewallPolicyService(prisma, firewallRuleService)
+    const firewallValidationService = new FirewallValidationService()
+    const infinizationFirewallService = new InfinizationFirewallService(prisma)
+    const firewallOrchestrationService = new FirewallOrchestrationService(
+      prisma,
+      firewallRuleService,
+      firewallValidationService,
+      infinizationFirewallService
+    )
+
+    const networkService = new DepartmentNetworkService(
+      prisma,
+      firewallRuleService,
+      firewallPolicyService,
+      firewallOrchestrationService
+    )
     try {
       await networkService.configureNetwork(department.id, ipSubnet)
     } catch (networkError) {
@@ -122,7 +174,10 @@ export class DepartmentResolver {
       gatewayIP: updatedDepartment.gatewayIP || undefined,
       dnsServers: updatedDepartment.dnsServers,
       ntpServers: updatedDepartment.ntpServers,
-      totalMachines: 0
+      totalMachines: 0,
+      firewallPolicy: updatedDepartment.firewallPolicy,
+      firewallDefaultConfig: updatedDepartment.firewallDefaultConfig || undefined,
+      firewallCustomRules: updatedDepartment.firewallCustomRules || undefined
     }
   }
 
@@ -172,7 +227,10 @@ export class DepartmentResolver {
       gatewayIP: department.gatewayIP || undefined,
       dnsServers: department.dnsServers,
       ntpServers: department.ntpServers,
-      totalMachines: 0
+      totalMachines: 0,
+      firewallPolicy: department.firewallPolicy,
+      firewallDefaultConfig: department.firewallDefaultConfig || undefined,
+      firewallCustomRules: department.firewallCustomRules || undefined
     }
   }
 
@@ -238,7 +296,10 @@ export class DepartmentResolver {
       gatewayIP: updatedDepartment.gatewayIP || undefined,
       dnsServers: updatedDepartment.dnsServers,
       ntpServers: updatedDepartment.ntpServers,
-      totalMachines: updatedDepartment.machines.length
+      totalMachines: updatedDepartment.machines.length,
+      firewallPolicy: updatedDepartment.firewallPolicy,
+      firewallDefaultConfig: updatedDepartment.firewallDefaultConfig || undefined,
+      firewallCustomRules: updatedDepartment.firewallCustomRules || undefined
     }
   }
 
@@ -266,7 +327,10 @@ export class DepartmentResolver {
       gatewayIP: department.gatewayIP || undefined,
       dnsServers: department.dnsServers,
       ntpServers: department.ntpServers,
-      totalMachines: department.machines.length
+      totalMachines: department.machines.length,
+      firewallPolicy: department.firewallPolicy,
+      firewallDefaultConfig: department.firewallDefaultConfig || undefined,
+      firewallCustomRules: department.firewallCustomRules || undefined
     }
   }
 
@@ -355,7 +419,140 @@ export class DepartmentResolver {
       gatewayIP: updatedDepartment.gatewayIP || undefined,
       dnsServers: updatedDepartment.dnsServers,
       ntpServers: updatedDepartment.ntpServers,
-      totalMachines: updatedDepartment.machines.length
+      totalMachines: updatedDepartment.machines.length,
+      firewallPolicy: updatedDepartment.firewallPolicy,
+      firewallDefaultConfig: updatedDepartment.firewallDefaultConfig || undefined,
+      firewallCustomRules: updatedDepartment.firewallCustomRules || undefined
+    }
+  }
+
+  /**
+   * Updates the firewall policy for a department.
+   * This includes the policy type, default config, and optional custom rules.
+   * If the policy changes and the department has a configured network, the subnet
+   * will be restarted to apply the new firewall rules.
+   */
+  @Mutation(() => DepartmentType)
+  @Authorized('ADMIN')
+  async updateDepartmentFirewallPolicy (
+    @Arg('departmentId', () => String) departmentId: string,
+    @Arg('input') input: UpdateDepartmentFirewallPolicyInput,
+    @Ctx() { prisma, user }: InfinibayContext
+  ): Promise<DepartmentType> {
+    const { firewallPolicy, firewallDefaultConfig, firewallCustomRules } = input
+    const id = departmentId
+
+    // Verify department exists
+    const department = await prisma.department.findUnique({
+      where: { id },
+      include: { machines: true }
+    })
+
+    if (!department) {
+      throw new UserInputError('Department not found')
+    }
+
+    // Validate that the default config is valid for the policy
+    const validBlockAllConfigs = ['allow_internet', 'allow_outbound', 'block_all']
+    const validAllowAllConfigs = ['block_ssh', 'block_smb', 'block_databases', 'none']
+
+    // Determine the effective default config to use
+    let effectiveDefaultConfig: string | undefined = firewallDefaultConfig
+
+    if (firewallDefaultConfig) {
+      // Validate explicitly provided config against the new policy
+      if (firewallPolicy === 'BLOCK_ALL' && !validBlockAllConfigs.includes(firewallDefaultConfig)) {
+        throw new UserInputError(`Invalid default config for BLOCK_ALL policy: ${firewallDefaultConfig}`)
+      }
+      if (firewallPolicy === 'ALLOW_ALL' && !validAllowAllConfigs.includes(firewallDefaultConfig)) {
+        throw new UserInputError(`Invalid default config for ALLOW_ALL policy: ${firewallDefaultConfig}`)
+      }
+    } else if (department.firewallPolicy !== firewallPolicy) {
+      // Policy is changing but no new config provided - check if existing config is compatible
+      const existingConfig = department.firewallDefaultConfig
+      const existingConfigValid = firewallPolicy === 'BLOCK_ALL'
+        ? existingConfig && validBlockAllConfigs.includes(existingConfig)
+        : existingConfig && validAllowAllConfigs.includes(existingConfig)
+
+      if (!existingConfigValid) {
+        // Existing config is incompatible with new policy - use policy's default
+        effectiveDefaultConfig = firewallPolicy === 'BLOCK_ALL' ? 'allow_outbound' : 'none'
+        console.log(`⚠️ Existing config '${existingConfig}' incompatible with ${firewallPolicy}, using default '${effectiveDefaultConfig}'`)
+      }
+    }
+
+    // Check if policy actually changed
+    const policyChanged = department.firewallPolicy !== firewallPolicy ||
+                          department.firewallDefaultConfig !== (effectiveDefaultConfig ?? department.firewallDefaultConfig)
+
+    // Update the firewall policy
+    const updatedDepartment = await prisma.department.update({
+      where: { id },
+      data: {
+        firewallPolicy,
+        ...(effectiveDefaultConfig !== undefined && { firewallDefaultConfig: effectiveDefaultConfig }),
+        ...(firewallCustomRules !== undefined && { firewallCustomRules })
+      },
+      include: { machines: true }
+    })
+
+    // Restart the department subnet if policy changed and network is configured
+    if (policyChanged && department.bridgeName && department.ipSubnet) {
+      console.log(`🔄 Firewall policy changed for department ${id}. Restarting subnet...`)
+
+      try {
+        // Initialize firewall services
+        const firewallRuleService = new FirewallRuleService(prisma)
+        const firewallPolicyService = new FirewallPolicyService(prisma, firewallRuleService)
+        const firewallValidationService = new FirewallValidationService()
+        const infinizationFirewallService = new InfinizationFirewallService(prisma)
+        const firewallOrchestrationService = new FirewallOrchestrationService(
+          prisma,
+          firewallRuleService,
+          firewallValidationService,
+          infinizationFirewallService
+        )
+
+        // Create network service with firewall capabilities
+        const networkService = new DepartmentNetworkService(
+          prisma,
+          firewallRuleService,
+          firewallPolicyService,
+          firewallOrchestrationService
+        )
+
+        await networkService.restartDepartmentSubnet(id)
+        console.log(`✅ Subnet restarted successfully for department ${id}`)
+      } catch (networkError) {
+        console.error(`❌ Failed to restart subnet for department ${id}:`, networkError)
+        // Don't fail the mutation - the policy is saved, network will sync on next restart
+        // The user will see the policy change but may need to manually restart VMs
+      }
+    }
+
+    // Trigger real-time event
+    try {
+      const eventManager = getEventManager()
+      await eventManager.dispatchEvent('departments', 'update', { id: updatedDepartment.id }, user?.id)
+      console.log(`🎯 Triggered real-time event: departments:update for firewall policy change`)
+    } catch (eventError) {
+      console.error('Failed to trigger real-time event:', eventError)
+    }
+
+    return {
+      id: updatedDepartment.id,
+      name: updatedDepartment.name,
+      createdAt: updatedDepartment.createdAt,
+      internetSpeed: updatedDepartment.internetSpeed || undefined,
+      ipSubnet: updatedDepartment.ipSubnet || undefined,
+      bridgeName: updatedDepartment.bridgeName || undefined,
+      gatewayIP: updatedDepartment.gatewayIP || undefined,
+      dnsServers: updatedDepartment.dnsServers,
+      ntpServers: updatedDepartment.ntpServers,
+      totalMachines: updatedDepartment.machines.length,
+      firewallPolicy: updatedDepartment.firewallPolicy,
+      firewallDefaultConfig: updatedDepartment.firewallDefaultConfig || undefined,
+      firewallCustomRules: updatedDepartment.firewallCustomRules || undefined
     }
   }
 

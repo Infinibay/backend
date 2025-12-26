@@ -79,7 +79,10 @@ export class DepartmentEventManager implements ResourceEventManager {
         createdAt: department.createdAt,
         internetSpeed: department.internetSpeed || undefined,
         ipSubnet: department.ipSubnet || undefined,
-        totalMachines: department._count.machines
+        totalMachines: department._count.machines,
+        firewallPolicy: department.firewallPolicy,
+        firewallDefaultConfig: department.firewallDefaultConfig || undefined,
+        firewallCustomRules: department.firewallCustomRules || undefined
       }
     } catch (error) {
       console.error('Error fetching department data:', error)

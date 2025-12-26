@@ -1,4 +1,11 @@
-import { ObjectType, Field, ID, Int, InputType, GraphQLTimestamp } from 'type-graphql'
+import { ObjectType, Field, ID, Int, InputType, GraphQLTimestamp, registerEnumType } from 'type-graphql'
+import { FirewallPolicy } from '@prisma/client'
+import GraphQLJSON from 'graphql-type-json'
+
+registerEnumType(FirewallPolicy, {
+  name: 'FirewallPolicy',
+  description: 'Política de firewall del departamento: ALLOW_ALL (Permitir Todo) o BLOCK_ALL (Bloquear Todo)'
+})
 
 @ObjectType()
 export class DepartmentType {
@@ -31,6 +38,15 @@ export class DepartmentType {
 
   @Field(() => [String], { nullable: true })
     ntpServers?: string[]
+
+  @Field(() => FirewallPolicy)
+    firewallPolicy: FirewallPolicy = 'BLOCK_ALL'
+
+  @Field({ nullable: true })
+    firewallDefaultConfig?: string
+
+  @Field(() => GraphQLJSON, { nullable: true })
+    firewallCustomRules?: any
 }
 
 @InputType()
@@ -52,6 +68,30 @@ export class UpdateDepartmentNetworkInput {
 
   @Field(() => [String], { nullable: true })
     ntpServers?: string[]
+}
+
+@InputType()
+export class CreateDepartmentFirewallInput {
+  @Field(() => FirewallPolicy, { defaultValue: 'BLOCK_ALL' })
+    firewallPolicy: FirewallPolicy = 'BLOCK_ALL'
+
+  @Field({ nullable: true, defaultValue: 'allow_outbound' })
+    firewallDefaultConfig?: string
+
+  @Field(() => GraphQLJSON, { nullable: true })
+    firewallCustomRules?: any
+}
+
+@InputType()
+export class UpdateDepartmentFirewallPolicyInput {
+  @Field(() => FirewallPolicy)
+    firewallPolicy: FirewallPolicy = 'BLOCK_ALL'
+
+  @Field()
+    firewallDefaultConfig: string = 'allow_outbound'
+
+  @Field(() => GraphQLJSON, { nullable: true })
+    firewallCustomRules?: any
 }
 
 // ===========================================================================

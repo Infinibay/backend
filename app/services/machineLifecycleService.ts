@@ -50,6 +50,9 @@ export class MachineLifecycleService {
       diskSizeGB = template.storage
     }
 
+    // Detect locale settings from host or input
+    const localeSettings = this.detectLocaleFromHost(input)
+
     const internalName = uuidv4()
     const machine = await this.prisma.$transaction(async (tx) => {
       let department: Department | null = null
@@ -135,10 +138,18 @@ export class MachineLifecycleService {
     })
 
     setImmediate(() => {
-      this.backgroundCode(machine.id, input.username, input.password, input.productKey, input.pciBus)
-        .catch(err => {
-          console.error(`[backgroundCode] Unhandled error for machine ${machine.id}:`, err)
-        })
+      this.backgroundCode(
+        machine.id,
+        input.username,
+        input.password,
+        input.productKey,
+        input.pciBus,
+        localeSettings.locale,
+        localeSettings.keyboard,
+        localeSettings.timezone
+      ).catch(err => {
+        console.error(`[backgroundCode] Unhandled error for machine ${machine.id}:`, err)
+      })
     })
 
     return machine
@@ -335,7 +346,16 @@ export class MachineLifecycleService {
     return updatedMachine
   }
 
-  private async backgroundCode (id: string, username: string, password: string, productKey: string | undefined, pciBus: string | null) {
+  private async backgroundCode (
+    id: string,
+    username: string,
+    password: string,
+    productKey: string | undefined,
+    pciBus: string | null,
+    locale: string,
+    keyboard: string,
+    timezone: string
+  ) {
     console.log(`[backgroundCode] Starting VM creation for ${id}`)
     try {
       const machine = await this.prisma.machine.findUnique({
@@ -351,7 +371,16 @@ export class MachineLifecycleService {
 
       // Use infinization-based CreateMachineServiceV2
       const createService = new CreateMachineServiceV2(this.prisma)
-      await createService.create(machine, username, password, productKey, pciBus)
+      await createService.create(
+        machine,
+        username,
+        password,
+        productKey,
+        pciBus,
+        locale,
+        keyboard,
+        timezone
+      )
 
       console.log(`[backgroundCode] CreateMachineServiceV2.create() completed for ${machine.name}`)
 
@@ -406,5 +435,61 @@ export class MachineLifecycleService {
       .catch(error => {
         this.debug.log(`Background hardware update for machine ${machineId} failed: ${error.message}`)
       })
+  }
+
+  private detectLocaleFromHost (input: CreateMachineInputType): {
+    locale: string
+    keyboard: string
+    timezone: string
+  } {
+    // Detect locale from environment variables
+    const envLocale = process.env.LC_ALL || process.env.LANG || 'en_US.UTF-8'
+    const locale = input.locale || envLocale
+
+    // Keyboard layout mapping for common locales where country code doesn't match keyboard layout
+    const keyboardMapping: Record<string, string> = {
+      US: 'us',
+      GB: 'uk', // UK uses 'uk' layout, not 'gb'
+      ES: 'es',
+      BR: 'br',
+      FR: 'fr',
+      DE: 'de',
+      IT: 'it',
+      PT: 'pt',
+      MX: 'latam', // Mexico uses Latin American layout
+      AR: 'latam', // Argentina uses Latin American layout
+      CH: 'ch', // Switzerland
+      AT: 'at', // Austria
+      BE: 'be', // Belgium
+      NL: 'us', // Netherlands often uses US layout
+      SE: 'se', // Sweden
+      NO: 'no', // Norway
+      DK: 'dk', // Denmark
+      FI: 'fi', // Finland
+      PL: 'pl', // Poland
+      RU: 'ru', // Russia
+      JP: 'jp', // Japan
+      KR: 'kr', // South Korea
+      CN: 'cn' // China
+    }
+
+    // Derive keyboard layout from locale if not provided
+    let keyboard = input.keyboard
+    if (!keyboard) {
+      const localeMatch = locale.match(/^[a-z]+_([A-Z]+)/)
+      if (localeMatch) {
+        const countryCode = localeMatch[1]
+        keyboard = keyboardMapping[countryCode] || countryCode.toLowerCase()
+      } else {
+        keyboard = 'us'
+      }
+    }
+
+    // Detect timezone from environment variable
+    const timezone = input.timezone || process.env.TZ || 'America/New_York'
+
+    this.debug.log(`Detected locale settings: locale=${locale}, keyboard=${keyboard}, timezone=${timezone}`)
+
+    return { locale, keyboard, timezone }
   }
 }
