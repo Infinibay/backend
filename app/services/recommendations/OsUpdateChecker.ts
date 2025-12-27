@@ -138,6 +138,12 @@ export class OsUpdateChecker extends RecommendationChecker {
   async analyze (context: RecommendationContext): Promise<RecommendationResult[]> {
     const results: RecommendationResult[] = []
 
+    // Skip for non-Windows VMs - this checker is Windows-specific
+    const os = context.machineConfig?.os?.toLowerCase() || ''
+    if (!os.includes('windows')) {
+      return results
+    }
+
     if (!context.latestSnapshot?.windowsUpdateInfo) {
       return results
     }
@@ -153,7 +159,7 @@ export class OsUpdateChecker extends RecommendationChecker {
       }
 
       const flags: string[] = []
-      const details: Record<string, string | number | boolean | (string | undefined)[]> = {}
+      const details: Record<string, unknown> = {}
       const issues: string[] = []
       const actions: string[] = []
       let highestSeverity = 'low'
@@ -190,6 +196,15 @@ export class OsUpdateChecker extends RecommendationChecker {
         details.optionalCount = pendingUpdates.length - criticalUpdates.length - importantUpdates.length
         details.totalSizeMB = Math.round(totalSizeMB)
         details.updateTitles = pendingUpdates.slice(0, 10).map((u: WindowsUpdate) => u.title || u.name || u.kb_number).filter(Boolean)
+
+        // Add full update objects for frontend display
+        details.updates = pendingUpdates.slice(0, 20).map((u: WindowsUpdate) => ({
+          title: u.title || u.name || 'Unknown Update',
+          kb: u.kb_number || null,
+          type: u.severity || (u.is_security_update ? 'Security' : 'Update'),
+          size: u.size_bytes ? `${Math.round(u.size_bytes / (1024 * 1024))} MB` : null,
+          requiresReboot: true
+        }))
 
         issues.push(`${pendingUpdates.length} updates available (${criticalUpdates.length} critical, ${importantUpdates.length} important, ${securityUpdates.length} security)`)
         actions.push('install pending updates')
@@ -261,8 +276,8 @@ export class OsUpdateChecker extends RecommendationChecker {
 
       if (flags.length > 0) {
         const vmName = context.machineConfig?.name || 'VM'
-        const text = `Windows Update issues detected on ${vmName}: ${issues.join(', ')}`
-        const actionText = `Address Windows Update issues on ${vmName}: ${actions.join(', ')} through Settings > Update & Security > Windows Update`
+        const text = `System updates available for ${vmName}: ${issues.join(', ')}`
+        const actionText = `Update ${vmName}: ${actions.join(', ')} through Settings > Update & Security > Windows Update`
 
         results.push({
           type: 'OS_UPDATE_AVAILABLE',

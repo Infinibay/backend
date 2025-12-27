@@ -243,12 +243,13 @@ export class ScriptExecutor {
           // TODO: Add Linux safe shell execution with run_as_user support
           // For now, use unsafe command for Linux/other shells
           // This requires a future 'ExecuteShellScript' safe command with user impersonation
-          debug('Using unsafe command for shell: %s', shellType);
+          debug('Using unsafe command for shell: %s, runAs: %s', shellType, runAs);
           commandResponse = await virtioService.sendUnsafeCommand(
             machineId,
             interpolatedScript,
             {
               shell: shellType as string,
+              runAs: runAs,
             },
             timeout
           );

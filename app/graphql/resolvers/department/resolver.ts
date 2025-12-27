@@ -81,6 +81,41 @@ export class DepartmentResolver {
     @Arg('firewallConfig', { nullable: true }) firewallConfig: CreateDepartmentFirewallInput,
     @Ctx() { prisma, user }: InfinibayContext
   ): Promise<DepartmentType> {
+    // Validate name is not empty
+    const trimmedName = name.trim()
+    if (!trimmedName) {
+      throw new UserInputError('Department name cannot be empty')
+    }
+
+    // Check if department name already exists (case insensitive)
+    const existingByName = await prisma.department.findFirst({
+      where: {
+        name: {
+          equals: trimmedName,
+          mode: 'insensitive'
+        }
+      }
+    })
+
+    if (existingByName) {
+      throw new UserInputError(`A department with the name "${trimmedName}" already exists`)
+    }
+
+    // Check if slug already exists (slug = name.toLowerCase())
+    const slug = trimmedName.toLowerCase()
+    const existingBySlug = await prisma.department.findFirst({
+      where: {
+        name: {
+          equals: slug,
+          mode: 'insensitive'
+        }
+      }
+    })
+
+    if (existingBySlug && existingBySlug.name.toLowerCase() === slug) {
+      throw new UserInputError(`A department with the URL "${slug}" already exists`)
+    }
+
     // Auto-assign the next available subnet
     const ipSubnet = await this.getNextAvailableSubnet(prisma)
 
@@ -108,7 +143,7 @@ export class DepartmentResolver {
     // Create department with ipSubnet and firewall config
     const department = await prisma.department.create({
       data: {
-        name,
+        name: trimmedName,
         ipSubnet,
         firewallPolicy,
         firewallDefaultConfig,
@@ -253,26 +288,46 @@ export class DepartmentResolver {
     }
 
     // Validate name is not empty
-    if (!name || name.trim() === '') {
+    const trimmedName = name.trim()
+    if (!trimmedName) {
       throw new UserInputError('Department name cannot be empty')
     }
 
-    // Check if name is already taken by another department
-    const existingDepartment = await prisma.department.findFirst({
+    // Check if name is already taken by another department (case insensitive)
+    const existingByName = await prisma.department.findFirst({
       where: {
-        name: name.trim(),
+        name: {
+          equals: trimmedName,
+          mode: 'insensitive'
+        },
         id: { not: id } // Exclude the current department
       }
     })
 
-    if (existingDepartment) {
-      throw new UserInputError(`Department name "${name.trim()}" is already taken`)
+    if (existingByName) {
+      throw new UserInputError(`A department with the name "${trimmedName}" already exists`)
+    }
+
+    // Check if slug would conflict with another department
+    const slug = trimmedName.toLowerCase()
+    const existingBySlug = await prisma.department.findFirst({
+      where: {
+        id: { not: id },
+        name: {
+          equals: slug,
+          mode: 'insensitive'
+        }
+      }
+    })
+
+    if (existingBySlug && existingBySlug.name.toLowerCase() === slug) {
+      throw new UserInputError(`A department with the URL "${slug}" already exists`)
     }
 
     // Update the department name
     const updatedDepartment = await prisma.department.update({
       where: { id },
-      data: { name: name.trim() },
+      data: { name: trimmedName },
       include: { machines: true }
     })
 
@@ -311,7 +366,12 @@ export class DepartmentResolver {
     @Ctx() { prisma }: InfinibayContext
   ): Promise<DepartmentType | null> {
     const department = await prisma.department.findFirst({
-      where: { name },
+      where: {
+        name: {
+          equals: name,
+          mode: 'insensitive'
+        }
+      },
       include: { machines: true }
     })
     if (!department) {

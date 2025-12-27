@@ -23,6 +23,11 @@ import { MachineLifecycleService } from '../../../services/machineLifecycleServi
 import { getEventManager } from '../../../services/EventManager'
 import { VMOperationsService } from '../../../services/VMOperationsService'
 import { getSocketService } from '../../../services/SocketService'
+import { VMMoveService } from '../../../services/VMMoveService'
+import { FirewallOrchestrationService } from '../../../services/firewall/FirewallOrchestrationService'
+import { FirewallRuleService } from '../../../services/firewall/FirewallRuleService'
+import { FirewallValidationService } from '../../../services/firewall/FirewallValidationService'
+import { InfinizationFirewallService } from '../../../services/firewall/InfinizationFirewallService'
 import { Machine as PrismaMachine, User as PrismaUser, MachineTemplate as PrismaMachineTemplate, Department as PrismaDepartment, MachineConfiguration, PrismaClient } from '@prisma/client'
 import { SafeUser } from '@utils/context'
 
@@ -610,21 +615,52 @@ export class MachineMutations {
       throw new UserInputError('Department not found')
     }
 
-    // Update machine's department
-    const updatedMachine = await prisma.machine.update({
+    // If same department, just return the machine without changes
+    if (machine.departmentId === departmentId) {
+      const existingMachine = await prisma.machine.findUnique({
+        where: { id },
+        include: { configuration: true, department: true, template: true, user: true }
+      })
+      return transformMachine(existingMachine!, prisma)
+    }
+
+    // Initialize firewall services for VMMoveService
+    const ruleService = new FirewallRuleService(prisma)
+    const validationService = new FirewallValidationService()
+    const infinizationFirewall = new InfinizationFirewallService(prisma)
+    await infinizationFirewall.initialize()
+    const firewallOrchestration = new FirewallOrchestrationService(
+      prisma,
+      ruleService,
+      validationService,
+      infinizationFirewall
+    )
+
+    // Use VMMoveService to handle the move with network/firewall hot-swap
+    const moveService = new VMMoveService(prisma, firewallOrchestration)
+    const result = await moveService.moveVMToDepartment(id, departmentId)
+
+    if (!result.success) {
+      throw new UserInputError(`Failed to move machine: ${result.error}`)
+    }
+
+    // Fetch updated machine
+    const updatedMachine = await prisma.machine.findUnique({
       where: { id },
-      data: {
-        departmentId
-      },
       include: { configuration: true, department: true, template: true, user: true }
     })
+
+    if (!updatedMachine) {
+      throw new UserInputError('Machine not found after move')
+    }
 
     // Trigger real-time event for VM department move
     try {
       const eventManager = getEventManager()
       // Send the full updated machine so clients receive fresh department info without refetch
       await eventManager.dispatchEvent('vms', 'update', updatedMachine, user?.id)
-      console.log(`🎯 Triggered real-time event: vms:update for machine move ${id}`)
+      console.log(`Triggered real-time event: vms:update for machine move ${id} ` +
+        `(hotSwap=${result.hotSwapPerformed}, network=${result.networkChanged}, firewall=${result.firewallChanged})`)
     } catch (eventError) {
       console.error('Failed to trigger real-time event:', eventError)
       // Don't fail the main operation if event triggering fails

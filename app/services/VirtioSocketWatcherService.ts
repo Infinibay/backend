@@ -424,6 +424,7 @@ export interface UnsafeCommandRequest {
   timeout?: number
   workingDir?: string
   envVars?: Record<string, string>
+  runAs?: string
 }
 
 export interface CommandResponse {
@@ -2185,7 +2186,8 @@ export class VirtioSocketWatcherService extends EventEmitter {
         shell: options.shell,
         timeout: Math.floor(timeout / 1000),
         working_dir: options.workingDir,
-        env_vars: options.envVars
+        env_vars: options.envVars,
+        run_as: options.runAs
       }
 
       this.debug.log('debug', `Sending unsafe command ${commandId} to VM ${vmId}: ${rawCommand}`)
