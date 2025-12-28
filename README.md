@@ -10,11 +10,10 @@ This repository contains the backend API server for Infinibay. It provides a Gra
 
 ## Tech Stack
 
-- **Runtime:** Node.js 20+
-- **API:** Apollo Server 3 (GraphQL)
+- **Runtime:** Node.js 18+
+- **API:** Apollo Server 4 (GraphQL)
 - **Database:** PostgreSQL (via Prisma 6)
 - **Virtualization:** Native libvirt bindings (Rust/NAPI-RS via `@infinibay/libvirt-node`)
-- **Caching:** Redis
 - **Real-time:** Socket.io for WebSocket events
 
 ## Installation
@@ -47,9 +46,8 @@ See the [lxd repository](https://github.com/Infinibay/lxd) for LXD-based deploym
 For developers contributing to the backend:
 
 ### Prerequisites
-- Node.js 20+
+- Node.js 18+
 - PostgreSQL 14+
-- Redis
 - libvirt with qemu/kvm
 
 ### Local Setup

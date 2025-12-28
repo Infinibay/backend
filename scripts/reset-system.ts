@@ -19,7 +19,6 @@ dotenv.config()
  * - VM disk images and temporary ISOs
  * - Socket files
  * - Database records (with re-seeding)
- * - Redis cache
  *
  * IMPORTANT: This is a destructive operation. All VM data will be lost.
  */
@@ -418,36 +417,7 @@ class SystemReset {
   }
 
   /**
-   * Phase 7: Clear Redis cache
-   */
-  async clearRedisCache (): Promise<CleanupResult> {
-    this.log('Clearing Redis cache...', 'header')
-
-    if (this.options.dryRun) {
-      this.logVerbose('[DRY-RUN] Would clear Redis cache')
-      return { success: true, message: 'Redis cleared (dry-run)', itemsCleaned: 0 }
-    }
-
-    if (!this.commandExists('redis-cli')) {
-      this.logVerbose('Redis CLI not found, skipping cache clear')
-      return { success: true, message: 'Redis not installed, skipped', itemsCleaned: 0 }
-    }
-
-    const redisHost = process.env.REDIS_HOST || 'localhost'
-    const redisPort = process.env.REDIS_PORT || '6379'
-
-    const result = this.runCommand(`redis-cli -h ${redisHost} -p ${redisPort} FLUSHDB`)
-    if (result.success) {
-      this.log('Redis cache cleared', 'success')
-      return { success: true, message: 'Redis cleared', itemsCleaned: 1 }
-    } else {
-      this.log('Could not connect to Redis (may not be running)', 'warning')
-      return { success: true, message: 'Redis not available', itemsCleaned: 0 }
-    }
-  }
-
-  /**
-   * Phase 8: Recreate directory structure
+   * Phase 7: Recreate directory structure
    */
   async recreateDirectories (): Promise<CleanupResult> {
     this.log('Recreating directory structure...', 'header')
@@ -532,7 +502,6 @@ ${colors.bold}${colors.red}╔════════════════�
     }
     console.log('  - Remove all socket files')
     console.log('  - Reset the database (re-seed with defaults)')
-    console.log('  - Clear Redis cache')
     console.log()
 
     console.log(`${colors.bold}${colors.red}⚠️  WARNING: ALL VM DATA WILL BE PERMANENTLY LOST!${colors.reset}`)
@@ -559,7 +528,6 @@ ${colors.bold}${colors.red}╔════════════════�
       { name: 'Cleanup Storage', fn: () => this.cleanupStorage() },
       { name: 'Cleanup Sockets', fn: () => this.cleanupSockets() },
       { name: 'Reset Database', fn: () => this.resetDatabase() },
-      { name: 'Clear Redis', fn: () => this.clearRedisCache() },
       { name: 'Recreate Directories', fn: () => this.recreateDirectories() }
     ]
 
