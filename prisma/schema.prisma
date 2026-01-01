@@ -8,24 +8,31 @@ datasource db {
 }
 
 model User {
-  id                 String               @id @default(uuid())
-  email              String               @unique
-  password           String
-  deleted            Boolean
-  token              String               @default("null")
-  firstName          String
-  lastName           String
-  createdAt          DateTime             @default(now())
-  role               UserRole             @default(USER)
-  updatedAt          DateTime             @updatedAt
-  VM                 Machine[]
-  maintenanceHistory MaintenanceHistory[]
-  maintenanceTasks   MaintenanceTask[]
-  scripts            Script[]
-  scriptExecutions   ScriptExecution[]
+  id                          String                     @id @default(uuid())
+  email                       String                     @unique
+  password                    String
+  deleted                     Boolean
+  token                       String                     @default("null")
+  firstName                   String
+  lastName                    String
+  createdAt                   DateTime                   @default(now())
+  role                        UserRole                   @default(USER)
+  updatedAt                   DateTime                   @updatedAt
+  VM                          Machine[]
+  maintenanceHistory          MaintenanceHistory[]
+  maintenanceTasks            MaintenanceTask[]
+  scripts                     Script[]
+  scriptExecutions            ScriptExecution[]
   departmentScriptAssignments DepartmentScript[]
-  scriptAuditLogs    ScriptAuditLog[]
-  approvedScripts    Script[]             @relation("ScriptApprovals")
+  scriptAuditLogs             ScriptAuditLog[]
+  approvedScripts             Script[]                   @relation("ScriptApprovals")
+  // Automation system relations
+  createdAutomations          Automation[]               @relation("AutomationCreator")
+  approvedAutomations         Automation[]               @relation("AutomationApprover")
+  createdCustomBlocks         CustomBlock[]
+  createdSystemScripts        SystemScript[]
+  automationVersions          AutomationVersion[]
+  recommendationActions       AutomationRecommendation[]
 }
 
 model Node {
@@ -68,46 +75,50 @@ model ISO {
 }
 
 model Machine {
-  id                 String                @id @default(uuid())
-  name               String
-  internalName       String
-  status             String
-  userId             String?
-  templateId         String?
-  os                 String
-  cpuCores           Int                   @default(0)
-  ramGB              Int                   @default(0)
-  diskSizeGB         Int                   @default(0)
-  gpuPciAddress      String?
-  createdAt          DateTime              @default(now())
-  updatedAt          DateTime              @updatedAt
-  departmentId       String?
-  version            Int                   @default(1)
-  localIP            String?
-  publicIP           String?
-  firewallRuleSetId  String?               @unique
-  applicationUsage   ApplicationUsage[]
-  department         Department?           @relation(fields: [departmentId], references: [id])
-  firewallRuleSet    FirewallRuleSet?      @relation(fields: [firewallRuleSetId], references: [id], onDelete: SetNull)
-  template           MachineTemplate?      @relation(fields: [templateId], references: [id])
-  user               User?                 @relation(fields: [userId], references: [id])
-  applications       MachineApplication[]
-  configuration      MachineConfiguration?
-  maintenanceHistory MaintenanceHistory[]
-  maintenanceTasks   MaintenanceTask[]
-  pendingCommands      PendingCommand[]
-  portUsage            PortUsage[]
-  blockedConnections   BlockedConnection[]
-  processSnapshots     ProcessSnapshot[]
-  systemEvents         SystemEvent[]
-  systemMetrics      SystemMetrics[]
-  healthAlerts       VMHealthAlert[]
-  healthCheckQueue   VMHealthCheckQueue[]
-  healthConfig       VMHealthConfig?
-  healthSnapshots    VMHealthSnapshot[]
-  recommendations    VMRecommendation[]
-  windowsServices    WindowsService[]
-  scriptExecutions   ScriptExecution[]
+  id                        String                     @id @default(uuid())
+  name                      String
+  internalName              String
+  status                    String
+  userId                    String?
+  templateId                String?
+  os                        String
+  cpuCores                  Int                        @default(0)
+  ramGB                     Int                        @default(0)
+  diskSizeGB                Int                        @default(0)
+  gpuPciAddress             String?
+  createdAt                 DateTime                   @default(now())
+  updatedAt                 DateTime                   @updatedAt
+  departmentId              String?
+  version                   Int                        @default(1)
+  localIP                   String?
+  publicIP                  String?
+  firewallRuleSetId         String?                    @unique
+  applicationUsage          ApplicationUsage[]
+  department                Department?                @relation(fields: [departmentId], references: [id])
+  firewallRuleSet           FirewallRuleSet?           @relation(fields: [firewallRuleSetId], references: [id], onDelete: SetNull)
+  template                  MachineTemplate?           @relation(fields: [templateId], references: [id])
+  user                      User?                      @relation(fields: [userId], references: [id])
+  applications              MachineApplication[]
+  configuration             MachineConfiguration?
+  maintenanceHistory        MaintenanceHistory[]
+  maintenanceTasks          MaintenanceTask[]
+  pendingCommands           PendingCommand[]
+  portUsage                 PortUsage[]
+  blockedConnections        BlockedConnection[]
+  processSnapshots          ProcessSnapshot[]
+  systemEvents              SystemEvent[]
+  systemMetrics             SystemMetrics[]
+  healthAlerts              VMHealthAlert[]
+  healthCheckQueue          VMHealthCheckQueue[]
+  healthConfig              VMHealthConfig?
+  healthSnapshots           VMHealthSnapshot[]
+  recommendations           VMRecommendation[]
+  windowsServices           WindowsService[]
+  scriptExecutions          ScriptExecution[]
+  // Automation system relations
+  automationExecutions      AutomationExecution[]
+  automationTargets         AutomationTarget[]
+  automationRecommendations AutomationRecommendation[]
 }
 
 model MachineConfiguration {
@@ -304,31 +315,34 @@ model Notification {
 }
 
 model Department {
-  id                  String             @id @default(uuid())
-  name                String
-  createdAt           DateTime           @default(now())
-  internetSpeed       Int?
-  ipSubnet            String?
-  updatedAt           DateTime           @updatedAt
-  firewallRuleSetId   String?            @unique
-  firewallRuleSet     FirewallRuleSet?   @relation(fields: [firewallRuleSetId], references: [id], onDelete: SetNull)
-  machines            Machine[]
-  scriptAssignments   DepartmentScript[]
+  id                    String             @id @default(uuid())
+  name                  String
+  createdAt             DateTime           @default(now())
+  internetSpeed         Int?
+  ipSubnet              String?
+  updatedAt             DateTime           @updatedAt
+  firewallRuleSetId     String?            @unique
+  firewallRuleSet       FirewallRuleSet?   @relation(fields: [firewallRuleSetId], references: [id], onDelete: SetNull)
+  machines              Machine[]
+  scriptAssignments     DepartmentScript[]
 
   // Network infrastructure fields
-  bridgeName          String?            // Linux bridge name: "infinibr-{shortId}" (max 15 chars)
-  gatewayIP           String?            // Gateway IP on bridge: "10.10.100.1"
-  dhcpRangeStart      String?            // DHCP pool start: "10.10.100.10"
-  dhcpRangeEnd        String?            // DHCP pool end: "10.10.100.254"
-  dnsmasqPid          Int?               // PID of dnsmasq process for this bridge
-  dnsServers          String[]           @default(["8.8.8.8", "8.8.4.4", "1.1.1.1"]) // DNS servers for DHCP clients
-  ntpServers          String[]           @default(["216.239.35.0", "162.159.200.1"]) // NTP servers for DHCP clients (Google: 216.239.35.0, Cloudflare: 162.159.200.1)
-  mtu                 Int?               @default(1500) // MTU for DHCP clients (default: 1500 for standard Ethernet)
+  bridgeName            String?            // Linux bridge name: "infinibr-{shortId}" (max 15 chars)
+  gatewayIP             String?            // Gateway IP on bridge: "10.10.100.1"
+  dhcpRangeStart        String?            // DHCP pool start: "10.10.100.10"
+  dhcpRangeEnd          String?            // DHCP pool end: "10.10.100.254"
+  dnsmasqPid            Int?               // PID of dnsmasq process for this bridge
+  dnsServers            String[]           @default(["8.8.8.8", "8.8.4.4", "1.1.1.1"]) // DNS servers for DHCP clients
+  ntpServers            String[]           @default(["216.239.35.0", "162.159.200.1"]) // NTP servers for DHCP clients (Google: 216.239.35.0, Cloudflare: 162.159.200.1)
+  mtu                   Int?               @default(1500) // MTU for DHCP clients (default: 1500 for standard Ethernet)
 
   // Firewall policy configuration
-  firewallPolicy        FirewallPolicy @default(BLOCK_ALL)
-  firewallDefaultConfig String?        @default("allow_outbound")
+  firewallPolicy        FirewallPolicy     @default(BLOCK_ALL)
+  firewallDefaultConfig String?            @default("allow_outbound")
   firewallCustomRules   Json?
+
+  // Automation system relations
+  automations           Automation[]
 
   @@index([bridgeName])
 }
@@ -633,9 +647,9 @@ model SystemEvent {
 }
 
 model VMHealthSnapshot {
-  id                   String             @id @default(uuid())
+  id                   String                @id @default(uuid())
   machineId            String
-  snapshotDate         DateTime           @default(now())
+  snapshotDate         DateTime              @default(now())
   overallStatus        String
   diskSpaceInfo        Json?
   resourceOptInfo      Json?
@@ -644,14 +658,16 @@ model VMHealthSnapshot {
   applicationInventory Json?
   customCheckResults   Json?
   osType               String?
-  checksCompleted      Int                @default(0)
-  checksFailed         Int                @default(0)
+  checksCompleted      Int                   @default(0)
+  checksFailed         Int                   @default(0)
   executionTimeMs      Int?
   errorSummary         String?
-  createdAt            DateTime           @default(now())
-  updatedAt            DateTime           @updatedAt
-  machine              Machine            @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+  machine              Machine               @relation(fields: [machineId], references: [id], onDelete: Cascade)
   recommendations      VMRecommendation[]
+  // Automation system relations
+  automationExecutions AutomationExecution[]
 
   @@index([machineId, snapshotDate])
   @@index([snapshotDate])
@@ -764,29 +780,32 @@ model AppSettings {
 }
 
 model Script {
-  id                   String             @id @default(uuid())
-  name                 String
-  description          String?
-  fileName             String             @unique
-  category             String?
-  tags                 String[]
-  os                   OS[]
-  shell                ShellType
+  id                        String                     @id @default(uuid())
+  name                      String
+  description               String?
+  fileName                  String                     @unique
+  category                  String?
+  tags                      String[]
+  os                        OS[]
+  shell                     ShellType
   // Approval workflow fields (optional/future enhancement)
   // Default status is APPROVED for backward compatibility
   // To enable: check status === APPROVED before execution in ScriptExecutor
   // Add mutations to approve/reject and set approvedById/approvedAt
-  status               ScriptStatus       @default(APPROVED)
-  approvedById         String?
-  approvedBy           User?              @relation("ScriptApprovals", fields: [approvedById], references: [id])
-  approvedAt           DateTime?
-  createdAt            DateTime           @default(now())
-  updatedAt            DateTime           @updatedAt
-  createdById          String?
-  createdBy            User?              @relation(fields: [createdById], references: [id])
-  executions           ScriptExecution[]
-  departmentAssignments DepartmentScript[]
-  auditLogs            ScriptAuditLog[]
+  status                    ScriptStatus               @default(APPROVED)
+  approvedById              String?
+  approvedBy                User?                      @relation("ScriptApprovals", fields: [approvedById], references: [id])
+  approvedAt                DateTime?
+  createdAt                 DateTime                   @default(now())
+  updatedAt                 DateTime                   @updatedAt
+  createdById               String?
+  createdBy                 User?                      @relation(fields: [createdById], references: [id])
+  executions                ScriptExecution[]
+  departmentAssignments     DepartmentScript[]
+  auditLogs                 ScriptAuditLog[]
+  // Automation system relations
+  automationScripts         AutomationScript[]
+  automationRecommendations AutomationRecommendation[]
 
   @@index([fileName])
   @@index([category])
@@ -809,31 +828,34 @@ model DepartmentScript {
 }
 
 model ScriptExecution {
-  id             String          @id @default(uuid())
-  scriptId       String
-  machineId      String
-  executionType  ExecutionType
-  triggeredById  String?
-  inputValues    Json
-  status         ExecutionStatus
-  startedAt      DateTime?
-  completedAt    DateTime?
-  exitCode       Int?
-  stdout         String?         @db.Text
-  stderr         String?         @db.Text
-  error          String?         @db.Text
-  executedAs     String?
+  id                       String                    @id @default(uuid())
+  scriptId                 String
+  machineId                String
+  executionType            ExecutionType
+  triggeredById            String?
+  inputValues              Json
+  status                   ExecutionStatus
+  startedAt                DateTime?
+  completedAt              DateTime?
+  exitCode                 Int?
+  stdout                   String?                   @db.Text
+  stderr                   String?                   @db.Text
+  error                    String?                   @db.Text
+  executedAs               String?
   // Scheduling fields for immediate, scheduled, and repeating executions
-  scheduledFor          DateTime?       // When script should execute (NULL or past = immediate)
-  repeatIntervalMinutes Int?            // Interval in minutes for repeating scripts (NULL = one-time)
-  lastExecutedAt        DateTime?       // Timestamp of last execution attempt
-  executionCount        Int             @default(0)  // Number of times executed
-  maxExecutions         Int?            // Maximum executions for repeating scripts (NULL = unlimited)
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
-  script         Script          @relation(fields: [scriptId], references: [id], onDelete: Cascade)
-  machine        Machine         @relation(fields: [machineId], references: [id], onDelete: Cascade)
-  triggeredBy    User?           @relation(fields: [triggeredById], references: [id])
+  scheduledFor             DateTime?                 // When script should execute (NULL or past = immediate)
+  repeatIntervalMinutes    Int?                      // Interval in minutes for repeating scripts (NULL = one-time)
+  lastExecutedAt           DateTime?                 // Timestamp of last execution attempt
+  executionCount           Int                       @default(0)  // Number of times executed
+  maxExecutions            Int?                      // Maximum executions for repeating scripts (NULL = unlimited)
+  createdAt                DateTime                  @default(now())
+  updatedAt                DateTime                  @updatedAt
+  script                   Script                    @relation(fields: [scriptId], references: [id], onDelete: Cascade)
+  machine                  Machine                   @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  triggeredBy              User?                     @relation(fields: [triggeredById], references: [id])
+  // Automation system relations
+  automationExecution      AutomationExecution?
+  automationRecommendation AutomationRecommendation?
 
   @@index([machineId, createdAt])
   @@index([scriptId, createdAt])
@@ -858,6 +880,243 @@ model ScriptAuditLog {
   @@index([scriptId, createdAt])
   @@index([userId, createdAt])
   @@index([action, createdAt])
+}
+
+// ============================================================================
+// AUTOMATION SYSTEM MODELS
+// ============================================================================
+
+// Scripts que SOLO pueden usarse en automations, no asignables a departamentos/VMs
+model SystemScript {
+  id                        String                     @id @default(uuid())
+  name                      String                     @unique
+  displayName               String
+  description               String?
+  codeWindows               String?                    @db.Text
+  codeLinux                 String?                    @db.Text
+  category                  String                     @default("General")
+  requiredHealthFields      String[]
+  isEnabled                 Boolean                    @default(true)
+  createdById               String?
+  createdAt                 DateTime                   @default(now())
+  updatedAt                 DateTime                   @updatedAt
+  createdBy                 User?                      @relation(fields: [createdById], references: [id])
+  automationScripts         AutomationScript[]
+  automationRecommendations AutomationRecommendation[]
+
+  @@index([category])
+  @@index([isEnabled])
+}
+
+// Bloques personalizados para Blockly
+model CustomBlock {
+  id              String          @id @default(uuid())
+  name            String          @unique
+  displayName     String
+  description     String?
+  category        String
+  blockDefinition Json
+  generatorCode   String          @db.Text
+  inputs          Json            @default("[]")
+  outputType      BlockOutputType
+  isBuiltIn       Boolean         @default(false)
+  isEnabled       Boolean         @default(true)
+  supportedOS     OS[]            @default([WINDOWS, LINUX])
+  createdById     String?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  createdBy       User?           @relation(fields: [createdById], references: [id])
+
+  @@index([category])
+  @@index([isEnabled])
+  @@index([isBuiltIn])
+}
+
+// Regla de automatización visual (Blockly workspace)
+model Automation {
+  id                       String                     @id @default(uuid())
+  name                     String
+  description              String?
+  // Blockly state
+  blocklyWorkspace         Json
+  generatedCode            String                     @db.Text
+  compiledCode             String?                    @db.Text
+  isCompiled               Boolean                    @default(false)
+  compilationError         String?
+  // Targeting
+  targetScope              AutomationScope            @default(ALL_VMS)
+  departmentId             String?
+  // Workflow status
+  status                   AutomationStatus           @default(DRAFT)
+  isEnabled                Boolean                    @default(false)
+  // Execution settings
+  priority                 Int                        @default(100)
+  cooldownMinutes          Int                        @default(60)
+  // Metadata - Tipo de recomendación que genera
+  recommendationType       RecommendationType?
+  recommendationText       String?
+  recommendationActionText String?
+  // Audit
+  createdById              String?
+  approvedById             String?
+  approvedAt               DateTime?
+  createdAt                DateTime                   @default(now())
+  updatedAt                DateTime                   @updatedAt
+
+  createdBy                User?                      @relation("AutomationCreator", fields: [createdById], references: [id])
+  approvedBy               User?                      @relation("AutomationApprover", fields: [approvedById], references: [id])
+  department               Department?                @relation(fields: [departmentId], references: [id])
+  automationScripts        AutomationScript[]
+  executions               AutomationExecution[]
+  targets                  AutomationTarget[]
+  versions                 AutomationVersion[]
+  recommendations          AutomationRecommendation[]
+
+  @@index([status, isEnabled])
+  @@index([departmentId])
+  @@index([createdById])
+  @@index([recommendationType])
+}
+
+// VMs específicas para cuando targetScope = SPECIFIC_VMS o EXCLUDE_VMS
+model AutomationTarget {
+  id           String     @id @default(uuid())
+  automationId String
+  machineId    String
+  createdAt    DateTime   @default(now())
+
+  automation   Automation @relation(fields: [automationId], references: [id], onDelete: Cascade)
+  machine      Machine    @relation(fields: [machineId], references: [id], onDelete: Cascade)
+
+  @@unique([automationId, machineId])
+  @@index([automationId])
+  @@index([machineId])
+}
+
+// Vincula automations con scripts de remediación
+model AutomationScript {
+  id             String        @id @default(uuid())
+  automationId   String
+  scriptId       String?
+  systemScriptId String?
+  os             OS
+  executionOrder Int           @default(0)
+  isEnabled      Boolean       @default(true)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  automation     Automation    @relation(fields: [automationId], references: [id], onDelete: Cascade)
+  script         Script?       @relation(fields: [scriptId], references: [id], onDelete: Cascade)
+  systemScript   SystemScript? @relation(fields: [systemScriptId], references: [id], onDelete: Cascade)
+
+  @@unique([automationId, scriptId, os])
+  @@unique([automationId, systemScriptId, os])
+  @@index([automationId])
+  @@index([scriptId])
+  @@index([systemScriptId])
+}
+
+// Historial de ejecuciones de automations
+model AutomationExecution {
+  id                String                       @id @default(uuid())
+  automationId      String
+  machineId         String
+  snapshotId        String?
+  triggerReason     String
+  evaluationResult  Boolean
+  status            AutomationExecutionStatus    @default(PENDING)
+  contextSnapshot   Json?
+  scriptExecutionId String?                      @unique
+  triggeredAt       DateTime                     @default(now())
+  evaluatedAt       DateTime?
+  completedAt       DateTime?
+  evaluationTimeMs  Int?
+  error             String?
+  errorStack        String?                      @db.Text
+
+  automation        Automation                   @relation(fields: [automationId], references: [id], onDelete: Cascade)
+  machine           Machine                      @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  snapshot          VMHealthSnapshot?            @relation(fields: [snapshotId], references: [id])
+  scriptExecution   ScriptExecution?             @relation(fields: [scriptExecutionId], references: [id])
+  recommendations   AutomationRecommendation[]
+
+  @@index([automationId, triggeredAt])
+  @@index([machineId, triggeredAt])
+  @@index([status])
+  @@index([snapshotId])
+}
+
+// Historial de cambios de automations
+model AutomationVersion {
+  id               String     @id @default(uuid())
+  automationId     String
+  version          Int
+  blocklyWorkspace Json
+  generatedCode    String     @db.Text
+  changedById      String?
+  changeReason     String?
+  createdAt        DateTime   @default(now())
+
+  automation       Automation @relation(fields: [automationId], references: [id], onDelete: Cascade)
+  changedBy        User?      @relation(fields: [changedById], references: [id])
+
+  @@unique([automationId, version])
+  @@index([automationId])
+}
+
+// Recomendaciones generadas por automations esperando acción del usuario
+model AutomationRecommendation {
+  id                String                         @id @default(uuid())
+  automationId      String
+  machineId         String
+  executionId       String?
+  status            AutomationRecommendationStatus @default(PENDING)
+  title             String
+  description       String?
+  severity          RecommendationSeverity         @default(MEDIUM)
+  userAction        RecommendationUserAction?
+  actionTakenById   String?
+  actionTakenAt     DateTime?
+  snoozeUntil       DateTime?
+  dismissReason     String?
+  scriptId          String?
+  systemScriptId    String?
+  scriptExecutionId String?                        @unique
+  autoResolvedAt    DateTime?
+  autoResolveReason String?
+  createdAt         DateTime                       @default(now())
+  updatedAt         DateTime                       @updatedAt
+  expiresAt         DateTime?
+
+  automation        Automation                     @relation(fields: [automationId], references: [id], onDelete: Cascade)
+  machine           Machine                        @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  execution         AutomationExecution?           @relation(fields: [executionId], references: [id])
+  actionTakenBy     User?                          @relation(fields: [actionTakenById], references: [id])
+  script            Script?                        @relation(fields: [scriptId], references: [id])
+  systemScript      SystemScript?                  @relation(fields: [systemScriptId], references: [id])
+  scriptExecution   ScriptExecution?               @relation(fields: [scriptExecutionId], references: [id])
+
+  @@unique([automationId, machineId, status])
+  @@index([machineId, status])
+  @@index([status])
+  @@index([createdAt])
+}
+
+// Templates predefinidos para automations
+model AutomationTemplate {
+  id                 String              @id @default(uuid())
+  name               String              @unique
+  description        String?
+  category           String
+  recommendationType RecommendationType?
+  blocklyWorkspace   Json
+  isEnabled          Boolean             @default(true)
+  usageCount         Int                 @default(0)
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+
+  @@index([category])
+  @@index([isEnabled])
 }
 
 model FirewallRuleSet {
@@ -1046,4 +1305,63 @@ enum ScriptAuditAction {
 enum FirewallPolicy {
   ALLOW_ALL // Lista blanca - Permitir todo por defecto
   BLOCK_ALL // Lista negra - Bloquear todo por defecto
+}
+
+// ============================================================================
+// AUTOMATION SYSTEM ENUMS
+// ============================================================================
+
+enum AutomationScope {
+  ALL_VMS        // Aplica a todas las VMs
+  DEPARTMENT     // Aplica a VMs de un departamento
+  SPECIFIC_VMS   // Aplica a VMs específicas (inclusión)
+  EXCLUDE_VMS    // Aplica a todas EXCEPTO las VMs especificadas (exclusión)
+}
+
+enum AutomationStatus {
+  DRAFT              // En edición
+  PENDING_APPROVAL   // Esperando aprobación
+  APPROVED           // Aprobada, lista para habilitar
+  REJECTED           // Rechazada
+  ARCHIVED           // Archivada (soft delete)
+}
+
+enum AutomationExecutionStatus {
+  PENDING            // En cola
+  EVALUATING         // Ejecutando código de evaluación
+  TRIGGERED          // Condición cumplida, preparando acción
+  EXECUTING_SCRIPT   // Ejecutando script de remediación
+  COMPLETED          // Finalizada
+  FAILED             // Error durante ejecución
+  SKIPPED            // Saltada (cooldown, deshabilitada, etc.)
+}
+
+enum BlockOutputType {
+  BOOLEAN   // Para condiciones
+  NUMBER    // Para valores numéricos
+  STRING    // Para texto
+  ARRAY     // Para listas
+  VOID      // Para acciones sin retorno
+}
+
+enum AutomationRecommendationStatus {
+  PENDING           // Esperando acción del usuario
+  EXECUTED          // Usuario ejecutó el script
+  DISMISSED         // Usuario descartó
+  SNOOZED           // Usuario pospuso
+  AUTO_RESOLVED     // La condición se resolvió sola
+  EXPIRED           // Expiró sin acción
+}
+
+enum RecommendationSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum RecommendationUserAction {
+  EXECUTE           // Ejecutar script de remediación
+  DISMISS           // Descartar permanentemente
+  SNOOZE            // Posponer por X tiempo
 }

@@ -7,6 +7,8 @@ import bcrypt from 'bcrypt'
 import dotenv from 'dotenv'
 import createApplications from './seeds/applications'
 import createScripts from './seeds/scripts'
+import createAutomationTemplates from './seeds/automationTemplates'
+import createDefaultAutomations from './seeds/defaultAutomations'
 
 import installCallbacks from '../app/utils/modelsCallbacks'
 
@@ -146,6 +148,8 @@ async function main () {
       }
       await createApplications(transactionPrisma)
       await createScripts(transactionPrisma)
+      await createAutomationTemplates(transactionPrisma)
+      await createDefaultAutomations(transactionPrisma)
 
       // Create default app settings
       await createDefaultAppSettings(transactionPrisma)
