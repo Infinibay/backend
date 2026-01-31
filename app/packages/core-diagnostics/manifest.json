@@ -1,0 +1,16 @@
+{
+  "name": "core-diagnostics",
+  "version": "1.0.0",
+  "displayName": "Core Diagnostics",
+  "description": "Built-in diagnostic checkers for disk space and resource monitoring",
+  "author": "Infinibay",
+  "license": "open-source",
+  "checkers": [
+    {
+      "name": "disk-space",
+      "file": "checkers/disk-space.js",
+      "type": "DISK_SPACE_LOW",
+      "dataNeeds": ["diskMetrics"]
+    }
+  ]
+}

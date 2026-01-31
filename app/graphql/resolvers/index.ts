@@ -24,7 +24,7 @@ import '../types/RecommendationTypes'
 import { AppSettingsResolver } from './AppSettingsResolver'
 import { FirewallResolver } from './firewall/resolver'
 import { ScriptResolver } from './scripts/resolver'
-import { AutomationResolver } from './automation/resolver'
+import { PluginPackageResolver } from './plugin-package'
 
 const resolvers: NonEmptyArray<Function> = [
   UserResolver,
@@ -52,7 +52,7 @@ const resolvers: NonEmptyArray<Function> = [
   AppSettingsResolver,
   FirewallResolver,
   ScriptResolver,
-  AutomationResolver
+  PluginPackageResolver
 ]
 
 export default resolvers as NonEmptyArray<Function>

@@ -26,13 +26,6 @@ model User {
   departmentScriptAssignments DepartmentScript[]
   scriptAuditLogs             ScriptAuditLog[]
   approvedScripts             Script[]                   @relation("ScriptApprovals")
-  // Automation system relations
-  createdAutomations          Automation[]               @relation("AutomationCreator")
-  approvedAutomations         Automation[]               @relation("AutomationApprover")
-  createdCustomBlocks         CustomBlock[]
-  createdSystemScripts        SystemScript[]
-  automationVersions          AutomationVersion[]
-  recommendationActions       AutomationRecommendation[]
 }
 
 model Node {
@@ -115,10 +108,6 @@ model Machine {
   recommendations           VMRecommendation[]
   windowsServices           WindowsService[]
   scriptExecutions          ScriptExecution[]
-  // Automation system relations
-  automationExecutions      AutomationExecution[]
-  automationTargets         AutomationTarget[]
-  automationRecommendations AutomationRecommendation[]
 }
 
 model MachineConfiguration {
@@ -340,9 +329,6 @@ model Department {
   firewallPolicy        FirewallPolicy     @default(BLOCK_ALL)
   firewallDefaultConfig String?            @default("allow_outbound")
   firewallCustomRules   Json?
-
-  // Automation system relations
-  automations           Automation[]
 
   @@index([bridgeName])
 }
@@ -666,8 +652,6 @@ model VMHealthSnapshot {
   updatedAt            DateTime              @updatedAt
   machine              Machine               @relation(fields: [machineId], references: [id], onDelete: Cascade)
   recommendations      VMRecommendation[]
-  // Automation system relations
-  automationExecutions AutomationExecution[]
 
   @@index([machineId, snapshotDate])
   @@index([snapshotDate])
@@ -763,8 +747,19 @@ model VMRecommendation {
   machine    Machine            @relation(fields: [machineId], references: [id], onDelete: Cascade)
   snapshot   VMHealthSnapshot?  @relation(fields: [snapshotId], references: [id])
 
+  // Package system: tracks which package/checker generated this recommendation
+  packageId   String?
+  checkerName String?
+
+  // Dismissal and snooze tracking
+  dismissedAt  DateTime? // When the recommendation was dismissed
+  snoozedUntil DateTime? // When the snooze period ends (null = not snoozed)
+
   @@index([machineId, createdAt])
   @@index([machineId, snapshotId])
+  @@index([packageId])
+  @@index([dismissedAt])
+  @@index([snoozedUntil])
 }
 
 model AppSettings {
@@ -803,9 +798,6 @@ model Script {
   executions                ScriptExecution[]
   departmentAssignments     DepartmentScript[]
   auditLogs                 ScriptAuditLog[]
-  // Automation system relations
-  automationScripts         AutomationScript[]
-  automationRecommendations AutomationRecommendation[]
 
   @@index([fileName])
   @@index([category])
@@ -853,9 +845,6 @@ model ScriptExecution {
   script                   Script                    @relation(fields: [scriptId], references: [id], onDelete: Cascade)
   machine                  Machine                   @relation(fields: [machineId], references: [id], onDelete: Cascade)
   triggeredBy              User?                     @relation(fields: [triggeredById], references: [id])
-  // Automation system relations
-  automationExecution      AutomationExecution?
-  automationRecommendation AutomationRecommendation?
 
   @@index([machineId, createdAt])
   @@index([scriptId, createdAt])
@@ -883,239 +872,79 @@ model ScriptAuditLog {
 }
 
 // ============================================================================
-// AUTOMATION SYSTEM MODELS
+// PACKAGE SYSTEM MODELS
 // ============================================================================
 
-// Scripts que SOLO pueden usarse en automations, no asignables a departamentos/VMs
-model SystemScript {
-  id                        String                     @id @default(uuid())
-  name                      String                     @unique
-  displayName               String
-  description               String?
-  codeWindows               String?                    @db.Text
-  codeLinux                 String?                    @db.Text
-  category                  String                     @default("General")
-  requiredHealthFields      String[]
-  isEnabled                 Boolean                    @default(true)
-  createdById               String?
-  createdAt                 DateTime                   @default(now())
-  updatedAt                 DateTime                   @updatedAt
-  createdBy                 User?                      @relation(fields: [createdById], references: [id])
-  automationScripts         AutomationScript[]
-  automationRecommendations AutomationRecommendation[]
+// Extensible packages/plugins that provide additional functionality
+model Package {
+  id          String   @id @default(uuid())
+  name        String   @unique // "ai-diagnostics"
+  version     String
+  displayName String
+  description String?
+  author      String
+  license     String // "open-source" | "commercial"
 
-  @@index([category])
+  isBuiltin Boolean @default(false)
+  isEnabled Boolean @default(true)
+
+  capabilities Json // { network: [...], storage: true }
+  settings     Json @default("{}") // Values configured by admin
+  manifestHash String // SHA256 of manifest to detect changes
+
+  installedAt DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  checkers       PackageChecker[]
+  packageLicense PackageLicense?
+
   @@index([isEnabled])
+  @@index([license])
 }
 
-// Bloques personalizados para Blockly
-model CustomBlock {
-  id              String          @id @default(uuid())
-  name            String          @unique
-  displayName     String
-  description     String?
-  category        String
-  blockDefinition Json
-  generatorCode   String          @db.Text
-  inputs          Json            @default("[]")
-  outputType      BlockOutputType
-  isBuiltIn       Boolean         @default(false)
-  isEnabled       Boolean         @default(true)
-  supportedOS     OS[]            @default([WINDOWS, LINUX])
-  createdById     String?
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt
-  createdBy       User?           @relation(fields: [createdById], references: [id])
+// License validation for commercial packages
+model PackageLicense {
+  id        String  @id @default(uuid())
+  packageId String  @unique
+  package   Package @relation(fields: [packageId], references: [id], onDelete: Cascade)
 
-  @@index([category])
-  @@index([isEnabled])
-  @@index([isBuiltIn])
-}
+  // License identification
+  licenseKey  String @unique
+  licenseType String // "trial" | "production" | "development"
 
-// Regla de automatización visual (Blockly workspace)
-model Automation {
-  id                       String                     @id @default(uuid())
-  name                     String
-  description              String?
-  // Blockly state
-  blocklyWorkspace         Json
-  generatedCode            String                     @db.Text
-  compiledCode             String?                    @db.Text
-  isCompiled               Boolean                    @default(false)
-  compilationError         String?
-  // Targeting
-  targetScope              AutomationScope            @default(ALL_VMS)
-  departmentId             String?
-  // Workflow status
-  status                   AutomationStatus           @default(DRAFT)
-  isEnabled                Boolean                    @default(false)
-  // Execution settings
-  priority                 Int                        @default(100)
-  cooldownMinutes          Int                        @default(60)
-  // Metadata - Tipo de recomendación que genera
-  recommendationType       RecommendationType?
-  recommendationText       String?
-  recommendationActionText String?
+  // Validation constraints
+  issuedAt    DateTime
+  expiresAt   DateTime?
+  maxMachines Int? // null = unlimited
+
+  // State tracking
+  isValid          Boolean  @default(true)
+  validationStatus String   @default("valid") // "valid" | "expired" | "invalid" | "revoked" | "grace_period"
+  lastValidatedAt  DateTime?
+  gracePeriodEnds  DateTime? // Allow operation if license server unreachable
+
   // Audit
-  createdById              String?
-  approvedById             String?
-  approvedAt               DateTime?
-  createdAt                DateTime                   @default(now())
-  updatedAt                DateTime                   @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  createdBy                User?                      @relation("AutomationCreator", fields: [createdById], references: [id])
-  approvedBy               User?                      @relation("AutomationApprover", fields: [approvedById], references: [id])
-  department               Department?                @relation(fields: [departmentId], references: [id])
-  automationScripts        AutomationScript[]
-  executions               AutomationExecution[]
-  targets                  AutomationTarget[]
-  versions                 AutomationVersion[]
-  recommendations          AutomationRecommendation[]
-
-  @@index([status, isEnabled])
-  @@index([departmentId])
-  @@index([createdById])
-  @@index([recommendationType])
+  @@index([isValid])
+  @@index([licenseType])
+  @@index([validationStatus])
 }
 
-// VMs específicas para cuando targetScope = SPECIFIC_VMS o EXCLUDE_VMS
-model AutomationTarget {
-  id           String     @id @default(uuid())
-  automationId String
-  machineId    String
-  createdAt    DateTime   @default(now())
+// Individual checkers within a package that can generate recommendations
+model PackageChecker {
+  id        String  @id @default(uuid())
+  packageId String
+  package   Package @relation(fields: [packageId], references: [id], onDelete: Cascade)
 
-  automation   Automation @relation(fields: [automationId], references: [id], onDelete: Cascade)
-  machine      Machine    @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  name      String // "predictive-disk-failure"
+  type      String // RecommendationType that it generates
+  dataNeeds String[] // ["diskMetrics", "historicalMetrics"]
+  isEnabled Boolean @default(true)
 
-  @@unique([automationId, machineId])
-  @@index([automationId])
-  @@index([machineId])
-}
-
-// Vincula automations con scripts de remediación
-model AutomationScript {
-  id             String        @id @default(uuid())
-  automationId   String
-  scriptId       String?
-  systemScriptId String?
-  os             OS
-  executionOrder Int           @default(0)
-  isEnabled      Boolean       @default(true)
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
-
-  automation     Automation    @relation(fields: [automationId], references: [id], onDelete: Cascade)
-  script         Script?       @relation(fields: [scriptId], references: [id], onDelete: Cascade)
-  systemScript   SystemScript? @relation(fields: [systemScriptId], references: [id], onDelete: Cascade)
-
-  @@unique([automationId, scriptId, os])
-  @@unique([automationId, systemScriptId, os])
-  @@index([automationId])
-  @@index([scriptId])
-  @@index([systemScriptId])
-}
-
-// Historial de ejecuciones de automations
-model AutomationExecution {
-  id                String                       @id @default(uuid())
-  automationId      String
-  machineId         String
-  snapshotId        String?
-  triggerReason     String
-  evaluationResult  Boolean
-  status            AutomationExecutionStatus    @default(PENDING)
-  contextSnapshot   Json?
-  scriptExecutionId String?                      @unique
-  triggeredAt       DateTime                     @default(now())
-  evaluatedAt       DateTime?
-  completedAt       DateTime?
-  evaluationTimeMs  Int?
-  error             String?
-  errorStack        String?                      @db.Text
-
-  automation        Automation                   @relation(fields: [automationId], references: [id], onDelete: Cascade)
-  machine           Machine                      @relation(fields: [machineId], references: [id], onDelete: Cascade)
-  snapshot          VMHealthSnapshot?            @relation(fields: [snapshotId], references: [id])
-  scriptExecution   ScriptExecution?             @relation(fields: [scriptExecutionId], references: [id])
-  recommendations   AutomationRecommendation[]
-
-  @@index([automationId, triggeredAt])
-  @@index([machineId, triggeredAt])
-  @@index([status])
-  @@index([snapshotId])
-}
-
-// Historial de cambios de automations
-model AutomationVersion {
-  id               String     @id @default(uuid())
-  automationId     String
-  version          Int
-  blocklyWorkspace Json
-  generatedCode    String     @db.Text
-  changedById      String?
-  changeReason     String?
-  createdAt        DateTime   @default(now())
-
-  automation       Automation @relation(fields: [automationId], references: [id], onDelete: Cascade)
-  changedBy        User?      @relation(fields: [changedById], references: [id])
-
-  @@unique([automationId, version])
-  @@index([automationId])
-}
-
-// Recomendaciones generadas por automations esperando acción del usuario
-model AutomationRecommendation {
-  id                String                         @id @default(uuid())
-  automationId      String
-  machineId         String
-  executionId       String?
-  status            AutomationRecommendationStatus @default(PENDING)
-  title             String
-  description       String?
-  severity          RecommendationSeverity         @default(MEDIUM)
-  userAction        RecommendationUserAction?
-  actionTakenById   String?
-  actionTakenAt     DateTime?
-  snoozeUntil       DateTime?
-  dismissReason     String?
-  scriptId          String?
-  systemScriptId    String?
-  scriptExecutionId String?                        @unique
-  autoResolvedAt    DateTime?
-  autoResolveReason String?
-  createdAt         DateTime                       @default(now())
-  updatedAt         DateTime                       @updatedAt
-  expiresAt         DateTime?
-
-  automation        Automation                     @relation(fields: [automationId], references: [id], onDelete: Cascade)
-  machine           Machine                        @relation(fields: [machineId], references: [id], onDelete: Cascade)
-  execution         AutomationExecution?           @relation(fields: [executionId], references: [id])
-  actionTakenBy     User?                          @relation(fields: [actionTakenById], references: [id])
-  script            Script?                        @relation(fields: [scriptId], references: [id])
-  systemScript      SystemScript?                  @relation(fields: [systemScriptId], references: [id])
-  scriptExecution   ScriptExecution?               @relation(fields: [scriptExecutionId], references: [id])
-
-  @@unique([automationId, machineId, status])
-  @@index([machineId, status])
-  @@index([status])
-  @@index([createdAt])
-}
-
-// Templates predefinidos para automations
-model AutomationTemplate {
-  id                 String              @id @default(uuid())
-  name               String              @unique
-  description        String?
-  category           String
-  recommendationType RecommendationType?
-  blocklyWorkspace   Json
-  isEnabled          Boolean             @default(true)
-  usageCount         Int                 @default(0)
-  createdAt          DateTime            @default(now())
-  updatedAt          DateTime            @updatedAt
-
-  @@index([category])
+  @@unique([packageId, name])
+  @@index([packageId])
   @@index([isEnabled])
 }
 
@@ -1305,63 +1134,4 @@ enum ScriptAuditAction {
 enum FirewallPolicy {
   ALLOW_ALL // Lista blanca - Permitir todo por defecto
   BLOCK_ALL // Lista negra - Bloquear todo por defecto
-}
-
-// ============================================================================
-// AUTOMATION SYSTEM ENUMS
-// ============================================================================
-
-enum AutomationScope {
-  ALL_VMS        // Aplica a todas las VMs
-  DEPARTMENT     // Aplica a VMs de un departamento
-  SPECIFIC_VMS   // Aplica a VMs específicas (inclusión)
-  EXCLUDE_VMS    // Aplica a todas EXCEPTO las VMs especificadas (exclusión)
-}
-
-enum AutomationStatus {
-  DRAFT              // En edición
-  PENDING_APPROVAL   // Esperando aprobación
-  APPROVED           // Aprobada, lista para habilitar
-  REJECTED           // Rechazada
-  ARCHIVED           // Archivada (soft delete)
-}
-
-enum AutomationExecutionStatus {
-  PENDING            // En cola
-  EVALUATING         // Ejecutando código de evaluación
-  TRIGGERED          // Condición cumplida, preparando acción
-  EXECUTING_SCRIPT   // Ejecutando script de remediación
-  COMPLETED          // Finalizada
-  FAILED             // Error durante ejecución
-  SKIPPED            // Saltada (cooldown, deshabilitada, etc.)
-}
-
-enum BlockOutputType {
-  BOOLEAN   // Para condiciones
-  NUMBER    // Para valores numéricos
-  STRING    // Para texto
-  ARRAY     // Para listas
-  VOID      // Para acciones sin retorno
-}
-
-enum AutomationRecommendationStatus {
-  PENDING           // Esperando acción del usuario
-  EXECUTED          // Usuario ejecutó el script
-  DISMISSED         // Usuario descartó
-  SNOOZED           // Usuario pospuso
-  AUTO_RESOLVED     // La condición se resolvió sola
-  EXPIRED           // Expiró sin acción
-}
-
-enum RecommendationSeverity {
-  LOW
-  MEDIUM
-  HIGH
-  CRITICAL
-}
-
-enum RecommendationUserAction {
-  EXECUTE           // Ejecutar script de remediación
-  DISMISS           // Descartar permanentemente
-  SNOOZE            // Posponer por X tiempo
 }

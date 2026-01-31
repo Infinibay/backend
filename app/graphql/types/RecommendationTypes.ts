@@ -128,6 +128,72 @@ export class RecommendationResponse {
 }
 
 /**
+ * Global recommendation with machine info for cross-VM views
+ */
+@ObjectType({ description: 'Recommendation with machine info for global views like notification dropdowns' })
+export class GlobalRecommendationType {
+  @Field(() => ID, { description: 'Unique identifier for the recommendation' })
+    id!: string
+
+  @Field(() => ID, { description: 'ID of the VM this recommendation applies to' })
+    machineId!: string
+
+  @Field(() => String, { description: 'Name of the VM for display purposes' })
+    machineName!: string
+
+  @Field(() => RecommendationType, { description: 'Category of recommendation' })
+    type!: RecommendationType
+
+  @Field(() => String, { description: 'Human-readable description of the issue' })
+    text!: string
+
+  @Field(() => String, { description: 'Suggested action to address the recommendation' })
+    actionText!: string
+
+  @Field(() => String, { description: 'Severity level: CRITICAL, HIGH, MEDIUM, LOW' })
+    severity!: string
+
+  @Field(() => GraphQLJSONObject, { nullable: true, description: 'Additional structured data' })
+    data?: Record<string, any> | null
+
+  @Field(() => Date, { description: 'Timestamp when this recommendation was generated' })
+    createdAt!: Date
+}
+
+/**
+ * Result type for dismiss operations
+ */
+@ObjectType({ description: 'Result of dismissing recommendation(s)' })
+export class DismissRecommendationResult {
+  @Field(() => Boolean, { description: 'Whether the operation succeeded' })
+    success!: boolean
+
+  @Field(() => Number, { nullable: true, description: 'Number of recommendations dismissed' })
+    dismissedCount?: number
+
+  @Field(() => String, { nullable: true, description: 'Error message if operation failed' })
+    error?: string
+}
+
+/**
+ * Result type for snooze operations
+ */
+@ObjectType({ description: 'Result of snoozing recommendation(s)' })
+export class SnoozeRecommendationResult {
+  @Field(() => Boolean, { description: 'Whether the operation succeeded' })
+    success!: boolean
+
+  @Field(() => Number, { nullable: true, description: 'Number of recommendations snoozed' })
+    snoozedCount?: number
+
+  @Field(() => Date, { nullable: true, description: 'When the snooze period ends' })
+    snoozedUntil?: Date
+
+  @Field(() => String, { nullable: true, description: 'Error message if operation failed' })
+    error?: string
+}
+
+/**
  * Aggregated recommendation statistics for a VM
  */
 @ObjectType()

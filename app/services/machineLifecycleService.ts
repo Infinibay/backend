@@ -10,6 +10,20 @@ import { getEventManager } from '../services/EventManager'
 import { CreateMachineServiceV2 } from './CreateMachineServiceV2'
 import { CreateMachineInputType, UpdateMachineHardwareInput, UpdateMachineNameInput, UpdateMachineUserInput, SuccessType, FirstBootScriptInputType } from '../graphql/resolvers/machine/type'
 
+/**
+ * Normalize PCI address to standard format.
+ * Fixes legacy bug where addresses were generated with 8-digit domain (00000000:)
+ * instead of the standard 4-digit domain (0000:).
+ */
+function normalizePciAddress (address: string | null): string | null {
+  if (!address) return null
+  // Fix 8-digit domain to 4-digit domain
+  if (address.startsWith('00000000:')) {
+    return '0000:' + address.slice(9)
+  }
+  return address
+}
+
 export class MachineLifecycleService {
   private prisma: PrismaClient
   private user: SafeUser | null
@@ -80,7 +94,7 @@ export class MachineLifecycleService {
           cpuCores,
           ramGB,
           diskSizeGB,
-          gpuPciAddress: input.pciBus,
+          gpuPciAddress: normalizePciAddress(input.pciBus),
           configuration: {
             create: {
               graphicPort: 0,
@@ -376,7 +390,7 @@ export class MachineLifecycleService {
         username,
         password,
         productKey,
-        pciBus,
+        normalizePciAddress(pciBus),
         locale,
         keyboard,
         timezone

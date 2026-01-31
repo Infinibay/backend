@@ -98,13 +98,13 @@ export class SystemResolver {
 
       // Filter out GPUs in use
       const available = controllers.filter(ctrl => {
-        const bus = ctrl.pciBus || `00000000:${ctrl.busAddress}` || ''
+        const bus = ctrl.pciBus || `0000:${ctrl.busAddress}` || ''
         return !usedBuses.includes(bus)
       })
 
       // Map to GraphQL type
       return available.map(controller => ({
-        pciBus: controller.pciBus || `00000000:${controller.busAddress}` || '',
+        pciBus: controller.pciBus || `0000:${controller.busAddress}` || '',
         vendor: controller.vendor,
         model: controller.name || controller.model,
         memory: (controller.vram || 0) / 1024 // Convert MB to GB

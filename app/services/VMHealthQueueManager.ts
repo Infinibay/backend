@@ -4,8 +4,6 @@ import { getVirtioSocketWatcherService, CommandResponse, SafeCommandType } from 
 import { MachineStatus } from '../graphql/resolvers/machine/type'
 import { v4 as uuidv4 } from 'uuid'
 import { VMRecommendationService } from './VMRecommendationService'
-import { AutomationTriggerService } from './automations/AutomationTriggerService'
-import { ScriptScheduler } from './scripts/ScriptScheduler'
 
 // Configuration constants for health monitoring intervals
 export const OVERALL_SCAN_INTERVAL_MINUTES = 60 // 1 hour
@@ -949,25 +947,6 @@ export class VMHealthQueueManager {
         console.log(`🏁 All health checks complete for VM ${machineId} snapshot ${snapshotId}, triggering recommendation generation [expectedChecks source: ${expectedChecksSource}]`)
         await this.generateRecommendationsForSnapshot(snapshotId, machineId)
 
-        // Process automations for this completed health snapshot
-        try {
-          const updatedSnapshot = await this.prisma.vMHealthSnapshot.findUnique({
-            where: { id: snapshotId }
-          })
-          if (updatedSnapshot) {
-            const scriptScheduler = new ScriptScheduler(this.prisma)
-            const automationTrigger = AutomationTriggerService.getInstance(
-              this.prisma,
-              scriptScheduler,
-              this.eventManager
-            )
-            await automationTrigger.onHealthSnapshotCreated(updatedSnapshot)
-            console.log(`⚡ Processed automations for snapshot ${snapshotId}`)
-          }
-        } catch (automationError) {
-          console.error(`⚠️ Failed to process automations for snapshot ${snapshotId}:`, automationError)
-          // Don't fail the health check workflow if automation processing fails
-        }
       }
     } catch (error) {
       console.error(`❌ Failed to update snapshot overall status for ${snapshotId}:`, error)

@@ -20,6 +20,8 @@ import {
   DefenderDisabledChecker,
   DefenderThreatChecker
 } from './recommendations'
+import { getPackageManager, PackageManager } from './packages/PackageManager'
+import { PackageCheckerResult } from './packages/types'
 
 export type RecommendationOperationResult = {
   success: true;
@@ -66,6 +68,8 @@ export class VMRecommendationService {
   private config: ServiceConfiguration
   private maintenanceTimer: NodeJS.Timeout | null = null
   private isDisposed: boolean = false
+  private packageManager: PackageManager | null = null
+  private packageManagerInitialized: boolean = false
 
   constructor (private prisma: PrismaClient) {
     this.config = this.loadConfiguration()
@@ -74,10 +78,35 @@ export class VMRecommendationService {
     this.validateConfiguration()
     this.startMaintenanceTimer()
 
+    // Initialize package manager asynchronously
+    this.initializePackageManager()
+
     // Run initial maintenance on startup
     setTimeout(() => {
       this.performMaintenance()
     }, 1000) // Small delay to ensure service is fully initialized
+  }
+
+  /**
+   * Initialize the PackageManager asynchronously
+   * This loads all package checkers for use in recommendations
+   */
+  private async initializePackageManager (): Promise<void> {
+    try {
+      console.log('📦 Initializing PackageManager for recommendations...')
+      this.packageManager = getPackageManager(this.prisma)
+      await this.packageManager.loadAll()
+      this.packageManagerInitialized = true
+
+      const statuses = this.packageManager.getPackageStatuses()
+      const totalCheckers = statuses.reduce((sum, pkg) => sum + pkg.checkerCount, 0)
+      console.log(`✅ PackageManager initialized: ${statuses.length} packages, ${totalCheckers} checkers`)
+    } catch (error) {
+      console.error('❌ Failed to initialize PackageManager:', error)
+      // Non-fatal: service continues without package checkers
+      this.packageManager = null
+      this.packageManagerInitialized = false
+    }
   }
 
   private registerDefaultCheckers (): void {
@@ -255,6 +284,22 @@ export class VMRecommendationService {
             this.handleCheckerError(checker.getName(), error as Error)
             console.error(`❌ Checker ${checker.getName()} failed after ${checkerTime}ms:`, error)
           }
+        }
+      }
+
+      // Run package checkers (in addition to built-in checkers)
+      if (this.packageManager && this.packageManagerInitialized) {
+        const packageCheckerStartTime = Date.now()
+        try {
+          const packageResults = await this.runPackageCheckers(context, checkerPerformance)
+          results.push(...packageResults)
+
+          const packageCheckerTime = Date.now() - packageCheckerStartTime
+          checkerPerformance.set('PackageCheckers', packageCheckerTime)
+          console.debug(`📦 Package checkers completed in ${packageCheckerTime}ms, produced ${packageResults.length} recommendations`)
+        } catch (error) {
+          console.error('❌ Package checkers failed:', error)
+          // Non-fatal: continue with built-in checker results
         }
       }
 
@@ -1095,6 +1140,108 @@ export class VMRecommendationService {
   }
 
   /**
+   * Run all package checkers and convert results to RecommendationResult format
+   * Package checkers run in addition to built-in checkers
+   */
+  private async runPackageCheckers (
+    context: RecommendationContext,
+    checkerPerformance: Map<string, number>
+  ): Promise<RecommendationResult[]> {
+    if (!this.packageManager) {
+      return []
+    }
+
+    // Build package checker context from recommendation context
+    const packageContext = {
+      vmId: context.vmId,
+      diskMetrics: context.latestSnapshot?.diskSpaceInfo,
+      historicalMetrics: context.historicalMetrics,
+      processSnapshots: context.recentProcessSnapshots,
+      portUsage: context.portUsage,
+      machineConfig: context.machineConfig
+    }
+
+    // Run all package checkers
+    const packageResults = await this.packageManager.runAllCheckers(packageContext)
+
+    // Convert PackageCheckerResult to RecommendationResult
+    const results: RecommendationResult[] = []
+    for (const result of packageResults) {
+      // Map package result type to RecommendationType
+      // Package checkers use string types that should match Prisma enum values
+      const mappedType = this.mapPackageTypeToRecommendationType(result.type)
+
+      if (mappedType) {
+        results.push({
+          type: mappedType,
+          text: result.text,
+          actionText: result.actionText,
+          data: {
+            ...result.data,
+            _severity: result.severity,
+            _remediation: result.remediation,
+            _source: 'package'
+          }
+        })
+      } else {
+        console.warn(`⚠️ Unknown package recommendation type: ${result.type}, skipping`)
+      }
+    }
+
+    return results
+  }
+
+  /**
+   * Map package checker type string to Prisma RecommendationType enum
+   * Returns null if the type is not recognized
+   */
+  private mapPackageTypeToRecommendationType (type: string): RecommendationType | null {
+    // Map common package types to Prisma enum values
+    // Available enum values: DISK_SPACE_LOW, HIGH_CPU_APP, HIGH_RAM_APP, PORT_BLOCKED,
+    // OVER_PROVISIONED, UNDER_PROVISIONED, OS_UPDATE_AVAILABLE, APP_UPDATE_AVAILABLE,
+    // DEFENDER_DISABLED, DEFENDER_THREAT, OTHER
+    const typeMapping: Record<string, RecommendationType> = {
+      // Disk related
+      'DISK_SPACE_LOW': RecommendationType.DISK_SPACE_LOW,
+      'DISK_SPACE_CRITICAL': RecommendationType.DISK_SPACE_LOW, // Map critical to low (same category)
+      // Resource related - map to closest equivalent
+      'RESOURCE_OPTIMIZATION': RecommendationType.OTHER,
+      'OVER_PROVISIONED': RecommendationType.OVER_PROVISIONED,
+      'UNDER_PROVISIONED': RecommendationType.UNDER_PROVISIONED,
+      // CPU/RAM related
+      'HIGH_CPU_APP': RecommendationType.HIGH_CPU_APP,
+      'HIGH_RAM_APP': RecommendationType.HIGH_RAM_APP,
+      // Security related
+      'SECURITY_RISK': RecommendationType.OTHER, // No specific security risk type
+      'DEFENDER_DISABLED': RecommendationType.DEFENDER_DISABLED,
+      'DEFENDER_THREAT': RecommendationType.DEFENDER_THREAT,
+      // Updates
+      'OS_UPDATE_AVAILABLE': RecommendationType.OS_UPDATE_AVAILABLE,
+      'APP_UPDATE_AVAILABLE': RecommendationType.APP_UPDATE_AVAILABLE,
+      // Network
+      'PORT_BLOCKED': RecommendationType.PORT_BLOCKED,
+      'PORT_CONFLICT': RecommendationType.PORT_BLOCKED, // Map conflict to blocked
+      // Performance
+      'DISK_IO_BOTTLENECK': RecommendationType.OTHER, // No specific disk IO type
+      // Generic
+      'OTHER': RecommendationType.OTHER
+    }
+
+    // Try direct mapping first
+    if (type in typeMapping) {
+      return typeMapping[type]
+    }
+
+    // Try as-is if it's already a valid RecommendationType
+    if (Object.values(RecommendationType).includes(type as RecommendationType)) {
+      return type as RecommendationType
+    }
+
+    // Default to OTHER for unknown types (rather than null) to avoid losing recommendations
+    return RecommendationType.OTHER
+  }
+
+  /**
    * Dispose method for complete service lifecycle cleanup
    * This should be called when the service is being shut down
    */
@@ -1116,6 +1263,11 @@ export class VMRecommendationService {
       // Clear checkers array
       this.checkers = []
       console.log('✓ Checkers cleared')
+
+      // Clear package manager reference
+      this.packageManager = null
+      this.packageManagerInitialized = false
+      console.log('✓ Package manager cleared')
 
       // Reset performance metrics
       this.performanceMetrics = this.initializePerformanceMetrics()
