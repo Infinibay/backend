@@ -1,3 +1,0 @@
-[submodule "lib/libvirt-node"]
-	path = lib/libvirt-node
-	url = https://github.com/Infinibay/libvirt-node.git
