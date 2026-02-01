@@ -88,22 +88,26 @@ export class DiskSpaceChecker extends RecommendationChecker {
       return results
     }
 
+    const os = context.machineConfig?.os?.toLowerCase() || ''
+
     try {
-      for (const [drive, usage] of Object.entries(diskUsage)) {
+      for (const [driveKey, usage] of Object.entries(diskUsage)) {
         if (usage && typeof usage === 'object') {
           const usageData = usage as DiskUsageData
-          const used = usageData.used || usageData.usedGB || 0
-          const total = usageData.total || usageData.totalGB || 1
+          const used = usageData.used || usageData.usedGB || usageData.used_gb || 0
+          const total = usageData.total || usageData.totalGB || usageData.total_gb || 1
           const percentage = total > 0 ? Math.round((used / total) * 100) : 0
           const available = total - used
+          const label = this.getDriveLabel(driveKey)
+          const actionText = this.getActionText(driveKey, os)
 
           if (percentage >= criticalThreshold) {
             results.push({
               type: 'DISK_SPACE_LOW',
-              text: `Drive ${drive} is critically low on space (${used}GB of ${total}GB used, ${percentage}%)`,
-              actionText: 'Immediately free up space by deleting unnecessary files, moving data to another drive, or expanding the disk',
+              text: `${label} is critically low on space (${used}GB of ${total}GB used, ${percentage}%)`,
+              actionText: `Immediately ${actionText.charAt(0).toLowerCase()}${actionText.slice(1)}`,
               data: {
-                drive,
+                drive: driveKey,
                 usedGB: used,
                 totalGB: total,
                 availableGB: available,
@@ -114,10 +118,10 @@ export class DiskSpaceChecker extends RecommendationChecker {
           } else if (percentage >= warningThreshold) {
             results.push({
               type: 'DISK_SPACE_LOW',
-              text: `Drive ${drive} is running low on space (${used}GB of ${total}GB used, ${percentage}%)`,
-              actionText: 'Free up space by deleting unnecessary files, moving data to another drive, or expanding the disk',
+              text: `${label} is running low on space (${used}GB of ${total}GB used, ${percentage}%)`,
+              actionText,
               data: {
-                drive,
+                drive: driveKey,
                 usedGB: used,
                 totalGB: total,
                 availableGB: available,
@@ -133,5 +137,29 @@ export class DiskSpaceChecker extends RecommendationChecker {
     }
 
     return results
+  }
+
+  private isLinuxMountPoint (key: string): boolean {
+    return key.startsWith('/')
+  }
+
+  private getDriveLabel (key: string): string {
+    if (this.isLinuxMountPoint(key)) {
+      return `Mount point ${key}`
+    }
+    return `Drive ${key}`
+  }
+
+  private getActionText (driveKey: string, os: string): string {
+    if (this.isLinuxMountPoint(driveKey) || os.includes('linux') || os.includes('ubuntu') || os.includes('fedora') || os.includes('debian') || os.includes('centos') || os.includes('rhel')) {
+      if (os.includes('ubuntu') || os.includes('debian')) {
+        return "Free up space by running 'sudo apt clean', removing old kernels, clearing /tmp, or expanding the partition"
+      }
+      if (os.includes('fedora') || os.includes('centos') || os.includes('rhel')) {
+        return "Free up space by running 'sudo dnf clean all', removing old kernels, clearing /tmp, or expanding the partition"
+      }
+      return 'Free up space by clearing package cache, removing old kernels, clearing /tmp, or expanding the partition'
+    }
+    return 'Free up space by running Disk Cleanup (cleanmgr), deleting temporary files, or expanding the disk'
   }
 }

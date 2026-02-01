@@ -131,16 +131,14 @@ export class PortConflictChecker extends RecommendationChecker {
       // Create unique key: port + protocol (+ optionally ruleId for more granularity)
       const port = rec.data?.port
       const protocol = rec.data?.protocol
-      const ruleId = rec.data?.ruleId
 
       if (!port || !protocol) {
-        // If missing port/protocol, keep the recommendation as-is
         const fallbackKey = `unknown-${Math.random()}`
         dedupeMap.set(fallbackKey, rec)
         continue
       }
 
-      const key = ruleId ? `${port}-${protocol}-${ruleId}` : `${port}-${protocol}`
+      const key = `${port}-${protocol}`
 
       const existing = dedupeMap.get(key)
 
@@ -363,10 +361,7 @@ export class PortConflictChecker extends RecommendationChecker {
     const ruleProtocol = rule.protocol?.toLowerCase() || 'all'
     const portProtocol = port.protocol?.toLowerCase() || ''
 
-    const protocolMatches = ruleProtocol === 'all' ||
-                           ruleProtocol === portProtocol ||
-                           (ruleProtocol === 'tcp' && portProtocol === 'tcp') ||
-                           (ruleProtocol === 'udp' && portProtocol === 'udp')
+    const protocolMatches = ruleProtocol === 'all' || ruleProtocol === portProtocol
 
     if (!protocolMatches) {
       return false

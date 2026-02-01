@@ -372,8 +372,8 @@ export class UnderProvisionedChecker extends RecommendationChecker {
         for (const [drive, usage] of Object.entries(diskUsage)) {
           if (usage && typeof usage === 'object') {
             const usageData = usage as DiskUsageData
-            const used = usageData.used || usageData.usedGB || 0
-            const total = usageData.total || usageData.totalGB || 1
+            const used = usageData.used || usageData.usedGB || usageData.used_gb || 0
+            const total = usageData.total || usageData.totalGB || usageData.total_gb || 1
             const percentage = total > 0 ? (used / total) * 100 : 0
 
             if (percentage > 90) {

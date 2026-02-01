@@ -367,6 +367,7 @@ export interface SafeCommandType {
   'CheckWindowsUpdates' | 'GetUpdateHistory' | 'GetPendingUpdates' |
   'CheckWindowsDefender' | 'GetDefenderStatus' | 'RunDefenderQuickScan' | 'GetThreatHistory' |
   'GetInstalledApplicationsWMI' | 'CheckApplicationUpdates' | 'GetApplicationDetails' |
+  'CheckLinuxUpdates' |
   'CheckDiskSpace' | 'CheckResourceOptimization' | 'RunHealthCheck' | 'RunAllHealthChecks' |
   'DiskCleanup' | 'AutoFixWindowsUpdates' | 'AutoFixDefender' | 'AutoOptimizeDisk' |
   // Maintenance commands

@@ -121,24 +121,26 @@ export class OverProvisionedChecker extends RecommendationChecker {
       const daysAnalyzed = (maxTimestamp - minTimestamp) / (1000 * 60 * 60 * 24)
 
       if (avgCpuUsage < 30 && daysAnalyzed >= 5) {
-        const recommendedCores = Math.max(1, Math.ceil(allocatedCores * (peakCpuUsage / 100) * 1.2))
+        const recommendedCores = Math.min(allocatedCores, Math.max(1, Math.ceil(allocatedCores * (peakCpuUsage / 100) * 1.2)))
         const potentialSavings = allocatedCores - recommendedCores
 
-        results.push({
-          type: 'OVER_PROVISIONED',
-          text: `VM has ${allocatedCores} CPU cores allocated but only uses ${Math.round(avgCpuUsage)}% on average`,
-          actionText: `Consider reducing allocated CPU cores to ${recommendedCores} to optimize resource utilization`,
-          data: {
-            resourceType: 'CPU',
-            allocatedCores,
-            avgUsagePercent: Math.round(avgCpuUsage),
-            peakUsagePercent: Math.round(peakCpuUsage),
-            recommendedCores,
-            potentialSavings,
-            efficiency: Math.round((avgCpuUsage / 100) * 100),
-            daysAnalyzed: Math.round(daysAnalyzed * 10) / 10
-          }
-        })
+        if (potentialSavings > 0) {
+          results.push({
+            type: 'OVER_PROVISIONED',
+            text: `VM has ${allocatedCores} CPU cores allocated but only uses ${Math.round(avgCpuUsage)}% on average`,
+            actionText: `Consider reducing allocated CPU cores to ${recommendedCores} to optimize resource utilization`,
+            data: {
+              resourceType: 'CPU',
+              allocatedCores,
+              avgUsagePercent: Math.round(avgCpuUsage),
+              peakUsagePercent: Math.round(peakCpuUsage),
+              recommendedCores,
+              potentialSavings,
+              efficiency: Math.round(avgCpuUsage),
+              daysAnalyzed: Math.round(daysAnalyzed * 10) / 10
+            }
+          })
+        }
       }
     }
 
@@ -153,24 +155,26 @@ export class OverProvisionedChecker extends RecommendationChecker {
       const daysAnalyzed = (maxTimestamp - minTimestamp) / (1000 * 60 * 60 * 24)
 
       if (avgRamUsage < 40 && daysAnalyzed >= 5) {
-        const recommendedRamGB = Math.max(1, Math.ceil(allocatedRamGB * (peakRamUsage / 100) * 1.3))
+        const recommendedRamGB = Math.min(allocatedRamGB, Math.max(1, Math.ceil(allocatedRamGB * (peakRamUsage / 100) * 1.3)))
         const potentialSavings = allocatedRamGB - recommendedRamGB
 
-        results.push({
-          type: 'OVER_PROVISIONED',
-          text: `VM has ${allocatedRamGB}GB RAM allocated but only uses ${Math.round(avgRamUsage)}% on average`,
-          actionText: `Consider reducing allocated RAM to ${recommendedRamGB}GB to optimize resource utilization`,
-          data: {
-            resourceType: 'RAM',
-            allocatedGB: allocatedRamGB,
-            avgUsagePercent: Math.round(avgRamUsage),
-            peakUsagePercent: Math.round(peakRamUsage),
-            recommendedGB: recommendedRamGB,
-            potentialSavingsGB: potentialSavings,
-            efficiency: Math.round((avgRamUsage / 100) * 100),
-            daysAnalyzed: Math.round(daysAnalyzed * 10) / 10
-          }
-        })
+        if (potentialSavings > 0) {
+          results.push({
+            type: 'OVER_PROVISIONED',
+            text: `VM has ${allocatedRamGB}GB RAM allocated but only uses ${Math.round(avgRamUsage)}% on average`,
+            actionText: `Consider reducing allocated RAM to ${recommendedRamGB}GB to optimize resource utilization`,
+            data: {
+              resourceType: 'RAM',
+              allocatedGB: allocatedRamGB,
+              avgUsagePercent: Math.round(avgRamUsage),
+              peakUsagePercent: Math.round(peakRamUsage),
+              recommendedGB: recommendedRamGB,
+              potentialSavingsGB: potentialSavings,
+              efficiency: Math.round(avgRamUsage),
+              daysAnalyzed: Math.round(daysAnalyzed * 10) / 10
+            }
+          })
+        }
       }
     }
 
@@ -183,8 +187,8 @@ export class OverProvisionedChecker extends RecommendationChecker {
         for (const [, usage] of Object.entries(diskUsage)) {
           if (usage && typeof usage === 'object') {
             const usageData = usage as DiskUsageData
-            const used = usageData.used || usageData.usedGB
-            const total = usageData.total || usageData.totalGB
+            const used = usageData.used ?? usageData.usedGB ?? usageData.used_gb
+            const total = usageData.total ?? usageData.totalGB ?? usageData.total_gb
             if (typeof used === 'number' && typeof total === 'number') {
               totalUsedGB += used
               totalAvailableGB += total

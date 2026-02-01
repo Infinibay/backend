@@ -1,4 +1,4 @@
-import { RecommendationChecker, RecommendationContext, RecommendationResult, ThreatTimelineInfo } from './BaseRecommendationChecker'
+import { RecommendationChecker, RecommendationContext, RecommendationResult } from './BaseRecommendationChecker'
 
 interface ThreatInfo {
   name?: string
@@ -77,7 +77,7 @@ export class DefenderThreatChecker extends RecommendationChecker {
       }
 
       const threatsDetected = defenderData.threats_detected || 0
-      const recentThreats = defenderData.recent_threats || []
+      const recentThreats = Array.isArray(defenderData.recent_threats) ? defenderData.recent_threats : []
 
       if (threatsDetected > 0 || (Array.isArray(recentThreats) && recentThreats.length > 0)) {
         const activeThreats = recentThreats.filter((threat: ThreatInfo) =>
@@ -166,10 +166,10 @@ export class DefenderThreatChecker extends RecommendationChecker {
                 recentActivity: true,
                 mediumSeverityCount: mediumSeverityThreats.length,
                 threatTimeline: recentThreats.slice(0, 5).map((t: ThreatInfo) => ({
-                  name: t.name || t.threat_name,
-                  detectionTime: t.detection_time || t.detected_at,
-                  status: t.status,
-                  severity: t.severity_id
+                  name: t.name || t.threat_name || null,
+                  detectionTime: t.detection_time || t.detected_at || null,
+                  status: t.status || null,
+                  severity: t.severity_id ?? null
                 })),
                 severity: 'medium'
               }

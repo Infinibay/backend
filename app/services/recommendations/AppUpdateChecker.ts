@@ -95,12 +95,21 @@ export class AppUpdateChecker extends RecommendationChecker {
         ...regularUpdates.slice(0, 2)
       ].slice(0, 5)
 
+      const os = context.machineConfig?.os?.toLowerCase() || ''
+      const defaultUpdateSource = os.includes('ubuntu') || os.includes('debian')
+        ? 'apt'
+        : os.includes('fedora') || os.includes('centos') || os.includes('rhel')
+          ? 'dnf'
+          : os.includes('windows')
+            ? 'Windows Update'
+            : 'package manager'
+
       for (const app of topApps) {
         const isSecurityUpdate = app.is_security_update === true
         const appName = app.name || app.app_name || 'Unknown Application'
         const currentVersion = app.version || app.current_version || 'Unknown'
         const availableVersion = app.update_available || app.new_version || 'Unknown'
-        const updateSource = app.update_source || 'Windows Update'
+        const updateSource = app.update_source || defaultUpdateSource
         const vmName = context.machineConfig?.name || 'VM'
 
         const text = isSecurityUpdate

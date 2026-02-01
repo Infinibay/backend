@@ -640,6 +640,7 @@ model VMHealthSnapshot {
   diskSpaceInfo        Json?
   resourceOptInfo      Json?
   windowsUpdateInfo    Json?
+  linuxUpdateInfo      Json?
   defenderStatus       Json?
   applicationInventory Json?
   customCheckResults   Json?
@@ -1019,6 +1020,7 @@ enum HealthCheckType {
   RESOURCE_OPTIMIZATION
   WINDOWS_UPDATES
   WINDOWS_DEFENDER
+  LINUX_UPDATES
   APPLICATION_INVENTORY
   APPLICATION_UPDATES
   SECURITY_CHECK

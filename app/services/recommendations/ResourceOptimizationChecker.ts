@@ -11,6 +11,58 @@ interface ResourceOptInfo {
   [key: string]: unknown
 }
 
+const KNOWN_APPS: Record<string, string> = {
+  // Browsers
+  chrome: 'Google Chrome',
+  chromium: 'Google Chrome',
+  'chromium-browser': 'Google Chrome',
+  'google-chrome': 'Google Chrome',
+  'google-chrome-stable': 'Google Chrome',
+  firefox: 'Mozilla Firefox',
+  'firefox-esr': 'Mozilla Firefox',
+  msedge: 'Microsoft Edge',
+  'microsoft-edge': 'Microsoft Edge',
+  'microsoft-edge-stable': 'Microsoft Edge',
+  safari: 'Safari',
+  // Office
+  winword: 'Microsoft Word',
+  excel: 'Microsoft Excel',
+  powerpnt: 'Microsoft PowerPoint',
+  outlook: 'Microsoft Outlook',
+  // IDEs
+  code: 'Visual Studio Code',
+  'code-oss': 'Visual Studio Code',
+  devenv: 'Visual Studio',
+  idea: 'IntelliJ IDEA',
+  idea64: 'IntelliJ IDEA',
+  phpstorm: 'PhpStorm',
+  webstorm: 'WebStorm',
+  pycharm: 'PyCharm',
+  'android-studio': 'Android Studio',
+  studio64: 'Android Studio'
+}
+
+const CORE_SYSTEM_PROCESSES = new Set([
+  // Windows
+  'system', 'idle', 'csrss', 'lsass', 'smss',
+  'wininit', 'services', 'svchost', 'dwm',
+  'conhost', 'winlogon', 'fontdrvhost',
+  'spoolsv', 'searchindexer', 'runtimebroker',
+  'taskhostw', 'audiodg', 'sihost', 'ctfmon',
+  'system idle process',
+  // Linux
+  'systemd', 'init', 'kthreadd', 'ksoftirqd',
+  'dbus-daemon', 'polkitd', 'networkmanager', 'snapd',
+  'cron', 'crond', 'atd', 'rsyslogd', 'sshd',
+  'systemd-journald', 'systemd-logind', 'systemd-udevd',
+  'systemd-resolved', 'systemd-timesyncd', 'systemd-networkd',
+  'udevd', 'agetty', 'gdm', 'gdm-session-worker', 'lightdm',
+  'accounts-daemon', 'udisksd', 'upowerd',
+  'thermald', 'irqbalance', 'avahi-daemon', 'cupsd',
+  'rtkit-daemon', 'low-memory-monitor', 'packagekitd', 'colord',
+  'firewalld', 'tuned', 'sssd', 'chronyd', 'auditd'
+])
+
 /**
  * ResourceOptimizationChecker - Identifies applications with high CPU/RAM usage for optimization
  *
@@ -136,19 +188,8 @@ export class ResourceOptimizationChecker extends RecommendationChecker {
       appName = executableName.replace(/\.(exe|com|bat|cmd|scr)$/i, '')
     }
 
-    if (appName.toLowerCase().includes('chrome')) return 'Google Chrome'
-    if (appName.toLowerCase().includes('firefox')) return 'Mozilla Firefox'
-    if (appName.toLowerCase().includes('edge')) return 'Microsoft Edge'
-    if (appName.toLowerCase().includes('safari')) return 'Safari'
-
-    if (appName.toLowerCase().includes('word')) return 'Microsoft Word'
-    if (appName.toLowerCase().includes('excel')) return 'Microsoft Excel'
-    if (appName.toLowerCase().includes('powerpoint')) return 'Microsoft PowerPoint'
-    if (appName.toLowerCase().includes('outlook')) return 'Microsoft Outlook'
-
-    if (appName.toLowerCase().includes('code')) return 'Visual Studio Code'
-    if (appName.toLowerCase().includes('studio')) return 'Visual Studio'
-    if (appName.toLowerCase().includes('intellij')) return 'IntelliJ IDEA'
+    const knownApp = KNOWN_APPS[appName.toLowerCase()]
+    if (knownApp) return knownApp
 
     return appName
   }
@@ -352,7 +393,7 @@ export class ResourceOptimizationChecker extends RecommendationChecker {
           const existingCpu = typeof existing.cpuPercent === 'number' ? existing.cpuPercent : parseFloat(String(existing.cpuPercent || 0))
           const existingMem = typeof existing.memoryKB === 'number' ? existing.memoryKB : parseFloat(String(existing.memoryKB || 0))
 
-          existing.cpuPercent = (existingCpu + ps.cpuUsagePercent) / 2
+          existing.cpuPercent = existingCpu + ps.cpuUsagePercent
           existing.memoryKB = Math.max(existingMem, Number(ps.memoryUsageKB))
           existing.sampleCount = (existing.sampleCount || 1) + 1
           existing.maxCpu = Math.max(existing.maxCpu || 0, ps.cpuUsagePercent)
@@ -360,7 +401,15 @@ export class ResourceOptimizationChecker extends RecommendationChecker {
         }
       }
 
-      return Array.from(processMap.values())
+      const merged = Array.from(processMap.values())
+      for (const data of merged) {
+        const count = data.sampleCount || 1
+        if (count > 1) {
+          const cpuSum = typeof data.cpuPercent === 'number' ? data.cpuPercent : parseFloat(String(data.cpuPercent || 0))
+          data.cpuPercent = cpuSum / count
+        }
+      }
+      return merged
     }
 
     return this.extractProcessData(context.latestSnapshot)
@@ -402,6 +451,7 @@ export class ResourceOptimizationChecker extends RecommendationChecker {
   private isSystemProcess (processName: string, executablePath: string): boolean {
     const lowerProcessName = processName.toLowerCase()
     const lowerPath = executablePath.toLowerCase()
+    const normalizedName = lowerProcessName.replace(/\.(exe|com|bat|cmd|scr)$/i, '')
 
     const systemProcessExcludes = process.env.SYSTEM_PROCESS_EXCLUDES?.toLowerCase().split(',').map(s => s.trim()) || []
     const systemProcessIncludes = process.env.SYSTEM_PROCESS_INCLUDE?.toLowerCase().split(',').map(s => s.trim()) || []
@@ -414,20 +464,40 @@ export class ResourceOptimizationChecker extends RecommendationChecker {
       return true
     }
 
-    const isSystemPath = lowerPath.includes('system32') ||
-                        lowerPath.includes('syswow64') ||
-                        lowerPath.includes('windows\\system') ||
-                        lowerPath.includes('windows/system')
-
-    if (isSystemPath) {
+    // Windows system paths
+    if (lowerPath.includes('system32') ||
+        lowerPath.includes('syswow64') ||
+        lowerPath.includes('windows\\system') ||
+        lowerPath.includes('windows/system')) {
       return true
     }
 
-    const coreSystemProcesses = [
-      'system', 'idle', 'csrss.exe', 'lsass.exe', 'smss.exe',
-      'wininit.exe', 'services.exe'
-    ]
+    // Linux system paths
+    if (lowerPath.startsWith('/usr/lib/systemd/') ||
+        lowerPath.startsWith('/lib/systemd/') ||
+        lowerPath.startsWith('/usr/libexec/') ||
+        lowerPath.startsWith('/sbin/')) {
+      return true
+    }
 
-    return coreSystemProcesses.some(sp => lowerProcessName.includes(sp))
+    // Core system processes (exact match, extension-normalized)
+    if (CORE_SYSTEM_PROCESSES.has(normalizedName)) {
+      return true
+    }
+
+    // Linux kernel threads (prefix patterns)
+    if (normalizedName.startsWith('kworker/') ||
+        normalizedName.startsWith('kworker:') ||
+        normalizedName.startsWith('irq/') ||
+        normalizedName.startsWith('migration/') ||
+        normalizedName.startsWith('watchdog/') ||
+        normalizedName.startsWith('ksoftirqd/') ||
+        normalizedName.startsWith('rcu_') ||
+        normalizedName.startsWith('xfs-') ||
+        normalizedName.startsWith('jbd2/')) {
+      return true
+    }
+
+    return false
   }
 }

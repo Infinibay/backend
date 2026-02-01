@@ -37,7 +37,7 @@ export class VMHealthQueueManager {
   private readonly MAX_QUEUE_SIZE_PER_VM = 100
   private readonly MAX_CONCURRENT_CHECKS_PER_VM = 2 // Lowered for heavy checks
   // Per-check concurrency limits for heavy checks
-  private readonly HEAVY_CHECK_TYPES: HealthCheckType[] = ['OVERALL_STATUS', 'RESOURCE_OPTIMIZATION', 'WINDOWS_DEFENDER', 'WINDOWS_UPDATES']
+  private readonly HEAVY_CHECK_TYPES: HealthCheckType[] = ['OVERALL_STATUS', 'RESOURCE_OPTIMIZATION', 'WINDOWS_DEFENDER', 'WINDOWS_UPDATES', 'LINUX_UPDATES']
   private readonly MAX_HEAVY_CHECKS_PER_VM = 1
   private readonly MAX_SYSTEM_WIDE_CONCURRENT = 50
   private activeChecks = new Set<string>()
@@ -50,6 +50,7 @@ export class VMHealthQueueManager {
     RESOURCE_OPTIMIZATION: 240000, // 4 minutes
     WINDOWS_UPDATES: 300000, // 5 minutes
     WINDOWS_DEFENDER: 300000, // 5 minutes
+    LINUX_UPDATES: 300000, // 5 minutes
     APPLICATION_INVENTORY: 180000, // 3 minutes
     APPLICATION_UPDATES: 180000, // 3 minutes (default)
     SECURITY_CHECK: 180000, // 3 minutes (default)
@@ -138,7 +139,7 @@ export class VMHealthQueueManager {
     // Check if VM exists and is running before queuing any health checks
     const vm = await this.prisma.machine.findUnique({
       where: { id: machineId },
-      select: { id: true, name: true, status: true }
+      select: { id: true, name: true, status: true, os: true }
     })
 
     if (!vm) {
@@ -150,15 +151,23 @@ export class VMHealthQueueManager {
       return
     }
 
+    const isWindows = vm.os?.toLowerCase().includes('windows') ?? false
+
+    // Cross-platform checks
     const standardChecks: HealthCheckType[] = [
       'OVERALL_STATUS',
       'DISK_SPACE',
       'RESOURCE_OPTIMIZATION',
-      'WINDOWS_UPDATES',
-      'WINDOWS_DEFENDER',
       'APPLICATION_INVENTORY',
       'APPLICATION_UPDATES'
     ]
+
+    // OS-specific checks
+    if (isWindows) {
+      standardChecks.push('WINDOWS_UPDATES', 'WINDOWS_DEFENDER')
+    } else {
+      standardChecks.push('LINUX_UPDATES')
+    }
 
     // Create or get today's snapshot and set expected checks for snapshot-scoped tracking
     const snapshot = await this.getOrCreateTodaySnapshot(machineId, standardChecks.length, standardChecks)
@@ -441,6 +450,8 @@ export class VMHealthQueueManager {
         action = 'CheckWindowsUpdates'; break
       case 'WINDOWS_DEFENDER':
         action = 'CheckWindowsDefender'; break
+      case 'LINUX_UPDATES':
+        action = 'CheckLinuxUpdates'; break
       case 'APPLICATION_INVENTORY':
         action = 'GetInstalledApplicationsWMI'; break
       case 'APPLICATION_UPDATES':
@@ -666,6 +677,9 @@ export class VMHealthQueueManager {
     case 'WINDOWS_UPDATES':
       updateData.windowsUpdateInfo = result.data
       break
+    case 'LINUX_UPDATES':
+      updateData.linuxUpdateInfo = result.data
+      break
     case 'WINDOWS_DEFENDER':
       updateData.defenderStatus = result.data
       break
@@ -853,6 +867,7 @@ export class VMHealthQueueManager {
       'RESOURCE_OPTIMIZATION',
       'WINDOWS_UPDATES',
       'WINDOWS_DEFENDER',
+      'LINUX_UPDATES',
       'APPLICATION_INVENTORY',
       'APPLICATION_UPDATES'
     ]

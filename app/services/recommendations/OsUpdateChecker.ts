@@ -12,7 +12,7 @@ interface WindowsUpdate {
   download_size?: number
 }
 
-interface UpdateStatus {
+interface WindowsUpdateStatus {
   pending_updates?: WindowsUpdate[]
   reboot_required?: boolean
   reboot_required_since?: string
@@ -21,13 +21,32 @@ interface UpdateStatus {
   pending_reboot_updates?: number
 }
 
+interface LinuxPendingUpdate {
+  package_name?: string
+  current_version?: string
+  available_version?: string
+  repository?: string
+  is_security?: boolean
+  architecture?: string
+}
+
+interface LinuxUpdateStatus {
+  pending_updates?: LinuxPendingUpdate[]
+  security_updates_count?: number
+  total_pending_count?: number
+  package_manager?: string
+  reboot_required?: boolean
+  reboot_required_since?: string
+  distro?: string
+}
+
 /**
- * OsUpdateChecker - Monitors Windows Update status and recommends system maintenance
+ * OsUpdateChecker - Monitors OS update status and recommends system maintenance
  *
  * @description
- * Analyzes Windows Update information to identify pending updates, security patches,
- * and system maintenance needs. Prioritizes critical and security updates while
- * tracking update configuration and reboot requirements.
+ * Analyzes update information for both Windows and Linux VMs to identify pending
+ * updates, security patches, and system maintenance needs. Prioritizes critical
+ * and security updates while tracking update configuration and reboot requirements.
  *
  * @category Maintenance
  *
@@ -136,22 +155,28 @@ export class OsUpdateChecker extends RecommendationChecker {
   getCategory (): string { return 'Maintenance' }
 
   async analyze (context: RecommendationContext): Promise<RecommendationResult[]> {
+    const os = context.machineConfig?.os?.toLowerCase() || ''
+    const isWindows = os.includes('windows')
+    const isLinux = os.includes('linux') || os.includes('ubuntu') || os.includes('fedora') || os.includes('debian') || os.includes('centos') || os.includes('rhel')
+
+    if (isWindows && context.latestSnapshot?.windowsUpdateInfo) {
+      return this.analyzeWindows(context)
+    }
+
+    if (isLinux && context.latestSnapshot?.linuxUpdateInfo) {
+      return this.analyzeLinux(context)
+    }
+
+    return []
+  }
+
+  private async analyzeWindows (context: RecommendationContext): Promise<RecommendationResult[]> {
     const results: RecommendationResult[] = []
 
-    // Skip for non-Windows VMs - this checker is Windows-specific
-    const os = context.machineConfig?.os?.toLowerCase() || ''
-    if (!os.includes('windows')) {
-      return results
-    }
-
-    if (!context.latestSnapshot?.windowsUpdateInfo) {
-      return results
-    }
-
     try {
-      const updateData: UpdateStatus = typeof context.latestSnapshot.windowsUpdateInfo === 'string'
-        ? JSON.parse(context.latestSnapshot.windowsUpdateInfo)
-        : context.latestSnapshot.windowsUpdateInfo
+      const updateData: WindowsUpdateStatus = typeof context.latestSnapshot!.windowsUpdateInfo === 'string'
+        ? JSON.parse(context.latestSnapshot!.windowsUpdateInfo)
+        : context.latestSnapshot!.windowsUpdateInfo
 
       if (!updateData || typeof updateData !== 'object') {
         console.warn('VMRecommendationService: Invalid windowsUpdateInfo format')
@@ -292,6 +317,122 @@ export class OsUpdateChecker extends RecommendationChecker {
       }
     } catch (error) {
       console.warn('VMRecommendationService: Failed to parse windowsUpdateInfo:', error)
+    }
+
+    return results
+  }
+
+  private async analyzeLinux (context: RecommendationContext): Promise<RecommendationResult[]> {
+    const results: RecommendationResult[] = []
+
+    try {
+      const updateData: LinuxUpdateStatus = typeof context.latestSnapshot!.linuxUpdateInfo === 'string'
+        ? JSON.parse(context.latestSnapshot!.linuxUpdateInfo)
+        : context.latestSnapshot!.linuxUpdateInfo
+
+      if (!updateData || typeof updateData !== 'object') {
+        console.warn('VMRecommendationService: Invalid linuxUpdateInfo format')
+        return results
+      }
+
+      const flags: string[] = []
+      const details: Record<string, unknown> = {}
+      const issues: string[] = []
+      const actions: string[] = []
+      let highestSeverity = 'low'
+
+      const distro = updateData.distro || 'Linux'
+      const packageManager = updateData.package_manager || 'apt'
+      const upgradeCmd = packageManager === 'dnf' ? 'sudo dnf upgrade' : packageManager === 'yum' ? 'sudo yum update' : 'sudo apt upgrade'
+
+      details.distro = distro
+      details.packageManager = packageManager
+
+      const pendingUpdates = updateData.pending_updates || []
+      const totalPending = updateData.total_pending_count ?? pendingUpdates.length
+      const securityCount = updateData.security_updates_count ?? pendingUpdates.filter(u => u.is_security === true).length
+
+      if (totalPending > 0) {
+        flags.push('pending_updates')
+
+        details.totalUpdates = totalPending
+        details.securityCount = securityCount
+        details.updateTitles = pendingUpdates.slice(0, 10).map((u: LinuxPendingUpdate) => u.package_name).filter(Boolean)
+
+        // Add full update objects for frontend display
+        details.updates = pendingUpdates.slice(0, 20).map((u: LinuxPendingUpdate) => ({
+          title: u.package_name || 'Unknown Package',
+          currentVersion: u.current_version || null,
+          availableVersion: u.available_version || null,
+          type: u.is_security ? 'Security' : 'Update',
+          repository: u.repository || null
+        }))
+
+        const updateSummary = securityCount > 0
+          ? `${totalPending} updates available (${securityCount} security)`
+          : `${totalPending} updates available`
+        issues.push(updateSummary)
+        actions.push(`install pending updates with \`${upgradeCmd}\``)
+
+        // Severity based on security updates and total count
+        if (securityCount > 0) {
+          highestSeverity = 'critical'
+        } else if (totalPending > 20) {
+          highestSeverity = 'high'
+        } else {
+          highestSeverity = 'medium'
+        }
+      }
+
+      if (updateData.reboot_required === true) {
+        flags.push('reboot_required')
+        details.rebootRequired = true
+
+        if (updateData.reboot_required_since) {
+          const rebootAgeResult = this.parseAndCalculateDaysSince(updateData.reboot_required_since)
+          if (rebootAgeResult.isValid && rebootAgeResult.daysSince > 0) {
+            details.rebootPendingDays = rebootAgeResult.daysSince
+            details.rebootRequiredSince = updateData.reboot_required_since
+            issues.push(`system reboot required (pending ${rebootAgeResult.daysSince} days)`)
+
+            if (rebootAgeResult.daysSince > 3) {
+              if (highestSeverity !== 'critical') highestSeverity = 'high'
+              details.rebootUrgent = true
+              actions.push(`reboot system immediately (pending ${rebootAgeResult.daysSince} days)`)
+            } else {
+              if (highestSeverity === 'low') highestSeverity = 'medium'
+              actions.push('reboot system')
+            }
+          } else {
+            issues.push('system reboot required')
+            actions.push('reboot system')
+            if (highestSeverity === 'low') highestSeverity = 'medium'
+          }
+        } else {
+          issues.push('system reboot required')
+          actions.push('reboot system')
+          if (highestSeverity === 'low') highestSeverity = 'medium'
+        }
+      }
+
+      if (flags.length > 0) {
+        const vmName = context.machineConfig?.name || 'VM'
+        const text = `System updates available for ${vmName} (${distro}): ${issues.join(', ')}`
+        const actionText = `Update ${vmName}: ${actions.join(', ')}`
+
+        results.push({
+          type: 'OS_UPDATE_AVAILABLE',
+          text,
+          actionText,
+          data: {
+            flags,
+            severity: highestSeverity,
+            ...details
+          }
+        })
+      }
+    } catch (error) {
+      console.warn('VMRecommendationService: Failed to parse linuxUpdateInfo:', error)
     }
 
     return results

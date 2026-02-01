@@ -94,69 +94,82 @@ export class DefenderDisabledChecker extends RecommendationChecker {
         })
       }
 
-      const signatureAge = defenderData.signature_age_days
-      if (typeof signatureAge === 'number' && signatureAge !== 999) {
-        const vmName = context.machineConfig?.name || 'VM'
-        if (signatureAge > 7) {
+      if (defenderData.enabled !== false) {
+        const signatureAge = defenderData.signature_age_days
+        if (typeof signatureAge === 'number' && signatureAge !== 999) {
+          const vmName = context.machineConfig?.name || 'VM'
+          if (signatureAge > 7) {
+            results.push({
+              type: 'DEFENDER_DISABLED',
+              text: `Windows Defender virus signatures on ${vmName} are ${signatureAge} days old`,
+              actionText: `Update virus signatures on ${vmName} through Windows Security > Virus & threat protection > Check for updates`,
+              data: {
+                outdatedSignatures: true,
+                signatureAgeDays: signatureAge,
+                lastSignatureUpdate: defenderData.last_signature_update,
+                engineVersion: defenderData.engine_version,
+                severity: signatureAge > 14 ? 'critical' : 'high'
+              }
+            })
+          } else if (signatureAge > 3) {
+            results.push({
+              type: 'DEFENDER_DISABLED',
+              text: `Windows Defender virus signatures on ${vmName} are ${signatureAge} days old`,
+              actionText: `Update virus signatures on ${vmName} through Windows Security > Virus & threat protection > Check for updates`,
+              data: {
+                outdatedSignatures: true,
+                signatureAgeDays: signatureAge,
+                lastSignatureUpdate: defenderData.last_signature_update,
+                engineVersion: defenderData.engine_version,
+                severity: 'medium'
+              }
+            })
+          }
+        }
+
+        const lastQuickScan = defenderData.last_quick_scan
+        const lastFullScan = defenderData.last_full_scan
+
+        if (!lastQuickScan && !lastFullScan) {
           results.push({
             type: 'DEFENDER_DISABLED',
-            text: `Windows Defender virus signatures on ${vmName} are ${signatureAge} days old`,
-            actionText: `Update virus signatures on ${vmName} through Windows Security > Virus & threat protection > Check for updates`,
+            text: 'No recent Windows Defender scans detected',
+            actionText: 'Run a quick scan through Windows Security > Virus & threat protection',
             data: {
-              outdatedSignatures: true,
-              signatureAgeDays: signatureAge,
-              lastSignatureUpdate: defenderData.last_signature_update,
-              engineVersion: defenderData.engine_version,
-              severity: signatureAge > 14 ? 'high' : 'medium'
-            }
-          })
-        } else if (signatureAge > 3) {
-          results.push({
-            type: 'DEFENDER_DISABLED',
-            text: `Windows Defender virus signatures on ${vmName} are ${signatureAge} days old`,
-            actionText: `Update virus signatures on ${vmName} through Windows Security > Virus & threat protection > Check for updates`,
-            data: {
-              outdatedSignatures: true,
-              signatureAgeDays: signatureAge,
-              lastSignatureUpdate: defenderData.last_signature_update,
-              engineVersion: defenderData.engine_version,
+              noRecentScans: true,
+              lastQuickScan: null,
+              lastFullScan: null,
+              scanHistory: defenderData.scan_history || [],
               severity: 'medium'
             }
           })
-        }
-      }
+        } else {
+          const quickScanResult = this.parseAndCalculateDaysSince(lastQuickScan)
+          const fullScanResult = this.parseAndCalculateDaysSince(lastFullScan)
 
-      const lastQuickScan = defenderData.last_quick_scan
-      const lastFullScan = defenderData.last_full_scan
-
-      if (!lastQuickScan && !lastFullScan) {
-        results.push({
-          type: 'DEFENDER_DISABLED',
-          text: 'No recent Windows Defender scans detected',
-          actionText: 'Run a quick scan through Windows Security > Virus & threat protection',
-          data: {
-            noRecentScans: true,
-            lastQuickScan: null,
-            lastFullScan: null,
-            scanHistory: defenderData.scan_history || [],
-            severity: 'medium'
+          let mostRecentDays: number | null = null
+          if (quickScanResult.isValid && fullScanResult.isValid) {
+            mostRecentDays = Math.min(quickScanResult.daysSince, fullScanResult.daysSince)
+          } else if (quickScanResult.isValid) {
+            mostRecentDays = quickScanResult.daysSince
+          } else if (fullScanResult.isValid) {
+            mostRecentDays = fullScanResult.daysSince
           }
-        })
-      } else {
-        const quickScanResult = this.parseAndCalculateDaysSince(lastQuickScan)
-        if (quickScanResult.isValid && quickScanResult.daysSince > 7) {
-          results.push({
-            type: 'DEFENDER_DISABLED',
-            text: `Last Windows Defender quick scan was ${quickScanResult.daysSince} days ago`,
-            actionText: 'Run a quick scan through Windows Security > Virus & threat protection',
-            data: {
-              outdatedScans: true,
-              daysSinceQuickScan: quickScanResult.daysSince,
-              lastQuickScan,
-              lastFullScan,
-              severity: quickScanResult.daysSince > 14 ? 'medium' : 'low'
-            }
-          })
+
+          if (mostRecentDays !== null && mostRecentDays > 7) {
+            results.push({
+              type: 'DEFENDER_DISABLED',
+              text: `Last Windows Defender scan was ${mostRecentDays} days ago`,
+              actionText: 'Run a quick scan through Windows Security > Virus & threat protection',
+              data: {
+                outdatedScans: true,
+                daysSinceLastScan: mostRecentDays,
+                lastQuickScan,
+                lastFullScan,
+                severity: mostRecentDays > 14 ? 'medium' : 'low'
+              }
+            })
+          }
         }
       }
     } catch (error) {
