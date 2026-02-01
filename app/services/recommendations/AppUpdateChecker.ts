@@ -104,21 +104,34 @@ export class AppUpdateChecker extends RecommendationChecker {
             ? 'Windows Update'
             : 'package manager'
 
+      // Version strings contain digits and dots, not spaces (e.g. "140.0.3485.66")
+      // Non-version values like "Check application for updates" should not be shown as versions
+      const isVersionLike = (str: string): boolean => /^\d/.test(str) && !str.includes(' ')
+
       for (const app of topApps) {
         const isSecurityUpdate = app.is_security_update === true
         const appName = app.name || app.app_name || 'Unknown Application'
-        const currentVersion = app.version || app.current_version || 'Unknown'
-        const availableVersion = app.update_available || app.new_version || 'Unknown'
+        const currentVersion = app.version || app.current_version || ''
+        const availableVersion = app.update_available || app.new_version || ''
         const updateSource = app.update_source || defaultUpdateSource
-        const vmName = context.machineConfig?.name || 'VM'
+
+        // Build version detail only when values look like actual version numbers
+        let versionDetail = ''
+        if (currentVersion && isVersionLike(currentVersion)) {
+          if (availableVersion && isVersionLike(availableVersion)) {
+            versionDetail = ` (${currentVersion} → ${availableVersion})`
+          } else {
+            versionDetail = ` (version ${currentVersion})`
+          }
+        }
 
         const text = isSecurityUpdate
-          ? `Security update available for ${appName} on ${vmName} (current: ${currentVersion}, available: ${availableVersion})`
-          : `Update available for ${appName} on ${vmName} (current: ${currentVersion}, available: ${availableVersion})`
+          ? `Security update available for ${appName}${versionDetail}`
+          : `Update available for ${appName}${versionDetail}`
 
         const actionText = isSecurityUpdate
-          ? `Update ${appName} on ${vmName} through ${updateSource} to fix security vulnerabilities`
-          : `Update ${appName} on ${vmName} through ${updateSource} to get new features and improvements`
+          ? `Update ${appName} through ${updateSource} to fix security vulnerabilities`
+          : `Update ${appName} through ${updateSource} to get the latest version`
 
         results.push({
           type: 'APP_UPDATE_AVAILABLE',
@@ -126,8 +139,8 @@ export class AppUpdateChecker extends RecommendationChecker {
           actionText,
           data: {
             appName,
-            currentVersion,
-            availableVersion,
+            currentVersion: currentVersion || 'Unknown',
+            availableVersion: availableVersion || 'Unknown',
             updateSource,
             isSecurityUpdate,
             updateSizeMB: app.update_size_bytes ? Math.round(app.update_size_bytes / (1024 * 1024)) : null,
