@@ -1,6 +1,6 @@
 import { RuleSetType } from '@prisma/client'
 
-import { FirewallEventManager } from '@services/FirewallEventManager'
+import { FirewallEventManager } from '@services/events/FirewallEventManager'
 
 // Mock types
 type MockSocketService = {

@@ -1,5 +1,5 @@
-import { VMHealthQueueManager } from '../../app/services/VMHealthQueueManager'
-import { EventManager } from '../../app/services/EventManager'
+import { VMHealthQueueManager } from '../../app/services/health/VMHealthQueueManager'
+import { EventManager } from '../../app/services/events/EventManager'
 import { PrismaClient } from '@prisma/client'
 import { mockDeep, DeepMockProxy } from 'jest-mock-extended'
 
@@ -8,7 +8,7 @@ const mockVirtioService = {
   sendSafeCommand: jest.fn()
 }
 
-jest.mock('../../app/services/VirtioSocketWatcherService', () => ({
+jest.mock('../../app/services/vm/VirtioSocketWatcherService', () => ({
   getVirtioSocketWatcherService: () => mockVirtioService
 }))
 

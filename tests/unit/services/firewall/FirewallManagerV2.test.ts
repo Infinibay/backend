@@ -11,7 +11,7 @@ const mockNftables = {
 }
 
 // Mock InfinizationService
-jest.mock('../../../../app/services/InfinizationService', () => ({
+jest.mock('@services/InfinizationService', () => ({
   getInfinization: jest.fn(() => Promise.resolve({
     getNftablesService: () => mockNftables
   }))

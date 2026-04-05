@@ -1,55 +1,31 @@
 /**
- * Tests for firewall cleanup in MachineCleanupService
+ * Tests for firewall cleanup in MachineCleanupServiceV2
  */
 
 import { PrismaClient, RuleSetType } from '@prisma/client'
-import { MachineCleanupService } from '@services/cleanup/machineCleanupService'
+import { MachineCleanupServiceV2 } from '@services/cleanup/machineCleanupServiceV2'
 
-// Mock libvirt
-jest.mock('@infinibay/libvirt-node', () => {
-  class MockNWFilter {
-    static lookupByName = jest.fn()
-    static defineXml = jest.fn()
-    undefine = jest.fn()
-  }
-
-  class MockMachine {
-    static lookupByName = jest.fn()
-    destroy = jest.fn()
-    undefine = jest.fn()
-  }
-
-  class MockConnection {
-    static open = jest.fn(() => new MockConnection())
-    close = jest.fn()
-  }
-
-  return {
-    __esModule: true,
-    Connection: MockConnection,
-    Machine: MockMachine,
-    NWFilter: MockNWFilter
-  }
-})
+// Mock infinization
+jest.mock('@services/InfinizationService', () => ({
+  getInfinization: jest.fn(() => ({
+    destroyVM: jest.fn().mockResolvedValue({ success: true })
+  }))
+}))
 
 // Mock VirtioSocketWatcherService
-jest.mock('@services/VirtioSocketWatcherService', () => ({
+jest.mock('@services/vm/VirtioSocketWatcherService', () => ({
   getVirtioSocketWatcherService: jest.fn(() => ({
     cleanupVmConnection: jest.fn()
   }))
 }))
 
-// Mock XMLGenerator
-jest.mock('@utils/VirtManager/xmlGenerator', () => ({
-  XMLGenerator: jest.fn().mockImplementation(() => ({
-    load: jest.fn(),
-    getUefiVarFile: jest.fn(() => null),
-    getDisks: jest.fn(() => [])
-  }))
+// Mock fs/promises
+jest.mock('fs/promises', () => ({
+  unlink: jest.fn().mockRejectedValue({ code: 'ENOENT' })
 }))
 
-describe('MachineCleanupService - Firewall Cleanup', () => {
-  let service: MachineCleanupService
+describe('MachineCleanupServiceV2 - Firewall Cleanup', () => {
+  let service: MachineCleanupServiceV2
   let mockPrisma: any
 
   beforeEach(() => {
@@ -65,20 +41,28 @@ describe('MachineCleanupService - Firewall Cleanup', () => {
         delete: jest.fn()
       },
       machineApplication: {
-        deleteMany: jest.fn()
+        deleteMany: jest.fn().mockResolvedValue({ count: 0 })
+      },
+      pendingCommand: {
+        deleteMany: jest.fn().mockResolvedValue({ count: 0 })
+      },
+      scriptExecution: {
+        deleteMany: jest.fn().mockResolvedValue({ count: 0 })
       },
       firewallRule: {
-        deleteMany: jest.fn()
+        deleteMany: jest.fn().mockResolvedValue({ count: 0 })
       },
       firewallRuleSet: {
         delete: jest.fn()
       },
-      $transaction: jest.fn(async (callback) => {
+      $transaction: jest.fn(async (callback: any) => {
         // Execute transaction callback with mock tx
         const mockTx = {
           machine: mockPrisma.machine,
           machineConfiguration: mockPrisma.machineConfiguration,
           machineApplication: mockPrisma.machineApplication,
+          pendingCommand: mockPrisma.pendingCommand,
+          scriptExecution: mockPrisma.scriptExecution,
           firewallRule: mockPrisma.firewallRule,
           firewallRuleSet: mockPrisma.firewallRuleSet
         }
@@ -86,11 +70,11 @@ describe('MachineCleanupService - Firewall Cleanup', () => {
       })
     }
 
-    service = new MachineCleanupService(mockPrisma as PrismaClient)
+    service = new MachineCleanupServiceV2(mockPrisma as PrismaClient)
   })
 
   describe('cleanupVM', () => {
-    it('should cleanup nwfilter when deleting VM', async () => {
+    it('should cleanup firewall resources via infinization when deleting VM', async () => {
       const vmId = 'test-vm-123'
       const mockVM = {
         id: vmId,
@@ -98,31 +82,29 @@ describe('MachineCleanupService - Firewall Cleanup', () => {
         configuration: null,
         firewallRuleSet: {
           id: 'ruleset-123',
+          internalName: 'vm_abc12345',
           rules: [
             { id: 'rule-1', name: 'Test Rule' }
           ]
         }
       }
 
-      mockPrisma.machine.findUnique.mockResolvedValue(mockVM)
+      // First call for initial lookup, second call inside transaction for firewall cleanup
+      mockPrisma.machine.findUnique
+        .mockResolvedValueOnce(mockVM)
+        .mockResolvedValueOnce(mockVM)
+        .mockResolvedValue(mockVM)
 
-      const { NWFilter, Machine, Connection } = require('@infinibay/libvirt-node')
-      const mockFilter = {
-        undefine: jest.fn()
+      const { getInfinization } = require('@services/InfinizationService')
+      const mockInfinization = {
+        destroyVM: jest.fn().mockResolvedValue({ success: true })
       }
-      NWFilter.lookupByName.mockReturnValue(mockFilter)
-      Machine.lookupByName.mockReturnValue(null) // VM already destroyed
+      getInfinization.mockResolvedValue(mockInfinization)
 
       await service.cleanupVM(vmId)
 
-      // Verify nwfilter was looked up and undefined
-      expect(NWFilter.lookupByName).toHaveBeenCalled()
-      const lookupCall = NWFilter.lookupByName.mock.calls[0]
-      const [, filterName] = lookupCall
-
-      // Filter name should match VM ID pattern
-      expect(filterName).toMatch(/^ibay-vm-[a-f0-9]{8}$/)
-      expect(mockFilter.undefine).toHaveBeenCalled()
+      // Verify infinization.destroyVM was called (handles TAP + firewall chain cleanup)
+      expect(mockInfinization.destroyVM).toHaveBeenCalledWith(vmId)
     })
 
     it('should cleanup FirewallRuleSet and rules from database', async () => {
@@ -134,6 +116,7 @@ describe('MachineCleanupService - Firewall Cleanup', () => {
         configuration: null,
         firewallRuleSet: {
           id: ruleSetId,
+          internalName: 'vm_def12345',
           rules: [
             { id: 'rule-1', name: 'Rule 1' },
             { id: 'rule-2', name: 'Rule 2' }
@@ -143,9 +126,10 @@ describe('MachineCleanupService - Firewall Cleanup', () => {
 
       mockPrisma.machine.findUnique.mockResolvedValue(mockVM)
 
-      const { NWFilter, Machine } = require('@infinibay/libvirt-node')
-      NWFilter.lookupByName.mockReturnValue(null) // Filter doesn't exist
-      Machine.lookupByName.mockReturnValue(null)
+      const { getInfinization } = require('@services/InfinizationService')
+      getInfinization.mockResolvedValue({
+        destroyVM: jest.fn().mockResolvedValue({ success: true })
+      })
 
       await service.cleanupVM(vmId)
 
@@ -160,30 +144,6 @@ describe('MachineCleanupService - Firewall Cleanup', () => {
       })
     })
 
-    it('should not fail if nwfilter does not exist', async () => {
-      const vmId = 'test-vm-789'
-      const mockVM = {
-        id: vmId,
-        internalName: 'test-vm-internal',
-        configuration: null,
-        firewallRuleSet: null
-      }
-
-      mockPrisma.machine.findUnique.mockResolvedValue(mockVM)
-
-      const { NWFilter, Machine } = require('@infinibay/libvirt-node')
-      NWFilter.lookupByName.mockReturnValue(null) // Filter doesn't exist
-      Machine.lookupByName.mockReturnValue(null)
-
-      // Should not throw
-      await expect(service.cleanupVM(vmId)).resolves.not.toThrow()
-
-      // Verify VM was deleted
-      expect(mockPrisma.machine.delete).toHaveBeenCalledWith({
-        where: { id: vmId }
-      })
-    })
-
     it('should not fail if FirewallRuleSet does not exist', async () => {
       const vmId = 'test-vm-no-firewall'
       const mockVM = {
@@ -195,9 +155,10 @@ describe('MachineCleanupService - Firewall Cleanup', () => {
 
       mockPrisma.machine.findUnique.mockResolvedValue(mockVM)
 
-      const { NWFilter, Machine } = require('@infinibay/libvirt-node')
-      NWFilter.lookupByName.mockReturnValue(null)
-      Machine.lookupByName.mockReturnValue(null)
+      const { getInfinization } = require('@services/InfinizationService')
+      getInfinization.mockResolvedValue({
+        destroyVM: jest.fn().mockResolvedValue({ success: true })
+      })
 
       // Should not throw
       await expect(service.cleanupVM(vmId)).resolves.not.toThrow()
@@ -207,25 +168,25 @@ describe('MachineCleanupService - Firewall Cleanup', () => {
       expect(mockPrisma.firewallRuleSet.delete).not.toHaveBeenCalled()
     })
 
-    it('should complete VM deletion even if nwfilter cleanup fails', async () => {
-      const vmId = 'test-vm-fail-filter'
+    it('should complete VM deletion even if infinization cleanup fails', async () => {
+      const vmId = 'test-vm-fail-infini'
       const mockVM = {
         id: vmId,
         internalName: 'test-vm-internal',
         configuration: null,
         firewallRuleSet: {
           id: 'ruleset-fail',
+          internalName: 'vm_fail1234',
           rules: []
         }
       }
 
       mockPrisma.machine.findUnique.mockResolvedValue(mockVM)
 
-      const { NWFilter, Machine } = require('@infinibay/libvirt-node')
-      NWFilter.lookupByName.mockImplementation(() => {
-        throw new Error('Libvirt connection failed')
+      const { getInfinization } = require('@services/InfinizationService')
+      getInfinization.mockResolvedValue({
+        destroyVM: jest.fn().mockResolvedValue({ success: false, error: 'Process not found' })
       })
-      Machine.lookupByName.mockReturnValue(null)
 
       // Should not throw - cleanup should continue
       await expect(service.cleanupVM(vmId)).resolves.not.toThrow()
@@ -247,9 +208,10 @@ describe('MachineCleanupService - Firewall Cleanup', () => {
 
       mockPrisma.machine.findUnique.mockResolvedValue(mockVM)
 
-      const { NWFilter, Machine } = require('@infinibay/libvirt-node')
-      NWFilter.lookupByName.mockReturnValue(null)
-      Machine.lookupByName.mockReturnValue(null)
+      const { getInfinization } = require('@services/InfinizationService')
+      getInfinization.mockResolvedValue({
+        destroyVM: jest.fn().mockResolvedValue({ success: true })
+      })
 
       await service.cleanupVM(vmId)
 

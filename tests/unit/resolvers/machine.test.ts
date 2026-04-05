@@ -43,7 +43,7 @@ jest.mock('@utils/VirtManager', () => ({
 }))
 
 // Mock EventManager
-jest.mock('@services/EventManager', () => ({
+jest.mock('@services/events/EventManager', () => ({
   getEventManager: jest.fn(() => ({
     dispatch: jest.fn()
   }))

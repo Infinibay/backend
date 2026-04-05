@@ -2,9 +2,10 @@ import 'reflect-metadata'
 import { PrismaClient } from '@prisma/client'
 import { mockDeep, mockReset, DeepMockProxy } from 'jest-mock-extended'
 
+const mocks = { prisma: undefined as any }
 // Mock Prisma Client
 jest.mock('@prisma/client', () => ({
-  PrismaClient: jest.fn(() => mockPrisma),
+  PrismaClient: jest.fn(() => mocks.prisma),
   Prisma: {
     PrismaClientKnownRequestError: class PrismaClientKnownRequestError extends Error {
       code: string
@@ -57,6 +58,28 @@ jest.mock('@prisma/client', () => ({
     OUT: 'OUT',
     INOUT: 'INOUT'
   }
+  ,
+  FirewallPolicy: { ALLOW_ALL: 'ALLOW_ALL', BLOCK_ALL: 'BLOCK_ALL' },
+  UserRole: { USER: 'USER', ADMIN: 'ADMIN', SUPER_ADMIN: 'SUPER_ADMIN' },
+  RecommendationType: {
+    DISK_SPACE_LOW: 'DISK_SPACE_LOW', HIGH_CPU_APP: 'HIGH_CPU_APP',
+    HIGH_RAM_APP: 'HIGH_RAM_APP', PORT_BLOCKED: 'PORT_BLOCKED',
+    OVER_PROVISIONED: 'OVER_PROVISIONED', UNDER_PROVISIONED: 'UNDER_PROVISIONED',
+    OS_UPDATE_AVAILABLE: 'OS_UPDATE_AVAILABLE', APP_UPDATE_AVAILABLE: 'APP_UPDATE_AVAILABLE',
+    DEFENDER_DISABLED: 'DEFENDER_DISABLED', DEFENDER_THREAT: 'DEFENDER_THREAT', OTHER: 'OTHER'
+  },
+  MaintenanceTaskType: {
+    DISK_CLEANUP: 'DISK_CLEANUP', DEFRAG: 'DEFRAG', DEFENDER_SCAN: 'DEFENDER_SCAN',
+    WINDOWS_UPDATES: 'WINDOWS_UPDATES', SYSTEM_FILE_CHECK: 'SYSTEM_FILE_CHECK',
+    DISK_CHECK: 'DISK_CHECK', REGISTRY_CLEANUP: 'REGISTRY_CLEANUP', CUSTOM_SCRIPT: 'CUSTOM_SCRIPT'
+  },
+  MaintenanceStatus: {
+    IDLE: 'IDLE', RUNNING: 'RUNNING', SUCCESS: 'SUCCESS',
+    FAILED: 'FAILED', CANCELLED: 'CANCELLED'
+  },
+  MaintenanceTrigger: {
+    MANUAL: 'MANUAL', SCHEDULED: 'SCHEDULED', AUTOMATIC: 'AUTOMATIC'
+  }
 }))
 
 // Mock EventManager
@@ -76,6 +99,21 @@ jest.mock('@services/EventManager', () => ({
   EventManager: MockEventManagerClass,
   createEventManager: jest.fn(() => new MockEventManagerClass()),
   getEventManager: jest.fn(() => new MockEventManagerClass())
+}))
+
+// Mock InfinizationService - prevents process.exit(1) from root check & directory check
+jest.mock('@services/InfinizationService', () => ({
+  getInfinization: jest.fn(() => Promise.resolve({
+    initialize: jest.fn().mockResolvedValue(undefined),
+    destroyVM: jest.fn().mockResolvedValue(undefined),
+    createVM: jest.fn().mockResolvedValue(undefined),
+    getVMStatus: jest.fn().mockResolvedValue({ processAlive: false }),
+    getAllVMs: jest.fn().mockResolvedValue([]),
+    startVM: jest.fn().mockResolvedValue(undefined),
+    stopVM: jest.fn().mockResolvedValue(undefined),
+    destroy: jest.fn().mockResolvedValue(undefined),
+    setPortForwarding: jest.fn().mockResolvedValue(undefined)
+  }))
 }))
 
 // Mock Socket.io
@@ -104,7 +142,9 @@ jest.mock('systeminformation', () => ({
 }))
 
 // Create mock Prisma instance
-export const mockPrisma = mockDeep<PrismaClient>() as unknown as DeepMockProxy<PrismaClient>
+const _mockPrisma = mockDeep<PrismaClient>() as any
+mocks.prisma = _mockPrisma
+export const mockPrisma = _mockPrisma
 
 // Environment variables for testing
 process.env.DATABASE_URL = 'postgresql://test:test@localhost:5432/test'
@@ -120,6 +160,8 @@ process.env.VIRTIO_WIN_ISO_PATH = '/tmp/virtio-win.iso'
 // Reset mocks before each test
 beforeEach(() => {
   mockReset(mockPrisma)
+  mockPrisma.$connect = jest.fn().mockResolvedValue(undefined)
+  mockPrisma.$disconnect = jest.fn().mockResolvedValue(undefined)
   jest.clearAllMocks()
 })
 

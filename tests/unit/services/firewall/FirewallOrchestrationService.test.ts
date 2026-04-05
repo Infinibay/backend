@@ -1,18 +1,20 @@
 import { FirewallOrchestrationService } from '@services/firewall/FirewallOrchestrationService'
 import { FirewallRuleService } from '@services/firewall/FirewallRuleService'
 import { FirewallValidationService } from '@services/firewall/FirewallValidationService'
-import { NWFilterXMLGeneratorService } from '@services/firewall/NWFilterXMLGeneratorService'
-import { LibvirtNWFilterService } from '@services/firewall/LibvirtNWFilterService'
+import { InfinizationFirewallService } from '@services/firewall/InfinizationFirewallService'
 import { PrismaClient, RuleSetType, RuleAction, RuleDirection } from '@prisma/client'
 
 // Mock all dependencies
 jest.mock('@services/firewall/FirewallRuleService')
 jest.mock('@services/firewall/FirewallValidationService')
-jest.mock('@services/firewall/NWFilterXMLGeneratorService')
-jest.mock('@services/firewall/LibvirtNWFilterService')
+jest.mock('@services/firewall/InfinizationFirewallService')
 
 const mockPrisma = {
   machine: {
+    findUnique: jest.fn(),
+    findMany: jest.fn()
+  },
+  department: {
     findUnique: jest.fn()
   }
 } as unknown as PrismaClient
@@ -21,21 +23,18 @@ describe('FirewallOrchestrationService', () => {
   let service: FirewallOrchestrationService
   let mockRuleService: jest.Mocked<FirewallRuleService>
   let mockValidationService: jest.Mocked<FirewallValidationService>
-  let mockXmlGenerator: jest.Mocked<NWFilterXMLGeneratorService>
-  let mockLibvirtService: jest.Mocked<LibvirtNWFilterService>
+  let mockInfinizationService: jest.Mocked<InfinizationFirewallService>
 
   beforeEach(() => {
     mockRuleService = new FirewallRuleService(mockPrisma) as jest.Mocked<FirewallRuleService>
     mockValidationService = new FirewallValidationService() as jest.Mocked<FirewallValidationService>
-    mockXmlGenerator = new NWFilterXMLGeneratorService() as jest.Mocked<NWFilterXMLGeneratorService>
-    mockLibvirtService = new LibvirtNWFilterService({} as any) as jest.Mocked<LibvirtNWFilterService>
+    mockInfinizationService = new InfinizationFirewallService(mockPrisma) as jest.Mocked<InfinizationFirewallService>
 
     service = new FirewallOrchestrationService(
       mockPrisma,
       mockRuleService,
       mockValidationService,
-      mockXmlGenerator,
-      mockLibvirtService
+      mockInfinizationService
     )
 
     jest.clearAllMocks()
@@ -183,7 +182,7 @@ describe('FirewallOrchestrationService', () => {
   })
 
   describe('applyVMRules', () => {
-    it('should validate, generate XML, and apply rules', async () => {
+    it('should validate and apply rules via nftables', async () => {
       const mockVM = {
         id: 'vm-123',
         internalName: 'vm-websrv-01',
@@ -214,19 +213,23 @@ describe('FirewallOrchestrationService', () => {
         conflicts: [],
         warnings: []
       });
-      (mockXmlGenerator.generateFilterName as jest.Mock).mockReturnValue('ibay-vm-abc123');
-      (mockXmlGenerator.generateFilterXML as jest.Mock).mockResolvedValue('<filter>...</filter>');
-      (mockLibvirtService.defineFilter as jest.Mock).mockResolvedValue('uuid-123');
-      (mockRuleService.updateRuleSetSyncStatus as jest.Mock).mockResolvedValue(undefined)
+      (mockInfinizationService.convertPrismaRulesToInput as jest.Mock).mockReturnValue([]);
+      (mockInfinizationService.applyVMRules as jest.Mock).mockResolvedValue({
+        appliedRules: 1,
+        totalRules: 1,
+        failedRules: 0,
+        failures: [],
+        chainName: 'vm_abc12345'
+      });
+      (mockRuleService.updateRuleSetSyncTimestamp as jest.Mock).mockResolvedValue(undefined)
 
       const result = await service.applyVMRules('vm-123')
 
       expect(result.success).toBe(true)
-      expect(result.filterName).toBe('ibay-vm-abc123')
       expect(result.rulesApplied).toBe(1)
+      expect(result.chainName).toBe('vm_abc12345')
       expect(mockValidationService.validateRuleConflicts).toHaveBeenCalled()
-      expect(mockLibvirtService.defineFilter).toHaveBeenCalled()
-      // NOTE: applyFilterToVM is no longer called - XML modification is done via XMLGenerator
+      expect(mockInfinizationService.applyVMRules).toHaveBeenCalled()
     })
 
     it('should throw error when validation fails', async () => {
@@ -244,7 +247,7 @@ describe('FirewallOrchestrationService', () => {
         warnings: []
       })
 
-      await expect(service.applyVMRules('vm-123')).rejects.toThrow('Rule conflicts')
+      await expect(service.applyVMRules('vm-123')).rejects.toThrow('rule conflicts')
     })
   })
 
@@ -275,28 +278,18 @@ describe('FirewallOrchestrationService', () => {
         findUnique: jest.fn().mockResolvedValue(mockDepartment)
       };
 
-      // Mock VM lookups for applyVMRules
-      (mockPrisma.machine.findUnique as jest.Mock)
-        .mockResolvedValueOnce({
-          ...mockDepartment.machines[0],
-          department: mockDepartment,
-          firewallRuleSet: { rules: [] }
-        })
-        .mockResolvedValueOnce({
-          ...mockDepartment.machines[1],
-          department: mockDepartment,
-          firewallRuleSet: { rules: [] }
-        });
-
       (mockValidationService.validateRuleConflicts as jest.Mock).mockResolvedValue({
         isValid: true,
         conflicts: [],
         warnings: []
       });
-      (mockXmlGenerator.generateFilterName as jest.Mock).mockReturnValue('ibay-vm-abc');
-      (mockXmlGenerator.generateFilterXML as jest.Mock).mockResolvedValue('<filter>...</filter>');
-      (mockLibvirtService.defineFilter as jest.Mock).mockResolvedValue('uuid-123');
-      (mockRuleService.updateRuleSetSyncStatus as jest.Mock).mockResolvedValue(undefined)
+      (mockInfinizationService.convertPrismaRulesToInput as jest.Mock).mockReturnValue([]);
+      (mockInfinizationService.applyDepartmentRules as jest.Mock).mockResolvedValue({
+        totalVms: 2,
+        vmsUpdated: 2,
+        errors: []
+      });
+      (mockRuleService.updateRuleSetSyncTimestamp as jest.Mock).mockResolvedValue(undefined)
 
       const result = await service.applyDepartmentRules('dept-123')
 

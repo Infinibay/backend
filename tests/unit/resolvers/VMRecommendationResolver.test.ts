@@ -295,7 +295,7 @@ describe('VMRecommendationResolver', () => {
         })
 
         await expect(resolver.getVMRecommendations(vmId, mockContext))
-          .rejects.toThrow('Failed to fetch recommendations')
+          .rejects.toThrow('Service initialization failed')
       })
 
       it('should handle service method failures', async () => {
@@ -304,7 +304,7 @@ describe('VMRecommendationResolver', () => {
         )
 
         await expect(resolver.getVMRecommendations(vmId, mockContext))
-          .rejects.toThrow('Failed to fetch recommendations')
+          .rejects.toThrow('Database connection lost')
       })
 
       it('should handle service timeout errors', async () => {
@@ -313,7 +313,7 @@ describe('VMRecommendationResolver', () => {
         )
 
         await expect(resolver.getVMRecommendations(vmId, mockContext))
-          .rejects.toThrow('Failed to fetch recommendations')
+          .rejects.toThrow('Operation timed out')
       })
 
       it('should handle malformed service response', async () => {
@@ -334,7 +334,7 @@ describe('VMRecommendationResolver', () => {
         )
 
         await expect(resolver.getVMRecommendations(vmId, mockContext))
-          .rejects.toThrow('Failed to fetch recommendations')
+          .rejects.toThrow('Database connection failed')
 
         expect(mockService.getRecommendations).not.toHaveBeenCalled()
       })

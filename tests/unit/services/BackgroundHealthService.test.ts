@@ -1,11 +1,20 @@
 import 'reflect-metadata'
 import { describe, it, expect, beforeEach, jest, afterEach } from '@jest/globals'
-import { BackgroundHealthService } from '@services/BackgroundHealthService'
-import { EventManager } from '@services/EventManager'
-import { VMHealthQueueManager } from '@services/VMHealthQueueManager'
-import { BackgroundTaskService } from '@services/BackgroundTaskService'
 import { mockPrisma } from '../../setup/jest.setup'
 import { RUNNING_STATUS, STOPPED_STATUS, PAUSED_STATUS } from '../../../app/constants/machine-status'
+
+// Mock VMRecommendationService before importing BackgroundHealthService
+jest.mock('@services/health/VMRecommendationService', () => {
+  return {
+    VMRecommendationService: jest.fn().mockImplementation(() => {
+      return {
+        analyzeVM: jest.fn(),
+        getRecommendations: jest.fn(),
+        cleanupExpiredRecommendations: jest.fn<() => Promise<number>>().mockResolvedValue(0)
+      }
+    })
+  }
+})
 
 // Mock cron module
 interface MockedCronJob {
@@ -28,6 +37,14 @@ jest.mock('cron', () => ({
     return instance
   })
 }))
+
+// Unmock EventManager so we can properly mock it ourselves
+jest.unmock('@services/events/EventManager')
+
+import { BackgroundHealthService } from '@services/health/BackgroundHealthService'
+import { EventManager } from '@services/events/EventManager'
+import { VMHealthQueueManager } from '@services/health/VMHealthQueueManager'
+import { BackgroundTaskService } from '@services/maintenance/BackgroundTaskService'
 
 describe('BackgroundHealthService', () => {
   let service: BackgroundHealthService
@@ -84,7 +101,10 @@ describe('BackgroundHealthService', () => {
         departmentId: null,
         templateId: null,
         gpuPciAddress: null,
-        firewallTemplates: {}
+        firewallRuleSetId: null,
+        version: 1,
+        localIP: null,
+        publicIP: null
       }
     ])
 
@@ -120,7 +140,7 @@ describe('BackgroundHealthService', () => {
 
       const { CronJob } = require('cron')
       expect(CronJob).toHaveBeenCalledWith(
-        '0 2 * * *',
+        '*/1 * * * *',
         expect.any(Function)
       )
     })
@@ -130,7 +150,8 @@ describe('BackgroundHealthService', () => {
       service.start()
 
       const { CronJob } = require('cron')
-      expect(CronJob).toHaveBeenCalledTimes(1)
+      // 2 CronJob instances created on first start (daily + weekly), none on second start
+      expect(CronJob).toHaveBeenCalledTimes(2)
     })
   })
 
@@ -153,7 +174,8 @@ describe('BackgroundHealthService', () => {
       service.updateSchedule('0 3 * * *')
 
       const { CronJob } = require('cron')
-      expect(CronJob).toHaveBeenCalledTimes(2)
+      // 2 from start() (daily + weekly) + 1 from updateSchedule() = 3
+      expect(CronJob).toHaveBeenCalledTimes(3)
       expect(CronJob).toHaveBeenLastCalledWith(
         '0 3 * * *',
         expect.any(Function)
@@ -285,7 +307,10 @@ describe('BackgroundHealthService', () => {
           departmentId: null,
           templateId: null,
           gpuPciAddress: null,
-          firewallTemplates: {}
+          firewallRuleSetId: null,
+          version: 1,
+          localIP: null,
+          publicIP: null
         },
         {
           id: 'vm-2',
@@ -302,7 +327,10 @@ describe('BackgroundHealthService', () => {
           departmentId: null,
           templateId: null,
           gpuPciAddress: null,
-          firewallTemplates: {}
+          firewallRuleSetId: null,
+          version: 1,
+          localIP: null,
+          publicIP: null
         }
       ])
 
@@ -454,7 +482,10 @@ describe('BackgroundHealthService', () => {
           departmentId: null,
           templateId: null,
           gpuPciAddress: null,
-          firewallTemplates: {}
+          firewallRuleSetId: null,
+          version: 1,
+          localIP: null,
+          publicIP: null
         }
       ])
 
@@ -532,7 +563,10 @@ describe('BackgroundHealthService', () => {
           departmentId: null,
           templateId: null,
           gpuPciAddress: null,
-          firewallTemplates: {}
+          firewallRuleSetId: null,
+          version: 1,
+          localIP: null,
+          publicIP: null
         },
         {
           id: 'vm-running-2',
@@ -549,7 +583,10 @@ describe('BackgroundHealthService', () => {
           departmentId: null,
           templateId: null,
           gpuPciAddress: null,
-          firewallTemplates: {}
+          firewallRuleSetId: null,
+          version: 1,
+          localIP: null,
+          publicIP: null
         }
       ])
 

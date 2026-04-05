@@ -1,7 +1,7 @@
 import 'reflect-metadata'
 import { PrismaClient, User, Prisma } from '@prisma/client'
-import { MachineLifecycleService } from '@services/machineLifecycleService'
-import { MachineCleanupService } from '@services/cleanup/machineCleanupService'
+import { MachineLifecycleService } from '@services/vm/machineLifecycleService'
+import { MachineCleanupServiceV2 as MachineCleanupService } from '@services/cleanup/machineCleanupServiceV2'
 import {
   createMockUser,
   createMockAdminUser,
@@ -14,10 +14,23 @@ import {
 } from '../setup/mock-factories'
 import { OsEnum } from '@graphql/resolvers/machine/type'
 import { mockPrisma } from '../setup/jest.setup'
+// libvirt-node is mocked in __mocks__/libvirt-node.js
+// @ts-ignore - Module is mocked, no type declarations needed
 import { Connection } from '@infinibay/libvirt-node'
 
 // Mock libvirt-node
 jest.mock('@infinibay/libvirt-node')
+
+// Mock InfinizationService to prevent process.exit during tests
+jest.mock('@services/InfinizationService', () => ({
+  getInfinization: jest.fn().mockResolvedValue({
+    getVMStatus: jest.fn().mockResolvedValue({ processAlive: false }),
+    getVMInfo: jest.fn().mockResolvedValue({}),
+    stopVM: jest.fn().mockResolvedValue(undefined),
+    destroyVM: jest.fn().mockResolvedValue(undefined),
+  }),
+  initializeInfinization: jest.fn().mockResolvedValue(undefined),
+}))
 
 // Mock VirtManager
 jest.mock('@utils/VirtManager', () => ({
@@ -140,6 +153,7 @@ describe('VM Lifecycle Integration Tests', () => {
         username: 'testuser',
         password: 'TestPass123!',
         productKey: undefined,
+        firstBootScripts: [],
         pciBus: null,
         applications: [{
           machineId: '', // Will be filled by the service
@@ -201,6 +215,7 @@ describe('VM Lifecycle Integration Tests', () => {
         username: 'testuser',
         password: 'TestPass123!',
         productKey: undefined,
+        firstBootScripts: [],
         pciBus: null,
         applications: []
       }
@@ -231,6 +246,7 @@ describe('VM Lifecycle Integration Tests', () => {
         username: 'testuser',
         password: 'TestPass123!',
         productKey: undefined,
+        firstBootScripts: [],
         pciBus: null,
         applications: []
       }
@@ -413,6 +429,7 @@ describe('VM Lifecycle Integration Tests', () => {
         username: 'testuser',
         password: 'TestPass123!',
         productKey: undefined,
+        firstBootScripts: [],
         pciBus: null,
         applications: []
       }
@@ -578,12 +595,17 @@ describe('VM Lifecycle Integration Tests', () => {
       // Mock transaction to execute the callback with a transaction object
       const mockTx = {
         machine: { delete: jest.fn().mockResolvedValue(machine) },
-        machineConfiguration: { delete: jest.fn() },
-        machineApplication: { deleteMany: jest.fn() },
-        vMNWFilter: { deleteMany: jest.fn() },
-        vmPort: { deleteMany: jest.fn() },
-        nWFilter: { deleteMany: jest.fn() }
+        machineConfiguration: { delete: jest.fn().mockResolvedValue({}), deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
+        machineApplication: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
+        pendingCommand: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
+        scriptExecution: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
+        vMNWFilter: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
+        vmPort: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
+        nWFilter: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
+        firewallRule: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
+        firewallRuleSet: { delete: jest.fn().mockResolvedValue({}) }
       };
+      ;
       (prisma.$transaction as jest.Mock).mockImplementation(async (callback: Function) => {
         return callback(mockTx)
       })
@@ -616,11 +638,15 @@ describe('VM Lifecycle Integration Tests', () => {
       // Mock transaction to execute the callback with a transaction object
       const mockTx = {
         machine: { delete: jest.fn().mockResolvedValue(machine) },
-        machineConfiguration: { delete: jest.fn() },
-        machineApplication: { deleteMany: jest.fn() },
-        vMNWFilter: { deleteMany: jest.fn() },
-        vmPort: { deleteMany: jest.fn() },
-        nWFilter: { deleteMany: jest.fn() }
+        machineConfiguration: { delete: jest.fn().mockResolvedValue({}) },
+        machineApplication: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
+        pendingCommand: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
+        scriptExecution: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
+        vMNWFilter: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
+        vmPort: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
+        nWFilter: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
+        firewallRule: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
+        firewallRuleSet: { delete: jest.fn().mockResolvedValue({}) }
       };
       (prisma.$transaction as jest.Mock).mockImplementation(async (callback: Function) => {
         return callback(mockTx)
@@ -717,6 +743,7 @@ describe('VM Lifecycle Integration Tests', () => {
         username: 'testuser',
         password: 'TestPass123!',
         productKey: undefined,
+        firstBootScripts: [],
         pciBus: null,
         applications: []
       }

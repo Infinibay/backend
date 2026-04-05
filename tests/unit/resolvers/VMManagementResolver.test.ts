@@ -1,14 +1,10 @@
 import { mockDeep, mockReset } from 'jest-mock-extended'
 import { VMManagementResolver } from '../../../app/graphql/resolvers/vmManagement/resolver'
-import { NetworkFilterService } from '@services/networkFilterService'
-import { VirtioSocketWatcherService } from '@services/VirtioSocketWatcherService'
-import { VirtManager } from '@utils/VirtManager'
+import { VirtioSocketWatcherService } from '@services/vm/VirtioSocketWatcherService'
 import {
   createMockUser,
   createMockAdminUser,
-  createMockMachine,
-  createMockNWFilter,
-  createMockFWRule
+  createMockMachine
 } from '../../setup/mock-factories'
 import {
   createMockContext,
@@ -18,21 +14,11 @@ import {
 import { UserInputError } from 'apollo-server-core'
 
 // Mock the service modules
-jest.mock('@services/networkFilterService')
-jest.mock('@services/VirtioSocketWatcherService')
-jest.mock('@utils/VirtManager')
+jest.mock('@services/vm/VirtioSocketWatcherService')
 
-const MockNetworkFilterService = NetworkFilterService as jest.MockedClass<typeof NetworkFilterService>
 const MockVirtioSocketWatcherService = VirtioSocketWatcherService as jest.MockedClass<typeof VirtioSocketWatcherService>
-const MockVirtManager = VirtManager as jest.MockedClass<typeof VirtManager>
 
-const mockNetworkFilterService = mockDeep<NetworkFilterService>()
 const mockVirtioSocketWatcherService = mockDeep<VirtioSocketWatcherService>()
-const mockVirtManager = mockDeep<VirtManager>()
-
-jest.mock('../../../app/utils/libvirt', () => ({
-  getLibvirtConnection: jest.fn()
-}))
 
 describe('VMManagementResolver', () => {
   let resolver: VMManagementResolver
@@ -43,19 +29,13 @@ describe('VMManagementResolver', () => {
   let mockAdminContext: any
 
   beforeEach(() => {
-    mockReset(mockNetworkFilterService)
     mockReset(mockVirtioSocketWatcherService)
-    mockReset(mockVirtManager)
 
     // Set up mocked constructors
-    MockNetworkFilterService.mockImplementation(() => mockNetworkFilterService)
     MockVirtioSocketWatcherService.mockImplementation(() => mockVirtioSocketWatcherService)
-    MockVirtManager.mockImplementation(() => mockVirtManager)
 
     resolver = new VMManagementResolver(
-      mockNetworkFilterService,
-      mockVirtManager,
-      mockVirtioSocketWatcherService
+      mockVirtioSocketWatcherService as any
     )
 
     mockUser = createMockUser()
@@ -63,244 +43,6 @@ describe('VMManagementResolver', () => {
     mockVM = createMockMachine({ userId: mockUser.id })
     mockContext = createUserContext()
     mockAdminContext = createAdminContext()
-  })
-
-  describe('getVMFirewallRules', () => {
-    const vmId = 'vm-123'
-
-    it('should successfully retrieve VM firewall rules', async () => {
-      const mockNWFilter = createMockNWFilter()
-      const mockFWRule = createMockFWRule()
-
-      const vmWithFilters = {
-        ...mockVM,
-        nwFilters: [{
-          nwFilter: {
-            rules: [mockFWRule]
-          }
-        }]
-      }
-
-      mockContext.prisma.machine.findUnique.mockResolvedValue(vmWithFilters)
-
-      const result = await resolver.getVMFirewallRules(vmId, mockContext)
-
-      expect(mockContext.prisma.machine.findUnique).toHaveBeenCalledWith({
-        where: { id: vmId },
-        include: {
-          nwFilters: {
-            include: {
-              nwFilter: {
-                include: {
-                  rules: true
-                }
-              }
-            }
-          }
-        }
-      })
-
-      expect(result).toHaveLength(1)
-      expect(result[0]).toMatchObject({
-        id: mockFWRule.id,
-        name: expect.any(String),
-        action: mockFWRule.action || 'accept',
-        direction: mockFWRule.direction || 'inbound',
-        protocol: mockFWRule.protocol,
-        port: mockFWRule.dstPortStart,
-        sourceIp: mockFWRule.srcIpAddr,
-        destinationIp: mockFWRule.dstIpAddr,
-        priority: mockFWRule.priority || 1000,
-        enabled: true
-      })
-    })
-
-    it('should return empty array when VM has no firewall rules', async () => {
-      const vmWithoutRules = {
-        ...mockVM,
-        nwFilters: []
-      }
-
-      mockContext.prisma.machine.findUnique.mockResolvedValue(vmWithoutRules)
-
-      const result = await resolver.getVMFirewallRules(vmId, mockContext)
-
-      expect(result).toEqual([])
-    })
-
-    it('should throw error when VM not found', async () => {
-      mockContext.prisma.machine.findUnique.mockResolvedValue(null)
-
-      await expect(resolver.getVMFirewallRules(vmId, mockContext))
-        .rejects.toThrow(UserInputError)
-
-      await expect(resolver.getVMFirewallRules(vmId, mockContext))
-        .rejects.toThrow('VM not found')
-    })
-
-    it('should handle complex rule mapping with multiple filters', async () => {
-      const mockFWRule1 = createMockFWRule({ id: 'rule-1', protocol: 'tcp' })
-      const mockFWRule2 = createMockFWRule({ id: 'rule-2', protocol: 'udp' })
-
-      const vmWithMultipleFilters = {
-        ...mockVM,
-        nwFilters: [
-          { nwFilter: { rules: [mockFWRule1] } },
-          { nwFilter: { rules: [mockFWRule2] } }
-        ]
-      }
-
-      mockContext.prisma.machine.findUnique.mockResolvedValue(vmWithMultipleFilters)
-
-      const result = await resolver.getVMFirewallRules(vmId, mockContext)
-
-      expect(result).toHaveLength(2)
-      expect(result.find(r => r.protocol === 'tcp')).toBeDefined()
-      expect(result.find(r => r.protocol === 'udp')).toBeDefined()
-    })
-  })
-
-  describe('createVMFirewallRule', () => {
-    const createRuleInput = {
-      vmId: 'vm-123',
-      name: 'test-rule',
-      action: 'accept' as const,
-      direction: 'inbound' as const,
-      protocol: 'tcp',
-      port: 80,
-      sourceIp: '192.168.1.0/24',
-      destinationIp: '10.0.0.1',
-      priority: 100
-    }
-
-    it('should successfully create firewall rule with existing filter for admin', async () => {
-      const mockNWFilter = createMockNWFilter()
-      const mockFWRule = createMockFWRule()
-
-      const vmWithFilter = {
-        ...mockVM,
-        nwFilters: [{
-          nwFilterId: mockNWFilter.id,
-          nwFilter: mockNWFilter
-        }]
-      }
-
-      mockAdminContext.prisma.machine.findUnique.mockResolvedValue(vmWithFilter)
-      mockNetworkFilterService.createRule.mockResolvedValue(mockFWRule)
-
-      const result = await resolver.createVMFirewallRule(createRuleInput, mockAdminContext)
-
-      expect(mockAdminContext.prisma.machine.findUnique).toHaveBeenCalledWith({
-        where: { id: createRuleInput.vmId },
-        include: {
-          nwFilters: {
-            include: {
-              nwFilter: true
-            }
-          }
-        }
-      })
-
-      expect(mockNetworkFilterService.createRule).toHaveBeenCalledWith(
-        mockNWFilter.id,
-        createRuleInput.action || 'accept',
-        createRuleInput.direction || 'inbound',
-        createRuleInput.priority || 1000,
-        createRuleInput.protocol || 'all',
-        createRuleInput.port,
-        expect.objectContaining({
-          srcIpAddr: createRuleInput.sourceIp,
-          dstIpAddr: createRuleInput.destinationIp,
-          dstPortStart: createRuleInput.port,
-          dstPortEnd: createRuleInput.port,
-          comment: createRuleInput.name
-        })
-      )
-
-      expect(result).toMatchObject({
-        id: mockFWRule.id,
-        name: createRuleInput.name,
-        action: createRuleInput.action,
-        direction: createRuleInput.direction,
-        protocol: createRuleInput.protocol
-      })
-    })
-
-    it('should successfully create firewall rule with new filter creation for admin', async () => {
-      const mockNWFilter = createMockNWFilter()
-      const mockFWRule = createMockFWRule()
-
-      const vmWithoutFilter = {
-        ...mockVM,
-        nwFilters: []
-      }
-
-      mockAdminContext.prisma.machine.findUnique.mockResolvedValue(vmWithoutFilter)
-      mockNetworkFilterService.createFilter.mockResolvedValue(mockNWFilter)
-      mockNetworkFilterService.createRule.mockResolvedValue(mockFWRule)
-      mockAdminContext.prisma.vMNWFilter.create.mockResolvedValue({
-        vmId: mockVM.id,
-        nwFilterId: mockNWFilter.id
-      })
-
-      const result = await resolver.createVMFirewallRule(createRuleInput, mockAdminContext)
-
-      expect(mockNetworkFilterService.createFilter).toHaveBeenCalledWith(
-        `vm_${mockVM.name}_filter`,
-        `Firewall rules for VM ${mockVM.name}`,
-        'root',
-        'vm'
-      )
-
-      expect(mockAdminContext.prisma.vMNWFilter.create).toHaveBeenCalledWith({
-        data: {
-          vmId: mockVM.id,
-          nwFilterId: mockNWFilter.id
-        }
-      })
-
-      expect(mockNetworkFilterService.createRule).toHaveBeenCalledWith(
-        mockNWFilter.id,
-        createRuleInput.action || 'accept',
-        createRuleInput.direction || 'inbound',
-        createRuleInput.priority || 1000,
-        createRuleInput.protocol || 'all',
-        createRuleInput.port,
-        expect.any(Object)
-      )
-
-      expect(result).toBeDefined()
-    })
-
-    // Note: Authorization is handled by @Authorized('ADMIN') decorator in GraphQL schema
-
-    it('should throw error when VM not found', async () => {
-      mockAdminContext.prisma.machine.findUnique.mockResolvedValue(null)
-
-      await expect(resolver.createVMFirewallRule(createRuleInput, mockAdminContext))
-        .rejects.toThrow(UserInputError)
-
-      await expect(resolver.createVMFirewallRule(createRuleInput, mockAdminContext))
-        .rejects.toThrow('VM not found')
-    })
-
-    it('should handle NetworkFilterService errors', async () => {
-      const vmWithFilter = {
-        ...mockVM,
-        nwFilters: [{
-          nwFilterId: 'filter-id',
-          nwFilter: createMockNWFilter()
-        }]
-      }
-
-      mockAdminContext.prisma.machine.findUnique.mockResolvedValue(vmWithFilter)
-      mockNetworkFilterService.createRule.mockRejectedValue(new Error('Service error'))
-
-      await expect(resolver.createVMFirewallRule(createRuleInput, mockAdminContext))
-        .rejects.toThrow('Service error')
-    })
-
-    // Note: Input validation is handled by TypeGraphQL schema validation
   })
 
   describe('listVMServices', () => {
@@ -324,8 +66,9 @@ describe('VMManagementResolver', () => {
         where: { id: vmId }
       })
 
+      // The resolver uses vm.id (from DB) not the input vmId
       expect(mockVirtioSocketWatcherService.sendSafeCommand).toHaveBeenCalledWith(
-        vmId,
+        mockVM.id,
         { action: 'ServiceList' },
         30000
       )
@@ -407,7 +150,7 @@ describe('VMManagementResolver', () => {
     it('should handle invalid service response format', async () => {
       const mockInvalidResponse = {
         success: true,
-        data: null
+        data: null as any
       }
 
       mockContext.prisma.machine.findUnique.mockResolvedValue(mockVM)
@@ -443,8 +186,9 @@ describe('VMManagementResolver', () => {
         where: { id: serviceControlInput.vmId }
       })
 
+      // The resolver uses vm.id (from DB) not input.vmId
       expect(mockVirtioSocketWatcherService.sendSafeCommand).toHaveBeenCalledWith(
-        serviceControlInput.vmId,
+        mockVM.id,
         {
           action: 'ServiceControl',
           params: {
@@ -526,8 +270,9 @@ describe('VMManagementResolver', () => {
         const result = await resolver.controlVMService(input, mockContext)
 
         expect(result.output).toContain(action)
+        // The resolver uses vm.id (from DB) not input.vmId
         expect(mockVirtioSocketWatcherService.sendSafeCommand).toHaveBeenCalledWith(
-          input.vmId,
+          mockVM.id,
           {
             action: 'ServiceControl',
             params: {
@@ -539,14 +284,7 @@ describe('VMManagementResolver', () => {
         )
       }
     })
-
-    // Note: Input validation is handled by TypeGraphQL schema validation
-
-    // Note: Input validation is handled by TypeGraphQL schema validation
   })
-
-  // Note: Authorization is handled by @Authorized() decorators in GraphQL schema
-  // and would be tested in integration tests with actual GraphQL execution
 
   describe('Error Handling', () => {
     const vmId = 'vm-123'
@@ -554,31 +292,9 @@ describe('VMManagementResolver', () => {
     it('should handle database connection errors', async () => {
       mockContext.prisma.machine.findUnique.mockRejectedValue(new Error('Database connection failed'))
 
-      await expect(resolver.getVMFirewallRules(vmId, mockContext))
+      // DB errors from findUnique happen before the try/catch, so they propagate as-is
+      await expect(resolver.listVMServices(vmId, mockContext))
         .rejects.toThrow('Database connection failed')
-    })
-
-    it('should handle network service errors gracefully', async () => {
-      const vmWithFilter = {
-        ...mockVM,
-        nwFilters: [{
-          nwFilterId: 'filter-id',
-          nwFilter: createMockNWFilter()
-        }]
-      }
-      mockAdminContext.prisma.machine.findUnique.mockResolvedValue(vmWithFilter)
-      mockNetworkFilterService.createRule.mockRejectedValue(new Error('Network error'))
-
-      const createRuleInput = {
-        vmId,
-        name: 'test-rule',
-        action: 'accept' as const,
-        direction: 'inbound' as const,
-        protocol: 'tcp'
-      }
-
-      await expect(resolver.createVMFirewallRule(createRuleInput, mockAdminContext))
-        .rejects.toThrow('Network error')
     })
 
     it('should handle virtio service timeout gracefully', async () => {
@@ -592,8 +308,6 @@ describe('VMManagementResolver', () => {
     it('should provide meaningful error messages', async () => {
       mockContext.prisma.machine.findUnique.mockResolvedValue(null)
 
-      await expect(resolver.getVMFirewallRules(vmId, mockContext))
-        .rejects.toThrow('VM not found')
       await expect(resolver.listVMServices(vmId, mockContext))
         .rejects.toThrow('VM not found')
     })

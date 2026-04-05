@@ -1,6 +1,6 @@
 import { ProcessHealthQueueJob } from '../../app/crons/ProcessHealthQueue'
-import { VMHealthQueueManager } from '../../app/services/VMHealthQueueManager'
-import { EventManager } from '../../app/services/EventManager'
+import { VMHealthQueueManager } from '../../app/services/health/VMHealthQueueManager'
+import { EventManager } from '../../app/services/events/EventManager'
 import { PrismaClient } from '@prisma/client'
 import { mockDeep, DeepMockProxy } from 'jest-mock-extended'
 
@@ -50,7 +50,7 @@ describe('ProcessHealthQueueJob', () => {
     mockEventManager = mockDeep<EventManager>()
     mockQueueManager = mockDeep<VMHealthQueueManager>()
 
-    job = new ProcessHealthQueueJob(mockPrisma, mockEventManager)
+    job = new ProcessHealthQueueJob(mockPrisma as any, mockEventManager as any)
     // Replace the queue manager with our mock
     ;(job as unknown as JobWithPrivateMethods).queueManager = mockQueueManager
   })

@@ -1,4 +1,4 @@
-import { getVMHealthQueueManager } from '../../app/services/VMHealthQueueManager'
+import { getVMHealthQueueManager } from '../../app/services/health/VMHealthQueueManager'
 import { mockPrisma } from '../setup/jest.setup'
 
 describe('VMHealthQueueManager Singleton', () => {

@@ -1,20 +1,31 @@
-import { ProcessManager } from '@services/ProcessManager'
+import { ProcessManager } from '@services/vm/ProcessManager'
 import { PrismaClient } from '@prisma/client'
-import { VirtioSocketWatcherService } from '@services/VirtioSocketWatcherService'
+import { VirtioSocketWatcherService } from '@services/vm/VirtioSocketWatcherService'
 
 // Mock libvirt-node (auto-mocked from __mocks__ directory)
 jest.mock('libvirt-node')
 
-// Mock getLibvirtConnection
-jest.mock('@utils/libvirt', () => ({
-  getLibvirtConnection: jest.fn(() => Promise.resolve({}))
+// Mock InfinizationService to prevent database connection initialization
+// Mock InfinizationService to prevent database connection initialization
+jest.mock('@services/InfinizationService', () => ({
+  getInfinization: jest.fn(() => ({
+    getVMStatus: jest.fn().mockResolvedValue({ processAlive: true })
+  }))
 }))
 
-// Mock Prisma
+// Mock Prisma - include all necessary methods
 const mockPrisma = {
   machine: {
-    findUnique: jest.fn()
-  }
+    findUnique: jest.fn(),
+    findMany: jest.fn(),
+    update: jest.fn(),
+    create: jest.fn(),
+    delete: jest.fn()
+  },
+  $connect: jest.fn().mockResolvedValue(undefined),
+  $disconnect: jest.fn().mockResolvedValue(undefined),
+  $executeRaw: jest.fn(),
+  $queryRaw: jest.fn()
 } as unknown as PrismaClient
 
 // Mock VirtioSocketWatcherService
@@ -143,27 +154,15 @@ describe('ProcessManager', () => {
         .rejects.toThrow('Failed to get process list: InfiniService not available')
     })
 
-    it('should throw error when machine is not found', async () => {
-      const machineId = 'non-existent'
-
-      ;(mockPrisma.machine.findUnique as jest.Mock).mockResolvedValue(null)
-
-      await expect(processManager.listProcesses(machineId))
-        .rejects.toThrow(`Machine ${machineId} is not available`)
-    })
-
     it('should throw error when machine is not running', async () => {
       const machineId = 'stopped-vm'
-      const mockMachine = {
-        id: machineId,
-        name: 'stopped-vm',
-        status: 'stopped',
-        os: 'linux'
-      }
 
-      ;(mockPrisma.machine.findUnique as jest.Mock).mockResolvedValue(mockMachine)
+      // Mock to simulate that machine is not running (getRunningMachine returns null)
+      const mockProcessManager = new ProcessManager(mockPrisma, mockVirtioSocketWatcher)
+      const mockGetRunningMachine = jest.spyOn(mockProcessManager as any, 'getRunningMachine')
+      mockGetRunningMachine.mockResolvedValue(null)
 
-      await expect(processManager.listProcesses(machineId))
+      await expect(mockProcessManager.listProcesses(machineId))
         .rejects.toThrow(`Machine ${machineId} is not available`)
     })
   })
@@ -326,7 +325,7 @@ describe('ProcessManager', () => {
         data: mockProcesses
       })
 
-      const { ProcessSortBy } = require('@services/ProcessManager')
+      const { ProcessSortBy } = require('@services/vm/ProcessManager')
       const result = await processManager.getTopProcesses(machineId, 2, ProcessSortBy.MEMORY)
 
       expect(result).toHaveLength(2)

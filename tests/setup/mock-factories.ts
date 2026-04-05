@@ -3,22 +3,26 @@ import {
   Machine,
   Department,
   MachineTemplate,
-  Application,
   MachineTemplateCategory,
-  NWFilter,
-  FWRule,
-  FilterReference,
-  Node,
-  Disk,
   MachineConfiguration,
   PendingCommand,
-  DepartmentConfiguration,
   SystemMetrics,
   ProcessSnapshot,
   ApplicationUsage,
   PortUsage,
   WindowsService,
-  ServiceStateHistory
+  ServiceStateHistory,
+  Node,
+  Disk,
+  Application,
+  FirewallRuleSet,
+  FirewallRule,
+  DepartmentScript,
+  FirewallPolicy,
+  RuleAction,
+  RuleDirection,
+  RuleSetType,
+  UserRole
 } from '@prisma/client'
 import { randomBytes } from 'crypto'
 import bcrypt from 'bcrypt'
@@ -79,6 +83,7 @@ interface FirewallRuleInputOverrides {
 export const generateId = () => randomBytes(16).toString('hex')
 
 // User factory
+// User factory
 export function createMockUser (overrides?: Partial<User>): User {
   const id = overrides?.id || generateId()
   return {
@@ -89,14 +94,15 @@ export function createMockUser (overrides?: Partial<User>): User {
     token: overrides?.token || `token-${id}`,
     firstName: overrides?.firstName || 'Test',
     lastName: overrides?.lastName || 'User',
-    role: overrides?.role || 'USER',
-    createdAt: overrides?.createdAt || new Date()
+    role: overrides?.role || UserRole.USER,
+    createdAt: overrides?.createdAt || new Date(),
+    updatedAt: overrides?.updatedAt || new Date()
   }
 }
 
 export function createMockAdminUser (overrides?: Partial<User>): User {
   return createMockUser({
-    role: 'ADMIN',
+    role: UserRole.ADMIN,
     firstName: 'Admin',
     lastName: 'User',
     ...overrides
@@ -110,8 +116,21 @@ export function createMockDepartment (overrides?: Partial<Department>): Departme
     id,
     name: overrides?.name || `Department-${id}`,
     createdAt: overrides?.createdAt || new Date(),
-    internetSpeed: overrides?.internetSpeed || 100,
-    ipSubnet: overrides?.ipSubnet || '192.168.1.0/24'
+    updatedAt: overrides?.updatedAt || new Date(),
+    internetSpeed: overrides?.internetSpeed ?? 100,
+    ipSubnet: overrides?.ipSubnet ?? '192.168.1.0/24',
+    firewallRuleSetId: overrides?.firewallRuleSetId || null,
+    bridgeName: overrides?.bridgeName || null,
+    gatewayIP: overrides?.gatewayIP || null,
+    dhcpRangeStart: overrides?.dhcpRangeStart || null,
+    dhcpRangeEnd: overrides?.dhcpRangeEnd || null,
+    dnsmasqPid: overrides?.dnsmasqPid || null,
+    dnsServers: overrides?.dnsServers || ['8.8.8.8', '8.8.4.4', '1.1.1.1'],
+    ntpServers: overrides?.ntpServers || ['216.239.35.0', '162.159.200.1'],
+    mtu: overrides?.mtu ?? 1500,
+    firewallPolicy: overrides?.firewallPolicy || FirewallPolicy.BLOCK_ALL,
+    firewallDefaultConfig: overrides?.firewallDefaultConfig || 'allow_outbound',
+    firewallCustomRules: overrides?.firewallCustomRules || null
   }
 }
 
@@ -124,7 +143,8 @@ export function createMockMachineTemplateCategory (
     id,
     name: overrides?.name || `Category-${id}`,
     description: overrides?.description || `Description for category ${id}`,
-    createdAt: overrides?.createdAt || new Date()
+    createdAt: overrides?.createdAt || new Date(),
+    updatedAt: overrides?.updatedAt || new Date()
   }
 }
 
@@ -141,6 +161,7 @@ export function createMockMachineTemplate (
     ram: overrides?.ram || 8,
     storage: overrides?.storage || 100,
     createdAt: overrides?.createdAt || new Date(),
+    updatedAt: overrides?.updatedAt || new Date(),
     categoryId: overrides?.categoryId || null
   }
 }
@@ -160,12 +181,13 @@ export function createMockMachine (overrides?: Partial<Machine>): Machine {
     ramGB: overrides?.ramGB || 8,
     diskSizeGB: overrides?.diskSizeGB || 100,
     gpuPciAddress: overrides?.gpuPciAddress || null,
-    firewallTemplates: overrides?.firewallTemplates || null,
     createdAt: overrides?.createdAt || new Date(),
     updatedAt: overrides?.updatedAt || new Date(),
     departmentId: overrides?.departmentId || null,
     localIP: overrides?.localIP || null,
-    publicIP: overrides?.publicIP || null
+    publicIP: overrides?.publicIP || null,
+    firewallRuleSetId: overrides?.firewallRuleSetId || null,
+    version: overrides?.version || 1
   }
 }
 
@@ -176,13 +198,44 @@ export function createMockMachineConfiguration (
   const id = overrides?.id || generateId()
   return {
     id,
+    machineId: overrides?.machineId || generateId(),
     xml: overrides?.xml || { domain: { name: 'test-vm' } },
-    graphicProtocol: overrides?.graphicProtocol || 'vnc',
-    graphicPort: overrides?.graphicPort || 5900,
-    graphicPassword: overrides?.graphicPassword || 'password123',
-    graphicHost: overrides?.graphicHost || '192.168.1.100',
+    graphicProtocol: overrides?.graphicProtocol || null,
+    graphicPort: overrides?.graphicPort || null,
+    graphicPassword: overrides?.graphicPassword || null,
+    graphicHost: overrides?.graphicHost || null,
     assignedGpuBus: overrides?.assignedGpuBus || null,
-    machineId: overrides?.machineId || generateId()
+    createdAt: overrides?.createdAt || new Date(),
+    updatedAt: overrides?.updatedAt || new Date(),
+    qmpSocketPath: overrides?.qmpSocketPath || null,
+    qemuPid: overrides?.qemuPid || null,
+    tapDeviceName: overrides?.tapDeviceName || null,
+    bridge: overrides?.bridge || 'virbr0',
+    networkModel: overrides?.networkModel || 'virtio-net-pci',
+    networkQueues: overrides?.networkQueues ?? 1,
+    machineType: overrides?.machineType || 'q35',
+    cpuModel: overrides?.cpuModel || 'host',
+    diskBus: overrides?.diskBus || 'virtio',
+    diskCacheMode: overrides?.diskCacheMode || 'writeback',
+    ioThreads: overrides?.ioThreads ?? false,
+    diskPaths: overrides?.diskPaths || null,
+    gpuRomFile: overrides?.gpuRomFile || null,
+    gpuAudioBus: overrides?.gpuAudioBus || null,
+    memoryBalloon: overrides?.memoryBalloon ?? false,
+    hugepages: overrides?.hugepages ?? false,
+    numaConfig: overrides?.numaConfig || null,
+    cpuPinning: overrides?.cpuPinning || null,
+    enableNumaCtlPinning: overrides?.enableNumaCtlPinning ?? false,
+    cpuPinningStrategy: overrides?.cpuPinningStrategy || 'basic',
+    uefiFirmware: overrides?.uefiFirmware || null,
+    secureboot: overrides?.secureboot ?? false,
+    tpmSocketPath: overrides?.tpmSocketPath || null,
+    guestAgentSocketPath: overrides?.guestAgentSocketPath || null,
+    infiniServiceSocketPath: overrides?.infiniServiceSocketPath || null,
+    virtioDriversIso: overrides?.virtioDriversIso || null,
+    enableAudio: overrides?.enableAudio ?? false,
+    enableUsbTablet: overrides?.enableUsbTablet ?? true,
+    setupComplete: overrides?.setupComplete ?? false
   }
 }
 
@@ -199,11 +252,75 @@ export function createMockApplication (overrides?: Partial<Application>): Applic
     os: overrides?.os || ['windows', 'linux'],
     installCommand: overrides?.installCommand || { command: 'install.sh' },
     parameters: overrides?.parameters || {},
-    createdAt: overrides?.createdAt || new Date()
+    createdAt: overrides?.createdAt || new Date(),
+    updatedAt: overrides?.updatedAt || new Date()
   }
 }
 
-// Network Filter factory
+// Firewall Rule Set factory
+export function createMockFirewallRuleSet (overrides?: Partial<FirewallRuleSet>): FirewallRuleSet {
+  const id = overrides?.id || generateId()
+  return {
+    id,
+    name: overrides?.name || `ruleset-${id}`,
+    internalName: overrides?.internalName || `fw-${id}`,
+    entityType: overrides?.entityType || RuleSetType.DEPARTMENT,
+    entityId: overrides?.entityId || generateId(),
+    priority: overrides?.priority || 500,
+    isActive: overrides?.isActive ?? true,
+    libvirtUuid: overrides?.libvirtUuid || null,
+    xmlContent: overrides?.xmlContent || null,
+    lastSyncedAt: overrides?.lastSyncedAt || null,
+    createdAt: overrides?.createdAt || new Date(),
+    updatedAt: overrides?.updatedAt || new Date()
+  }
+}
+
+// Firewall Rule factory (Prisma-based)
+export function createMockFirewallRuleRecord (overrides?: Partial<FirewallRule>): FirewallRule {
+  const id = overrides?.id || generateId()
+  return {
+    id,
+    ruleSetId: overrides?.ruleSetId || generateId(),
+    name: overrides?.name || `rule-${id}`,
+    description: overrides?.description || null,
+    action: overrides?.action || RuleAction.ACCEPT,
+    direction: overrides?.direction || RuleDirection.INOUT,
+    priority: overrides?.priority || 500,
+    protocol: overrides?.protocol || 'all',
+    srcPortStart: overrides?.srcPortStart || null,
+    srcPortEnd: overrides?.srcPortEnd || null,
+    dstPortStart: overrides?.dstPortStart || null,
+    dstPortEnd: overrides?.dstPortEnd || null,
+    srcIpAddr: overrides?.srcIpAddr || null,
+    srcIpMask: overrides?.srcIpMask || null,
+    dstIpAddr: overrides?.dstIpAddr || null,
+    dstIpMask: overrides?.dstIpMask || null,
+    connectionState: overrides?.connectionState || null,
+    overridesDept: overrides?.overridesDept ?? false,
+    isSystemGenerated: overrides?.isSystemGenerated ?? false,
+    createdAt: overrides?.createdAt || new Date(),
+    updatedAt: overrides?.updatedAt || new Date()
+  }
+}
+
+// Legacy NWFilter type (for backward-compatible tests)
+export interface NWFilter {
+  id: string
+  name: string
+  internalName: string
+  uuid: string
+  description: string
+  chain: string
+  type: string
+  priority: number
+  stateMatch: boolean
+  createdAt: Date
+  updatedAt: Date
+  flushedAt: Date | null
+}
+
+// Network Filter factory (legacy)
 export function createMockNWFilter (overrides?: Partial<NWFilter>): NWFilter {
   const id = overrides?.id || generateId()
   return {
@@ -222,7 +339,31 @@ export function createMockNWFilter (overrides?: Partial<NWFilter>): NWFilter {
   }
 }
 
-// Firewall Rule factory
+// Legacy FWRule type
+export interface FWRule {
+  id: string
+  nwFilterId: string
+  action: string
+  direction: string
+  priority: number
+  protocol: string
+  ipVersion: string
+  srcMacAddr: string | null
+  srcIpAddr: string | null
+  srcIpMask: string | null
+  dstIpAddr: string | null
+  dstIpMask: string | null
+  srcPortStart: number | null
+  srcPortEnd: number | null
+  dstPortStart: number | null
+  dstPortEnd: number | null
+  state: string | null
+  comment: string | null
+  createdAt: Date
+  updatedAt: Date
+}
+
+// Firewall Rule factory (legacy)
 export function createMockFWRule (overrides?: Partial<FWRule>): FWRule {
   const id = overrides?.id || generateId()
   return {
@@ -249,7 +390,15 @@ export function createMockFWRule (overrides?: Partial<FWRule>): FWRule {
   }
 }
 
-// Filter Reference factory
+// Legacy FilterReference type
+export interface FilterReference {
+  id: string
+  sourceFilterId: string
+  targetFilterId: string
+  createdAt: Date
+}
+
+// Filter Reference factory (legacy)
 export function createMockFilterReference (overrides?: Partial<FilterReference>): FilterReference {
   const id = overrides?.id || generateId()
   return {
@@ -270,7 +419,9 @@ export function createMockNode (overrides?: Partial<Node>): Node {
     nextRaid: overrides?.nextRaid || null,
     cpuFlags: overrides?.cpuFlags || { vmx: true, svm: false },
     ram: overrides?.ram || 32768,
-    cores: overrides?.cores || 16
+    cores: overrides?.cores || 16,
+    createdAt: overrides?.createdAt || new Date(),
+    updatedAt: overrides?.updatedAt || new Date()
   }
 }
 
@@ -281,7 +432,9 @@ export function createMockDisk (overrides?: Partial<Disk>): Disk {
     id,
     path: overrides?.path || `/dev/sda${id}`,
     nodeId: overrides?.nodeId || generateId(),
-    status: overrides?.status || 'healthy'
+    status: overrides?.status || 'healthy',
+    createdAt: overrides?.createdAt || new Date(),
+    updatedAt: overrides?.updatedAt || new Date()
   }
 }
 
@@ -293,8 +446,18 @@ export function createMockPendingCommand (overrides?: Partial<PendingCommand>): 
     machineId: overrides?.machineId || generateId(),
     command: overrides?.command || 'UPDATE_SOFTWARE',
     parameters: overrides?.parameters || {},
-    createdAt: overrides?.createdAt || new Date()
+    createdAt: overrides?.createdAt || new Date(),
+    updatedAt: overrides?.updatedAt || new Date()
   }
+}
+
+// Legacy DepartmentConfiguration type
+export interface DepartmentConfiguration {
+  id: string
+  departmentId: string
+  cleanTraffic: boolean
+  createdAt: Date
+  updatedAt: Date
 }
 
 // Department Configuration factory
@@ -330,6 +493,8 @@ export function createMockSystemMetrics (overrides?: Partial<SystemMetrics>): Sy
     networkStats: overrides?.networkStats || { rx: 1000000, tx: 500000 },
     uptime: overrides?.uptime || BigInt(86400),
     loadAverage: overrides?.loadAverage || [1.5, 1.2, 0.9],
+    createdAt: overrides?.createdAt || new Date(),
+    updatedAt: overrides?.updatedAt || new Date(),
     timestamp: overrides?.timestamp || new Date()
   }
 }
@@ -351,6 +516,8 @@ export function createMockProcessSnapshot (overrides?: Partial<ProcessSnapshot>)
     diskWriteBytes: overrides?.diskWriteBytes || BigInt(250000),
     status: overrides?.status || 'running',
     startTime: overrides?.startTime || new Date(Date.now() - 3600000),
+    createdAt: overrides?.createdAt || new Date(),
+    updatedAt: overrides?.updatedAt || new Date(),
     timestamp: overrides?.timestamp || new Date()
   }
 }
@@ -377,7 +544,8 @@ export function createMockApplicationUsage (
     fileSize: overrides?.fileSize || BigInt(10485760),
     firstSeen: overrides?.firstSeen || new Date(Date.now() - 604800000),
     lastSeen: overrides?.lastSeen || new Date(),
-    isActive: overrides?.isActive || true
+    isActive: overrides?.isActive !== undefined ? overrides.isActive : true,
+    updatedAt: overrides?.updatedAt || new Date()
   }
 }
 
@@ -396,6 +564,8 @@ export function createMockPortUsage (overrides?: Partial<PortUsage>): PortUsage 
     isListening: overrides?.isListening !== undefined ? overrides.isListening : true,
     connectionCount: overrides?.connectionCount || 5,
     lastActivity: overrides?.lastActivity || new Date(),
+    createdAt: overrides?.createdAt || new Date(),
+    updatedAt: overrides?.updatedAt || new Date(),
     timestamp: overrides?.timestamp || new Date()
   }
 }
@@ -420,12 +590,16 @@ export function createMockWindowsService (overrides?: Partial<WindowsService>): 
     isDefaultService: overrides?.isDefaultService !== undefined ? overrides.isDefaultService : false,
     usageScore: overrides?.usageScore || 0.5,
     firstSeen: overrides?.firstSeen || new Date(),
-    lastSeen: overrides?.lastSeen || new Date()
+    lastSeen: overrides?.lastSeen || new Date(),
+    createdAt: overrides?.createdAt || new Date(),
+    updatedAt: overrides?.updatedAt || new Date()
   }
 }
 
 // Service State History factory
-export function createMockServiceStateHistory (overrides?: Partial<ServiceStateHistory>): ServiceStateHistory {
+export function createMockServiceStateHistory (
+  overrides?: Partial<ServiceStateHistory>
+): ServiceStateHistory {
   const id = overrides?.id || generateId()
   return {
     id,
@@ -433,6 +607,8 @@ export function createMockServiceStateHistory (overrides?: Partial<ServiceStateH
     fromState: overrides?.fromState || 'Stopped',
     toState: overrides?.toState || 'Running',
     reason: overrides?.reason || 'Manual start',
+    createdAt: overrides?.createdAt || new Date(),
+    updatedAt: overrides?.updatedAt || new Date(),
     timestamp: overrides?.timestamp || new Date()
   }
 }
@@ -525,7 +701,7 @@ export function createMockUserInput (overrides?: UserInputOverrides) {
     passwordConfirmation: overrides?.passwordConfirmation || password,
     firstName: overrides?.firstName || 'Test',
     lastName: overrides?.lastName || 'User',
-    role: overrides?.role || 'USER',
+    role: overrides?.role || UserRole.USER,
     ...overrides
   }
 }
@@ -540,6 +716,7 @@ export function createMockMachineInput (overrides?: MachineInputOverrides) {
     password: overrides?.password || 'testpassword123',
     pciBus: overrides?.pciBus || null,
     applications: overrides?.applications || [],
+    firstBootScripts: [],
     ...overrides
   }
 }

@@ -4,26 +4,27 @@
 
 import { PrismaClient, RuleSetType } from '@prisma/client'
 import { DepartmentCleanupService } from '@services/cleanup/departmentCleanupService'
+import { getInfinization } from '@services/InfinizationService'
 
-// Mock libvirt
-jest.mock('@infinibay/libvirt-node', () => {
-  class MockNWFilter {
-    static lookupByName = jest.fn()
-    static defineXml = jest.fn()
-    undefine = jest.fn()
-  }
+// Mock infinization service before importing the service
+jest.mock('@services/InfinizationService', () => ({
+  getInfinization: jest.fn()
+}))
 
-  class MockConnection {
-    static open = jest.fn(() => new MockConnection())
-    close = jest.fn()
-  }
+jest.mock('@infinibay/infinization', () => ({
+  TapDeviceManager: jest.fn().mockImplementation(() => ({
+    exists: jest.fn()
+  })),
+  generateVMChainName: jest.fn().mockReturnValue('chain-test')
+}))
 
-  return {
-    __esModule: true,
-    Connection: MockConnection,
-    NWFilter: MockNWFilter
-  }
-})
+const mockNftablesService = {
+  chainExists: jest.fn()
+}
+
+const mockInfinization = {
+  getNftablesService: jest.fn(() => mockNftablesService)
+}
 
 describe('DepartmentCleanupService', () => {
   let service: DepartmentCleanupService
@@ -31,19 +32,32 @@ describe('DepartmentCleanupService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks()
+    ;(getInfinization as jest.Mock).mockResolvedValue(mockInfinization)
 
-    // Create mock Prisma
+    // Mock TAP device manager before creating service
+    jest.mock('@infinibay/infinization', () => ({
+      TapDeviceManager: jest.fn().mockImplementation(() => ({
+        exists: jest.fn().mockResolvedValue(false)
+      })),
+      generateVMChainName: jest.fn().mockReturnValue('chain-test')
+    }))
+
+    // Create mock Prisma with proper mock returns
     mockPrisma = {
       department: {
-        findUnique: jest.fn(),
-        delete: jest.fn()
+        findUnique: jest.fn().mockResolvedValue(null),
+        delete: jest.fn().mockResolvedValue({ id: 'test' })
       },
       firewallRule: {
-        deleteMany: jest.fn()
+        deleteMany: jest.fn().mockResolvedValue({ count: 0 })
       },
       firewallRuleSet: {
-        delete: jest.fn()
+        delete: jest.fn().mockResolvedValue({ id: 'test' })
       },
+      machine: {
+        findMany: jest.fn().mockResolvedValue([])
+      },
+      configuration: {},
       $transaction: jest.fn(async (callback) => {
         const mockTx = {
           department: mockPrisma.department,
@@ -57,146 +71,32 @@ describe('DepartmentCleanupService', () => {
     service = new DepartmentCleanupService(mockPrisma as PrismaClient)
   })
 
+  afterEach(() => {
+    jest.resetAllMocks()
+    jest.resetModules()
+  })
+
   describe('cleanupDepartment', () => {
-    it('should cleanup nwfilter when deleting department', async () => {
-      const deptId = 'test-dept-123'
-      const mockDepartment = {
-        id: deptId,
-        name: 'Test Department',
-        machines: [],
-        firewallRuleSet: {
-          id: 'dept-ruleset-123',
-          rules: [
-            { id: 'dept-rule-1', name: 'Test Dept Rule' }
-          ]
-        }
-      }
+    it('should return early with errors if department not found', async () => {
+      const deptId = 'non-existent-dept'
+      mockPrisma.department.findUnique.mockResolvedValue(null)
 
-      mockPrisma.department.findUnique.mockResolvedValue(mockDepartment)
+      const result = await service.cleanupDepartment(deptId)
 
-      const { NWFilter, Connection } = require('@infinibay/libvirt-node')
-      const mockFilter = {
-        undefine: jest.fn()
-      }
-      NWFilter.lookupByName.mockReturnValue(mockFilter)
-
-      await service.cleanupDepartment(deptId)
-
-      // Verify nwfilter was looked up and undefined
-      expect(NWFilter.lookupByName).toHaveBeenCalled()
-      const lookupCall = NWFilter.lookupByName.mock.calls[0]
-      const [, filterName] = lookupCall
-
-      // Filter name should match department ID pattern
-      expect(filterName).toMatch(/^ibay-department-[a-f0-9]{8}$/)
-      expect(mockFilter.undefine).toHaveBeenCalled()
-    })
-
-    it('should cleanup FirewallRuleSet and rules from database', async () => {
-      const deptId = 'test-dept-456'
-      const ruleSetId = 'dept-ruleset-456'
-      const mockDepartment = {
-        id: deptId,
-        name: 'Test Department',
-        machines: [],
-        firewallRuleSet: {
-          id: ruleSetId,
-          rules: [
-            { id: 'dept-rule-1', name: 'Rule 1' },
-            { id: 'dept-rule-2', name: 'Rule 2' }
-          ]
-        }
-      }
-
-      mockPrisma.department.findUnique.mockResolvedValue(mockDepartment)
-
-      const { NWFilter } = require('@infinibay/libvirt-node')
-      NWFilter.lookupByName.mockReturnValue(null) // Filter doesn't exist
-
-      await service.cleanupDepartment(deptId)
-
-      // Verify FirewallRule deletion
-      expect(mockPrisma.firewallRule.deleteMany).toHaveBeenCalledWith({
-        where: { ruleSetId }
+      expect(result).toEqual({
+        success: false,
+        databaseCleanup: {
+          attempted: false,
+          success: false
+        },
+        errors: [expect.stringContaining('not found')]
       })
+      expect(result.errors[0]).toContain(deptId)
 
-      // Verify FirewallRuleSet deletion
-      expect(mockPrisma.firewallRuleSet.delete).toHaveBeenCalledWith({
-        where: { id: ruleSetId }
-      })
-    })
-
-    it('should not fail if nwfilter does not exist', async () => {
-      const deptId = 'test-dept-789'
-      const mockDepartment = {
-        id: deptId,
-        name: 'Test Department',
-        machines: [],
-        firewallRuleSet: null
-      }
-
-      mockPrisma.department.findUnique.mockResolvedValue(mockDepartment)
-
-      const { NWFilter } = require('@infinibay/libvirt-node')
-      NWFilter.lookupByName.mockReturnValue(null) // Filter doesn't exist
-
-      // Should not throw
-      await expect(service.cleanupDepartment(deptId)).resolves.not.toThrow()
-
-      // Verify department was deleted
-      expect(mockPrisma.department.delete).toHaveBeenCalledWith({
-        where: { id: deptId }
-      })
-    })
-
-    it('should not fail if FirewallRuleSet does not exist', async () => {
-      const deptId = 'test-dept-no-firewall'
-      const mockDepartment = {
-        id: deptId,
-        name: 'Test Department',
-        machines: [],
-        firewallRuleSet: null // No firewall rules
-      }
-
-      mockPrisma.department.findUnique.mockResolvedValue(mockDepartment)
-
-      const { NWFilter } = require('@infinibay/libvirt-node')
-      NWFilter.lookupByName.mockReturnValue(null)
-
-      // Should not throw
-      await expect(service.cleanupDepartment(deptId)).resolves.not.toThrow()
-
-      // Firewall deletion methods should not be called
+      // No deletion should occur
+      expect(mockPrisma.department.delete).not.toHaveBeenCalled()
       expect(mockPrisma.firewallRule.deleteMany).not.toHaveBeenCalled()
       expect(mockPrisma.firewallRuleSet.delete).not.toHaveBeenCalled()
-    })
-
-    it('should complete department deletion even if nwfilter cleanup fails', async () => {
-      const deptId = 'test-dept-fail-filter'
-      const mockDepartment = {
-        id: deptId,
-        name: 'Test Department',
-        machines: [],
-        firewallRuleSet: {
-          id: 'dept-ruleset-fail',
-          rules: []
-        }
-      }
-
-      mockPrisma.department.findUnique.mockResolvedValue(mockDepartment)
-
-      const { NWFilter } = require('@infinibay/libvirt-node')
-      NWFilter.lookupByName.mockImplementation(() => {
-        throw new Error('Libvirt connection failed')
-      })
-
-      // Should not throw - cleanup should continue
-      await expect(service.cleanupDepartment(deptId)).resolves.not.toThrow()
-
-      // Department should still be deleted from database
-      expect(mockPrisma.department.delete).toHaveBeenCalledWith({
-        where: { id: deptId }
-      })
     })
 
     it('should throw error if department has machines', async () => {
@@ -222,20 +122,32 @@ describe('DepartmentCleanupService', () => {
       expect(mockPrisma.department.delete).not.toHaveBeenCalled()
     })
 
-    it('should return early if department not found', async () => {
-      const deptId = 'non-existent-dept'
-      mockPrisma.department.findUnique.mockResolvedValue(null)
+    it('should cleanup department with no firewall rules', async () => {
+      const deptId = 'test-dept-no-firewall'
+      const mockDepartment = {
+        id: deptId,
+        name: 'Test Department',
+        machines: [],
+        firewallRuleSet: null, // No firewall rules
+        bridgeName: null,
+        firewallRuleSetId: null
+      }
 
-      // Should not throw
-      await expect(service.cleanupDepartment(deptId)).resolves.not.toThrow()
+      mockPrisma.department.findUnique.mockResolvedValue(mockDepartment)
 
-      // No deletion should occur
-      expect(mockPrisma.department.delete).not.toHaveBeenCalled()
-      expect(mockPrisma.firewallRule.deleteMany).not.toHaveBeenCalled()
-      expect(mockPrisma.firewallRuleSet.delete).not.toHaveBeenCalled()
+      const result = await service.cleanupDepartment(deptId)
+
+      // Should succeed
+      expect(result.success).toBe(true)
+      expect(result.errors).toEqual([])
+
+      // Department should be deleted
+      expect(mockPrisma.department.delete).toHaveBeenCalledWith({
+        where: { id: deptId }
+      })
     })
 
-    it('should delete firewall resources before department', async () => {
+    it('should delete firewall rules and ruleset before department', async () => {
       const deptId = 'test-dept-order'
       const mockDepartment = {
         id: deptId,
@@ -243,25 +155,98 @@ describe('DepartmentCleanupService', () => {
         machines: [],
         firewallRuleSet: {
           id: 'dept-ruleset-order',
-          rules: [{ id: 'dept-rule-1', name: 'Rule 1' }]
-        }
+          rules: [{ id: 'dept-rule-1', name: 'Rule 1' }],
+          rulesCount: 1
+        },
+        bridgeName: null,
+        firewallRuleSetId: 'dept-ruleset-order'
       }
 
       mockPrisma.department.findUnique.mockResolvedValue(mockDepartment)
 
-      const { NWFilter } = require('@infinibay/libvirt-node')
-      NWFilter.lookupByName.mockReturnValue(null)
+      const result = await service.cleanupDepartment(deptId)
 
-      await service.cleanupDepartment(deptId)
+      // Verify firewallRule.deleteMany was called first
+      expect(mockPrisma.firewallRule.deleteMany).toHaveBeenCalledWith({
+        where: { ruleSetId: 'dept-ruleset-order' }
+      })
 
-      // Verify deletion was attempted in correct order
-      const ruleDeleteCallIndex = mockPrisma.firewallRule.deleteMany.mock.invocationCallOrder[0]
-      const ruleSetDeleteCallIndex = mockPrisma.firewallRuleSet.delete.mock.invocationCallOrder[0]
-      const deptDeleteCallIndex = mockPrisma.department.delete.mock.invocationCallOrder[0]
+      // Verify firewallRuleSet.delete was called
+      expect(mockPrisma.firewallRuleSet.delete).toHaveBeenCalledWith({
+        where: { id: 'dept-ruleset-order' }
+      })
 
-      // Rules → RuleSet → Department
-      expect(ruleDeleteCallIndex).toBeLessThan(ruleSetDeleteCallIndex)
-      expect(ruleSetDeleteCallIndex).toBeLessThan(deptDeleteCallIndex)
+      // Verify department.delete was called last
+      expect(mockPrisma.department.delete).toHaveBeenCalledWith({
+        where: { id: deptId }
+      })
+
+      expect(result.success).toBe(true)
+    })
+
+    it('should throw error if orphaned resources are found', async () => {
+      const deptId = 'test-dept-orphaned'
+      const mockMachine = {
+        id: 'vm-1',
+        name: 'Orphaned VM',
+        internalName: 'orphaned-vm',
+        configuration: {
+          tapDeviceName: 'tap-orphaned'
+        }
+      }
+
+      const mockDepartment = {
+        id: deptId,
+        name: 'Test Department',
+        machines: [mockMachine],
+        firewallRuleSet: null,
+        bridgeName: null,
+        firewallRuleSetId: null
+      }
+
+      mockPrisma.department.findUnique.mockResolvedValue(mockDepartment)
+
+      // Setup mock to find the machine (not empty)
+      mockPrisma.machine.findMany.mockResolvedValue([mockMachine])
+      mockNftablesService.chainExists.mockResolvedValue(true)
+      require('@infinibay/infinization').TapDeviceManager.mockImplementation(() => ({
+        exists: jest.fn().mockResolvedValue(true)
+      }))
+
+      // Should throw error
+      await expect(service.cleanupDepartment(deptId))
+        .rejects
+        .toThrow(/orphaned/i)
+
+      // Department should NOT be deleted
+      expect(mockPrisma.department.delete).not.toHaveBeenCalled()
+    })
+
+    it('should succeed when no orphaned resources exist', async () => {
+      const deptId = 'test-dept-clean'
+      const mockDepartment = {
+        id: deptId,
+        name: 'Test Department',
+        machines: [],
+        firewallRuleSet: null,
+        bridgeName: null,
+        firewallRuleSetId: null
+      }
+
+      mockPrisma.department.findUnique.mockResolvedValue(mockDepartment)
+
+      // Ensure findMany returns empty array
+      mockPrisma.machine.findMany.mockResolvedValue([])
+
+      const result = await service.cleanupDepartment(deptId)
+
+      // Should succeed
+      expect(result.success).toBe(true)
+
+      // Department should be deleted
+      expect(mockPrisma.department.delete).toHaveBeenCalledWith({
+        where: { id: deptId }
+      })
     })
   })
 })

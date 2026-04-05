@@ -1,5 +1,5 @@
 import 'reflect-metadata'
-import { SnapshotServiceV2 } from '../../../app/services/SnapshotServiceV2'
+import { SnapshotServiceV2 } from '../../../app/services/vm/SnapshotServiceV2'
 import { PrismaClient } from '@prisma/client'
 import fs from 'fs'
 

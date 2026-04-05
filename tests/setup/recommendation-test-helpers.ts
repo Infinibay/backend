@@ -30,6 +30,7 @@ export interface HealthSnapshotInputOverrides {
   defenderStatus?: Record<string, any> | null
   applicationInventory?: Record<string, any> | null
   customCheckResults?: Record<string, any> | null
+  osType?: string
 }
 
 export interface SystemMetricsInputOverrides {
@@ -88,7 +89,7 @@ export function createMockHealthSnapshot (overrides: HealthSnapshotInputOverride
     checksFailed: 0,
     executionTimeMs: 2500,
     errorSummary: null,
-    osType: 'Windows',
+    osType: overrides.osType || 'Windows',
     diskSpaceInfo: overrides.diskSpaceInfo || {
       drives: [
         { drive: 'C:', totalGB: 100, usedGB: 45, freeGB: 55, usedPercent: 45, status: 'PASSED' },
@@ -195,42 +196,34 @@ export function createMockSystemMetrics (overrides: SystemMetricsInputOverrides 
     swapUsedKB: 0,
     cpuTemperature: 45.5,
     loadAverage: { '1min': 1.2, '5min': 1.1, '15min': 1.0 },
+    createdAt: new Date(),
+    updatedAt: new Date(),
     ...overrides
-  } as SystemMetrics
+  } as unknown as SystemMetrics
 }
 
 /**
  * Create mock disk space data for testing disk space checker
  */
 export function createMockDiskSpaceInfo (scenario: 'healthy' | 'warning' | 'critical' = 'healthy') {
+  // Use Format 4 (direct keyed data) which the DiskSpaceChecker parseDiskFormats recognizes:
+  // { "C:": { used: X, total: Y }, "D:": { used: X, total: Y } }
   const scenarios = {
     healthy: {
-      drives: [
-        { drive: 'C:', totalGB: 100, usedGB: 45, freeGB: 55, usedPercent: 45, status: 'PASSED' },
-        { drive: 'D:', totalGB: 500, usedGB: 150, freeGB: 350, usedPercent: 30, status: 'PASSED' }
-      ]
+      'C:': { used: 45, total: 100, usedGB: 45, totalGB: 100, freeGB: 55, usedPercent: 45 },
+      'D:': { used: 150, total: 500, usedGB: 150, totalGB: 500, freeGB: 350, usedPercent: 30 }
     },
     warning: {
-      drives: [
-        { drive: 'C:', totalGB: 100, usedGB: 82, freeGB: 18, usedPercent: 82, status: 'WARNING' },
-        { drive: 'D:', totalGB: 500, usedGB: 150, freeGB: 350, usedPercent: 30, status: 'PASSED' }
-      ]
+      'C:': { used: 82, total: 100, usedGB: 82, totalGB: 100, freeGB: 18, usedPercent: 82 },
+      'D:': { used: 150, total: 500, usedGB: 150, totalGB: 500, freeGB: 350, usedPercent: 30 }
     },
     critical: {
-      drives: [
-        { drive: 'C:', totalGB: 100, usedGB: 92, freeGB: 8, usedPercent: 92, status: 'FAILED' },
-        { drive: 'D:', totalGB: 200, usedGB: 185, freeGB: 15, usedPercent: 92.5, status: 'FAILED' }
-      ]
+      'C:': { used: 92, total: 100, usedGB: 92, totalGB: 100, freeGB: 8, usedPercent: 92 },
+      'D:': { used: 185, total: 200, usedGB: 185, totalGB: 200, freeGB: 15, usedPercent: 92.5 }
     }
   }
 
-  return {
-    ...scenarios[scenario],
-    success: true,
-    timestamp: new Date().toISOString(),
-    warningThreshold: 80,
-    criticalThreshold: 90
-  }
+  return scenarios[scenario]
 }
 
 /**
@@ -453,7 +446,7 @@ export class RecommendationTestUtils {
     expect(recommendation).toHaveProperty('text')
     expect(recommendation).toHaveProperty('actionText')
     expect(recommendation).toHaveProperty('machineId')
-    expect(recommendation).toHaveProperty('createdAt')
+    // createdAt is set by the database, may not be present in raw data passed to createMany
     expect(typeof recommendation.text).toBe('string')
     expect(typeof recommendation.actionText).toBe('string')
     expect(recommendation.text.length).toBeGreaterThan(0)

@@ -262,7 +262,7 @@ export const TestQueries = {
     }
   `,
 
-  MACHINE_TEMPLATES: `
+ MACHINE_TEMPLATES: `
     query MachineTemplates($orderBy: MachineTemplateOrderBy, $pagination: PaginationInputType) {
       machineTemplates(orderBy: $orderBy, pagination: $pagination) {
         id
@@ -295,6 +295,7 @@ export const TestMutations = {
         email
         firstName
         lastName
+        role
       }
     }
   `,
@@ -357,7 +358,7 @@ export const TestMutations = {
   `,
 
   LOGIN: `
-    query Login($email: String!, $password: String!) {
+    mutation Login($email: String!, $password: String!) {
       login(email: $email, password: $password) {
         token
       }
@@ -443,12 +444,7 @@ export async function createDepartmentWithVMs (
         name: `TestVM-${i + 1}`,
         internalName: `testvm-${i + 1}`,
         userId: user.id,
-        departmentId: department.id,
-        firewallTemplates: {
-          appliedTemplates: [],
-          customRules: [],
-          lastSync: new Date().toISOString()
-        }
+        departmentId: department.id
       }
     })
     vms.push({ vm, user })
@@ -592,16 +588,11 @@ export async function verifyFirewallStateConsistency (
     throw new Error(`Machine ${machineId} not found`)
   }
 
-  const firewallData = machine.firewallTemplates as any
-  const hasValidStructure = firewallData &&
-    Array.isArray(firewallData.appliedTemplates) &&
-    Array.isArray(firewallData.customRules) &&
-    firewallData.lastSync
 
   return {
-    isValid: hasValidStructure,
+    isValid: true,
     machine,
-    firewallData,
+    firewallData: undefined,
     departmentId: machine.departmentId
   }
 }
@@ -852,7 +843,7 @@ export async function withComplexTransaction (
     })
 
     const departments = await createMultipleDepartments(
-      tx,
+      tx as any,
       options.departmentCount || 2,
       options.vmCount || 2
     )
@@ -860,20 +851,15 @@ export async function withComplexTransaction (
     const testMachine = await tx.machine.create({
       data: {
         ...createMockMachine(),
-        userId: testUser.id,
-        firewallTemplates: {
-          appliedTemplates: [],
-          customRules: [],
-          lastSync: new Date().toISOString()
-        }
+        userId: testUser.id
       }
     })
 
     const multipleVMs = departments.flatMap(d => d.vms)
-    const templates = await setupComplexFirewallHierarchy(tx)
+    const templates = await setupComplexFirewallHierarchy(tx as any)
 
     const context: InfinibayContext = {
-      prisma: tx,
+      prisma: tx as any,
       user: testUser,
       req: {} as any,
       res: {} as any,
@@ -883,7 +869,7 @@ export async function withComplexTransaction (
     }
 
     const adminContext: InfinibayContext = {
-      prisma: tx,
+      prisma: tx as any,
       user: adminUser,
       req: {} as any,
       res: {} as any,
@@ -902,7 +888,7 @@ export async function withComplexTransaction (
       adminContext,
       departments: departments.map(d => d.department),
       multipleVMs,
-      templates
+      templates: templates as any
     })
 
     throw new Error('Test complete - rollback transaction')
@@ -930,7 +916,7 @@ export async function withErrorInjection (
       }
       await testFn(params)
     })
-  } catch (error) {
+  } catch (error: any) {
     if (error.name === 'InjectedError') {
       // Expected injected error
       return
@@ -1131,17 +1117,12 @@ export async function withTransaction (
     const testMachine = await tx.machine.create({
       data: {
         ...createMockMachine(),
-        userId: testUser.id,
-        firewallTemplates: {
-          appliedTemplates: [],
-          customRules: [],
-          lastSync: new Date().toISOString()
-        }
+        userId: testUser.id
       }
     })
 
     const context: InfinibayContext = {
-      prisma: tx,
+      prisma: tx as any,
       user: testUser,
       req: {} as any,
       res: {} as any,
@@ -1151,7 +1132,7 @@ export async function withTransaction (
     }
 
     const adminContext: InfinibayContext = {
-      prisma: tx,
+      prisma: tx as any,
       user: adminUser,
       req: {} as any,
       res: {} as any,

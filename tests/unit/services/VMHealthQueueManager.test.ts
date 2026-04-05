@@ -1,12 +1,12 @@
 import 'reflect-metadata'
-import { VMHealthQueueManager } from '@services/VMHealthQueueManager'
-import type { EventManager } from '@services/EventManager'
+import { VMHealthQueueManager } from '@services/health/VMHealthQueueManager'
+import type { EventManager } from '@services/events/EventManager'
 import { mockPrisma } from '../../setup/jest.setup'
 import { TaskStatus, TaskPriority, HealthCheckType } from '@prisma/client'
 import { RUNNING_STATUS, STOPPED_STATUS, PAUSED_STATUS } from '../../../app/constants/machine-status'
 
 // Mock VirtioSocketWatcherService
-jest.mock('@services/VirtioSocketWatcherService', () => ({
+jest.mock('@services/vm/VirtioSocketWatcherService', () => ({
   getVirtioSocketWatcherService: jest.fn(() => ({
     sendSafeCommand: jest.fn().mockResolvedValue({
       success: true,
@@ -52,7 +52,10 @@ describe('VMHealthQueueManager', () => {
       departmentId: null,
       templateId: null,
       gpuPciAddress: null,
-      firewallTemplates: {}
+      firewallRuleSetId: null,
+      version: 1,
+      localIP: null,
+      publicIP: null
     })
   })
 
@@ -77,7 +80,10 @@ describe('VMHealthQueueManager', () => {
     departmentId: null,
     templateId: null,
     gpuPciAddress: null,
-    firewallTemplates: {}
+    version: 1,
+    localIP: null,
+    publicIP: null,
+    firewallRuleSetId: null
   })
 
   describe('queueHealthCheck', () => {
@@ -235,6 +241,29 @@ describe('VMHealthQueueManager', () => {
         updatedAt: new Date()
       })
 
+      // Mock snapshot operations needed by queueHealthChecks
+      mockPrisma.vMHealthSnapshot.findFirst.mockResolvedValue(null)
+      mockPrisma.vMHealthSnapshot.create.mockResolvedValue({
+        id: 'snapshot-1',
+        machineId: mockMachineId,
+        snapshotDate: new Date(),
+        overallStatus: 'PENDING',
+        checksCompleted: 0,
+        checksFailed: 0,
+        executionTimeMs: null,
+        errorSummary: null,
+        osType: null,
+        diskSpaceInfo: null,
+        resourceOptInfo: null,
+        windowsUpdateInfo: null,
+        defenderStatus: null,
+        applicationInventory: null,
+        linuxUpdateInfo: null,
+        customCheckResults: null,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      })
+
       await queueManager.queueHealthChecks(mockMachineId)
 
       // Focus on functional outcome: should queue 6 standard checks
@@ -326,6 +355,29 @@ describe('VMHealthQueueManager', () => {
         updatedAt: new Date()
       })
 
+      // Mock snapshot operations needed by queueHealthChecks
+      mockPrisma.vMHealthSnapshot.findFirst.mockResolvedValue(null)
+      mockPrisma.vMHealthSnapshot.create.mockResolvedValue({
+        id: 'snapshot-1',
+        machineId: mockMachineId,
+        snapshotDate: new Date(),
+        overallStatus: 'PENDING',
+        checksCompleted: 0,
+        checksFailed: 0,
+        executionTimeMs: null,
+        errorSummary: null,
+        osType: null,
+        diskSpaceInfo: null,
+        resourceOptInfo: null,
+        windowsUpdateInfo: null,
+        defenderStatus: null,
+        applicationInventory: null,
+        linuxUpdateInfo: null,
+        customCheckResults: null,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      })
+
       await queueManager.queueHealthChecks(mockMachineId)
 
       // Focus on functional outcome: should queue 6 standard checks
@@ -340,7 +392,7 @@ describe('VMHealthQueueManager', () => {
       // Verify VM status was checked
       expect(mockPrisma.machine.findUnique).toHaveBeenCalledWith({
         where: { id: mockMachineId },
-        select: { id: true, name: true, status: true }
+        select: { id: true, name: true, status: true, os: true }
       })
 
       // Verify no health check creation operations were performed
@@ -425,7 +477,7 @@ describe('VMHealthQueueManager', () => {
   describe('health snapshot storage', () => {
     it('should store health check results in snapshots', async () => {
       // Mock successful health check response
-      const { getVirtioSocketWatcherService } = await import('@services/VirtioSocketWatcherService')
+      const { getVirtioSocketWatcherService } = await import('@services/vm/VirtioSocketWatcherService')
       const mockService = getVirtioSocketWatcherService()
       mockService.sendSafeCommand.mockResolvedValue({
         success: true,
@@ -555,7 +607,7 @@ describe('VMHealthQueueManager', () => {
     let mockService: { sendSafeCommand: jest.Mock }
 
     beforeEach(async () => {
-      const { getVirtioSocketWatcherService } = await import('@services/VirtioSocketWatcherService')
+      const { getVirtioSocketWatcherService } = await import('@services/vm/VirtioSocketWatcherService')
       mockService = getVirtioSocketWatcherService()
       mockService.sendSafeCommand = jest.fn().mockResolvedValue({
         success: true,

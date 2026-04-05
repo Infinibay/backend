@@ -1,0 +1,694 @@
+// @ts-nocheck - Extensive mock typing prevents proper TS type checking
+import { describe, it, expect, beforeEach, afterEach, jest } from '@jest/globals'
+
+// Create mock before importing anything that uses it
+const mockISO = {
+  findFirst: jest.fn<any, any[]>(),
+  findUnique: jest.fn<any, any[]>(),
+  findMany: jest.fn<any, any[]>(),
+  create: jest.fn<any, any[]>(),
+  update: jest.fn<any, any[]>(),
+  delete: jest.fn<any, any[]>()
+} as { findFirst: jest.Mock; findUnique: jest.Mock; findMany: jest.Mock; create: jest.Mock; update: jest.Mock; delete: jest.Mock }
+
+// Mock @prisma/client BEFORE ISOService imports it
+jest.mock('@prisma/client', () => ({
+  __esModule: true,
+  PrismaClient: jest.fn().mockReturnValue({
+    iSO: mockISO
+  }),
+  Prisma: {}
+}))
+// Re-export mock for test access
+const mockPrismaISO = mockISO
+
+// Create mockFs first for hoisting
+const mockFs = {
+  mkdir: jest.fn<any, any[]>(),
+  stat: jest.fn<any, any[]>(),
+  access: jest.fn<any, any[]>(),
+  unlink: jest.fn<any, any[]>(),
+  readFile: jest.fn<any, any[]>(),
+  readdir: jest.fn<any, any[]>()
+} as { mkdir: jest.Mock; stat: jest.Mock; access: jest.Mock; unlink: jest.Mock; readFile: jest.Mock; readdir: jest.Mock }
+
+// Mock fs/promises
+jest.mock('fs/promises', () => ({
+  mkdir: (...args: any[]) => mockFs.mkdir(...args),
+  stat: (...args: any[]) => mockFs.stat(...args),
+  access: (...args: any[]) => mockFs.access(...args),
+  unlink: (...args: any[]) => mockFs.unlink(...args),
+  readFile: (...args: any[]) => mockFs.readFile(...args),
+  readdir: (...args: any[]) => mockFs.readdir(...args),
+  default: {}
+}))
+
+// Mock EventManager
+jest.mock('../../../app/services/EventManagers/ISOEventManager', () => ({
+  ISOEventManager: {
+    getInstance: jest.fn(() => ({
+      emitISORegistered: jest.fn(),
+      emitISORemoved: jest.fn()
+    }))
+  }
+}))
+
+import { ISOService } from '../../../app/services/ISOService'
+import { ISOEventManager } from '../../../app/services/EventManagers/ISOEventManager'
+
+describe('ISOService', () => {
+  let service: ISOService
+  let mockEventManager: any
+  let originalBaseDir: string | undefined
+
+  const createMockISO = (overrides?: Partial<any>): any => ({
+    id: 'iso-1',
+    filename: 'windows10.iso',
+    os: 'WINDOWS10',
+    version: null,
+    size: BigInt(5368709120),
+    path: '/opt/infinibay/iso/windows10.iso',
+    checksum: null,
+    isAvailable: true,
+    lastVerified: new Date(),
+    uploadedAt: new Date(),
+    downloadUrl: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    ...overrides
+  })
+
+  beforeEach(async () => {
+    jest.clearAllMocks()
+    originalBaseDir = process.env.INFINIBAY_BASE_DIR
+    process.env.INFINIBAY_BASE_DIR = '/opt/infinibay'
+
+    mockEventManager = (ISOEventManager as any).getInstance()
+    
+    // Reset singleton
+    (ISOService as any).instance = undefined
+    service = ISOService.getInstance()
+
+    // Default mocks for fs using mockFs
+    mockFs.mkdir.mockResolvedValue(undefined)
+    mockFs.stat.mockResolvedValue({
+      size: 5368709120,
+      isFile: () => true
+    } as any)
+    mockFs.access.mockResolvedValue(undefined)
+    mockFs.unlink.mockResolvedValue(undefined)
+    mockFs.readFile.mockResolvedValue(Buffer.from('mock'))
+    mockFs.readdir.mockResolvedValue(['windows10.iso'])
+  })
+
+  afterEach(() => {
+    jest.restoreAllMocks()
+    process.env.INFINIBAY_BASE_DIR = originalBaseDir
+  })
+
+  describe('singleton pattern', () => {
+    it('should return the same instance on multiple calls', () => {
+      const instance1 = ISOService.getInstance()
+      const instance2 = ISOService.getInstance()
+
+      expect(instance1).toBe(instance2)
+    })
+
+    it('should create new instance when instance is undefined', () => {
+      (ISOService as any).instance = undefined
+
+      const newInstance = ISOService.getInstance()
+
+      expect(newInstance).toBeDefined()
+      expect(newInstance).toBeInstanceOf(ISOService)
+    })
+  })
+
+  describe('getAvailableISOs', () => {
+    it('should exclude unavailable ISOs', async () => {
+      const mockISOs = [
+        createMockISO({ os: 'WINDOWS10', isAvailable: true }),
+        createMockISO({ id: 'iso-2', os: 'UBUNTU', isAvailable: false })
+      ]
+      mockPrismaISO.findMany.mockResolvedValue(mockISOs)
+
+      const result = await service.getAvailableISOs()
+
+      expect(result).toHaveLength(1)
+      expect(result[0].os).toBe('WINDOWS10')
+    })
+
+    it('should return empty array when no ISOs available', async () => {
+      mockPrismaISO.findMany.mockResolvedValue([])
+
+      const result = await service.getAvailableISOs()
+
+      expect(result).toEqual([])
+    })
+  })
+
+  describe('syncISOsWithFileSystem', () => {
+    it('should sync ISOs from filesystem to database', async () => {
+      mockFs.readdir.mockResolvedValueOnce(['windows10.iso', 'ubuntu.iso'])
+
+      mockPrismaISO.findUnique
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(null)
+      mockPrismaISO.create.mockResolvedValue(createMockISO())
+      mockPrismaISO.findMany.mockResolvedValue([])
+
+      await service.syncISOsWithFileSystem()
+
+      expect(mockFs.mkdir).toHaveBeenCalledWith(expect.any(String), { recursive: true })
+      expect(mockPrismaISO.create).toHaveBeenCalled()
+      expect(mockEventManager.emitISORegistered).toHaveBeenCalledWith(expect.any(Object))
+    })
+
+    it('should update existing ISO with new verification timestamp', async () => {
+      mockFs.readdir.mockResolvedValueOnce(['windows10.iso'])
+
+      const existingISO = createMockISO({ id: 'existing-iso' })
+      mockPrismaISO.findUnique
+        .mockResolvedValueOnce(existingISO)
+        .mockResolvedValueOnce(null)
+      mockPrismaISO.update.mockResolvedValue(existingISO)
+      mockPrismaISO.findMany.mockResolvedValue([])
+
+      await service.syncISOsWithFileSystem()
+
+      expect(mockPrismaISO.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'existing-iso' },
+          data: expect.objectContaining({
+            lastVerified: expect.any(Date),
+            isAvailable: true
+          })
+        })
+      )
+    })
+
+    it('should mark ISOs as unavailable if file is deleted', async () => {
+      mockFs.readdir.mockResolvedValueOnce([])
+      
+      mockPrismaISO.findMany.mockResolvedValue([createMockISO()])
+      mockPrismaISO.update.mockResolvedValue({ ...createMockISO(), isAvailable: false })
+
+      await service.syncISOsWithFileSystem()
+
+      expect(mockPrismaISO.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'iso-1' },
+          data: { isAvailable: false }
+        })
+      )
+    })
+
+    it('should handle error gracefully', async () => {
+      mockFs.mkdir.mockRejectedValueOnce(new Error('Permission denied'))
+
+      await expect(service.syncISOsWithFileSystem()).rejects.toThrow('Permission denied')
+    })
+
+    it('should handle ISO directory not existing', async () => {
+      mockFs.readdir.mockResolvedValueOnce([])
+      
+      // Also need to mock findMany for the dbISOs check
+      mockPrismaISO.findMany.mockResolvedValue([])
+
+      await service.syncISOsWithFileSystem()
+
+      expect(mockFs.mkdir).toHaveBeenCalledWith(expect.any(String), { recursive: true })
+    })
+  })
+
+  describe('checkISOForOS', () => {
+    it('should return true when ISO exists for requested OS', async () => {
+      mockPrismaISO.findFirst.mockResolvedValue(createMockISO())
+
+      const result = await service.checkISOForOS('windows10')
+
+      expect(result).toEqual({
+        os: 'WINDOWS10',
+        available: true,
+        iso: expect.any(Object)
+      })
+    })
+
+    it('should return false when ISO does not exist', async () => {
+      mockPrismaISO.findFirst.mockResolvedValue(null)
+
+      const result = await service.checkISOForOS('ubuntu')
+
+      expect(result).toEqual({
+        os: 'UBUNTU',
+        available: false,
+        iso: undefined
+      })
+    })
+
+    it('should handle case insensitivity for OS parameter', async () => {
+      mockPrismaISO.findFirst.mockResolvedValue(createMockISO())
+
+      await service.checkISOForOS('Windows10')
+
+      expect(mockPrismaISO.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            os: 'WINDOWS10'
+          })
+        })
+      )
+    })
+  })
+
+  describe('getSystemReadiness', () => {
+    it('should return ready status when ISOs are available', async () => {
+      const mockISOList = [
+        createMockISO({ os: 'WINDOWS10' }),
+        createMockISO({ id: 'iso-2', os: 'UBUNTU' })
+      ]
+      mockPrismaISO.findMany.mockResolvedValue(mockISOList)
+
+      const result = await service.getSystemReadiness()
+
+      expect(result.ready).toBe(true)
+      expect(result.availableOS).toEqual(expect.arrayContaining(['WINDOWS10', 'UBUNTU']))
+      expect(result.missingOS).toEqual(expect.arrayContaining(['WINDOWS11', 'FEDORA']))
+    })
+
+    it('should return not ready when no ISOs available', async () => {
+      mockPrismaISO.findMany.mockResolvedValue([])
+
+      const result = await service.getSystemReadiness()
+
+      expect(result).toEqual({
+        ready: false,
+        availableOS: [],
+        missingOS: ['WINDOWS10', 'WINDOWS11', 'UBUNTU', 'FEDORA']
+      })
+    })
+
+    it('should include all supported OS types', async () => {
+      const mockISOList = [createMockISO({ os: 'WINDOWS10' })]
+      mockPrismaISO.findMany.mockResolvedValue(mockISOList)
+
+      const result = await service.getSystemReadiness()
+
+      expect(result.missingOS).toEqual(['WINDOWS11', 'UBUNTU', 'FEDORA'])
+    })
+  })
+
+  describe('validateISO', () => {
+    it('should validate ISO successfully', async () => {
+      mockPrismaISO.findUnique.mockResolvedValue(createMockISO())
+      mockPrismaISO.update.mockResolvedValue(createMockISO())
+
+      const result = await service.validateISO('iso-1')
+
+      expect(result).toBe(true)
+      expect(mockPrismaISO.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'iso-1' },
+          data: expect.objectContaining({
+            isAvailable: true,
+            lastVerified: expect.any(Date)
+          })
+        })
+      )
+    })
+
+    it('should return false when file size does not match', async () => {
+      mockFs.stat.mockResolvedValue({ size: 1000000, isFile: () => true })
+
+      mockPrismaISO.findUnique.mockResolvedValue(createMockISO())
+      mockPrismaISO.update.mockResolvedValue({ ...createMockISO(), isAvailable: false })
+
+      const result = await service.validateISO('iso-1')
+
+      expect(result).toBe(false)
+    })
+
+    it('should throw error when ISO not found', async () => {
+      mockPrismaISO.findUnique.mockResolvedValue(null)
+
+      await expect(service.validateISO('non-existent')).rejects.toThrow('ISO not found')
+    })
+
+    it('should handle validation failure gracefully', async () => {
+      mockFs.stat.mockRejectedValue(new Error('File error'))
+
+      const result = await service.validateISO('iso-1')
+
+      expect(result).toBe(false)
+    })
+  })
+
+  describe('calculateChecksum', () => {
+    it('should calculate and return checksum for ISO', async () => {
+      const mockHash = { digest: jest.fn().mockReturnValue('abc123') }
+      jest.spyOn(require('crypto'), 'createHash').mockReturnValue(mockHash as any)
+
+      mockPrismaISO.findUnique.mockResolvedValue(createMockISO())
+      mockPrismaISO.update.mockResolvedValue(createMockISO())
+
+      const result = await service.calculateChecksum('iso-1')
+
+      expect(result).toBe('abc123')
+      expect(mockPrismaISO.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'iso-1' },
+          data: { checksum: 'abc123' }
+        })
+      )
+    })
+
+    it('should throw error when ISO not found', async () => {
+      mockPrismaISO.findUnique.mockResolvedValue(null)
+
+      await expect(service.calculateChecksum('non-existent')).rejects.toThrow('ISO not found')
+    })
+  })
+
+  describe('registerISO', () => {
+    it('should create new ISO record', async () => {
+      mockPrismaISO.findUnique.mockResolvedValueOnce(null)
+      mockPrismaISO.create.mockResolvedValue(createMockISO())
+
+      const result = await service.registerISO(
+        'windows10.iso',
+        'windows10',
+        5368709120,
+        '/opt/infinibay/iso/windows10.iso'
+      )
+
+      expect(result).toEqual(createMockISO())
+      expect(result.os).toBe('WINDOWS10')
+      expect(mockEventManager.emitISORegistered).toHaveBeenCalledWith(expect.any(Object))
+    })
+
+    it('should update existing ISO record', async () => {
+      const existingISO = createMockISO({ id: 'existing-iso' })
+
+      mockPrismaISO.findUnique.mockResolvedValueOnce(existingISO)
+      mockPrismaISO.update.mockResolvedValue(existingISO)
+
+      const result = await service.registerISO(
+        'windows10.iso',
+        'windows10',
+        6000000000,
+        '/opt/infinibay/iso/windows10-new.iso'
+      )
+
+      expect(mockPrismaISO.create).not.toHaveBeenCalled()
+      expect(mockEventManager.emitISORegistered).not.toHaveBeenCalled()
+    })
+
+    it('should normalize OS to uppercase', async () => {
+      mockPrismaISO.findUnique.mockResolvedValueOnce(null)
+      mockPrismaISO.create.mockResolvedValue(createMockISO())
+
+      await service.registerISO('windows10.iso', 'windows10', 5368709120, '/path')
+
+      expect(mockPrismaISO.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            os: 'WINDOWS10'
+          })
+        })
+      )
+    })
+  })
+
+  describe('removeISO', () => {
+    it('should remove ISO successfully', async () => {
+      mockPrismaISO.findUnique.mockResolvedValueOnce(createMockISO())
+      mockPrismaISO.delete.mockResolvedValue(createMockISO())
+
+      await service.removeISO('iso-1')
+
+      expect(mockFs.unlink).toHaveBeenCalledWith(expect.any(String))
+      expect(mockPrismaISO.delete).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'iso-1' }
+        })
+      )
+      expect(mockEventManager.emitISORemoved).toHaveBeenCalledWith('iso-1', 'windows10.iso')
+    })
+
+    it('should handle file deletion failure gracefully', async () => {
+      mockFs.unlink.mockRejectedValue(new Error('Permission denied'))
+
+      mockPrismaISO.findUnique.mockResolvedValueOnce(createMockISO())
+      mockPrismaISO.delete.mockResolvedValue(createMockISO())
+
+      await service.removeISO('iso-1')
+
+      expect(mockPrismaISO.delete).toHaveBeenCalled()
+    })
+
+    it('should throw error when ISO not found', async () => {
+      mockPrismaISO.findUnique.mockResolvedValueOnce(null)
+
+      await expect(service.removeISO('non-existent')).rejects.toThrow('ISO not found')
+    })
+  })
+
+  describe('getISOsByAvailability', () => {
+    it('should group ISOs by availability', async () => {
+      const mockISOs = [
+        createMockISO({ isAvailable: true }),
+        createMockISO({ id: 'iso-2', isAvailable: false }),
+        createMockISO({ id: 'iso-3', isAvailable: true })
+      ]
+
+      mockPrismaISO.findMany.mockResolvedValue(mockISOs)
+
+      const result = await service.getISOsByAvailability()
+
+      expect(result.available).toHaveLength(2)
+      expect(result.unavailable).toHaveLength(1)
+    })
+
+    it('should return all available when all ISOs are available', async () => {
+      const mockISOs = [
+        createMockISO({ isAvailable: true }),
+        createMockISO({ id: 'iso-2', isAvailable: true })
+      ]
+
+      mockPrismaISO.findMany.mockResolvedValue(mockISOs)
+
+      const result = await service.getISOsByAvailability()
+
+      expect(result.available).toHaveLength(2)
+      expect(result.unavailable).toHaveLength(0)
+    })
+
+    it('should return all unavailable when no ISOs are available', async () => {
+      const mockISOs = [
+        createMockISO({ isAvailable: false }),
+        createMockISO({ id: 'iso-2', isAvailable: false })
+      ]
+
+      mockPrismaISO.findMany.mockResolvedValue(mockISOs)
+
+      const result = await service.getISOsByAvailability()
+
+      expect(result.available).toHaveLength(0)
+      expect(result.unavailable).toHaveLength(2)
+    })
+  })
+
+  describe('extractOSType', () => {
+    it('should extract WINDOWS10 from filename', () => {
+      const result = (service as any).extractOSType('windows10.iso')
+      expect(result).toBe('WINDOWS10')
+    })
+
+    it('should extract WINDOWS11 from filename', () => {
+      const result = (service as any).extractOSType('windows11.iso')
+      expect(result).toBe('WINDOWS11')
+    })
+
+    it('should extract UBUNTU from filename', () => {
+      const result = (service as any).extractOSType('ubuntu.iso')
+      expect(result).toBe('UBUNTU')
+    })
+
+    it('should extract FEDORA from filename', () => {
+      const result = (service as any).extractOSType('fedora.iso')
+      expect(result).toBe('FEDORA')
+    })
+
+    it('should handle short names (win10, win11)', () => {
+      expect((service as any).extractOSType('win10.iso')).toBe('WINDOWS10')
+      expect((service as any).extractOSType('win11.iso')).toBe('WINDOWS11')
+    })
+
+    it('should return null for unknown OS', () => {
+      const result = (service as any).extractOSType('centos.iso')
+      expect(result).toBeNull()
+    })
+
+    it('should handle filename without .iso extension', () => {
+      const result = (service as any).extractOSType('windows10')
+      expect(result).toBe('WINDOWS10')
+    })
+
+    it('should be case insensitive', () => {
+      expect((service as any).extractOSType('WINDOWS10.ISO')).toBe('WINDOWS10')
+      expect((service as any).extractOSType('Windows10.iso')).toBe('WINDOWS10')
+    })
+  })
+
+  describe('getSupportedOSTypes', () => {
+    it('should return all supported OS types', () => {
+      const result = service.getSupportedOSTypes()
+
+      expect(result).toEqual(['WINDOWS10', 'WINDOWS11', 'UBUNTU', 'FEDORA'])
+    })
+  })
+
+  describe('checkMultipleOSAvailability', () => {
+    it('should check availability for multiple OSes', async () => {
+      const mockISOs = [
+        createMockISO({ os: 'WINDOWS10' }),
+        createMockISO({ id: 'iso-2', os: 'UBUNTU' })
+      ]
+      mockPrismaISO.findMany.mockResolvedValue(mockISOs)
+
+      const result = await service.checkMultipleOSAvailability(['windows10', 'ubuntu', 'fedora'])
+
+      expect(result.get('WINDOWS10')).toBe(true)
+      expect(result.get('UBUNTU')).toBe(true)
+      expect(result.get('FEDORA')).toBe(false)
+    })
+
+    it('should return all false when no ISOs available', async () => {
+      mockPrismaISO.findMany.mockResolvedValue([])
+
+      const result = await service.checkMultipleOSAvailability(['windows10', 'ubuntu'])
+
+      expect(result.get('WINDOWS10')).toBe(false)
+      expect(result.get('UBUNTU')).toBe(false)
+    })
+
+    it('should handle empty OS list', async () => {
+      mockPrismaISO.findMany.mockResolvedValue([])
+
+      const result = await service.checkMultipleOSAvailability([])
+
+      expect(result).toBeInstanceOf(Map)
+      expect(result.size).toBe(0)
+    })
+
+    it('should normalize OS names to uppercase in keys', async () => {
+      const mockISOs = [createMockISO({ os: 'WINDOWS10' })]
+      mockPrismaISO.findMany.mockResolvedValue(mockISOs)
+
+      const result = await service.checkMultipleOSAvailability(['windows10'])
+
+      expect(result.get('WINDOWS10')).toBe(true)
+      expect(result.get('windows10')).toBe(undefined)
+    })
+  })
+
+  describe('safe paths and edge cases', () => {
+    it('should handle empty filesystem with no ISOs', async () => {
+      mockFs.readdir.mockResolvedValueOnce([])
+      mockPrismaISO.findMany.mockResolvedValue([])
+
+      await service.syncISOsWithFileSystem()
+
+      expect(mockPrismaISO.create).not.toHaveBeenCalled()
+    })
+
+    it('should handle non-ISO files in directory', async () => {
+      mockFs.readdir.mockResolvedValueOnce(['windows10.iso', 'readme.txt', 'ubuntu.iso'])
+      mockPrismaISO.findUnique.mockResolvedValue(null)
+      mockPrismaISO.create.mockResolvedValue(createMockISO())
+      mockPrismaISO.findMany.mockResolvedValue([])
+
+      await service.syncISOsWithFileSystem()
+
+      expect(mockPrismaISO.create).toHaveBeenCalled()
+    })
+
+    it('should handle invalid filename format gracefully', async () => {
+      mockFs.readdir.mockResolvedValueOnce(['invalid-file-name', 'another-file.txt'])
+      mockPrismaISO.findMany.mockResolvedValue([])
+
+      await service.syncISOsWithFileSystem()
+
+      expect(mockPrismaISO.create).not.toHaveBeenCalled()
+    })
+
+    it('should handle database error in sync', async () => {
+      mockFs.readdir.mockResolvedValueOnce(['windows10.iso'])
+      mockPrismaISO.findUnique.mockResolvedValueOnce(null)
+      mockPrismaISO.create.mockRejectedValueOnce(new Error('Database error'))
+
+      await expect(service.syncISOsWithFileSystem()).rejects.toThrow('Database error')
+    })
+
+    it('should handle permission denied when accessing file', async () => {
+      mockFs.readdir.mockResolvedValueOnce([])
+      
+      // This test is about stat failing (not access), which would happen in validateISO.
+      // For syncISOsWithFileSystem, access is called at line 86 inside a try/catch
+      // So stat rejection is caught and no update happens
+      mockFs.stat.mockResolvedValue({
+        size: 5368709120,
+        isFile: () => true
+      } as any)
+      mockPrismaISO.findMany.mockResolvedValue([])
+
+      await service.syncISOsWithFileSystem()
+
+      expect(mockPrismaISO.update).not.toHaveBeenCalled()
+    })
+
+    it('should handle very large file size (BigInt)', async () => {
+      mockFs.readdir.mockResolvedValueOnce(['large.iso'])
+      mockFs.stat.mockResolvedValue({
+        size: Number.MAX_SAFE_INTEGER,
+        isFile: () => true
+      })
+
+      mockPrismaISO.findUnique.mockResolvedValueOnce(null)
+      mockPrismaISO.create.mockResolvedValue(createMockISO())
+
+      const result = await service.syncISOsWithFileSystem()
+
+      expect(mockPrismaISO.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            size: expect.any(BigInt)
+          })
+        })
+      )
+    })
+
+    it('should handle null checksum in database', async () => {
+      const isoWithNullChecksum = { ...createMockISO(), checksum: null }
+      mockPrismaISO.findUnique.mockResolvedValue(isoWithNullChecksum)
+
+      const result = await service.validateISO('iso-1')
+
+      expect(result).toBe(true)
+    })
+
+    it('should handle custom base directory', async () => {
+      process.env.INFINIBAY_BASE_DIR = '/custom/path'
+      
+      // Reset singleton
+      (ISOService as any).instance = undefined
+      const customService = ISOService.getInstance()
+      
+      mockPrismaISO.findMany.mockResolvedValue([])
+
+      await customService.syncISOsWithFileSystem()
+
+      expect(mockFs.mkdir).toHaveBeenCalledWith('/custom/path/iso', { recursive: true })
+    })
+  })
+})

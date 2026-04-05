@@ -17,8 +17,12 @@ interface AuthContext {
 }
 
 interface DecodedToken {
-  userId: string
-  userRole: string
+  // generateTestToken signs with {id, role}
+  id: string
+  role: string
+  // Legacy fields (some code may sign with these)
+  userId?: string
+  userRole?: string
   iat?: number
   exp?: number
 }
@@ -42,9 +46,12 @@ async function testAuthChecker (
   try {
     const decoded = jwt.verify(token, process.env.TOKENKEY || 'test-secret-key') as DecodedToken
 
+    // generateTestToken signs with {id, role}, handle both formats
+    const tokenUserId = decoded.userId || decoded.id
+
     // Fetch user from database
     const user = await mockPrisma.user.findUnique({
-      where: { id: decoded.userId }
+      where: { id: tokenUserId }
     }) as User | null
 
     if (!user || user.deleted) {
@@ -326,7 +333,7 @@ describe('Authentication Flow Integration Tests', () => {
       expect(context2.user).toEqual(mockUser)
     })
 
-    it.skip('should handle concurrent authentication requests', async () => {
+    it('should handle concurrent authentication requests', async () => {
       // Reset mocks to ensure clean state
       jest.clearAllMocks()
 

@@ -208,13 +208,15 @@ describe('UserResolver', () => {
       const hashedPassword = await bcrypt.hash(input.password, 10)
       const createdUser = createMockUser({
         ...mockInput,
+        role: UserRole.USER,
         password: hashedPassword
       })
 
       mockPrisma.user.findUnique.mockResolvedValue(null) // Email doesn't exist
       mockPrisma.user.create.mockResolvedValue(createdUser)
 
-      const result = await resolver.createUser(input)
+      const context = createAdminContext() as unknown as InfinibayContext
+      const result = await resolver.createUser(input, context)
 
       expect(mockPrisma.user.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
@@ -239,7 +241,8 @@ describe('UserResolver', () => {
 
       mockPrisma.user.findUnique.mockResolvedValue(existingUser)
 
-      await expect(resolver.createUser(input)).rejects.toThrow(UserInputError)
+      const context = createAdminContext() as unknown as InfinibayContext
+      await expect(resolver.createUser(input, context)).rejects.toThrow(UserInputError)
       expect(mockPrisma.user.create).not.toHaveBeenCalled()
     })
 
@@ -255,7 +258,8 @@ describe('UserResolver', () => {
       mockPrisma.user.findUnique.mockResolvedValue(null) // User doesn't exist yet
       mockPrisma.user.create.mockResolvedValue(mockUser)
 
-      const result = await resolver.createUser(input)
+      const context = createAdminContext() as unknown as InfinibayContext
+      const result = await resolver.createUser(input, context)
       // The resolver doesn't validate email format, so it creates the user
       expect(mockPrisma.user.create).toHaveBeenCalled()
       expect(result).toEqual(mockUser)
@@ -268,7 +272,8 @@ describe('UserResolver', () => {
         role: UserRole.USER
       }
 
-      await expect(resolver.createUser(input)).rejects.toThrow(UserInputError)
+      const context = createAdminContext() as unknown as InfinibayContext
+      await expect(resolver.createUser(input, context)).rejects.toThrow(UserInputError)
       expect(mockPrisma.user.create).not.toHaveBeenCalled()
     })
 
@@ -281,13 +286,15 @@ describe('UserResolver', () => {
       const hashedPassword = await bcrypt.hash(input.password, 10)
       const createdUser = createMockAdminUser({
         ...mockInput,
+        role: UserRole.ADMIN,
         password: hashedPassword
       })
 
       mockPrisma.user.findUnique.mockResolvedValue(null)
       mockPrisma.user.create.mockResolvedValue(createdUser)
 
-      const result = await resolver.createUser(input)
+      const context = createAdminContext() as unknown as InfinibayContext
+      const result = await resolver.createUser(input, context)
       expect(result).toEqual(createdUser)
     })
   })
@@ -307,15 +314,15 @@ describe('UserResolver', () => {
       mockPrisma.user.findUnique.mockResolvedValue(existingUser)
       mockPrisma.user.update.mockResolvedValue(updatedUser)
 
-      const result = await resolver.updateUser(existingUser.id, updateInput)
+      const context = createAdminContext() as unknown as InfinibayContext
+      const result = await resolver.updateUser(existingUser.id, updateInput, context)
 
+      // The resolver now only sends fields that are explicitly provided (not undefined)
       expect(mockPrisma.user.update).toHaveBeenCalledWith({
         where: { id: existingUser.id },
         data: {
-          password: existingUser.password,
           firstName: updateInput.firstName,
-          lastName: updateInput.lastName,
-          role: existingUser.role
+          lastName: updateInput.lastName
         }
       })
       expect(result).toEqual(updatedUser)
@@ -338,15 +345,14 @@ describe('UserResolver', () => {
         password: await bcrypt.hash(newPassword, 10)
       })
 
-      await resolver.updateUser(existingUser.id, updateInput)
+      const context = createAdminContext() as unknown as InfinibayContext
+      await resolver.updateUser(existingUser.id, updateInput, context)
 
+      // The resolver now only sends fields that are explicitly provided (not undefined)
       expect(mockPrisma.user.update).toHaveBeenCalledWith({
         where: { id: existingUser.id },
         data: {
-          password: expect.any(String), // Should be hashed
-          firstName: existingUser.firstName,
-          lastName: existingUser.lastName,
-          role: existingUser.role
+          password: expect.any(String) // Should be hashed
         }
       })
     })
@@ -362,8 +368,9 @@ describe('UserResolver', () => {
         role: undefined
       }
 
+      const context = createAdminContext() as unknown as InfinibayContext
       await expect(
-        resolver.updateUser('non-existent', updateInput)
+        resolver.updateUser('non-existent', updateInput, context)
       ).rejects.toThrow(UserInputError)
     })
 
@@ -380,13 +387,14 @@ describe('UserResolver', () => {
 
       mockPrisma.user.findUnique.mockResolvedValue(existingUser)
 
+      const context = createAdminContext() as unknown as InfinibayContext
       await expect(
-        resolver.updateUser(existingUser.id, updateInput)
+        resolver.updateUser(existingUser.id, updateInput, context)
       ).rejects.toThrow(UserInputError)
     })
 
     it('should allow updating role for admin users', async () => {
-      const existingUser = createMockUser({ role: 'USER' })
+      const existingUser = createMockUser({ role: UserRole.USER })
       const updateInput: UpdateUserInputType = {
         firstName: undefined,
         lastName: undefined,
@@ -394,12 +402,13 @@ describe('UserResolver', () => {
         passwordConfirmation: undefined,
         role: UserRole.ADMIN
       }
-      const updatedUser = { ...existingUser, role: 'ADMIN' }
+      const updatedUser = { ...existingUser, role: UserRole.ADMIN as string }
 
       mockPrisma.user.findUnique.mockResolvedValue(existingUser)
-      mockPrisma.user.update.mockResolvedValue(updatedUser)
+      mockPrisma.user.update.mockResolvedValue(updatedUser as any)
 
-      const result = await resolver.updateUser(existingUser.id, updateInput)
+      const context = createAdminContext() as unknown as InfinibayContext
+      const result = await resolver.updateUser(existingUser.id, updateInput, context)
 
       expect(result.role).toBe('ADMIN')
     })

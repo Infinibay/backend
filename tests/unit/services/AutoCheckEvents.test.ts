@@ -1,15 +1,15 @@
 import 'reflect-metadata'
 
-import { VmEventManager } from '../../../app/services/VmEventManager'
-import { VirtioSocketWatcherService } from '../../../app/services/VirtioSocketWatcherService'
-import { EventManager } from '../../../app/services/EventManager'
-import { SocketService } from '../../../app/services/SocketService'
+import { VmEventManager } from '../../../app/services/events/VmEventManager'
+import { VirtioSocketWatcherService } from '../../../app/services/vm/VirtioSocketWatcherService'
+import { EventManager } from '../../../app/services/events/EventManager'
+import { SocketService } from '../../../app/services/events/SocketService'
 import { mockPrisma } from '../../setup/jest.setup'
 import { PrismaClient } from '@prisma/client'
 import { createMockUser, createMockMachine, createMockDepartment } from '../../setup/mock-factories'
 
 // Unmock EventManager for this test file since we need to test its actual implementation
-jest.unmock('../../../app/services/EventManager')
+jest.unmock('../../../app/services/events/EventManager')
 
 // Mock socket service
 const mockSocketService = {

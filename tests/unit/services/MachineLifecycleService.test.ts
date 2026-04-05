@@ -1,12 +1,11 @@
 import 'reflect-metadata'
 import { describe, it, expect, beforeEach, jest } from '@jest/globals'
-import { MachineLifecycleService } from '../../../app/services/machineLifecycleService'
+import { MachineLifecycleService } from '../../../app/services/vm/machineLifecycleService'
 import { mockPrisma } from '../../setup/jest.setup'
 import { UserInputError, ApolloError } from 'apollo-server-express'
-import { MachineCleanupService } from '../../../app/services/cleanup/machineCleanupService'
+import { MachineCleanupServiceV2 } from '../../../app/services/cleanup/machineCleanupServiceV2'
 import { HardwareUpdateService } from '../../../app/services/vm/hardwareUpdateService'
-import VirtManager from '../../../app/utils/VirtManager'
-import { getEventManager } from '../../../app/services/EventManager'
+import { getEventManager } from '../../../app/services/events/EventManager'
 import si from 'systeminformation'
 import {
   createMockMachine,
@@ -18,10 +17,10 @@ import { CreateMachineInputType, UpdateMachineHardwareInput, OsEnum } from '../.
 import { User } from '@prisma/client'
 
 // Mock dependencies
-jest.mock('../../../app/services/cleanup/machineCleanupService')
+jest.mock('../../../app/services/cleanup/machineCleanupServiceV2')
 jest.mock('../../../app/services/vm/hardwareUpdateService')
-jest.mock('../../../app/utils/VirtManager')
-jest.mock('../../../app/services/EventManager', () => ({
+jest.mock('../../../app/services/vm/CreateMachineServiceV2')
+jest.mock('../../../app/services/events/EventManager', () => ({
   getEventManager: jest.fn()
 }))
 jest.mock('systeminformation')
@@ -41,13 +40,6 @@ describe('MachineLifecycleService', () => {
     jest.clearAllMocks()
 
     mockUser = createMockUser()
-
-    // Mock VirtManager
-    const VirtManagerMock = VirtManager as unknown as jest.Mock
-    VirtManagerMock.mockImplementation(() => ({
-      setPrisma: jest.fn(),
-      createMachine: jest.fn()
-    }))
 
     // Mock EventManager
     mockEventManager = {
@@ -100,9 +92,9 @@ describe('MachineLifecycleService', () => {
         username: 'admin',
         password: 'password123',
         departmentId: 'dept-123',
-        pciBus: null
+        pciBus: null,
+        firstBootScripts: []
       }
-
       const mockDepartment = createMockDepartment({
         id: 'dept-123',
         name: 'Default Department'
@@ -160,7 +152,8 @@ describe('MachineLifecycleService', () => {
         password: 'password123',
         productKey: 'XXXXX-XXXXX-XXXXX-XXXXX-XXXXX',
         departmentId: 'dept-123',
-        pciBus: null
+        pciBus: null,
+        firstBootScripts: []
       }
 
       const mockTemplate = createMockMachineTemplate({
@@ -231,7 +224,8 @@ describe('MachineLifecycleService', () => {
         username: 'admin',
         password: 'password123',
         departmentId: 'dept-123',
-        pciBus: null
+        pciBus: null,
+        firstBootScripts: []
       }
 
       mockPrisma.machineTemplate.findUnique.mockResolvedValue(null)
@@ -249,7 +243,8 @@ describe('MachineLifecycleService', () => {
         username: 'admin',
         password: 'password123',
         departmentId: 'dept-123',
-        pciBus: null
+        pciBus: null,
+        firstBootScripts: []
       }
 
       await expect(service.createMachine(input))
@@ -267,7 +262,8 @@ describe('MachineLifecycleService', () => {
         applications: [],
         username: 'admin',
         password: 'password123',
-        pciBus: null
+        pciBus: null,
+        firstBootScripts: []
       }
 
       mockPrisma.$transaction.mockImplementation(async (fn: unknown) => {
@@ -307,7 +303,8 @@ describe('MachineLifecycleService', () => {
         username: 'admin',
         password: 'password123',
         departmentId: 'dept-123',
-        pciBus: null
+        pciBus: null,
+        firstBootScripts: []
       }
 
       const mockDepartment = {
@@ -383,7 +380,7 @@ describe('MachineLifecycleService', () => {
 
       // Mock the MachineCleanupService
       const mockCleanupVM = jest.fn();
-      (MachineCleanupService as unknown as jest.Mock).mockImplementation(() => ({
+      (MachineCleanupServiceV2 as unknown as jest.Mock).mockImplementation(() => ({
         cleanupVM: mockCleanupVM
       }))
 
@@ -396,12 +393,7 @@ describe('MachineLifecycleService', () => {
       expect(mockPrisma.machine.findFirst).toHaveBeenCalledWith({
         where: { id: 'machine-123', userId: mockUser?.id },
         include: {
-          configuration: true,
-          nwFilters: {
-            include: {
-              nwFilter: true
-            }
-          }
+          configuration: true
         }
       })
       expect(mockCleanupVM).toHaveBeenCalledWith('machine-123')
@@ -428,7 +420,7 @@ describe('MachineLifecycleService', () => {
 
       // Mock the MachineCleanupService to throw an error
       const mockCleanupVM = jest.fn(() => Promise.reject(new Error('Cleanup failed')));
-      (MachineCleanupService as unknown as jest.Mock).mockImplementation(() => ({
+      (MachineCleanupServiceV2 as unknown as jest.Mock).mockImplementation(() => ({
         cleanupVM: mockCleanupVM
       }))
 

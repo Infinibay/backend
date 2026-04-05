@@ -1,8 +1,8 @@
 import 'reflect-metadata'
 import { describe, it, expect, beforeEach } from '@jest/globals'
-import { PortValidationService } from '../../../app/services/PortValidationService'
+import { PortValidationService } from '../../../app/services/maintenance/PortValidationService'
 import { AppError, ErrorCode } from '../../../app/utils/errors/ErrorHandler'
-import type { PortRange, ValidationResult, ConflictDetection, CommonPort } from '../../../app/services/PortValidationService'
+import { PortRange, ValidationResult, ConflictDetection, CommonPort } from '../../../app/services/maintenance/PortValidationService'
 
 describe('PortValidationService', () => {
   let service: PortValidationService
@@ -427,31 +427,31 @@ describe('PortValidationService', () => {
     it('should return TCP ports when protocol is tcp', () => {
       const result = service.getCommonPorts('tcp')
       expect(result.length).toBeGreaterThan(0)
-      expect(result.every(port => port.protocol === 'tcp')).toBe(true)
-      expect(result.some(port => port.port === 22 && port.name === 'SSH')).toBe(true)
-      expect(result.some(port => port.port === 80 && port.name === 'HTTP')).toBe(true)
-      expect(result.some(port => port.port === 443 && port.name === 'HTTPS')).toBe(true)
+      expect(result.every((port: CommonPort) => port.protocol === 'tcp')).toBe(true)
+      expect(result.some((port: CommonPort) => port.port === 22 && port.name === 'SSH')).toBe(true)
+      expect(result.some((port: CommonPort) => port.port === 80 && port.name === 'HTTP')).toBe(true)
+      expect(result.some((port: CommonPort) => port.port === 443 && port.name === 'HTTPS')).toBe(true)
     })
 
     it('should return UDP ports when protocol is udp', () => {
       const result = service.getCommonPorts('udp')
       expect(result.length).toBeGreaterThan(0)
-      expect(result.every(port => port.protocol === 'udp')).toBe(true)
-      expect(result.some(port => port.port === 53 && port.name === 'DNS')).toBe(true)
+      expect(result.every((port: CommonPort) => port.protocol === 'udp')).toBe(true)
+      expect(result.some((port: CommonPort) => port.port === 53 && port.name === 'DNS')).toBe(true)
     })
 
     it('should return all ports when protocol is all', () => {
       const result = service.getCommonPorts('all')
       expect(result.length).toBeGreaterThan(0)
-      expect(result.some(port => port.protocol === 'tcp')).toBe(true)
-      expect(result.some(port => port.protocol === 'udp')).toBe(true)
+      expect(result.some((port: CommonPort) => port.protocol === 'tcp')).toBe(true)
+      expect(result.some((port: CommonPort) => port.protocol === 'udp')).toBe(true)
     })
 
     it('should return all ports when no protocol specified', () => {
       const result = service.getCommonPorts()
       expect(result.length).toBeGreaterThan(0)
-      expect(result.some(port => port.protocol === 'tcp')).toBe(true)
-      expect(result.some(port => port.protocol === 'udp')).toBe(true)
+      expect(result.some((port: CommonPort) => port.protocol === 'tcp')).toBe(true)
+      expect(result.some((port: CommonPort) => port.protocol === 'udp')).toBe(true)
     })
 
     it('should return empty array for invalid protocol', () => {
@@ -463,7 +463,7 @@ describe('PortValidationService', () => {
       const result = service.getCommonPorts('tcp')
       expect(result.length).toBeGreaterThan(0)
 
-      result.forEach(port => {
+      result.forEach((port: CommonPort) => {
         expect(port).toHaveProperty('port')
         expect(port).toHaveProperty('name')
         expect(port).toHaveProperty('description')

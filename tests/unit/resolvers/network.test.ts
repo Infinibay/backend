@@ -1,6 +1,6 @@
 import 'reflect-metadata'
 import { NetworkResolver } from '@graphql/resolvers/networks/resolver'
-import { NetworkService } from '@services/networkService'
+import { NetworkService } from '@services/network/networkService'
 import { mockPrisma } from '../../setup/jest.setup'
 import {
   createAdminContext,
@@ -18,7 +18,7 @@ import type {
 } from '@graphql/resolvers/networks/types'
 
 // Mock NetworkService
-jest.mock('@services/networkService')
+jest.mock('@services/network/networkService')
 
 describe('NetworkResolver', () => {
   let resolver: NetworkResolver

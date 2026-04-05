@@ -1,14 +1,15 @@
 import { FirewallRuleService } from '@services/firewall/FirewallRuleService'
 import { PrismaClient, RuleSetType, RuleAction, RuleDirection } from '@prisma/client'
 
-// Mock PrismaClient
+// Mock PrismaClient with upsert support
 const mockPrisma = {
   firewallRuleSet: {
     create: jest.fn(),
     findUnique: jest.fn(),
     findMany: jest.fn(),
     update: jest.fn(),
-    delete: jest.fn()
+    delete: jest.fn(),
+    upsert: jest.fn()
   },
   firewallRule: {
     create: jest.fn(),
@@ -40,7 +41,7 @@ describe('FirewallRuleService', () => {
         rules: []
       };
 
-      (mockPrisma.firewallRuleSet.create as jest.Mock).mockResolvedValue(mockRuleSet)
+      (mockPrisma.firewallRuleSet.upsert as jest.Mock).mockResolvedValue(mockRuleSet)
 
       const result = await service.createRuleSet(
         RuleSetType.DEPARTMENT,
@@ -50,13 +51,19 @@ describe('FirewallRuleService', () => {
       )
 
       expect(result).toEqual(mockRuleSet)
-      expect(mockPrisma.firewallRuleSet.create).toHaveBeenCalledWith({
-        data: {
+      expect(mockPrisma.firewallRuleSet.upsert).toHaveBeenCalledWith({
+        where: {
+          internalName: 'ibay-dept-abc123'
+        },
+        create: {
           name: 'Engineering Department Firewall',
           internalName: 'ibay-dept-abc123',
           entityType: RuleSetType.DEPARTMENT,
           entityId: 'dept-abc123',
           priority: 500,
+          isActive: true
+        },
+        update: {
           isActive: true
         },
         include: { rules: true }
@@ -75,7 +82,7 @@ describe('FirewallRuleService', () => {
         rules: []
       };
 
-      (mockPrisma.firewallRuleSet.create as jest.Mock).mockResolvedValue(mockRuleSet)
+      (mockPrisma.firewallRuleSet.upsert as jest.Mock).mockResolvedValue(mockRuleSet)
 
       const result = await service.createRuleSet(
         RuleSetType.VM,
