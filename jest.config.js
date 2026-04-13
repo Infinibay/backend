@@ -1,4 +1,3 @@
-/** @type {import('ts-jest').JestConfigWithTsJest} **/
 module.exports = {
   testEnvironment: "node",
   transform: {
@@ -10,7 +9,7 @@ module.exports = {
     '^@graphql/(.*)$': '<rootDir>/app/graphql/$1',
     '^@resolvers/(.*)$': '<rootDir>/app/graphql/resolvers/$1',
     '^@main/(.*)$': '<rootDir>/app/$1',
-    '^libvirt-node$': '<rootDir>/__mocks__/libvirt-node.js',
+    '^@infinibay/libvirt-node$': '<rootDir>/__mocks__/libvirt-node.js'
   },
   rootDir: '',
   testMatch: [

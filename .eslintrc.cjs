@@ -19,15 +19,15 @@ module.exports = {
   rules: {
     // TypeScript specific rules
     '@typescript-eslint/no-unused-vars': 'error',
-    '@typescript-eslint/no-explicit-any': 'warn',
+    '@typescript-eslint/no-explicit-any': 'error',
     '@typescript-eslint/explicit-function-return-type': 'off',
     '@typescript-eslint/explicit-module-boundary-types': 'off',
     '@typescript-eslint/no-non-null-assertion': 'warn',
-    
+
     // Standard JavaScript rules adjustments for TypeScript
     'no-unused-vars': 'off', // Use TypeScript version instead
     'no-undef': 'off', // TypeScript handles this
-    
+
     // Code style rules
     'indent': ['error', 2],
     'quotes': ['error', 'single'],
@@ -41,12 +41,19 @@ module.exports = {
       parserOptions: {
         project: './tsconfig.json'
       }
+    },
+    {
+      files: ['tests/**/*.ts'],
+      rules: {
+        '@typescript-eslint/no-explicit-any': 'warn',
+        '@typescript-eslint/no-unsafe-member-access': 'off',
+        '@typescript-eslint/no-unsafe-assignment': 'off'
+      }
     }
   ],
   ignorePatterns: [
     'dist/**',
     'node_modules/**',
-    '*.js',
     'lib/**/*.node'
   ]
 }
