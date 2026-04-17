@@ -1,3 +1,4 @@
+import logger from '@main/logger'
 import { PrismaClient } from '@prisma/client'
 import { SocketService } from './SocketService'
 import { ResourceEventManager, EventAction, EventPayload } from './EventManager'
@@ -15,7 +16,7 @@ export class ScriptsEventManager implements ResourceEventManager {
   // Main event handler for script events
   async handleEvent (action: EventAction, scriptData: any, triggeredBy?: string): Promise<void> {
     try {
-      console.log(`📜 Handling script event: ${action}`, { scriptId: scriptData?.id, eventType: scriptData?.action, triggeredBy })
+      logger.info(`📜 Handling script event: ${action}`, { scriptId: scriptData?.id, eventType: scriptData?.action, triggeredBy })
 
       // Determine event type from scriptData.action or fallback to action parameter
       const eventType = scriptData?.action || action
@@ -36,9 +37,9 @@ export class ScriptsEventManager implements ResourceEventManager {
         await this.handleGenericScriptEvent(action, scriptData, triggeredBy)
       }
 
-      console.log(`✅ Script event handled: ${eventType}`)
+      logger.info(`✅ Script event handled: ${eventType}`)
     } catch (error) {
-      console.error(`❌ Error handling script event ${action}:`, error)
+      logger.error(`❌ Error handling script event ${action}:`, error)
       // Don't throw - log and continue to prevent operation failure
     }
   }
@@ -154,7 +155,7 @@ export class ScriptsEventManager implements ResourceEventManager {
   private async handleGenericScriptEvent (action: EventAction, scriptData: any, triggeredBy?: string): Promise<void> {
     const script = await this.getScriptData(scriptData)
     if (!script) {
-      console.warn(`⚠️ Script not found for event: ${scriptData?.id}`)
+      logger.warn(`⚠️ Script not found for event: ${scriptData?.id}`)
       return
     }
 
@@ -173,11 +174,11 @@ export class ScriptsEventManager implements ResourceEventManager {
       try {
         this.socketService.sendToUser(userId, resource, action, payload)
       } catch (error) {
-        console.error(`❌ Failed to send event to user ${userId}:`, error)
+        logger.error(`❌ Failed to send event to user ${userId}:`, error)
         // Continue sending to other users even if one fails
       }
     }
-    console.log(`✅ Event sent to ${userIds.length} users: ${resource}:${action}`)
+    logger.info(`✅ Event sent to ${userIds.length} users: ${resource}:${action}`)
   }
 
   // Get complete script data from database
@@ -220,7 +221,7 @@ export class ScriptsEventManager implements ResourceEventManager {
 
       return script
     } catch (error) {
-      console.error('❌ Error fetching script data:', error)
+      logger.error('❌ Error fetching script data:', error)
       return null
     }
   }
@@ -261,7 +262,7 @@ export class ScriptsEventManager implements ResourceEventManager {
         })
       }
     } catch (error) {
-      console.error('❌ Error determining target users for script event:', error)
+      logger.error('❌ Error determining target users for script event:', error)
     }
 
     return Array.from(targetUsers)
@@ -314,7 +315,7 @@ export class ScriptsEventManager implements ResourceEventManager {
         })
       }
     } catch (error) {
-      console.error('❌ Error determining target users for execution event:', error)
+      logger.error('❌ Error determining target users for execution event:', error)
     }
 
     return Array.from(targetUsers)

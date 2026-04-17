@@ -1,3 +1,4 @@
+import logger from '@main/logger'
 import { getSocketService } from '../SocketService'
 import { ISO } from '@prisma/client'
 
@@ -36,7 +37,7 @@ export class ISOEventManager {
     try {
       return getSocketService()
     } catch (error) {
-      console.warn('Socket service not initialized yet')
+      logger.warn('Socket service not initialized yet')
       return null
     }
   }
@@ -57,7 +58,7 @@ export class ISOEventManager {
     const io = socketService.getIO()
     if (io) {
       io.emit('iso:registered', event)
-      console.log(`ISO registered event emitted for: ${iso.filename}`)
+      logger.info(`ISO registered event emitted for: ${iso.filename}`)
     }
   }
 
@@ -77,7 +78,7 @@ export class ISOEventManager {
     const io = socketService.getIO()
     if (io) {
       io.emit('iso:removed', event)
-      console.log(`ISO removed event emitted for: ${filename}`)
+      logger.info(`ISO removed event emitted for: ${filename}`)
     }
   }
 

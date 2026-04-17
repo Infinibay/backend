@@ -1,3 +1,4 @@
+import logger from '@main/logger'
 import { PrismaClient } from '@prisma/client'
 import { SocketService } from './SocketService'
 
@@ -36,7 +37,7 @@ export class EventManager {
   // Register a resource-specific event manager
   registerResourceManager (resource: string, manager: ResourceEventManager): void {
     this.resourceManagers.set(resource, manager)
-    console.log(`📋 Registered event manager for resource: ${resource}`)
+    logger.info(`📋 Registered event manager for resource: ${resource}`)
   }
 
   // Main event dispatch method
@@ -47,7 +48,7 @@ export class EventManager {
     triggeredBy?: string
   ): Promise<void> {
     try {
-      console.log(`🎯 Dispatching event: ${resource}:${action}`, {
+      logger.info(`🎯 Dispatching event: ${resource}:${action}`, {
         dataId: data?.id,
         triggeredBy
       })
@@ -55,16 +56,16 @@ export class EventManager {
       // Get the appropriate resource manager
       const manager = this.resourceManagers.get(resource)
       if (!manager) {
-        console.warn(`⚠️ No event manager found for resource: ${resource}`)
+        logger.warn(`⚠️ No event manager found for resource: ${resource}`)
         return
       }
 
       // Let the resource manager handle the event
       await manager.handleEvent(action, data, triggeredBy)
 
-      console.log(`✅ Event dispatched successfully: ${resource}:${action}`)
+      logger.info(`✅ Event dispatched successfully: ${resource}:${action}`)
     } catch (error) {
-      console.error(`❌ Error dispatching event ${resource}:${action}:`, error)
+      logger.error(`❌ Error dispatching event ${resource}:${action}:`, error)
 
       // Send error event to triggering user if available
       if (triggeredBy) {
@@ -176,7 +177,7 @@ export class EventManager {
 
     // Fire and forget - infinization doesn't await this
     this.dispatchEvent(mappedResource, action as EventAction, eventData).catch(err => {
-      console.error(`Error in emitCRUD(${resource}, ${action}, ${id}):`, err)
+      logger.error(`Error in emitCRUD(${resource}, ${action}, ${id}):`, err)
     })
   }
 

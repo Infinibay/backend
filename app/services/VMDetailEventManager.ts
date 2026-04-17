@@ -1,8 +1,6 @@
+import logger from '@main/logger'
 import { SocketService, getSocketService } from './SocketService'
 import { PrismaClient } from '@prisma/client'
-import Debug from 'debug'
-
-const debug = Debug('infinibay:vm-detail-events')
 
 export interface VMDetailEventData {
   machineId: string
@@ -39,7 +37,7 @@ export class VMDetailEventManager {
       }
 
       if (!targetUserId) {
-        debug(`No user ID found for machine ${machineId}, skipping event`)
+        logger.debug(`No user ID found for machine ${machineId}, skipping event`)
         return
       }
 
@@ -51,9 +49,9 @@ export class VMDetailEventManager {
         }
       })
 
-      debug(`📡 Emitted vm:${eventType} event for machine ${machineId} to user ${targetUserId}`)
+      logger.debug(`📡 Emitted vm:${eventType} event for machine ${machineId} to user ${targetUserId}`)
     } catch (error) {
-      debug(`Failed to emit event: ${error}`)
+      logger.debug(`Failed to emit event: ${error}`)
     }
   }
 

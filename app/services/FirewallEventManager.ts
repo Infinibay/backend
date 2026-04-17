@@ -1,80 +1,29 @@
+import logger from '@main/logger'
 import { PrismaClient, RuleSetType } from '@prisma/client'
 
-import { EventAction, EventPayload, ResourceEventManager } from './EventManager'
+import { BaseEventManager } from './base/BaseEventManager'
+import { EventAction, EventPayload } from './EventManager'
 import { SocketService } from './SocketService'
 
 /**
  * Firewall Event Manager - handles firewall rule change events
  * Sends real-time updates when firewall rules are created, updated, or deleted
  */
-export class FirewallEventManager implements ResourceEventManager {
-  private socketService: SocketService
-  private prisma: PrismaClient
+export class FirewallEventManager extends BaseEventManager {
 
   constructor (socketService: SocketService, prisma: PrismaClient) {
-    this.socketService = socketService
-    this.prisma = prisma
+    super(socketService, prisma)
   }
 
-  /**
-   * Main event handler for firewall events
-   * @param action - The action performed (create, update, delete)
-   * @param ruleData - The firewall rule data or rule ID
-   * @param triggeredBy - User ID who triggered the event (optional)
-   */
-  async handleEvent (action: EventAction, ruleData: any, triggeredBy?: string): Promise<void> {
-    try {
-      console.log(`🛡️ Handling firewall event: ${action}`, { ruleId: ruleData?.id, triggeredBy })
+  // ============================================
+  // Abstract method implementations
+  // ============================================
 
-      // Get complete rule data with rule set information
-      const rule = await this.getRuleData(ruleData)
-      if (!rule) {
-        console.warn(`⚠️ Firewall rule not found for event: ${ruleData?.id}`)
-        return
-      }
-
-      // Determine the entity type (department or VM)
-      const entityType = rule.ruleSet.entityType
-      const entityId = rule.ruleSet.entityId
-
-      // Determine which users should receive this event
-      const targetUsers = await this.getTargetUsers(entityType, entityId)
-
-      // Create event payload
-      const payload: EventPayload = {
-        status: 'success',
-        data: {
-          ruleId: rule.id,
-          ruleName: rule.name,
-          ...(entityType === RuleSetType.DEPARTMENT
-            ? { departmentId: entityId }
-            : { vmId: entityId })
-        }
-      }
-
-      // Determine the correct event name based on entity type
-      // Convert action to past tense to match frontend expectations
-      const actionPastTense = action === 'create' ? 'created' : action === 'update' ? 'updated' : action === 'delete' ? 'deleted' : action
-      const eventAction = entityType === RuleSetType.DEPARTMENT
-        ? `rule:${actionPastTense}:department`
-        : `rule:${actionPastTense}`
-
-      // Send event to each target user
-      for (const userId of targetUsers) {
-        this.socketService.sendToUser(userId, 'firewall', eventAction, payload)
-      }
-
-      console.log(`✅ Firewall event sent to ${targetUsers.length} users: ${eventAction}`)
-    } catch (error) {
-      console.error(`❌ Error handling firewall event ${action}:`, error)
-      throw error
-    }
+  protected getResourceName (): string {
+    return 'firewall'
   }
 
-  /**
-   * Get complete rule data from database
-   */
-  private async getRuleData (ruleData: any): Promise<any> {
+  protected async fetchResourceData (ruleData: any): Promise<any | null> {
     try {
       // If we already have complete data with ruleSet, use it
       if (ruleData && typeof ruleData === 'object' && ruleData.ruleSet) {
@@ -96,46 +45,85 @@ export class FirewallEventManager implements ResourceEventManager {
 
       return rule
     } catch (error) {
-      console.error('Error fetching firewall rule data:', error)
+      logger.error('Error fetching firewall rule data:', error)
       return null
     }
   }
 
-  /**
-   * Determine which users should receive this firewall event
-   * For department rules: all users who can access VMs in that department
-   * For VM rules: all users who can access that specific VM
-   */
-  private async getTargetUsers (entityType: RuleSetType, entityId: string): Promise<string[]> {
+  protected async getTargetUsers (rule: any, action: EventAction): Promise<string[]> {
+    // FirewallEventManager doesn't use the standard target users pattern
+    // It determines targets based on entity type (department/VM) in handleEvent
+    // This method is required by abstract base but not used directly
+    return []
+  }
+
+  // ============================================
+  // Override handleEvent for firewall-specific entity-based routing
+  // ============================================
+
+  async handleEvent (action: EventAction, ruleData: any, triggeredBy?: string): Promise<void> {
+    try {
+      logger.info(`🛡️ Handling firewall event: ${action}`, { ruleId: ruleData?.id, triggeredBy })
+
+      // Get complete rule data with rule set information
+      const rule = await this.fetchResourceData(ruleData)
+      if (!rule) {
+        logger.warn(`⚠️ Firewall rule not found for event: ${ruleData?.id}`)
+        return
+      }
+
+      // Determine the entity type (department or VM)
+      const entityType = rule.ruleSet.entityType
+      const entityId = rule.ruleSet.entityId
+
+      // Determine which users should receive this event
+      const targetUsers = await this.getTargetUsersForEntity(entityType, entityId)
+
+      // Create event payload
+      const payload: EventPayload = {
+        status: 'success',
+        data: {
+          ruleId: rule.id,
+          ruleName: rule.name,
+          ...(entityType === RuleSetType.DEPARTMENT
+            ? { departmentId: entityId }
+            : { vmId: entityId })
+        }
+      }
+
+      // Determine the correct event name based on entity type
+      // Convert action to past tense to match frontend expectations
+      const actionPastTense = action === 'create' ? 'created' : action === 'update' ? 'updated' : action === 'delete' ? 'deleted' : action
+      const eventAction = entityType === RuleSetType.DEPARTMENT
+        ? `rule:${actionPastTense}:department`
+        : `rule:${actionPastTense}`
+
+      // Send event to each target user using inherited helper
+      this.sendToTargetUsers(targetUsers, 'firewall', eventAction, payload)
+
+      logger.info(`✅ Firewall event sent to ${targetUsers.length} users: ${eventAction}`)
+    } catch (error) {
+      logger.error(`❌ Error handling firewall event ${action}:`, error)
+      throw error
+    }
+  }
+
+  // ============================================
+  // Firewall-specific helper for entity-based targeting
+  // ============================================
+
+  private async getTargetUsersForEntity (entityType: RuleSetType, entityId: string): Promise<string[]> {
     try {
       const targetUsers: Set<string> = new Set()
 
       // 1. Always include all admin users
-      const adminUsers = await this.prisma.user.findMany({
-        where: {
-          role: 'ADMIN',
-          deleted: false
-        },
-        select: { id: true }
-      })
-
-      adminUsers.forEach(admin => targetUsers.add(admin.id))
+      const adminIds = await this.getAdminUsers()
+      adminIds.forEach(id => targetUsers.add(id))
 
       if (entityType === RuleSetType.DEPARTMENT) {
         // 2. For department rules: include users with VMs in this department
-        const usersWithVMsInDept = await this.prisma.user.findMany({
-          where: {
-            deleted: false,
-            VM: {
-              some: {
-                departmentId: entityId
-              }
-            }
-          },
-          select: { id: true }
-        })
-
-        usersWithVMsInDept.forEach(user => targetUsers.add(user.id))
+        const deptUserIds = await this.getDepartmentUsers(entityId)
+        deptUserIds.forEach(id => targetUsers.add(id))
       } else {
         // 3. For VM rules: include the owner of the VM
         const vm = await this.prisma.machine.findUnique({
@@ -150,7 +138,7 @@ export class FirewallEventManager implements ResourceEventManager {
 
       return Array.from(targetUsers)
     } catch (error) {
-      console.error('Error determining target users for firewall event:', error)
+      logger.error('Error determining target users for firewall event:', error)
       return []
     }
   }

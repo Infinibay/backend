@@ -4,10 +4,11 @@ import type { Mock } from 'jest-mock'
 import { PrismaClient } from '@prisma/client'
 
 // Unmock EventManager so we test the real implementation
-jest.unmock('@services/events/EventManager')
+import logger from '@main/logger'
+jest.unmock('@services/EventManager')
 
-import { EventManager, ResourceEventManager, EventAction, EventData } from '../../../app/services/events/EventManager'
-import { SocketService } from '../../../app/services/events/SocketService'
+import { EventManager, ResourceEventManager, EventAction, EventData } from '../../../app/services/EventManager'
+import { SocketService } from '../../../app/services/SocketService'
 
 // Mock SocketService
 class MockSocketService {
@@ -81,7 +82,7 @@ describe('EventManager', () => {
     })
 
     it('should log warning when no manager registered', async () => {
-      const consoleSpy = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const consoleSpy = jest.spyOn(logger, 'warn').mockImplementation(() => undefined as any)
 
       await eventManager.dispatchEvent('vms', 'create', mockData, 'user-123')
 
@@ -247,7 +248,7 @@ describe('EventManager', () => {
 
   describe('console logging', () => {
     it('should log event dispatching', async () => {
-      const consoleSpy = jest.spyOn(console, 'log').mockImplementation(() => {})
+      const consoleSpy = jest.spyOn(logger, 'info').mockImplementation(() => undefined as any)
       const mockManager = { handleEvent: jest.fn<ResourceEventManager['handleEvent']>().mockResolvedValue(undefined) }
       eventManager.registerResourceManager('vms', mockManager as any)
 
@@ -265,7 +266,7 @@ describe('EventManager', () => {
     })
 
     it('should log successful dispatch', async () => {
-      const consoleSpy = jest.spyOn(console, 'log').mockImplementation(() => {})
+      const consoleSpy = jest.spyOn(logger, 'info').mockImplementation(() => undefined as any)
       const mockManager = { handleEvent: jest.fn<ResourceEventManager['handleEvent']>().mockResolvedValue(undefined) }
       eventManager.registerResourceManager('vms', mockManager as any)
 
@@ -279,7 +280,7 @@ describe('EventManager', () => {
     })
 
     it('should log dispatch errors', async () => {
-      const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {})
+      const consoleSpy = jest.spyOn(logger, 'error').mockImplementation(() => undefined as any)
       const mockManager = { handleEvent: jest.fn<ResourceEventManager['handleEvent']>().mockRejectedValue(new Error('Test error')) }
       eventManager.registerResourceManager('vms', mockManager as any)
 

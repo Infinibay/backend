@@ -2,6 +2,7 @@ import 'reflect-metadata'
 import { describe, it, expect, beforeEach, jest } from '@jest/globals'
 
 // Define types inline to avoid import issues
+import logger from '@main/logger'
 type MockSocketService = {
   sendToUser: jest.Mock
   broadcastToResource: jest.Mock
@@ -30,26 +31,26 @@ class EventManager {
 
   registerResourceManager (resource: string, manager: ResourceEventManager): void {
     this.resourceManagers.set(resource, manager)
-    console.log(`📋 Registered event manager for resource: ${resource}`)
+    logger.info(`📋 Registered event manager for resource: ${resource}`)
   }
 
   async dispatchEvent (resource: string, action: string, data: unknown, triggeredBy?: string): Promise<void> {
     try {
-      console.log(`🎯 Dispatching event: ${resource}:${action}`, {
+      logger.info(`🎯 Dispatching event: ${resource}:${action}`, {
         dataId: (data as { id?: string })?.id,
         triggeredBy
       })
 
       const manager = this.resourceManagers.get(resource)
       if (!manager) {
-        console.warn(`⚠️ No event manager found for resource: ${resource}`)
+        logger.warn(`⚠️ No event manager found for resource: ${resource}`)
         return
       }
 
       await manager.handleEvent(action, data, triggeredBy)
-      console.log(`✅ Event dispatched successfully: ${resource}:${action}`)
+      logger.info(`✅ Event dispatched successfully: ${resource}:${action}`)
     } catch (error) {
-      console.error(`❌ Error dispatching event ${resource}:${action}:`, error)
+      logger.error(`❌ Error dispatching event ${resource}:${action}:`, error)
 
       if (triggeredBy) {
         this.socketService.sendToUser(triggeredBy, resource, action, {
@@ -215,7 +216,7 @@ describe('EventManager', () => {
     })
 
     it('should warn if no resource manager found', async () => {
-      const consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const consoleWarnSpy = jest.spyOn(logger, 'warn').mockImplementation(() => undefined as any)
 
       await eventManager.dispatchEvent('unknown-resource', 'create', {})
 
@@ -229,7 +230,7 @@ describe('EventManager', () => {
       const error = new Error('Test error')
       mockResourceManager.handleEvent.mockRejectedValue(error)
 
-      const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {})
+      const consoleErrorSpy = jest.spyOn(logger, 'error').mockImplementation(() => undefined as any)
 
       await eventManager.dispatchEvent('vms', 'create', { id: 'vm-123' }, 'user-123')
 

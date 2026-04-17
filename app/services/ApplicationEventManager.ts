@@ -1,52 +1,25 @@
+import logger from '@main/logger'
 import { PrismaClient } from '@prisma/client'
 import { SocketService } from './SocketService'
-import { ResourceEventManager, EventAction, EventPayload } from './EventManager'
+import { BaseEventManager } from './base/BaseEventManager'
+import { EventAction } from './EventManager'
 
 // Application Event Manager - handles application-specific real-time events
-export class ApplicationEventManager implements ResourceEventManager {
-  private socketService: SocketService
-  private prisma: PrismaClient
+export class ApplicationEventManager extends BaseEventManager {
 
   constructor (socketService: SocketService, prisma: PrismaClient) {
-    this.socketService = socketService
-    this.prisma = prisma
+    super(socketService, prisma)
   }
 
-  // Main event handler for application events
-  async handleEvent (action: EventAction, appData: any, triggeredBy?: string): Promise<void> {
-    try {
-      console.log(`📱 Handling application event: ${action}`, { appId: appData?.id, triggeredBy })
+  // ============================================
+  // Abstract method implementations
+  // ============================================
 
-      // Get fresh application data from database if we only have an ID
-      const application = await this.getApplicationData(appData)
-      if (!application) {
-        console.warn(`⚠️ Application not found for event: ${appData?.id}`)
-        return
-      }
-
-      // Determine which users should receive this event
-      const targetUsers = await this.getTargetUsers(application, action)
-
-      // Create event payload
-      const payload: EventPayload = {
-        status: 'success',
-        data: application
-      }
-
-      // Send event to each target user
-      for (const userId of targetUsers) {
-        this.socketService.sendToUser(userId, 'applications', action, payload)
-      }
-
-      console.log(`✅ Application event sent to ${targetUsers.length} users: ${action}`)
-    } catch (error) {
-      console.error(`❌ Error handling application event ${action}:`, error)
-      throw error
-    }
+  protected getResourceName (): string {
+    return 'application'
   }
 
-  // Get complete application data from database
-  private async getApplicationData (appData: any): Promise<any> {
+  protected async fetchResourceData (appData: any): Promise<any | null> {
     try {
       // If we already have complete data, use it
       if (appData && typeof appData === 'object' && appData.name) {
@@ -80,25 +53,18 @@ export class ApplicationEventManager implements ResourceEventManager {
 
       return application
     } catch (error) {
-      console.error('Error fetching application data:', error)
+      logger.error('Error fetching application data:', error)
       return null
     }
   }
 
-  // Determine which users should receive this application event
-  private async getTargetUsers (application: any, action: EventAction): Promise<string[]> {
+  protected async getTargetUsers (application: any, action: EventAction): Promise<string[]> {
     try {
       const targetUsers: Set<string> = new Set()
 
       // 1. Always include all admin users (they can see all applications)
-      const adminUsers = await this.prisma.user.findMany({
-        where: {
-          role: 'ADMIN',
-          deleted: false
-        },
-        select: { id: true }
-      })
-      adminUsers.forEach(admin => targetUsers.add(admin.id))
+      const adminIds = await this.getAdminUsers()
+      adminIds.forEach(id => targetUsers.add(id))
 
       // 2. Include users who have VMs with this application
       if (application.machines && application.machines.length > 0) {
@@ -114,41 +80,27 @@ export class ApplicationEventManager implements ResourceEventManager {
           .filter(Boolean)
 
         if (departmentIds.length > 0) {
-          const departmentUsers = await this.prisma.user.findMany({
-            where: {
-              deleted: false,
-              VM: {
-                some: {
-                  departmentId: {
-                    in: departmentIds
-                  }
-                }
-              }
-            },
-            select: { id: true }
-          })
-          departmentUsers.forEach(user => targetUsers.add(user.id))
+          const deptUserIds = await this.getUsersByDepartmentIds(departmentIds)
+          deptUserIds.forEach(id => targetUsers.add(id))
         }
       }
 
-      // 3. For certain actions, include additional users
+      // 3. For create action, include all active users
       if (action === 'create') {
-        // New applications might be visible to all users for installation
-        const allActiveUsers = await this.prisma.user.findMany({
-          where: { deleted: false },
-          select: { id: true }
-        })
-        allActiveUsers.forEach(user => targetUsers.add(user.id))
+        const activeIds = await this.getAllActiveUsers()
+        activeIds.forEach(id => targetUsers.add(id))
       }
 
       return Array.from(targetUsers)
     } catch (error) {
-      console.error('Error determining target users for application event:', error)
+      logger.error('Error determining target users for application event:', error)
       return []
     }
   }
 
-  // Specific application event handlers
+  // ============================================
+  // Public convenience handlers
+  // ============================================
 
   async handleApplicationCreated (appData: any, triggeredBy?: string): Promise<void> {
     await this.handleEvent('create', appData, triggeredBy)
@@ -159,50 +111,7 @@ export class ApplicationEventManager implements ResourceEventManager {
   }
 
   async handleApplicationDeleted (appData: any, triggeredBy?: string): Promise<void> {
-    // For delete events, we might not have full application data anymore
-    const targetUsers = await this.getTargetUsersForDeletedApplication(appData)
-
-    const payload: EventPayload = {
-      status: 'success',
-      data: {
-        id: appData.id || appData,
-        action: 'deleted',
-        deletedAt: new Date().toISOString()
-      }
-    }
-
-    for (const userId of targetUsers) {
-      this.socketService.sendToUser(userId, 'applications', 'delete', payload)
-    }
-  }
-
-  // Special handling for deleted applications (limited data available)
-  private async getTargetUsersForDeletedApplication (appData: any): Promise<string[]> {
-    try {
-      const targetUsers: Set<string> = new Set()
-
-      // Include all admin users
-      const adminUsers = await this.prisma.user.findMany({
-        where: {
-          role: 'ADMIN',
-          deleted: false
-        },
-        select: { id: true }
-      })
-      adminUsers.forEach(admin => targetUsers.add(admin.id))
-
-      // For safety, include all active users for delete events
-      // This ensures everyone sees the application disappear from their lists
-      const allActiveUsers = await this.prisma.user.findMany({
-        where: { deleted: false },
-        select: { id: true }
-      })
-      allActiveUsers.forEach(user => targetUsers.add(user.id))
-
-      return Array.from(targetUsers)
-    } catch (error) {
-      console.error('Error determining target users for deleted application:', error)
-      return []
-    }
+    // Delegate to inherited handleEvent which handles delete events
+    await this.handleEvent('delete', appData, triggeredBy)
   }
 }

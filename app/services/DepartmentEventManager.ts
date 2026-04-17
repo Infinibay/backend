@@ -1,52 +1,25 @@
+import logger from '@main/logger'
 import { PrismaClient } from '@prisma/client'
 import { SocketService } from './SocketService'
-import { ResourceEventManager, EventAction, EventPayload } from './EventManager'
+import { BaseEventManager } from './base/BaseEventManager'
+import { EventAction } from './EventManager'
 
 // Department Event Manager - handles department-specific real-time events
-export class DepartmentEventManager implements ResourceEventManager {
-  private socketService: SocketService
-  private prisma: PrismaClient
+export class DepartmentEventManager extends BaseEventManager {
 
   constructor (socketService: SocketService, prisma: PrismaClient) {
-    this.socketService = socketService
-    this.prisma = prisma
+    super(socketService, prisma)
   }
 
-  // Main event handler for department events
-  async handleEvent (action: EventAction, deptData: any, triggeredBy?: string): Promise<void> {
-    try {
-      console.log(`🏢 Handling department event: ${action}`, { deptId: deptData?.id, triggeredBy })
+  // ============================================
+  // Abstract method implementations
+  // ============================================
 
-      // Get fresh department data from database if we only have an ID
-      const department = await this.getDepartmentData(deptData)
-      if (!department) {
-        console.warn(`⚠️ Department not found for event: ${deptData?.id}`)
-        return
-      }
-
-      // Determine which users should receive this event
-      const targetUsers = await this.getTargetUsers(department, action)
-
-      // Create event payload
-      const payload: EventPayload = {
-        status: 'success',
-        data: department
-      }
-
-      // Send event to each target user
-      for (const userId of targetUsers) {
-        this.socketService.sendToUser(userId, 'departments', action, payload)
-      }
-
-      console.log(`✅ Department event sent to ${targetUsers.length} users: ${action}`)
-    } catch (error) {
-      console.error(`❌ Error handling department event ${action}:`, error)
-      throw error
-    }
+  protected getResourceName (): string {
+    return 'department'
   }
 
-  // Get complete department data from database
-  private async getDepartmentData (deptData: any): Promise<any> {
+  protected async fetchResourceData (deptData: any): Promise<any | null> {
     try {
       // If we already have complete data with GraphQL format, use it
       if (deptData && typeof deptData === 'object' && deptData.name && 'totalMachines' in deptData) {
@@ -85,60 +58,41 @@ export class DepartmentEventManager implements ResourceEventManager {
         firewallCustomRules: department.firewallCustomRules || undefined
       }
     } catch (error) {
-      console.error('Error fetching department data:', error)
+      logger.error('Error fetching department data:', error)
       return null
     }
   }
 
-  // Determine which users should receive this department event
-  private async getTargetUsers (department: any, action: EventAction): Promise<string[]> {
+  protected async getTargetUsers (department: any, action: EventAction): Promise<string[]> {
     try {
       const targetUsers: Set<string> = new Set()
 
       // 1. Always include all admin users (they can see all departments)
-      const adminUsers = await this.prisma.user.findMany({
-        where: {
-          role: 'ADMIN',
-          deleted: false
-        },
-        select: { id: true }
-      })
-      adminUsers.forEach(admin => targetUsers.add(admin.id))
+      const adminIds = await this.getAdminUsers()
+      adminIds.forEach(id => targetUsers.add(id))
 
       // 2. Include users who have VMs in this department
       if (department.id) {
-        const departmentUsers = await this.prisma.user.findMany({
-          where: {
-            deleted: false,
-            VM: {
-              some: {
-                departmentId: department.id
-              }
-            }
-          },
-          select: { id: true }
-        })
-        departmentUsers.forEach(user => targetUsers.add(user.id))
+        const deptUserIds = await this.getDepartmentUsers(department.id)
+        deptUserIds.forEach(id => targetUsers.add(id))
       }
 
-      // 3. For certain actions, include additional users
+      // 3. For create action, include all active users
       if (action === 'create') {
-        // New departments might be visible to all users for VM assignment
-        const allActiveUsers = await this.prisma.user.findMany({
-          where: { deleted: false },
-          select: { id: true }
-        })
-        allActiveUsers.forEach(user => targetUsers.add(user.id))
+        const activeIds = await this.getAllActiveUsers()
+        activeIds.forEach(id => targetUsers.add(id))
       }
 
       return Array.from(targetUsers)
     } catch (error) {
-      console.error('Error determining target users for department event:', error)
+      logger.error('Error determining target users for department event:', error)
       return []
     }
   }
 
-  // Specific department event handlers
+  // ============================================
+  // Public convenience handlers
+  // ============================================
 
   async handleDepartmentCreated (deptData: any, triggeredBy?: string): Promise<void> {
     await this.handleEvent('create', deptData, triggeredBy)
@@ -149,50 +103,7 @@ export class DepartmentEventManager implements ResourceEventManager {
   }
 
   async handleDepartmentDeleted (deptData: any, triggeredBy?: string): Promise<void> {
-    // For delete events, we might not have full department data anymore
-    const targetUsers = await this.getTargetUsersForDeletedDepartment(deptData)
-
-    const payload: EventPayload = {
-      status: 'success',
-      data: {
-        id: deptData.id || deptData,
-        action: 'deleted',
-        deletedAt: new Date().toISOString()
-      }
-    }
-
-    for (const userId of targetUsers) {
-      this.socketService.sendToUser(userId, 'departments', 'delete', payload)
-    }
-  }
-
-  // Special handling for deleted departments (limited data available)
-  private async getTargetUsersForDeletedDepartment (deptData: any): Promise<string[]> {
-    try {
-      const targetUsers: Set<string> = new Set()
-
-      // Include all admin users
-      const adminUsers = await this.prisma.user.findMany({
-        where: {
-          role: 'ADMIN',
-          deleted: false
-        },
-        select: { id: true }
-      })
-      adminUsers.forEach(admin => targetUsers.add(admin.id))
-
-      // For safety, include all active users for delete events
-      // This ensures everyone sees the department disappear from their lists
-      const allActiveUsers = await this.prisma.user.findMany({
-        where: { deleted: false },
-        select: { id: true }
-      })
-      allActiveUsers.forEach(user => targetUsers.add(user.id))
-
-      return Array.from(targetUsers)
-    } catch (error) {
-      console.error('Error determining target users for deleted department:', error)
-      return []
-    }
+    // Delegate to inherited handleEvent which handles delete events
+    await this.handleEvent('delete', deptData, triggeredBy)
   }
 }
