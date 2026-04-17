@@ -1,3 +1,5 @@
+import logger from '@main/logger'
+import { Logger } from 'winston'
 /**
  * CommandDispatcher — Handles command construction, sending, and retry logic
  *
@@ -14,7 +16,6 @@
 
 import * as fs from 'fs'
 import { v4 as uuidv4 } from 'uuid'
-import { Debugger } from '../../utils/debug'
 import type {
   VmConnection,
   OutboundMessage,
@@ -31,12 +32,17 @@ import type {
 /** Callback the dispatcher uses to reconnect a VM when a command finds it disconnected */
 export type ReconnectFn = (vmId: string, socketPath: string) => Promise<void>
 
+/** Callback to send a message over a VM socket */
+export type SendMessageFn = (connection: VmConnection, message: OutboundMessage) => void
+
 export interface CommandDispatcherDeps {
-  debug: Debugger
+  debug: Logger
   /** The orchestrator's connections Map — shared reference */
   connections: Map<string, VmConnection>
   /** Function to trigger reconnection when a command finds VM disconnected */
   reconnectFn: ReconnectFn
+  /** Function to write messages to a VM socket (owned by orchestrator) */
+  sendMessage: SendMessageFn
 }
 
 // ────────────────────────────────────────────────────────────────────────────────
@@ -44,66 +50,16 @@ export interface CommandDispatcherDeps {
 // ────────────────────────────────────────────────────────────────────────────────
 
 export class CommandDispatcher {
-  private readonly debug: Debugger
+  private readonly debug: Logger
   private readonly connections: Map<string, VmConnection>
   private readonly reconnectFn: ReconnectFn
+  private readonly sendMessage: SendMessageFn
 
   constructor(deps: CommandDispatcherDeps) {
     this.debug = deps.debug
     this.connections = deps.connections
     this.reconnectFn = deps.reconnectFn
-  }
-
-  // ──────────────────────────────────────────────────────────────────────────
-  // Low-level message transmission
-  // ──────────────────────────────────────────────────────────────────────────
-
-  sendMessage(connection: VmConnection, message: OutboundMessage): void {
-    const sendStartTime = Date.now()
-
-    if (!connection.isConnected) {
-      this.debug.log('warn', `Cannot send message to disconnected VM ${connection.vmId} (quality=${connection.connectionQuality}, stability=${connection.connectionStabilityScore}%)`)
-      connection.messageStats.errors++
-      return
-    }
-
-    try {
-      const messageStr = JSON.stringify(message) + '\n'
-      const messageSize = Buffer.byteLength(messageStr, 'utf8')
-
-      this.debug.log('debug', `📤 Sending message to VM ${connection.vmId}: size=${messageSize} bytes, type=${message.type || 'unknown'}`)
-      this.debug.log('debug', `Message preview: ${messageStr.slice(0, 200)}${messageStr.length > 200 ? '...' : ''}`)
-
-      connection.socket.write(messageStr, (error) => {
-        if (error) {
-          this.debug.log('error', `Failed to write message to VM ${connection.vmId}: ${error.message}`)
-          connection.transmissionFailureCount++
-          connection.messageStats.errors++
-        }
-      })
-
-      // Update transmission statistics
-      connection.messageStats.sent++
-      connection.messageStats.totalBytes += messageSize
-      connection.lastSuccessfulTransmission = new Date()
-
-      const transmissionTime = Date.now() - sendStartTime
-      if (transmissionTime > 100) { // Log slow transmissions
-        this.debug.log('warn', `Slow message transmission to VM ${connection.vmId}: ${transmissionTime}ms for ${messageSize} bytes`)
-      }
-
-      this.debug.log('debug', `✅ Message sent to VM ${connection.vmId} in ${transmissionTime}ms (total sent: ${connection.messageStats.sent})`)
-    } catch (error) {
-      connection.messageStats.errors++
-      connection.transmissionFailureCount++
-
-      // Update connection quality on transmission failure
-      connection.connectionQuality = 'poor'
-      connection.connectionStabilityScore = Math.max(0, connection.connectionStabilityScore - 15)
-
-      this.debug.log('error', `Failed to send message to VM ${connection.vmId}: ${error} (failures: ${connection.transmissionFailureCount}, quality: ${connection.connectionQuality})`)
-      this.debug.log('debug', `Transmission failure context: uptime=${Date.now() - connection.connectionStartTime.getTime()}ms, stability=${connection.connectionStabilityScore}%`)
-    }
+    this.sendMessage = deps.sendMessage
   }
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -130,7 +86,7 @@ export class CommandDispatcher {
 
     if (!connection.isConnected) {
       // Try to reconnect once before failing
-      this.debug.log('warn', `VM ${vmId} is not connected, attempting reconnection...`)
+      this.debug.warn(`VM ${vmId} is not connected, attempting reconnection...`)
 
       // Check if socket file still exists
       const socketPath = connection.socketPath
@@ -180,7 +136,7 @@ export class CommandDispatcher {
         timeout: Math.floor(timeout / 1000) // Convert to seconds for InfiniService
       }
 
-      this.debug.log('debug', `Sending safe command ${commandId} to VM ${vmId}: ${JSON.stringify(message)}`)
+      this.debug.debug(`Sending safe command ${commandId} to VM ${vmId}: ${JSON.stringify(message)}`)
       this.sendMessage(connection, message)
     })
   }
@@ -202,7 +158,7 @@ export class CommandDispatcher {
 
     if (!connection.isConnected) {
       // Try to reconnect once before failing
-      this.debug.log('warn', `VM ${vmId} is not connected, attempting reconnection...`)
+      this.debug.warn(`VM ${vmId} is not connected, attempting reconnection...`)
 
       // Check if socket file still exists
       const socketPath = connection.socketPath
@@ -250,7 +206,7 @@ export class CommandDispatcher {
         run_as: options.runAs
       }
 
-      this.debug.log('debug', `Sending unsafe command ${commandId} to VM ${vmId}: ${rawCommand}`)
+      this.debug.debug(`Sending unsafe command ${commandId} to VM ${vmId}: ${rawCommand}`)
       this.sendMessage(connection, message)
     })
   }
@@ -448,7 +404,7 @@ export class CommandDispatcher {
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        this.debug.log('debug', `Executing command for VM ${vmId}, attempt ${attempt}/${maxRetries}`)
+        this.debug.debug(`Executing command for VM ${vmId}, attempt ${attempt}/${maxRetries}`)
         const response = await commandBuilder()
 
         // If command succeeded or failed but got a response, return it
@@ -457,11 +413,11 @@ export class CommandDispatcher {
         }
 
         // If command failed but we have retries left, wait and retry
-        this.debug.log('warn', `Command failed for VM ${vmId}, retrying in ${retryDelay}ms...`)
+        this.debug.warn(`Command failed for VM ${vmId}, retrying in ${retryDelay}ms...`)
         await new Promise(resolve => setTimeout(resolve, retryDelay))
       } catch (error) {
         lastError = error as Error
-        this.debug.log('warn', `Command attempt ${attempt} failed for VM ${vmId}: ${error}`)
+        this.debug.warn(`Command attempt ${attempt} failed for VM ${vmId}: ${error}`)
 
         if (attempt < maxRetries) {
           await new Promise(resolve => setTimeout(resolve, retryDelay))

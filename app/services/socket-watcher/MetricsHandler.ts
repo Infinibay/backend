@@ -1,3 +1,5 @@
+import logger from '@main/logger'
+import { Logger } from 'winston'
 /**
  * MetricsHandler — Handles metrics storage, auto-check analysis, and VM setup
  *
@@ -12,7 +14,6 @@
  */
 
 import { EventEmitter } from 'events'
-import { Debugger } from '../../utils/debug'
 import type {
   MetricsMessage,
   ResponseMessage,
@@ -31,7 +32,7 @@ import type {
 // ────────────────────────────────────────────────────────────────────────────────
 
 export interface MetricsHandlerDeps {
-  debug: Debugger
+  debug: Logger
   /** Prisma client instance */
   prisma: any
   /** VmEventManager — may be undefined if not yet initialized */
@@ -45,7 +46,7 @@ export interface MetricsHandlerDeps {
 // ────────────────────────────────────────────────────────────────────────────────
 
 export class MetricsHandler {
-  private readonly debug: Debugger
+  private readonly debug: Logger
   private readonly prisma: any
   private readonly getVmEventManager: () => any | undefined
   private readonly emitter: EventEmitter
@@ -87,7 +88,7 @@ export class MetricsHandler {
         return
       }
 
-      this.debug.log('info', `First infiniservice message from VM ${vmId} - completing setup`)
+      this.debug.info(`First infiniservice message from VM ${vmId} - completing setup`)
 
       // 1. Mark setup as complete
       await this.prisma.machineConfiguration.update({
@@ -104,7 +105,7 @@ export class MetricsHandler {
       // 3. Eject all CD-ROMs (async, non-blocking)
       const { ejectAllCdroms } = await import('../InfinizationService')
       ejectAllCdroms(vmId).catch((err: Error) => {
-        this.debug.log('warn', `Failed to eject CD-ROMs: ${err.message}`)
+        this.debug.warn(`Failed to eject CD-ROMs: ${err.message}`)
       })
 
       // 4. Emit event to frontend
@@ -116,10 +117,10 @@ export class MetricsHandler {
         })
       }
 
-      this.debug.log('info', `VM ${vmId} setup complete - status changed to running`)
+      this.debug.info(`VM ${vmId} setup complete - status changed to running`)
 
     } catch (error: any) {
-      this.debug.log('error', `Error handling first infiniservice message: ${error.message}`)
+      this.debug.error(`Error handling first infiniservice message: ${error.message}`)
     }
   }
 
@@ -133,21 +134,21 @@ export class MetricsHandler {
       const { data } = message
 
       // Log the incoming data structure for debugging
-      this.debug.log('debug', `Metrics data structure for VM ${vmId}:`)
-      this.debug.log('debug', `- system.cpu: ${JSON.stringify(data.system?.cpu)}`)
-      this.debug.log('debug', `- system.memory: ${JSON.stringify(data.system?.memory)}`)
-      this.debug.log('debug', `- system.disk: ${JSON.stringify(data.system?.disk)}`)
-      this.debug.log('debug', `- system.network: ${JSON.stringify(data.system?.network)}`)
-      this.debug.log('debug', `- system.uptime_seconds: ${data.system?.uptime_seconds}`)
+      this.debug.debug(`Metrics data structure for VM ${vmId}:`)
+      this.debug.debug(`- system.cpu: ${JSON.stringify(data.system?.cpu)}`)
+      this.debug.debug(`- system.memory: ${JSON.stringify(data.system?.memory)}`)
+      this.debug.debug(`- system.disk: ${JSON.stringify(data.system?.disk)}`)
+      this.debug.debug(`- system.network: ${JSON.stringify(data.system?.network)}`)
+      this.debug.debug(`- system.uptime_seconds: ${data.system?.uptime_seconds}`)
 
       // Validate required fields exist
       if (!data.system) {
-        this.debug.log('error', `Missing 'system' field in metrics data for VM ${vmId}`)
+        this.debug.error(`Missing 'system' field in metrics data for VM ${vmId}`)
         return
       }
 
       if (!data.system.memory) {
-        this.debug.log('error', `Missing 'system.memory' field in metrics data for VM ${vmId}`)
+        this.debug.error(`Missing 'system.memory' field in metrics data for VM ${vmId}`)
         return
       }
 
@@ -356,15 +357,15 @@ export class MetricsHandler {
         metrics: formattedMetrics
       })
 
-      this.debug.log('metrics', `Stored metrics for VM ${vmId}`)
+      this.debug.debug('metrics', `Stored metrics for VM ${vmId}`)
     } catch (error) {
-      this.debug.log('error', `Failed to store metrics for VM ${vmId}: ${error}`)
+      this.debug.error(`Failed to store metrics for VM ${vmId}: ${error}`)
       // Log more details about the specific error
       if (error instanceof Error) {
-        this.debug.log('error', `Error details: ${error.stack}`)
+        this.debug.error(`Error details: ${error.stack}`)
       }
       // Log the problematic data that caused the error
-      this.debug.log('error', `Problematic message data: ${JSON.stringify(message, null, 2)}`)
+      this.debug.error(`Problematic message data: ${JSON.stringify(message, null, 2)}`)
     }
   }
 
@@ -394,7 +395,7 @@ export class MetricsHandler {
         return
       }
 
-      this.debug.log('debug', `Processing auto-check response for VM ${vmId}: ${commandType}`)
+      this.debug.debug(`Processing auto-check response for VM ${vmId}: ${commandType}`)
 
       // If command failed, this might indicate an issue
       if (!response.success) {
@@ -414,7 +415,7 @@ export class MetricsHandler {
       // For successful responses, analyze the data to detect issues or remediations
       await this.analyzeAutoCheckData(vmId, commandType, data, response)
     } catch (error) {
-      this.debug.log('error', `Error handling auto-check response for VM ${vmId}: ${error}`)
+      this.debug.error(`Error handling auto-check response for VM ${vmId}: ${error}`)
     }
   }
 
@@ -466,10 +467,10 @@ export class MetricsHandler {
           break
 
         default:
-          this.debug.log('debug', `No specific analysis for command type: ${commandType}`)
+          this.debug.debug(`No specific analysis for command type: ${commandType}`)
       }
     } catch (error) {
-      this.debug.log('error', `Error analyzing auto-check data for VM ${vmId}: ${error}`)
+      this.debug.error(`Error analyzing auto-check data for VM ${vmId}: ${error}`)
     }
   }
 
@@ -488,7 +489,7 @@ export class MetricsHandler {
       }
 
       if (!isWindowsUpdatesData(data)) {
-        this.debug.log('debug', 'Data is not WindowsUpdatesData format')
+        this.debug.debug('Data is not WindowsUpdatesData format')
         return
       }
 
@@ -520,7 +521,7 @@ export class MetricsHandler {
         }
       }
     } catch (error) {
-      this.debug.log('error', `Error analyzing Windows updates response: ${error}`)
+      this.debug.error(`Error analyzing Windows updates response: ${error}`)
     }
   }
 
@@ -538,7 +539,7 @@ export class MetricsHandler {
       }
 
       if (!isDefenderData(data)) {
-        this.debug.log('debug', 'Data is not DefenderData format')
+        this.debug.debug('Data is not DefenderData format')
         return
       }
 
@@ -571,7 +572,7 @@ export class MetricsHandler {
         })
       }
     } catch (error) {
-      this.debug.log('error', `Error analyzing Defender response: ${error}`)
+      this.debug.error(`Error analyzing Defender response: ${error}`)
     }
   }
 
@@ -590,7 +591,7 @@ export class MetricsHandler {
       }
 
       if (!isDiskSpaceData(data)) {
-        this.debug.log('debug', 'Data is not DiskSpaceData format')
+        this.debug.debug('Data is not DiskSpaceData format')
         return
       }
 
@@ -627,7 +628,7 @@ export class MetricsHandler {
         }
       }
     } catch (error) {
-      this.debug.log('error', `Error analyzing disk space response: ${error}`)
+      this.debug.error(`Error analyzing disk space response: ${error}`)
     }
   }
 
@@ -645,7 +646,7 @@ export class MetricsHandler {
       }
 
       if (!isResourceOptimizationData(data)) {
-        this.debug.log('debug', 'Data is not ResourceOptimizationData format')
+        this.debug.debug('Data is not ResourceOptimizationData format')
         return
       }
 
@@ -662,7 +663,7 @@ export class MetricsHandler {
         })
       }
     } catch (error) {
-      this.debug.log('error', `Error analyzing resource optimization response: ${error}`)
+      this.debug.error(`Error analyzing resource optimization response: ${error}`)
     }
   }
 
@@ -680,7 +681,7 @@ export class MetricsHandler {
       }
 
       if (!isHealthCheckData(data)) {
-        this.debug.log('debug', 'Data is not HealthCheckData format')
+        this.debug.debug('Data is not HealthCheckData format')
         return
       }
 
@@ -695,7 +696,7 @@ export class MetricsHandler {
         })
       }
     } catch (error) {
-      this.debug.log('error', `Error analyzing health check response: ${error}`)
+      this.debug.error(`Error analyzing health check response: ${error}`)
     }
   }
 
@@ -719,7 +720,7 @@ export class MetricsHandler {
         error: success ? undefined : (response.error || response.stderr || 'Unknown error')
       })
     } catch (error) {
-      this.debug.log('error', `Error analyzing remediation response: ${error}`)
+      this.debug.error(`Error analyzing remediation response: ${error}`)
     }
   }
 
@@ -737,7 +738,7 @@ export class MetricsHandler {
       }
 
       if (!isDefenderScanData(data)) {
-        this.debug.log('debug', 'Data is not DefenderScanData format')
+        this.debug.debug('Data is not DefenderScanData format')
         return
       }
 
@@ -752,7 +753,7 @@ export class MetricsHandler {
         })
       }
     } catch (error) {
-      this.debug.log('error', `Error analyzing Defender scan response: ${error}`)
+      this.debug.error(`Error analyzing Defender scan response: ${error}`)
     }
   }
 
@@ -793,17 +794,17 @@ export class MetricsHandler {
         (iface.is_up ?? true) && (iface.ip_addresses?.length || 0) > 0
       ).length
 
-      this.debug.log('info', `Processing IP addresses for VM ${vmId}: ${totalInterfaces} total interfaces, ${interfacesWithIPs} with IPs, ${upInterfaces} UP, ${upInterfacesWithIPs} UP with IPs`)
+      this.debug.info(`Processing IP addresses for VM ${vmId}: ${totalInterfaces} total interfaces, ${interfacesWithIPs} with IPs, ${upInterfaces} UP, ${upInterfacesWithIPs} UP with IPs`)
 
       // Log individual interface details for diagnostics
       interfaces.forEach(iface => {
         const ipCount = iface.ip_addresses?.length || 0
         const isUp = iface.is_up ?? true
-        this.debug.log('debug', `Interface ${iface.name}: is_up=${isUp}, ip_count=${ipCount}, ips=[${iface.ip_addresses?.join(', ') || 'none'}]`)
+        this.debug.debug(`Interface ${iface.name}: is_up=${isUp}, ip_count=${ipCount}, ips=[${iface.ip_addresses?.join(', ') || 'none'}]`)
       })
 
       if (upInterfacesWithIPs === 0 && totalInterfaces > 0) {
-        this.debug.log('warn', `No UP interfaces with IP addresses detected for VM ${vmId} (${totalInterfaces} total interfaces)`)
+        this.debug.warn(`No UP interfaces with IP addresses detected for VM ${vmId} (${totalInterfaces} total interfaces)`)
       }
 
       let localIP: string | null = null
@@ -824,7 +825,7 @@ export class MetricsHandler {
         for (const ip of ipAddresses) {
           // Validate IP address format
           if (!this.isValidIPAddress(ip)) {
-            this.debug.log('debug', `Skipping invalid IP address format: ${this.maskIP(ip)}`)
+            this.debug.debug(`Skipping invalid IP address format: ${this.maskIP(ip)}`)
             continue
           }
 
@@ -832,7 +833,7 @@ export class MetricsHandler {
 
           // Skip loopback and other special addresses
           if (this.isLoopbackAddress(ip)) {
-            this.debug.log('debug', `Skipping loopback address: ${ip}`)
+            this.debug.debug(`Skipping loopback address: ${ip}`)
             continue
           }
 
@@ -841,14 +842,14 @@ export class MetricsHandler {
             if (!localIP || this.shouldPreferIP(ip, localIP)) {
               localIP = ip
               selectedInterface = iface.name
-              this.debug.log('debug', `Selected local IP ${this.maskIP(ip)} from interface ${iface.name}`)
+              this.debug.debug(`Selected local IP ${this.maskIP(ip)} from interface ${iface.name}`)
             }
           } else {
             // Public IP
             if (!publicIP || this.shouldPreferIP(ip, publicIP)) {
               publicIP = ip
               selectedInterface = iface.name
-              this.debug.log('debug', `Selected public IP ${this.maskIP(ip)} from interface ${iface.name}`)
+              this.debug.debug(`Selected public IP ${this.maskIP(ip)} from interface ${iface.name}`)
             }
           }
         }
@@ -861,14 +862,14 @@ export class MetricsHandler {
       })
 
       if (!currentMachine) {
-        this.debug.log('error', `VM ${vmId} not found in database during IP update`)
+        this.debug.error(`VM ${vmId} not found in database during IP update`)
         return
       }
 
       const ipChanged = currentMachine.localIP !== localIP || currentMachine.publicIP !== publicIP
 
       if (!ipChanged) {
-        this.debug.log('debug', `No IP changes detected for VM ${vmId}, skipping database update`)
+        this.debug.debug(`No IP changes detected for VM ${vmId}, skipping database update`)
         return
       }
 
@@ -882,14 +883,14 @@ export class MetricsHandler {
       }).catch((error: any) => {
         // Handle database constraint errors gracefully
         if (error.code === 'P2025') {
-          this.debug.log('warn', `VM ${vmId} no longer exists in database during IP update`)
+          this.debug.warn(`VM ${vmId} no longer exists in database during IP update`)
         } else {
           throw error
         }
       })
 
-      this.debug.log('info', `Updated IP addresses for VM ${vmId}: local=${this.maskIP(localIP)} (was ${this.maskIP(currentMachine.localIP)}), public=${this.maskIP(publicIP)} (was ${this.maskIP(currentMachine.publicIP)}), selected_interface=${selectedInterface}`)
-      this.debug.log('info', `All detected IPs for VM ${vmId}: [${allDetectedIPs.map(ip => this.maskIP(ip)).join(', ')}]`)
+      this.debug.info(`Updated IP addresses for VM ${vmId}: local=${this.maskIP(localIP)} (was ${this.maskIP(currentMachine.localIP)}), public=${this.maskIP(publicIP)} (was ${this.maskIP(currentMachine.publicIP)}), selected_interface=${selectedInterface}`)
+      this.debug.info(`All detected IPs for VM ${vmId}: [${allDetectedIPs.map(ip => this.maskIP(ip)).join(', ')}]`)
 
       // Emit event for real-time updates only when IPs actually change
       const vmEventManager = this.getVmEventManager()
@@ -909,15 +910,15 @@ export class MetricsHandler {
         }, eventType)
       }
     } catch (error) {
-      this.debug.log('error', `Failed to update IP addresses for VM ${vmId}: ${error}`)
+      this.debug.error(`Failed to update IP addresses for VM ${vmId}: ${error}`)
 
       // Add context about which interface caused the error
       if (error instanceof Error) {
-        this.debug.log('error', `Error details: ${error.stack}`)
+        this.debug.error(`Error details: ${error.stack}`)
       }
 
       // Log the interface data for debugging
-      this.debug.log('error', `Interface data that caused error: ${JSON.stringify(interfaces, null, 2)}`)
+      this.debug.error(`Interface data that caused error: ${JSON.stringify(interfaces, null, 2)}`)
     }
   }
 

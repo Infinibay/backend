@@ -1,5 +1,12 @@
 /**
- * VirtioSocketWatcherService - Manages connections to VM InfiniService agents
+ * VirtioSocketWatcherService - Orchestrator for VM InfiniService agent connections
+ *
+ * This file is the thin orchestrator that wires together the extracted sub-modules:
+ * - ConnectionManager: connection lifecycle, reconnection, filesystem watcher
+ * - MessageRouter: incoming socket data parsing and message dispatch
+ * - KeepAliveManager: bidirectional keep-alive monitoring and RTT tracking
+ * - MetricsHandler: metrics storage and auto-check responses
+ * - CommandDispatcher: safe/unsafe command sending
  *
  * Debug output control:
  * - To see all debug messages: DEBUG=infinibay:virtio-socket:* npm run dev
@@ -8,593 +15,132 @@
  * - To disable all output: (default, or set DEBUG to other namespaces)
  */
 import prisma from '@utils/database'
-import * as net from 'net'
-import * as fs from 'fs'
-import * as path from 'path'
-import * as chokidar from 'chokidar'
 import { EventEmitter } from 'events'
-import { v4 as uuidv4 } from 'uuid'
+import * as path from 'path'
 import { VmEventManager } from './VmEventManager'
 import { VMHealthQueueManager } from './VMHealthQueueManager'
-import { Debugger } from '../utils/debug'
+import { Logger } from 'winston'
+import logger from '@main/logger'
 import { getSocketService } from '../services/SocketService'
 import { ScriptManager } from './scripts/ScriptManager'
 import { TemplateEngine } from './scripts/TemplateEngine'
 import { MetricsHandler } from './socket-watcher/MetricsHandler'
-import { isIPv6Private, isValidIPv6, isLoopbackAddress, isPrivateIP, getIPAddressType } from './socket-watcher/IpUtils'
+import { CommandDispatcher } from './socket-watcher/CommandDispatcher'
+import { KeepAliveManager } from './socket-watcher/KeepAliveManager'
+import { MessageRouter } from './socket-watcher/MessageRouter'
+import { ConnectionManager } from './socket-watcher/ConnectionManager'
+import { HealthMonitor } from './socket-watcher/HealthMonitor'
 
-// Payload logging configuration and helpers
-const LOG_PREVIEW_LEN = Number(process.env.INFINIBAY_LOG_PREVIEW_LEN ?? 300)
-const SENSITIVE_KEYS = [/(password|token|secret|authorization|bearer)/i]
+// Import all types, constants, and helpers from the canonical source
+import {
+  // Re-export types used by external consumers
+  type BaseMessage,
+  type ErrorMessage,
+  type MetricsMessage,
+  type ErrorReportMessage,
+  type CommandMessage,
+  type ResponseMessage,
+  type CircuitBreakerStateMessage,
+  type KeepAliveMessage,
+  type KeepAliveRequestMessage,
+  type FirewallEventMessage,
+  type ScriptCompletionMessage,
+  type RequestPendingScriptsMessage,
+  type PendingScriptsResponseMessage,
+  type PendingScriptInfo,
+  type PackageInfo,
+  type ServiceInfo,
+  type ProcessInfo,
+  type UserInfo,
+  type SystemInfo,
+  type OsInfo,
+  type WindowsUpdate,
+  type WindowsUpdatesData,
+  type DefenderData,
+  type DiskDrive,
+  type DiskSpaceData,
+  type ResourceOptimizationData,
+  type HealthCheckData,
+  type DefenderScanData,
+  type ResponseData,
+  type SafeCommandParams,
+  type OutgoingMessage,
+  type FormattedCommandType,
+  // Exported types used by external consumers
+  SafeCommandType,
+  UnsafeCommandRequest,
+  CommandResponse,
+  // Connection & diagnostics types
+  type HealthCheckResult,
+  type MessageStats,
+  type DisconnectionRecord,
+  type VmConnection,
+  type OutboundMessage,
+} from './socket-watcher/types'
 
-function redactSensitive(obj: any): any {
-  if (obj && typeof obj === 'object') {
-    if (Array.isArray(obj)) return obj.map(redactSensitive)
-    const out: any = {}
-    for (const [k, v] of Object.entries(obj)) {
-      if (SENSITIVE_KEYS.some(rx => rx.test(k))) out[k] = '**redacted**'
-      else out[k] = redactSensitive(v)
-    }
-    return out
-  }
-  return obj
+// Re-export types for backward compatibility with external consumers
+export type {
+  SafeCommandType,
+  UnsafeCommandRequest,
+  CommandResponse,
+  BaseMessage,
+  ErrorMessage,
+  MetricsMessage,
+  ErrorReportMessage,
+  ResponseMessage,
+  CircuitBreakerStateMessage,
+  KeepAliveMessage,
+  KeepAliveRequestMessage,
+  FirewallEventMessage,
+  ScriptCompletionMessage,
+  RequestPendingScriptsMessage,
+  PendingScriptsResponseMessage,
+  PendingScriptInfo,
+  HealthCheckResult,
+  MessageStats,
+  DisconnectionRecord,
+  VmConnection,
+  OutboundMessage,
+  ResponseData,
+  OutgoingMessage,
+  FormattedCommandType,
 }
 
-// Message types from InfiniService
-interface BaseMessage {
-  type: 'metrics' | 'error' | 'handshake' | 'command' | 'response' | 'error_report' | 'circuit_breaker_state' | 'keep_alive' | 'keep_alive_request' | 'firewall_event' | 'script_completion' | 'request_pending_scripts'
-  timestamp: string
-}
-
-interface ErrorMessage extends BaseMessage {
-  type: 'error'
-  error: string
-  details?: unknown
-}
-
-interface MetricsMessage extends BaseMessage {
-  type: 'metrics'
-  data: {
-    system: {
-      cpu: {
-        usage_percent: number
-        cores_usage: number[]
-        temperature?: number
-      }
-      memory: {
-        total_kb: number
-        used_kb: number
-        available_kb: number
-        swap_total_kb?: number
-        swap_used_kb?: number
-      }
-      disk: {
-        usage_stats: Array<{
-          mount_point: string
-          total_gb: number
-          used_gb: number
-          available_gb: number
-        }>
-        io_stats: {
-          read_bytes_per_sec: number
-          write_bytes_per_sec: number
-          read_ops_per_sec: number
-          write_ops_per_sec: number
-        }
-      }
-      network: {
-        interfaces: Array<{
-          name: string
-          bytes_received: number
-          bytes_sent: number
-          packets_received: number
-          packets_sent: number
-          ip_addresses?: string[]
-          is_up?: boolean
-        }>
-      }
-      uptime_seconds: number
-      load_average?: {
-        load_1min: number
-        load_5min: number
-        load_15min: number
-      }
-    }
-    processes?: Array<{
-      pid: number
-      ppid?: number
-      name: string
-      exe_path?: string
-      cmd_line?: string
-      cpu_percent: number
-      memory_kb: number
-      disk_read_bytes?: number
-      disk_write_bytes?: number
-      status: string
-      start_time?: string
-    }>
-    applications?: Array<{
-      exe_path: string
-      name: string
-      version?: string
-      description?: string
-      publisher?: string
-      last_access?: string
-      last_modified?: string
-      access_count: number
-      usage_minutes: number
-      file_size?: number
-      is_active: boolean
-    }>
-    ports?: Array<{
-      port: number
-      protocol: string
-      state: string
-      pid?: number
-      process_name?: string
-      exe_path?: string
-      is_listening: boolean
-      connection_count: number
-    }>
-    windows_services?: Array<{
-      name: string
-      display_name: string
-      description?: string
-      start_type: string
-      service_type: string
-      exe_path?: string
-      dependencies?: string[]
-      state: string
-      pid?: number
-      is_default: boolean
-    }>
-  }
-}
-
-interface ErrorReportMessage extends BaseMessage {
-  type: 'error_report'
-  error_type: string
-  severity: 'Temporary' | 'Recoverable' | 'Fatal' | 'Unknown'
-  windows_error_code?: number
-  retry_attempt: number
-  max_retries: number
-  recovery_suggestion?: string
-  vm_id: string
-}
-
-// Command-related message types
-interface CommandMessage extends BaseMessage {
-  type: 'command'
-  id: string
-  commandType: SafeCommandType | UnsafeCommandRequest
-}
-
-interface ResponseMessage extends BaseMessage {
-  type: 'response'
-  id: string
-  success: boolean
-  exit_code?: number
-  stdout?: string
-  stderr?: string
-  execution_time_ms?: number
-  command_type?: string
-  data?: ResponseData
-  error?: string
-}
-
-// Circuit Breaker and Keep-Alive message types
-interface CircuitBreakerStateMessage extends BaseMessage {
-  type: 'circuit_breaker_state'
-  state: 'Closed' | 'Open' | 'HalfOpen'
-  failure_count: number
-  last_failure_time?: string
-  recovery_eta_seconds?: number
-}
-
-interface KeepAliveMessage extends BaseMessage {
-  type: 'keep_alive'
-  sequence_number: number
-}
-
-interface KeepAliveRequestMessage extends BaseMessage {
-  type: 'keep_alive_request'
-  sequence_number: number
-  timestamp: string
-}
-
-interface FirewallEventMessage extends BaseMessage {
-  type: 'firewall_event'
-  event_type: 'connection_blocked' | 'connection_allowed'
-  port: number
-  protocol: string
-  process_name?: string
-  process_id?: number
-  source_ip?: string
-  rule_name?: string
-  timestamp: string
-}
-
-interface ScriptCompletionMessage extends BaseMessage {
-  type: 'script_completion'
-  execution_id: string
-  exit_code: number
-  log_file?: string
-  stdout?: string
-  stderr?: string
-}
-
-interface RequestPendingScriptsMessage extends BaseMessage {
-  type: 'request_pending_scripts'
-  vm_id: string
-  request_timestamp: string
-}
-
-interface PendingScriptsResponseMessage {
-  type: 'pending_scripts_response'
-  timestamp: string
-  scripts: PendingScriptInfo[]
-}
-
-interface PendingScriptInfo {
-  execution_id: string
-  script_id: string
-  script_name: string
-  script_content: string
-  shell: string
-  execution_type: string
-  input_values: Record<string, any>
-  timeout_seconds: number
-  run_as: string | null
-}
-
-// Define types for different response data structures
-interface PackageInfo {
-  name: string
-  version?: string
-  description?: string
-  installed?: boolean
-  available?: boolean
-}
-
-interface ServiceInfo {
-  name: string
-  display_name?: string
-  status: string
-  start_type?: string
-}
-
-interface ProcessInfo {
-  pid: number
-  name: string
-  cpu_percent: number
-  memory_kb: number
-  status?: string
-}
-
-interface UserInfo {
-  username: string
-  full_name?: string
-  is_admin: boolean
-  is_active: boolean
-  last_login?: string
-}
-
-interface SystemInfo {
-  hostname?: string
-  os?: string
-  kernel?: string
-  arch?: string
-  cpu_count?: number
-  total_memory?: number
-}
-
-interface OsInfo {
-  name?: string
-  version?: string
-  build?: string
-  platform?: string
-}
-
-// Auto-check response data interfaces
-interface WindowsUpdate {
-  title: string
-  importance: 'Critical' | 'Important' | 'Moderate' | 'Low'
-  kb_id?: string
-  size?: number
-}
-
-interface WindowsUpdatesData {
-  pending_updates?: WindowsUpdate[]
-  installed_count?: number
-  failed_count?: number
-}
-
-interface DefenderData {
-  real_time_protection?: boolean
-  antivirus_enabled?: boolean
-  definitions_outdated?: boolean
-  last_definition_update?: string
-  scan_status?: string
-}
-
-interface DiskDrive {
-  drive_letter: string
-  total_gb: number
-  used_gb: number
-  available_gb: number
-}
-
-interface DiskSpaceData {
-  drives?: DiskDrive[]
-}
-
-interface ResourceOptimizationData {
-  cpu_optimization_available?: boolean
-  memory_optimization_available?: boolean
-  disk_optimization_available?: boolean
-  recommendations?: string[]
-}
-
-interface HealthCheckData {
-  overall_health?: 'Healthy' | 'Warning' | 'Critical'
-  checks?: Array<{
-    name: string
-    status: string
-    details?: unknown
-  }>
-}
-
-interface DefenderScanData {
-  threats_found?: number
-  scan_duration?: string
-  threats?: Array<{
-    name: string
-    severity: string
-    action: string
-  }>
-}
-
-// Response data can be different types depending on the command
-// For compatibility with GraphQL resolver expectations, ensure arrays are properly typed
-type ResponseData = PackageInfo[] | ServiceInfo[] | ProcessInfo[] | UserInfo[] | SystemInfo | OsInfo |
-  WindowsUpdatesData | DefenderData | DiskSpaceData | ResourceOptimizationData |
-  HealthCheckData | DefenderScanData | unknown[] | Record<string, unknown>
-
-// Safe command types matching InfiniService
-export interface SafeCommandType {
-  action: 'ServiceList' | 'ServiceControl' | 'PackageList' | 'PackageInstall' |
-  'PackageRemove' | 'PackageUpdate' | 'PackageSearch' | 'ProcessList' |
-  'ProcessKill' | 'ProcessTop' | 'SystemInfo' | 'OsInfo' | 'UserList' |
-  // Auto-check commands
-  'CheckWindowsUpdates' | 'GetUpdateHistory' | 'GetPendingUpdates' |
-  'CheckWindowsDefender' | 'GetDefenderStatus' | 'RunDefenderQuickScan' | 'GetThreatHistory' |
-  'GetInstalledApplicationsWMI' | 'CheckApplicationUpdates' | 'GetApplicationDetails' |
-  'CheckLinuxUpdates' |
-  'CheckDiskSpace' | 'CheckResourceOptimization' | 'RunHealthCheck' | 'RunAllHealthChecks' |
-  'DiskCleanup' | 'AutoFixWindowsUpdates' | 'AutoFixDefender' | 'AutoOptimizeDisk' |
-  // Maintenance commands
-  'ExecutePowerShellScript' | 'RunMaintenanceTask' | 'ValidateSystemHealth' |
-  'CleanTemporaryFiles' | 'UpdateSystemSoftware' | 'RestartServices' | 'CheckSystemIntegrity'
-  params?: SafeCommandParams
-}
-
-// Parameters for safe commands
-interface SafeCommandParams {
-  // Package operations
-  query?: string
-  package?: string
-  // Process operations
-  pid?: number
-  force?: boolean
-  limit?: number
-  sort_by?: string
-  // Service operations
-  service?: string
-  service_name?: string // Alternative service name field
-  action?: string
-  // Auto-check parameters
-  check_name?: string
-  days?: number
-  app_id?: string
-  warning_threshold?: number
-  critical_threshold?: number
-  evaluation_window_days?: number
-  drive?: string
-  targets?: string[]
-  // Maintenance parameters
-  /** Required for ExecutePowerShellScript (validated by || '') */
-  script?: string
-  /** Optional, defaults to 'inline' */
-  script_type?: string
-  task_type?: string
-  task_name?: string
-  parameters?: Record<string, unknown>
-  /** Optional, allows 0 for no timeout. Use ?? to preserve falsy values. */
-  timeout_seconds?: number
-  /** Optional working directory path */
-  working_directory?: string
-  /** Optional environment variables map */
-  environment_vars?: Record<string, string>
-  /** Optional, defaults to false. Use ?? to preserve false values. */
-  run_as_admin?: boolean
-  validate_before?: boolean
-  validate_after?: boolean
-}
-
-export interface UnsafeCommandRequest {
-  rawCommand: string
-  shell?: string
-  timeout?: number
-  workingDir?: string
-  envVars?: Record<string, string>
-  runAs?: string
-}
-
-export interface CommandResponse {
-  id?: string // Command ID for tracking
-  success: boolean
-  exit_code?: number
-  stdout?: string
-  stderr?: string
-  execution_time_ms?: number
-  command_type?: string // 'safe' or 'unsafe'
-  data?: ResponseData
-  error?: string
-}
-
-// Health check result structure for detailed tracking
-interface HealthCheckResult {
-  timestamp: Date
-  success: boolean
-  latency?: number
-  error?: string
-}
-
-// Message statistics for connection diagnostics
-interface MessageStats {
-  sent: number
-  received: number
-  errors: number
-  totalBytes: number
-  averageLatency: number
-}
-
-// Disconnection history tracking
-interface DisconnectionRecord {
-  timestamp: Date
-  reason: string
-  duration: number
-  wasUnexpected: boolean
-}
-
-// Connection state for each VM with enhanced diagnostics
-interface VmConnection {
-  vmId: string
-  socket: net.Socket
-  socketPath: string
-  buffer: string
-  reconnectAttempts: number
-  reconnectTimer?: NodeJS.Timeout
-  lastMessageTime: Date
-  pingTimer?: NodeJS.Timeout
-  isConnected: boolean
-  lastErrorType?: string // Track last error type to avoid repetitive logging
-  errorCount: number // Track error frequency
-  pendingCommands: Map<string, {
-    resolve: (value: CommandResponse) => void
-    reject: (error: Error) => void
-    timeout: NodeJS.Timeout
-  }> // Track pending commands awaiting responses
-  // Enhanced connection diagnostics
-  connectionStartTime: Date
-  lastHealthCheckTime?: Date
-  healthCheckResults: HealthCheckResult[]
-  messageStats: MessageStats
-  connectionQuality: 'excellent' | 'good' | 'poor' | 'critical'
-  disconnectionHistory: DisconnectionRecord[]
-  transmissionFailureCount: number
-  lastSuccessfulTransmission?: Date
-  connectionStabilityScore: number // 0-100 score based on connection health
-  messageTypeCounts: Record<string, number> // Track message type frequency
-  // Enhanced error tracking for intelligent retry logic
-  lastErrorReport?: ErrorReportMessage // Last detailed error received from Rust side
-  errorClassificationHistory: ErrorReportMessage[] // History of classified errors
-  recoverableErrorCount: number // Count of recoverable errors
-  fatalErrorCount: number // Count of fatal errors
-  lastRecoveryAttempt?: Date // When last recovery was attempted
-  // Circuit Breaker fields
-  circuitBreakerState: 'Closed' | 'Open' | 'HalfOpen' // Current circuit breaker state
-  circuitBreakerFailureCount: number // Failure count for circuit breaker
-  circuitBreakerLastStateChange: Date // When state last changed
-  // Keep-Alive fields
-  keepAliveSequence: number // Track keep-alive message sequence
-  keepAliveLastSent?: Date // Last keep-alive sent time
-  keepAliveLastReceived?: Date // Last keep-alive response time
-  keepAliveFailureCount: number // Count of missed keep-alive responses
-  keepAliveTimer?: NodeJS.Timeout // Timer for keep-alive interval
-  keepAliveSentCount: number // Total keep-alive requests sent
-  keepAliveReceivedCount: number // Total keep-alive responses received
-  keepAliveRttHistory: number[] // History of RTT (last 20 values)
-  keepAliveAverageRtt: number // Average RTT in milliseconds
-  keepAliveLastFailureTime?: Date // Timestamp of last keep-alive failure
-  keepAliveConsecutiveFailures: number // Consecutive failures (different from total)
-  // Graceful Degradation fields
-  isDegraded: boolean // Whether connection is in degraded mode
-  degradationReason?: string // Why connection was degraded
-  wasIdle?: boolean // Track ACTIVE→IDLE transitions for logging
-  // Per-connection reconnect delay (can be adjusted based on error patterns)
-  reconnectBaseDelayMs: number // Mutable reconnect delay for this connection
-  // Connection pooling for alternative endpoints
-  socketPaths: string[] // Alternative socket paths to try
-  currentSocketIndex: number // Index of the currently used socket path
-}
-
-// Define message structure types for outgoing messages
-interface OutgoingMessage {
-  type: string
-  SafeCommand?: {
-    id: string
-    command_type: Record<string, unknown>
-    params: null
-    timeout: number
-  }
-  UnsafeCommand?: {
-    id: string
-    raw_command: string
-    shell?: string
-    timeout: number
-    working_dir?: string
-    env_vars?: Record<string, string>
-  }
-  [key: string]: unknown
-}
-
-// Union type for all outbound messages including keep-alive
-type OutboundMessage = OutgoingMessage | KeepAliveRequestMessage | { type: 'keep_alive_response'; sequence_number: number; timestamp: string } | PendingScriptsResponseMessage
-
-// Define the formatted command type structure
-interface FormattedCommandType {
-  action: string
-  query?: string
-  package?: string
-  limit?: number | null
-  pid?: number
-  force?: boolean | null
-  sort_by?: string | null
-  [key: string]: unknown // Allow additional properties for Record compatibility
-}
 
 export class VirtioSocketWatcherService extends EventEmitter {
   private prisma: typeof prisma
   private vmEventManager?: VmEventManager
   private queueManager?: VMHealthQueueManager
   private connections: Map<string, VmConnection> = new Map()
-  private watcher?: chokidar.FSWatcher
   private socketDir: string
-  private isRunning: boolean = false
+  private debug: Logger
+
+  // Sub-modules
   private metricsHandler: MetricsHandler
-  private readonly maxReconnectAttempts = Number(process.env.VIRTIO_MAX_RECONNECT_ATTEMPTS) || 15
-  private readonly reconnectBaseDelay = Number(process.env.VIRTIO_RECONNECT_BASE_DELAY_MS) || 3000 // 3 seconds (was 1s)
-  private readonly maxReconnectDelay = Number(process.env.VIRTIO_MAX_RECONNECT_DELAY_MS) || 120000
-  // Connection monitoring constants
-  // Set high to accommodate long-running health checks (up to 5+ minutes)
-  private readonly messageTimeout = Number(process.env.VIRTIO_MESSAGE_TIMEOUT_MS) || 900000 // 15 minutes (was 10min)
-  private readonly pingInterval = Number(process.env.VIRTIO_PING_INTERVAL_MS) || 60000 // 1 minute (was 5min)
-  // Keep-alive request interval - 120 seconds (2 minutes)
-  // Longer interval reduces I/O overhead for Windows Global objects with OVERLAPPED I/O
-  private readonly keepAliveInterval = (() => {
-    const parsed = Number(process.env.VIRTIO_KEEP_ALIVE_INTERVAL_MS)
-    return (process.env.VIRTIO_KEEP_ALIVE_INTERVAL_MS !== undefined && !isNaN(parsed)) ? parsed : 120000
-  })()
-  private debug: Debugger
+  private commandDispatcher: CommandDispatcher
+  private keepAliveManager: KeepAliveManager
+  private messageRouter: MessageRouter
+  private connectionManager: ConnectionManager
+  private healthMonitor: HealthMonitor
 
   constructor(prismaClient: typeof prisma) {
     super()
     this.prisma = prismaClient
     this.socketDir = path.join(process.env.INFINIBAY_BASE_DIR || '/opt/infinibay', 'sockets')
-    this.debug = new Debugger('infinibay:virtio-socket')
+    this.debug = logger.child({ module: 'infinibay:virtio-socket' })
 
-    // Initialize metrics handler — emitter is `this` (EventEmitter)
+    // Read configuration from environment
+    const keepAliveInterval = (() => {
+      const parsed = Number(process.env.VIRTIO_KEEP_ALIVE_INTERVAL_MS)
+      return (process.env.VIRTIO_KEEP_ALIVE_INTERVAL_MS !== undefined && !isNaN(parsed)) ? parsed : 120000
+    })()
+    const maxReconnectAttempts = Number(process.env.VIRTIO_MAX_RECONNECT_ATTEMPTS) || 15
+    const reconnectBaseDelay = Number(process.env.VIRTIO_RECONNECT_BASE_DELAY_MS) || 3000
+    const maxReconnectDelay = Number(process.env.VIRTIO_MAX_RECONNECT_DELAY_MS) || 120000
+    const messageTimeout = Number(process.env.VIRTIO_MESSAGE_TIMEOUT_MS) || 900000
+    const pingInterval = Number(process.env.VIRTIO_PING_INTERVAL_MS) || 60000
+
+    // 1. Initialize metrics handler — emitter is `this` (EventEmitter)
     this.metricsHandler = new MetricsHandler({
       debug: this.debug,
       prisma: this.prisma,
@@ -602,8 +148,68 @@ export class VirtioSocketWatcherService extends EventEmitter {
       emitter: this,
     })
 
+    // 2. Initialize health monitor — owns periodic staleness/quality checks
+    this.healthMonitor = new HealthMonitor(
+      { messageTimeout, pingInterval, keepAliveInterval },
+      { debug: this.debug }
+    )
+
+    // 3. Initialize keep-alive manager — shares the connections Map via reference
+    this.keepAliveManager = new KeepAliveManager({
+      debug: this.debug,
+      connections: this.connections,
+      sendMessage: (conn, msg) => this.sendMessage(conn, msg),
+      emitter: this,
+      keepAliveInterval,
+    })
+
+    // 4. Initialize message router — handles incoming socket data parsing and dispatching
+    this.messageRouter = new MessageRouter({
+      debug: this.debug,
+      connections: this.connections,
+      metricsHandler: this.metricsHandler,
+      keepAliveManager: this.keepAliveManager,
+      sendMessage: (conn, msg) => this.sendMessage(conn, msg),
+      handleErrorReport: (conn, report) => this.connectionManager.handleErrorReport(conn, report),
+      handleCircuitBreakerStateChange: (conn, msg) => this.connectionManager.handleCircuitBreakerStateChange(conn, msg),
+      handleFirewallEvent: (vmId, msg) => this.handleFirewallEvent(vmId, msg),
+      handleScriptCompletion: (vmId, msg) => this.handleScriptCompletion(vmId, msg),
+      handleRequestPendingScripts: (vmId, msg, conn) => this.handleRequestPendingScripts(vmId, msg, conn),
+    })
+
+    // 5. Initialize connection manager — owns the filesystem watcher and connection lifecycle
+    this.connectionManager = new ConnectionManager({
+      debug: this.debug,
+      prisma: this.prisma,
+      connections: this.connections,
+      keepAliveManager: this.keepAliveManager,
+      healthMonitor: this.healthMonitor,
+      metricsHandler: this.metricsHandler,
+      handleSocketData: (conn, data) => this.messageRouter.handleSocketData(conn, data),
+      processHealthCheckQueue: (conn) => this.processHealthCheckQueue(conn),
+      getVmEventManager: () => this.vmEventManager,
+      getQueueManager: () => this.queueManager,
+      getIpDetectionStats: () => ({ totalVmsWithIPs: 0, recentIPUpdates: 0 }),
+      emitter: this,
+      socketDir: this.socketDir,
+      maxReconnectAttempts,
+      reconnectBaseDelay,
+      maxReconnectDelay,
+      messageTimeout,
+      pingInterval,
+      keepAliveInterval,
+    })
+
+    // 6. Initialize command dispatcher — shares the connections Map via reference
+    this.commandDispatcher = new CommandDispatcher({
+      debug: this.debug,
+      connections: this.connections,
+      reconnectFn: (vmId: string, socketPath: string) => this.connectionManager.connectToVm(vmId, socketPath),
+      sendMessage: (conn, msg) => this.sendMessage(conn, msg),
+    })
+
     // Log timeout configuration for debugging
-    this.debug.log('info', `VirtIO timeout configuration: messageTimeout=${this.messageTimeout}ms, pingInterval=${this.pingInterval}ms, keepAliveInterval=${this.keepAliveInterval}ms, reconnectBaseDelay=${this.reconnectBaseDelay}ms, maxReconnectDelay=${this.maxReconnectDelay}ms, maxReconnectAttempts=${this.maxReconnectAttempts}`)
+    this.debug.info(`VirtIO timeout configuration: messageTimeout=${messageTimeout}ms, pingInterval=${pingInterval}ms, keepAliveInterval=${keepAliveInterval}ms, reconnectBaseDelay=${reconnectBaseDelay}ms, maxReconnectDelay=${maxReconnectDelay}ms, maxReconnectAttempts=${maxReconnectAttempts}`)
   }
 
   // Initialize the service with optional dependencies
@@ -612,605 +218,27 @@ export class VirtioSocketWatcherService extends EventEmitter {
     this.queueManager = queueManager
   }
 
-  // Start watching for socket files
+  // ──────────────────────────────────────────────────────────────────────────
+  // Service lifecycle — delegated to ConnectionManager
+  // ──────────────────────────────────────────────────────────────────────────
+
   async start(): Promise<void> {
-    if (this.isRunning) {
-      this.debug.log('info', 'VirtioSocketWatcherService is already running')
-      return
-    }
-
-    this.debug.log('info', `Starting VirtioSocketWatcherService, watching directory: ${this.socketDir}`)
-
-    // Ensure socket directory exists
-    try {
-      await fs.promises.mkdir(this.socketDir, { recursive: true })
-    } catch (error) {
-      this.debug.log('error', `Failed to create socket directory: ${error}`)
-      throw error
-    }
-
-    // Clean up stale sockets from VMs that are no longer running
-    await this.cleanupStaleSockets()
-
-    // Set up file watcher
-    this.watcher = chokidar.watch(this.socketDir, {
-      persistent: true,
-      ignoreInitial: false,
-      awaitWriteFinish: {
-        stabilityThreshold: 500,
-        pollInterval: 100
-      }
-    })
-
-    this.watcher
-      .on('add', this.handleSocketFileAdded.bind(this))
-      .on('unlink', this.handleSocketFileRemoved.bind(this))
-      .on('error', (error: unknown) => this.debug.log('error', `Watcher error: ${error}`))
-
-    this.isRunning = true
-    this.debug.log('info', 'VirtioSocketWatcherService started successfully')
+    return this.connectionManager.start()
   }
 
-  // Stop the service and clean up
   async stop(): Promise<void> {
-    if (!this.isRunning) {
-      return
-    }
-
-    this.debug.log('info', 'Stopping VirtioSocketWatcherService...')
-    this.isRunning = false
-
-    // Close watcher
-    if (this.watcher) {
-      await this.watcher.close()
-      this.watcher = undefined
-    }
-
-    // Close all connections
-    for (const connection of this.connections.values()) {
-      this.closeConnection(connection.vmId, 'cleanup or error')
-    }
-
-    this.debug.log('info', 'VirtioSocketWatcherService stopped')
+    return this.connectionManager.stop()
   }
 
-  /**
-   * Cleans up stale socket files from VMs that are no longer running.
-   * Called at service startup to remove orphaned sockets.
-   */
-  private async cleanupStaleSockets(): Promise<void> {
-    this.debug.log('info', 'Cleaning up stale socket files...')
+  // ──────────────────────────────────────────────────────────────────────────
+  // Message sending
+  // ──────────────────────────────────────────────────────────────────────────
 
-    try {
-      const files = await fs.promises.readdir(this.socketDir)
-      let cleanedCount = 0
-      let keptCount = 0
-
-      for (const file of files) {
-        // Only process .socket files
-        const match = file.match(/^(.+)\.socket$/)
-        if (!match) {
-          continue
-        }
-
-        const vmId = match[1]
-        const socketPath = path.join(this.socketDir, file)
-
-        try {
-          // Check if VM exists and is running
-          const vm = await this.prisma.machine.findUnique({
-            where: { id: vmId },
-            select: { id: true, status: true }
-          })
-
-          if (!vm || vm.status !== 'running') {
-            // Socket is orphaned - VM doesn't exist or isn't running
-            try {
-              await fs.promises.unlink(socketPath)
-              cleanedCount++
-              this.debug.log('debug', `Removed stale socket for VM ${vmId} (status: ${vm?.status ?? 'not found'})`)
-            } catch (unlinkError: any) {
-              // Silently ignore ENOENT (file disappeared between check and unlink)
-              if (unlinkError.code !== 'ENOENT') {
-                this.debug.log('warn', `Failed to remove stale socket ${socketPath}: ${unlinkError.message}`)
-              }
-            }
-          } else {
-            keptCount++
-            this.debug.log('debug', `Keeping socket for running VM ${vmId}`)
-          }
-        } catch (error: any) {
-          this.debug.log('warn', `Error checking VM ${vmId} for stale socket cleanup: ${error.message}`)
-        }
-      }
-
-      this.debug.log('info', `Stale socket cleanup complete: ${cleanedCount} removed, ${keptCount} kept`)
-    } catch (error: any) {
-      // Don't fail startup if cleanup fails - just log and continue
-      this.debug.log('warn', `Failed to clean up stale sockets: ${error.message}`)
-    }
-  }
-
-  // Handle new socket file detected
-  private async handleSocketFileAdded(socketPath: string): Promise<void> {
-    const filename = path.basename(socketPath)
-    const match = filename.match(/^(.+)\.socket$/)
-
-    if (!match) {
-      this.debug.log('debug', `Ignoring non-socket file: ${filename}`)
-      return
-    }
-
-    const vmId = match[1]
-    this.debug.log('debug', `New socket file detected for VM ${vmId}: ${socketPath}`)
-
-    // Check if VM exists in database
-    try {
-      const vm = await this.prisma.machine.findUnique({
-        where: { id: vmId },
-        select: { id: true, name: true, status: true }
-      })
-
-      if (!vm) {
-        this.debug.log('debug', `VM ${vmId} not found in database, ignoring socket`)
-        return
-      }
-
-      // Establish connection
-      await this.connectToVm(vmId, socketPath)
-    } catch (error) {
-      this.debug.log('error', `Error handling socket file for VM ${vmId}: ${error}`)
-    }
-  }
-
-  // Handle socket file removal
-  private handleSocketFileRemoved(socketPath: string): void {
-    const filename = path.basename(socketPath)
-    const match = filename.match(/^(.+)\.socket$/)
-
-    if (!match) {
-      return
-    }
-
-    const vmId = match[1]
-    this.debug.log('debug', `Socket file removed for VM ${vmId}`)
-
-    // Close connection if exists
-    this.closeConnection(vmId, 'socket file removed')
-  }
-
-  // Connect to a VM's Unix domain socket
-  private async connectToVm(vmId: string, socketPath: string): Promise<void> {
-    // Close existing connection if any
-    if (this.connections.has(vmId)) {
-      this.debug.log('debug', `🔌 Closing existing connection for VM ${vmId}`)
-      this.closeConnection(vmId, 'reconnecting')
-    }
-
-    const socket = new net.Socket()
-
-    // Configure socket timeouts
-    // Note: This is a Unix Domain Socket, not TCP, so keep-alive/noDelay don't apply
-    // However, we still need to disable idle timeout to prevent automatic closure
-    socket.setTimeout(0) // Disable idle timeout - the watcher keeps connection open indefinitely
-
-    const now = new Date()
-    const connection: VmConnection = {
-      vmId,
-      socket,
-      socketPath,
-      buffer: '',
-      reconnectAttempts: 0,
-      lastMessageTime: now,
-      isConnected: false,
-      errorCount: 0,
-      pendingCommands: new Map(),
-      // Enhanced connection diagnostics
-      connectionStartTime: now,
-      healthCheckResults: [],
-      messageStats: {
-        sent: 0,
-        received: 0,
-        errors: 0,
-        totalBytes: 0,
-        averageLatency: 0
-      },
-      connectionQuality: 'good',
-      disconnectionHistory: [],
-      transmissionFailureCount: 0,
-      connectionStabilityScore: 100,
-      messageTypeCounts: Object.create(null) as Record<string, number>,
-      // Enhanced error tracking for intelligent retry logic
-      errorClassificationHistory: [],
-      recoverableErrorCount: 0,
-      fatalErrorCount: 0,
-      // Circuit Breaker initialization
-      circuitBreakerState: 'Closed',
-      circuitBreakerFailureCount: 0,
-      circuitBreakerLastStateChange: now,
-      // Keep-Alive initialization
-      keepAliveSequence: 0,
-      keepAliveFailureCount: 0,
-      keepAliveSentCount: 0,
-      keepAliveReceivedCount: 0,
-      keepAliveRttHistory: [],
-      keepAliveAverageRtt: 0,
-      keepAliveConsecutiveFailures: 0,
-      // Graceful Degradation initialization
-      isDegraded: false,
-      // Initialize per-connection reconnect delay from class default
-      reconnectBaseDelayMs: this.reconnectBaseDelay,
-      // Connection pooling initialization
-      socketPaths: [socketPath], // Start with primary socket path, can add alternatives
-      currentSocketIndex: 0
-    }
-
-    this.debug.log('info', `🔌 Initiating connection to VM ${vmId} at ${socketPath} (attempt timestamp: ${now.toISOString()})`)
-    this.debug.log('debug', `Connection configuration: timeout=${this.messageTimeout}ms, pingInterval=${this.pingInterval}ms, maxReconnects=${this.maxReconnectAttempts}`)
-
-    this.connections.set(vmId, connection)
-
-    // Set up socket event handlers
-    socket.on('connect', () => {
-      const connectTime = new Date()
-      const connectionDuration = connectTime.getTime() - connection.connectionStartTime.getTime()
-
-      this.debug.log('info', `✅ Connected to VM ${vmId} (duration: ${connectionDuration}ms)`)
-      this.debug.log('debug', `Connection established: socketPath=${socketPath}, attempts=${connection.reconnectAttempts}, quality=${connection.connectionQuality}`)
-
-      connection.isConnected = true
-      connection.reconnectAttempts = 0
-      connection.lastMessageTime = connectTime
-      // Reset error tracking on successful connection
-      connection.errorCount = 0
-      connection.lastErrorType = undefined
-      connection.transmissionFailureCount = 0
-
-      // Update connection quality based on establishment speed
-      if (connectionDuration < 1000) {
-        connection.connectionQuality = 'excellent'
-      } else if (connectionDuration < 3000) {
-        connection.connectionQuality = 'good'
-      } else {
-        connection.connectionQuality = 'poor'
-      }
-
-      // Reset stability score on successful connection
-      connection.connectionStabilityScore = 100
-
-      this.debug.log('info', `Connection quality assessed as '${connection.connectionQuality}' based on ${connectionDuration}ms establishment time`)
-
-      // Connection established successfully
-      // Start connection health monitoring (pings, timeouts)
-      this.startHealthMonitoring(connection)
-
-      // Start bidirectional keep-alive monitoring
-      this.startKeepAliveMonitoring(connection)
-
-      // Process any queued health checks for this VM
-      this.processHealthCheckQueue(connection)
-
-      // TODO: Implement handshake authentication here
-    })
-
-    socket.on('data', (data: Buffer) => {
-      this.handleSocketData(connection, data)
-    })
-
-    socket.on('error', (error: Error) => {
-      // Determine error type
-      let errorType = 'UNKNOWN'
-
-      if (error.message.includes('EACCES')) {
-        errorType = 'EACCES'
-      } else if (error.message.includes('ECONNREFUSED')) {
-        errorType = 'ECONNREFUSED'
-      } else if (error.message.includes('ENOENT')) {
-        errorType = 'ENOENT'
-      }
-
-      // Enhanced error tracking and classification
-      const errorTimestamp = new Date()
-      connection.messageStats.errors++
-
-      // Update connection quality based on error frequency
-      const errorRate = connection.messageStats.errors / Math.max(connection.messageStats.received + connection.messageStats.sent, 1)
-      if (errorRate > 0.1) {
-        connection.connectionQuality = 'critical'
-        connection.connectionStabilityScore = Math.max(0, connection.connectionStabilityScore - 10)
-      } else if (errorRate > 0.05) {
-        connection.connectionQuality = 'poor'
-        connection.connectionStabilityScore = Math.max(20, connection.connectionStabilityScore - 5)
-      }
-
-      // Only log if this is a new error type or first occurrence
-      if (connection.lastErrorType !== errorType || connection.errorCount === 0) {
-        connection.lastErrorType = errorType
-        connection.errorCount = 1
-
-        // Log specific error details based on type with enhanced context
-        if (errorType === 'EACCES') {
-          this.debug.log('warn', `❌ Socket permission denied for VM ${vmId}. InfiniService may not be installed or running.`)
-          this.debug.log('debug', `Error context: attempts=${connection.reconnectAttempts}, quality=${connection.connectionQuality}, stability=${connection.connectionStabilityScore}`)
-          // Only show diagnostic help on first error
-          if (connection.reconnectAttempts === 0) {
-            this.debug.log('info', `💡 To diagnose: virsh qemu-agent-command ${vmId} '{"execute":"guest-exec","arguments":{"path":"systemctl","arg":["status","infiniservice"]}}'`)
-          }
-        } else if (errorType === 'ECONNREFUSED') {
-          this.debug.log('warn', `Connection refused for VM ${vmId}. InfiniService may not be listening on the socket.`)
-          this.debug.log('debug', `Connection stats: uptime=${Date.now() - connection.connectionStartTime.getTime()}ms, msgs_received=${connection.messageStats.received}`)
-        } else if (errorType === 'ENOENT') {
-          this.debug.log('debug', `Socket file not found for VM ${vmId}. VM may be shutting down or InfiniService not started.`)
-        } else {
-          this.debug.log('error', `Socket error for VM ${vmId}: ${error.message.toString().slice(0, 100)}`)
-          this.debug.log('debug', `Error details: type=${errorType}, timestamp=${errorTimestamp.toISOString()}, quality=${connection.connectionQuality}`)
-        }
-
-        // Log recent error classification history if available
-        if (connection.errorClassificationHistory.length > 0) {
-          const recentErrorReport = connection.lastErrorReport
-          if (recentErrorReport) {
-            this.debug.log('debug', `📋 Last error report from InfiniService: ${recentErrorReport.error_type} (${recentErrorReport.severity}) - retry ${recentErrorReport.retry_attempt}/${recentErrorReport.max_retries}`)
-            if (recentErrorReport.recovery_suggestion) {
-              this.debug.log('info', `💡 InfiniService recovery suggestion: ${recentErrorReport.recovery_suggestion}`)
-            }
-          }
-
-          // Show error pattern summary
-          const recentErrors = connection.errorClassificationHistory.slice(-5)
-          const errorTypes = recentErrors.map(e => e.error_type).join(', ')
-          this.debug.log('debug', `📊 Recent error patterns: recoverable=${connection.recoverableErrorCount}, fatal=${connection.fatalErrorCount}, types=[${errorTypes}]`)
-        }
-      } else {
-        // Same error type, increment counter but only log periodically
-        connection.errorCount++
-
-        // Log every 10th occurrence of the same error with enhanced metrics
-        if (connection.errorCount % 10 === 0) {
-          const timeSinceStart = Date.now() - connection.connectionStartTime.getTime()
-          this.debug.log('debug', `Still experiencing ${errorType} errors for VM ${vmId} (${connection.errorCount} occurrences over ${timeSinceStart}ms, stability=${connection.connectionStabilityScore}%)`)
-        }
-      }
-
-      this.handleConnectionError(connection)
-    })
-
-    socket.on('timeout', () => {
-      this.debug.log('warn', `⏱️ Socket timeout event for VM ${vmId} (this should not happen with setTimeout(0))`)
-      // Don't close the socket automatically - let our health monitoring handle it
-    })
-
-    socket.on('close', () => {
-      this.debug.log('debug', `🔌 Socket closed for VM ${vmId}`)
-      connection.isConnected = false
-      this.handleConnectionClosed(connection)
-    })
-
-    // Attempt connection
-    try {
-      this.debug.log('debug', `🔌 Attempting to connect to VM ${vmId} at ${socketPath}`)
-      socket.connect(socketPath)
-    } catch (error) {
-      this.debug.log('error', `Failed to connect to VM ${vmId}: ${error}`)
-      this.handleConnectionError(connection)
-    }
-  }
-
-  // Handle incoming data from socket with enhanced diagnostics
-  private handleSocketData(connection: VmConnection, data: Buffer): void {
-    const receiveTime = new Date()
-    const dataSize = data.length
-
-    connection.buffer += data.toString()
-    console.log('Received data:', data.toString());
-    connection.lastMessageTime = receiveTime
-
-    // Update message statistics
-    connection.messageStats.received++
-    connection.messageStats.totalBytes += dataSize
-
-    this.debug.log('debug', `📥 Received ${dataSize} bytes from VM ${connection.vmId} (buffer size: ${connection.buffer.length}, total received: ${connection.messageStats.received})`)
-
-    // Monitor buffer size for potential issues
-    if (connection.buffer.length > 100000) { // 100KB buffer warning
-      this.debug.log('warn', `Large buffer detected for VM ${connection.vmId}: ${connection.buffer.length} bytes - possible message parsing issue`)
-    }
-
-    // Process complete messages (delimited by newlines)
-    let newlineIndex: number
-    let messagesProcessed = 0
-    while ((newlineIndex = connection.buffer.indexOf('\n')) !== -1) {
-      const messageStr = connection.buffer.slice(0, newlineIndex)
-      connection.buffer = connection.buffer.slice(newlineIndex + 1)
-
-      if (messageStr.trim()) {
-        const messageStartTime = Date.now()
-        this.processMessage(connection, messageStr.trim())
-        const processingTime = Date.now() - messageStartTime
-        messagesProcessed++
-
-        // Update average latency (simple moving average)
-        if (connection.messageStats.averageLatency === 0) {
-          connection.messageStats.averageLatency = processingTime
-        } else {
-          connection.messageStats.averageLatency = (connection.messageStats.averageLatency * 0.9) + (processingTime * 0.1)
-        }
-
-        if (processingTime > 1000) { // Log slow message processing
-          this.debug.log('warn', `Slow message processing for VM ${connection.vmId}: ${processingTime}ms`)
-        }
-      }
-    }
-
-    if (messagesProcessed > 0) {
-      this.debug.log('debug', `Processed ${messagesProcessed} messages from VM ${connection.vmId} (avg latency: ${connection.messageStats.averageLatency.toFixed(1)}ms)`)
-    }
-  }
-
-  // Process a complete message
-  private async processMessage(connection: VmConnection, messageStr: string): Promise<void> {
-    try {
-      const message = JSON.parse(messageStr) as BaseMessage | MetricsMessage | ErrorMessage | ResponseMessage | Record<string, unknown>
-
-      // Handle messages without explicit type field (legacy or command responses)
-      if (!('type' in message) && 'id' in message && 'success' in message) {
-        (message as unknown as ResponseMessage).type = 'response'
-      }
-
-      this.debug.log('debug', `📥 Received ${('type' in message ? message.type : 'unknown')} message from VM ${connection.vmId}`)
-
-      // Add redacted message preview
-      const redacted = redactSensitive(message)
-      const preview = JSON.stringify(redacted, null, 2).slice(0, LOG_PREVIEW_LEN)
-      this.debug.log('debug', `📋 Message preview: ${preview}${preview.length === LOG_PREVIEW_LEN ? '…' : ''}`)
-
-      const msgType = 'type' in message && typeof message.type === 'string' ? message.type : undefined
-
-      // Track message type frequency (bounded to avoid memory growth)
-      const typeKey: string = msgType || 'unknown'
-      connection.messageTypeCounts[typeKey] = (connection.messageTypeCounts[typeKey] || 0) + 1
-
-      // Keep only most recent 1000 message types to prevent unbounded growth
-      const totalMessages = Object.values(connection.messageTypeCounts).reduce((sum, count) => sum + count, 0)
-      if (totalMessages > 1000) {
-        // Simple cleanup: reduce all counts by half
-        for (const key in connection.messageTypeCounts) {
-          connection.messageTypeCounts[key] = Math.floor(connection.messageTypeCounts[key] / 2)
-          if (connection.messageTypeCounts[key] === 0) {
-            delete connection.messageTypeCounts[key]
-          }
-        }
-      }
-
-      switch (msgType) {
-        case 'metrics':
-          // Check if this is the first message from infiniservice (VM just completed setup)
-          await this.metricsHandler.handleFirstInfiniserviceMessage(connection.vmId)
-
-          // Store metrics in database
-          await this.metricsHandler.storeMetrics(connection.vmId, message as MetricsMessage)
-          break
-
-        case 'error':
-          const errorMsg = message as ErrorMessage
-          this.debug.log('error', `Error from VM ${connection.vmId}: ${errorMsg.error} ${errorMsg.details ? JSON.stringify(errorMsg.details) : ''}`)
-          break
-
-        case 'error_report':
-          // Handle detailed error report from Rust side
-          const errorReport = message as ErrorReportMessage
-          await this.handleErrorReport(connection, errorReport)
-          break
-
-        case 'response':
-          // Handle command response
-          const response = message as ResponseMessage
-          const pendingCommand = connection.pendingCommands.get(response.id)
-          if (pendingCommand) {
-            clearTimeout(pendingCommand.timeout)
-
-            // Try to parse stdout as JSON data for certain command types
-            let data = response.data
-            if (!data && response.stdout && response.command_type) {
-              try {
-                // For process-related commands, try to parse stdout as JSON
-                if (['ProcessList', 'ProcessTop', 'ProcessKill'].includes(response.command_type)) {
-                  data = JSON.parse(response.stdout)
-                  this.debug.log('debug', `Parsed stdout for ${response.command_type}, got ${Array.isArray(data) ? data.length : 0} items`)
-                  if (Array.isArray(data) && data.length > 0) {
-                    this.debug.log('debug', `First item structure: ${JSON.stringify(data[0], null, 2)}`)
-                  }
-                }
-              } catch (parseError) {
-                this.debug.log('debug', `Could not parse stdout as JSON for ${response.command_type}: ${parseError}`)
-              }
-            }
-
-            // Build complete response object
-            const commandResponse: CommandResponse = {
-              id: response.id,
-              success: response.success,
-              exit_code: response.exit_code,
-              stdout: response.stdout || '',
-              stderr: response.stderr || '',
-              execution_time_ms: response.execution_time_ms,
-              command_type: response.command_type,
-              data: data || response.data,
-              error: response.error
-            }
-
-            pendingCommand.resolve(commandResponse)
-            connection.pendingCommands.delete(response.id)
-
-            // Log with execution time if available
-            const execTime = response.execution_time_ms ? ` (${response.execution_time_ms}ms)` : ''
-            this.debug.log('debug', `Command ${response.id} completed for VM ${connection.vmId}${execTime}`)
-
-            // Log error details if command failed
-            if (!response.success) {
-              this.debug.log('warn', `Command ${response.id} failed: ${response.error || response.stderr || 'Unknown error'}`)
-            }
-
-            // Check if this is an auto-check related command and emit events if needed
-            await this.metricsHandler.handleAutoCheckResponse(connection.vmId, response, data || null)
-          } else {
-            this.debug.log('warn', `Received response for unknown command ${response.id} from VM ${connection.vmId}`)
-          }
-          break
-
-        case 'circuit_breaker_state':
-          // Handle circuit breaker state changes from Rust side
-          const circuitBreakerMsg = message as CircuitBreakerStateMessage
-          await this.handleCircuitBreakerStateChange(connection, circuitBreakerMsg)
-          break
-
-        case 'keep_alive':
-          // Handle keep-alive messages from InfiniService
-          const keepAliveMsg = message as KeepAliveMessage
-          await this.handleKeepAliveMessage(connection, keepAliveMsg)
-          break
-
-        case 'firewall_event':
-          // Handle firewall events from InfiniService (Windows Firewall monitoring)
-          const firewallEventMsg = message as FirewallEventMessage
-          await this.handleFirewallEvent(connection.vmId, firewallEventMsg)
-          break
-
-        case 'script_completion':
-          // Handle script completion messages from first-boot scripts
-          const scriptCompletionMsg = message as ScriptCompletionMessage
-          await this.handleScriptCompletion(connection.vmId, scriptCompletionMsg)
-          break
-
-        case 'request_pending_scripts':
-          // Handle request for pending script executions from InfiniService
-          const requestMsg = message as RequestPendingScriptsMessage
-          await this.handleRequestPendingScripts(connection.vmId, requestMsg, connection)
-          break
-
-        default:
-          this.debug.log('warn', `Unknown message type from VM ${connection.vmId}: ${typeof message === 'object' && message && 'type' in message ? message.type : 'unknown'}`)
-          this.debug.log('warn', `Full message: ${messageStr}`) // Log full message for unknown types
-      }
-    } catch (error) {
-      this.debug.log('error', `Failed to process message from VM ${connection.vmId}: ${error}`)
-      this.debug.log('error', `Raw message: ${messageStr}`)
-      // Add more details about the parsing error
-      if (error instanceof SyntaxError) {
-        this.debug.log('error', `JSON parsing error: ${error.message}`)
-        this.debug.log('error', `Message length: ${messageStr.length} chars`)
-        this.debug.log('error', `First 500 chars: ${messageStr.substring(0, 500)}`)
-      }
-    }
-  }
-
-
-  // Send message to VM with enhanced transmission tracking
   private sendMessage(connection: VmConnection, message: OutboundMessage): void {
     const sendStartTime = Date.now()
 
     if (!connection.isConnected) {
-      this.debug.log('warn', `Cannot send message to disconnected VM ${connection.vmId} (quality=${connection.connectionQuality}, stability=${connection.connectionStabilityScore}%)`)
+      this.debug.warn(`Cannot send message to disconnected VM ${connection.vmId} (quality=${connection.connectionQuality}, stability=${connection.connectionStabilityScore}%)`)
       connection.messageStats.errors++
       return
     }
@@ -1219,12 +247,12 @@ export class VirtioSocketWatcherService extends EventEmitter {
       const messageStr = JSON.stringify(message) + '\n'
       const messageSize = Buffer.byteLength(messageStr, 'utf8')
 
-      this.debug.log('debug', `📤 Sending message to VM ${connection.vmId}: size=${messageSize} bytes, type=${message.type || 'unknown'}`)
-      this.debug.log('debug', `Message preview: ${messageStr.slice(0, 200)}${messageStr.length > 200 ? '...' : ''}`)
+      this.debug.debug(`📤 Sending message to VM ${connection.vmId}: size=${messageSize} bytes, type=${message.type || 'unknown'}`)
+      this.debug.debug(`Message preview: ${messageStr.slice(0, 200)}${messageStr.length > 200 ? '...' : ''}`)
 
       connection.socket.write(messageStr, (error) => {
         if (error) {
-          this.debug.log('error', `Failed to write message to VM ${connection.vmId}: ${error.message}`)
+          this.debug.error(`Failed to write message to VM ${connection.vmId}: ${error.message}`)
           connection.transmissionFailureCount++
           connection.messageStats.errors++
         }
@@ -1237,10 +265,10 @@ export class VirtioSocketWatcherService extends EventEmitter {
 
       const transmissionTime = Date.now() - sendStartTime
       if (transmissionTime > 100) { // Log slow transmissions
-        this.debug.log('warn', `Slow message transmission to VM ${connection.vmId}: ${transmissionTime}ms for ${messageSize} bytes`)
+        this.debug.warn(`Slow message transmission to VM ${connection.vmId}: ${transmissionTime}ms for ${messageSize} bytes`)
       }
 
-      this.debug.log('debug', `✅ Message sent to VM ${connection.vmId} in ${transmissionTime}ms (total sent: ${connection.messageStats.sent})`)
+      this.debug.debug(`✅ Message sent to VM ${connection.vmId} in ${transmissionTime}ms (total sent: ${connection.messageStats.sent})`)
     } catch (error) {
       connection.messageStats.errors++
       connection.transmissionFailureCount++
@@ -1249,997 +277,146 @@ export class VirtioSocketWatcherService extends EventEmitter {
       connection.connectionQuality = 'poor'
       connection.connectionStabilityScore = Math.max(0, connection.connectionStabilityScore - 15)
 
-      this.debug.log('error', `Failed to send message to VM ${connection.vmId}: ${error} (failures: ${connection.transmissionFailureCount}, quality: ${connection.connectionQuality})`)
-      this.debug.log('debug', `Transmission failure context: uptime=${Date.now() - connection.connectionStartTime.getTime()}ms, stability=${connection.connectionStabilityScore}%`)
+      this.debug.error(`Failed to send message to VM ${connection.vmId}: ${error} (failures: ${connection.transmissionFailureCount}, quality: ${connection.connectionQuality})`)
+      this.debug.debug(`Transmission failure context: uptime=${Date.now() - connection.connectionStartTime.getTime()}ms, stability=${connection.connectionStabilityScore}%`)
     }
   }
 
-  /**
-   * Send a safe command to a VM
-   *
-   * @remarks
-   * Optional fields with `undefined` values are omitted during JSON serialization,
-   * which correctly maps to Rust's `Option::None`. Use nullish coalescing (??)
-   * for optional fields to preserve falsy values (0, false, '').
-   *
-   * @param vmId - VM identifier
-   * @param commandType - Safe command type with parameters
-   * @param timeout - Command timeout in milliseconds (default: 30000)
-   */
+  // ──────────────────────────────────────────────────────────────────────────
+  // Command dispatching — delegated to CommandDispatcher
+  // ──────────────────────────────────────────────────────────────────────────
+
   public async sendSafeCommand(
     vmId: string,
     commandType: SafeCommandType,
     timeout: number = 30000
   ): Promise<CommandResponse> {
-    const connection = this.connections.get(vmId)
-    if (!connection) {
-      throw new Error(`No connection to VM ${vmId}`)
-    }
-
-    if (!connection.isConnected) {
-      // Try to reconnect once before failing
-      this.debug.log('warn', `VM ${vmId} is not connected, attempting reconnection...`)
-
-      // Check if socket file still exists
-      const socketPath = connection.socketPath
-      if (socketPath && require('fs').existsSync(socketPath)) {
-        await this.connectToVm(vmId, socketPath)
-        // Wait a moment for connection to establish
-        await new Promise(resolve => setTimeout(resolve, 1000))
-
-        // Check again
-        const updatedConnection = this.connections.get(vmId)
-        if (!updatedConnection || !updatedConnection.isConnected) {
-          throw new Error(`VM ${vmId} is not connected and reconnection failed`)
-        }
-      } else {
-        throw new Error(`VM ${vmId} is not connected and socket file not found`)
-      }
-    }
-
-    const commandId = uuidv4()
-
-    return new Promise<CommandResponse>((resolve, reject) => {
-      // Set up timeout
-      const timeoutHandle = setTimeout(() => {
-        connection.pendingCommands.delete(commandId)
-        reject(new Error(`Command timeout after ${timeout}ms`))
-      }, timeout)
-
-      // Store pending command
-      connection.pendingCommands.set(commandId, {
-        resolve,
-        reject,
-        timeout: timeoutHandle
-      })
-
-      // Build the command_type object with proper serde tag format
-      // InfiniService expects SafeCommandType with #[serde(tag = "action")]
-      let commandTypeFormatted: FormattedCommandType
-
-      switch (commandType.action) {
-        case 'PackageSearch':
-          commandTypeFormatted = {
-            action: 'PackageSearch',
-            query: commandType.params?.query || ''
-          }
-          break
-        case 'PackageInstall':
-          commandTypeFormatted = {
-            action: 'PackageInstall',
-            package: commandType.params?.package || ''
-          }
-          break
-        case 'PackageRemove':
-          commandTypeFormatted = {
-            action: 'PackageRemove',
-            package: commandType.params?.package || ''
-          }
-          break
-        case 'PackageUpdate':
-          commandTypeFormatted = {
-            action: 'PackageUpdate',
-            package: commandType.params?.package || ''
-          }
-          break
-        case 'PackageList':
-          commandTypeFormatted = { action: 'PackageList' }
-          break
-        case 'ServiceList':
-          commandTypeFormatted = { action: 'ServiceList' }
-          break
-        case 'SystemInfo':
-          commandTypeFormatted = { action: 'SystemInfo' }
-          break
-        case 'OsInfo':
-          commandTypeFormatted = { action: 'OsInfo' }
-          break
-        case 'ProcessList':
-          commandTypeFormatted = {
-            action: 'ProcessList',
-            limit: commandType.params?.limit || null
-          }
-          break
-        case 'ProcessKill':
-          commandTypeFormatted = {
-            action: 'ProcessKill',
-            pid: commandType.params?.pid,
-            force: commandType.params?.force || null
-          }
-          break
-        case 'ProcessTop':
-          commandTypeFormatted = {
-            action: 'ProcessTop',
-            limit: commandType.params?.limit || null,
-            sort_by: commandType.params?.sort_by || null
-          }
-          break
-        // Maintenance commands
-        case 'ExecutePowerShellScript':
-          // Validate required script parameter
-          if (!commandType.params?.script || typeof commandType.params.script !== 'string' || commandType.params.script.trim() === '') {
-            throw new Error('ExecutePowerShellScript requires a non-empty script parameter')
-          }
-          commandTypeFormatted = {
-            action: 'ExecutePowerShellScript',
-            script: commandType.params.script,
-            script_type: commandType.params.script_type || 'inline',  // Keep || for required string with default
-            timeout_seconds: commandType.params.timeout_seconds ?? undefined,  // Use ?? to preserve 0
-            working_directory: commandType.params.working_directory ?? undefined,  // Use ?? to preserve ''
-            environment_vars: commandType.params.environment_vars ?? undefined,  // Use ?? to preserve {}
-            run_as_admin: commandType.params.run_as_admin ?? false  // Use ?? for consistency
-          }
-          break
-        case 'RunMaintenanceTask':
-          commandTypeFormatted = {
-            action: 'RunMaintenanceTask',
-            task_type: commandType.params?.task_type || '',
-            task_name: commandType.params?.task_name || '',
-            parameters: commandType.params?.parameters || undefined,
-            validate_before: commandType.params?.validate_before || false,
-            validate_after: commandType.params?.validate_after || false
-          }
-          break
-        case 'ValidateSystemHealth':
-          commandTypeFormatted = {
-            action: 'ValidateSystemHealth',
-            check_name: commandType.params?.check_name || undefined
-          }
-          break
-        case 'CleanTemporaryFiles':
-          commandTypeFormatted = {
-            action: 'CleanTemporaryFiles',
-            targets: commandType.params?.targets || undefined
-          }
-          break
-        case 'UpdateSystemSoftware':
-          commandTypeFormatted = {
-            action: 'UpdateSystemSoftware',
-            package: commandType.params?.package || undefined
-          }
-          break
-        case 'RestartServices':
-          commandTypeFormatted = {
-            action: 'RestartServices',
-            service_name: commandType.params?.service_name || undefined
-          }
-          break
-        case 'CheckSystemIntegrity':
-          commandTypeFormatted = {
-            action: 'CheckSystemIntegrity'
-          }
-          break
-        case 'UserList':
-          commandTypeFormatted = { action: 'UserList' }
-          break
-        default:
-          commandTypeFormatted = { action: commandType.action }
-      }
-
-      // Build the complete message with IncomingMessage structure
-      // IncomingMessage has #[serde(tag = "type")] internally-tagged enum
-      // With internally-tagged enums, the variant's fields are flattened into the same object
-      const message = {
-        type: 'SafeCommand',
-        id: commandId,
-        command_type: commandTypeFormatted,
-        params: null, // Not used, params are in command_type
-        timeout: Math.floor(timeout / 1000) // Convert to seconds for InfiniService
-      }
-
-      this.debug.log('debug', `Sending safe command ${commandId} to VM ${vmId}: ${JSON.stringify(message)}`)
-      this.sendMessage(connection, message)
-    })
+    return this.commandDispatcher.sendSafeCommand(vmId, commandType, timeout)
   }
 
-  // Public method to send unsafe (raw) commands to a VM
   public async sendUnsafeCommand(
     vmId: string,
     rawCommand: string,
     options: Partial<UnsafeCommandRequest> = {},
     timeout: number = 30000
   ): Promise<CommandResponse> {
-    const connection = this.connections.get(vmId)
-    if (!connection) {
-      throw new Error(`No connection to VM ${vmId}`)
-    }
-
-    if (!connection.isConnected) {
-      // Try to reconnect once before failing
-      this.debug.log('warn', `VM ${vmId} is not connected, attempting reconnection...`)
-
-      // Check if socket file still exists
-      const socketPath = connection.socketPath
-      if (socketPath && require('fs').existsSync(socketPath)) {
-        await this.connectToVm(vmId, socketPath)
-        // Wait a moment for connection to establish
-        await new Promise(resolve => setTimeout(resolve, 1000))
-
-        // Check again
-        const updatedConnection = this.connections.get(vmId)
-        if (!updatedConnection || !updatedConnection.isConnected) {
-          throw new Error(`VM ${vmId} is not connected and reconnection failed`)
-        }
-      } else {
-        throw new Error(`VM ${vmId} is not connected and socket file not found`)
-      }
-    }
-
-    const commandId = uuidv4()
-
-    return new Promise<CommandResponse>((resolve, reject) => {
-      // Set up timeout
-      const timeoutHandle = setTimeout(() => {
-        connection.pendingCommands.delete(commandId)
-        reject(new Error(`Command timeout after ${timeout}ms`))
-      }, timeout)
-
-      // Store pending command
-      connection.pendingCommands.set(commandId, {
-        resolve,
-        reject,
-        timeout: timeoutHandle
-      })
-
-      // Send command with proper serde-tagged format
-      // With internally-tagged enums, the variant's fields are flattened into the same object
-      const message = {
-        type: 'UnsafeCommand',
-        id: commandId,
-        raw_command: rawCommand,
-        shell: options.shell,
-        timeout: Math.floor(timeout / 1000),
-        working_dir: options.workingDir,
-        env_vars: options.envVars,
-        run_as: options.runAs
-      }
-
-      this.debug.log('debug', `Sending unsafe command ${commandId} to VM ${vmId}: ${rawCommand}`)
-      this.sendMessage(connection, message)
-    })
+    return this.commandDispatcher.sendUnsafeCommand(vmId, rawCommand, options, timeout)
   }
 
-  // Helper method specifically for package management commands
   public async sendPackageCommand(
     vmId: string,
     action: 'PackageList' | 'PackageInstall' | 'PackageRemove' | 'PackageUpdate' | 'PackageSearch',
     packageName?: string,
-    timeout: number = 45000 // 45 second default timeout for package operations
+    timeout: number = 45000
   ): Promise<CommandResponse> {
-    const commandType: SafeCommandType = {
-      action,
-      params: packageName ? { package: packageName } : undefined
-    }
-
-    if (action === 'PackageSearch' && packageName) {
-      commandType.params = { query: packageName }
-    }
-
-    return this.sendSafeCommand(vmId, commandType, timeout)
+    return this.commandDispatcher.sendPackageCommand(vmId, action, packageName, timeout)
   }
 
-  // Helper method specifically for process control commands
   public async sendProcessCommand(
     vmId: string,
     action: 'ProcessList' | 'ProcessKill' | 'ProcessTop',
     params?: { pid?: number; force?: boolean; limit?: number; sort_by?: string },
     timeout: number = 30000
   ): Promise<CommandResponse> {
-    const commandType: SafeCommandType = {
-      action,
-      params
-    }
-
-    return this.sendSafeCommand(vmId, commandType, timeout)
+    return this.commandDispatcher.sendProcessCommand(vmId, action, params, timeout)
   }
 
-  // Helper method to get user list from VM
   public async getUserList(
     vmId: string,
     timeout: number = 30000
   ): Promise<CommandResponse> {
-    const commandType: SafeCommandType = {
-      action: 'UserList'
-    }
-    return this.sendSafeCommand(vmId, commandType, timeout)
+    return this.commandDispatcher.getUserList(vmId, timeout)
   }
 
-  // Enhanced connection health monitoring with detailed diagnostics
-  // Note: Bidirectional keep-alive monitoring is set up separately in connectToVm via startKeepAliveMonitoring()
-  private startHealthMonitoring(connection: VmConnection): void {
-    // Clear existing timer
-    if (connection.pingTimer) {
-      clearInterval(connection.pingTimer)
-    }
-
-    this.debug.log('info', `🔍 Starting health monitoring for VM ${connection.vmId} (timeout=${this.messageTimeout}ms, interval=${this.pingInterval}ms)`)
-
-    connection.pingTimer = setInterval(() => {
-      const now = Date.now()
-      const healthCheckStartTime = Date.now()
-      connection.lastHealthCheckTime = new Date()
-
-      // Check if connection is stale
-      const timeSinceLastMessage = now - connection.lastMessageTime.getTime()
-      const connectionUptime = now - connection.connectionStartTime.getTime()
-
-      // Perform comprehensive health assessment
-      let healthCheckSuccess = true
-      let healthLatency: number | undefined
-      let healthError: string | undefined
-
-      // Increase staleness threshold multiplier from 1x to 1.5x messageTimeout
-      const stalenessThreshold = this.messageTimeout * 1.5
-
-      // Add grace period for first health check after connection establishment (5 minutes)
-      const graceTimeAfterConnection = 300000
-      const inGracePeriod = connectionUptime < graceTimeAfterConnection
-
-      if (timeSinceLastMessage > stalenessThreshold && !inGracePeriod) {
-        healthCheckSuccess = false
-        healthError = `Message timeout: ${Math.round(timeSinceLastMessage / 1000)}s since last message`
-
-        // Implement progressive quality degradation instead of immediate critical marking
-        if (timeSinceLastMessage > stalenessThreshold * 2) {
-          connection.connectionQuality = 'critical'
-          connection.connectionStabilityScore = Math.max(0, connection.connectionStabilityScore - 15) // Reduced penalty
-        } else if (timeSinceLastMessage > stalenessThreshold * 1.5) {
-          connection.connectionQuality = 'poor'
-          connection.connectionStabilityScore = Math.max(10, connection.connectionStabilityScore - 8) // Reduced penalty
-        } else {
-          connection.connectionQuality = 'good' // Progressive degradation
-          connection.connectionStabilityScore = Math.max(20, connection.connectionStabilityScore - 5) // Minimal penalty
-        }
-
-        this.debug.log('warn', `Connection to VM ${connection.vmId} appears stale (${Math.round(timeSinceLastMessage / 1000)}s since last message), quality=${connection.connectionQuality}, stability=${connection.connectionStabilityScore}%`)
-        this.debug.log('debug', `Health check context: uptime=${connectionUptime}ms, msgs_sent=${connection.messageStats.sent}, msgs_received=${connection.messageStats.received}, errors=${connection.messageStats.errors}`)
-
-        // Log idle duration if exceeds twice the keep-alive interval (240 seconds / 4 minutes)
-        const idleDuration = now - connection.lastMessageTime.getTime()
-        const idleThreshold = this.keepAliveInterval * 2
-        const isCurrentlyIdle = idleDuration > idleThreshold
-
-        // Track ACTIVE→IDLE and IDLE→ACTIVE transitions
-        if (!connection.wasIdle && isCurrentlyIdle) {
-          this.debug.log('warn', `⚠️ Connection transitioned from ACTIVE to IDLE after ${(idleDuration / 1000).toFixed(0)}s of inactivity for VM ${connection.vmId}`)
-          connection.wasIdle = true
-        } else if (connection.wasIdle && !isCurrentlyIdle) {
-          this.debug.log('info', `✅ Connection transitioned from IDLE to ACTIVE for VM ${connection.vmId}`)
-          connection.wasIdle = false
-        }
-
-        if (isCurrentlyIdle) {
-          this.debug.log('warn', `⚠️ Connection to VM ${connection.vmId} has been idle for ${(idleDuration / 1000).toFixed(0)}s - no messages received`)
-        }
-
-        // IMPORTANT: DO NOT close the connection automatically due to timeout
-        // The watcher should keep the connection open indefinitely, waiting for the VM
-        // The connection will only close when:
-        // 1. The VM explicitly closes the socket (socket 'close' event)
-        // 2. The watcher service is stopped
-        // 3. The socket file is removed
-        this.debug.log('debug', `Keeping connection open despite staleness - waiting for VM ${connection.vmId} to send data`)
-
-        // DO NOT call handleConnectionError here - let the connection stay open
-      } else {
-        // Connection appears healthy
-        healthLatency = Date.now() - healthCheckStartTime
-
-        // Update connection quality based on responsiveness
-        if (timeSinceLastMessage < this.pingInterval / 2) {
-          connection.connectionQuality = 'excellent'
-          connection.connectionStabilityScore = Math.min(100, connection.connectionStabilityScore + 2)
-        } else if (timeSinceLastMessage < this.pingInterval) {
-          connection.connectionQuality = 'good'
-          connection.connectionStabilityScore = Math.min(100, connection.connectionStabilityScore + 1)
-        }
-
-        this.debug.log('debug', `Health check passed for VM ${connection.vmId}: last_msg=${Math.round(timeSinceLastMessage / 1000)}s ago, quality=${connection.connectionQuality}, stability=${connection.connectionStabilityScore}%`)
-      }
-
-      // Record health check result
-      const healthResult: HealthCheckResult = {
-        timestamp: new Date(),
-        success: healthCheckSuccess,
-        latency: healthLatency,
-        error: healthError
-      }
-
-      connection.healthCheckResults.push(healthResult)
-
-      // Keep only last 50 health check results
-      if (connection.healthCheckResults.length > 50) {
-        connection.healthCheckResults = connection.healthCheckResults.slice(-50)
-      }
-
-      // Log periodic health summary
-      const recentResults = connection.healthCheckResults.slice(-10) // Last 10 checks
-      const successRate = recentResults.filter(r => r.success).length / recentResults.length
-      const avgLatency = recentResults
-        .filter(r => r.latency !== undefined)
-        .reduce((sum, r) => sum + (r.latency || 0), 0) / Math.max(1, recentResults.filter(r => r.latency !== undefined).length)
-
-      if (connection.healthCheckResults.length % 10 === 0) { // Every 10th check
-        this.debug.log('info', `📊 Health summary for VM ${connection.vmId}: success_rate=${(successRate * 100).toFixed(1)}%, avg_latency=${avgLatency.toFixed(1)}ms, stability=${connection.connectionStabilityScore}%`)
-      }
-    }, this.pingInterval)
+  public async sendMaintenancePowerShellScript(
+    vmId: string,
+    script: string,
+    options: {
+      scriptType?: string
+      timeoutSeconds?: number
+      workingDirectory?: string
+      environmentVars?: Record<string, string>
+      runAsAdmin?: boolean
+    } = {},
+    timeout: number = 60000
+  ): Promise<CommandResponse> {
+    return this.commandDispatcher.sendMaintenancePowerShellScript(vmId, script, options, timeout)
   }
 
-  private startKeepAliveMonitoring(connection: VmConnection): void {
-    // Check if keep-alive is disabled via environment variable
-    if (process.env.VIRTIO_DISABLE_KEEP_ALIVE === 'true') {
-      // Clear any existing timer before returning
-      if (connection.keepAliveTimer) {
-        clearInterval(connection.keepAliveTimer)
-        connection.keepAliveTimer = undefined
-        this.debug.log('debug', `Cleared existing keep-alive timer for VM ${connection.vmId}`)
-      }
-      this.debug.log('info', `Keep-alive disabled via environment variable for VM ${connection.vmId}`)
-      return
-    }
-
-    // Clear existing timer
-    if (connection.keepAliveTimer) {
-      clearInterval(connection.keepAliveTimer)
-    }
-
-    this.debug.log('info', `Starting keep-alive monitoring for VM ${connection.vmId} (interval=${this.keepAliveInterval}ms)`)
-
-    connection.keepAliveTimer = setInterval(() => {
-      // Increment or initialize sequence number
-      if (connection.keepAliveSequence === undefined || connection.keepAliveSequence === null) {
-        connection.keepAliveSequence = 1
-      } else {
-        connection.keepAliveSequence++
-      }
-
-      const sequenceNumber = connection.keepAliveSequence
-
-      // Create keep-alive request message
-      const keepAliveRequest: KeepAliveRequestMessage = {
-        type: 'keep_alive_request',
-        sequence_number: sequenceNumber,
-        timestamp: new Date().toISOString()
-      }
-
-      // Send the request
-      this.sendMessage(connection, keepAliveRequest)
-      connection.keepAliveLastSent = new Date()
-      connection.keepAliveSentCount++
-
-      this.debug.log('debug', `💓 Keep-alive request sent to VM ${connection.vmId} (seq: ${sequenceNumber}, total_sent: ${connection.keepAliveSentCount})`)
-
-      // Check if we haven't received a keep-alive response in 3 intervals (360s / 6 minutes)
-      const now = Date.now()
-      const failureThreshold = this.keepAliveInterval * 3
-      const lastReceivedMs = connection.keepAliveLastReceived?.getTime()
-      const lastSentMs = connection.keepAliveLastSent?.getTime()
-
-      if ((lastReceivedMs && now - lastReceivedMs > failureThreshold) ||
-          (!lastReceivedMs && lastSentMs && now - lastSentMs > failureThreshold)) {
-        connection.keepAliveFailureCount++
-        connection.keepAliveConsecutiveFailures++
-        connection.keepAliveLastFailureTime = new Date()
-
-        if (connection.keepAliveFailureCount >= 3) {
-          this.debug.log('warn', `Keep-alive failures detected for VM ${connection.vmId} (failures: ${connection.keepAliveFailureCount})`)
-        }
-
-        // Emit failure event if consecutive failures >= 3
-        if (connection.keepAliveConsecutiveFailures >= 3) {
-          this.emit('keepAliveFailure', {
-            vmId: connection.vmId,
-            failureCount: connection.keepAliveFailureCount,
-            consecutiveFailures: connection.keepAliveConsecutiveFailures,
-            lastFailureTime: connection.keepAliveLastFailureTime
-          })
-          this.debug.log('error', `❌ Keep-alive failure event emitted for VM ${connection.vmId} (consecutive: ${connection.keepAliveConsecutiveFailures}, total: ${connection.keepAliveFailureCount})`)
-        }
-
-        // Emit critical event if consecutive failures >= 5
-        if (connection.keepAliveConsecutiveFailures >= 5) {
-          this.emit('keepAliveCritical', {
-            vmId: connection.vmId,
-            failureCount: connection.keepAliveFailureCount
-          })
-          this.debug.log('error', `🚨 CRITICAL: Keep-alive failures exceeded threshold for VM ${connection.vmId}`)
-        }
-
-        // Update connection stability score
-        this.updateConnectionStabilityScore(connection)
-      }
-    }, this.keepAliveInterval)
+  public async sendMaintenanceTask(
+    vmId: string,
+    taskType: string,
+    taskName: string,
+    parameters?: Record<string, unknown>,
+    options: {
+      validateBefore?: boolean
+      validateAfter?: boolean
+    } = {},
+    timeout: number = 60000
+  ): Promise<CommandResponse> {
+    return this.commandDispatcher.sendMaintenanceTask(vmId, taskType, taskName, parameters, options, timeout)
   }
 
-  // Handle detailed error report from InfiniService
-  private async handleErrorReport(connection: VmConnection, errorReport: ErrorReportMessage): Promise<void> {
-    connection.lastErrorReport = errorReport
-    connection.errorClassificationHistory.push(errorReport)
-
-    // Keep only last 50 error reports
-    if (connection.errorClassificationHistory.length > 50) {
-      connection.errorClassificationHistory = connection.errorClassificationHistory.slice(-50)
-    }
-
-    // Update error counters
-    if (errorReport.severity === 'Fatal') {
-      connection.fatalErrorCount++
-    } else {
-      connection.recoverableErrorCount++
-    }
-
-    // Log the error report with appropriate level based on severity
-    const logLevel = errorReport.severity === 'Fatal' ? 'error' : 'warn'
-    this.debug.log(logLevel, `🔧 Error report from VM ${connection.vmId}: ${errorReport.error_type} (${errorReport.severity}) - retry ${errorReport.retry_attempt}/${errorReport.max_retries}`)
-
-    if (errorReport.recovery_suggestion) {
-      this.debug.log('info', `💡 Recovery suggestion for VM ${connection.vmId}: ${errorReport.recovery_suggestion}`)
-    }
-
-    // Make intelligent reconnection decisions based on error type
-    if (errorReport.severity === 'Fatal') {
-      this.debug.log('error', `💀 Fatal error reported by VM ${connection.vmId}: ${errorReport.error_type}. Stopping reconnection attempts.`)
-      this.closeConnection(connection.vmId, 'fatal_error')
-    } else if (errorReport.severity === 'Recoverable') {
-      // Adjust reconnection strategy based on error type
-      this.adjustReconnectionStrategy(connection, errorReport)
-    }
-
-    // Track last recovery attempt time
-    connection.lastRecoveryAttempt = new Date()
+  public async sendValidateSystemHealth(
+    vmId: string,
+    checkName?: string,
+    timeout: number = 30000
+  ): Promise<CommandResponse> {
+    return this.commandDispatcher.sendValidateSystemHealth(vmId, checkName, timeout)
   }
 
-  // Connection pooling management
-  private expandConnectionPool(connection: VmConnection): void {
-    // Add alternative socket paths for the VM
-    const vmId = connection.vmId
-    const alternativePaths = [
-      `/opt/infinibay/sockets/${vmId}.socket`,
-      `/tmp/infinibay/${vmId}.socket`,
-      `/run/infinibay/${vmId}.socket`
-    ]
-
-    // Add paths that don't already exist in the pool
-    for (const path of alternativePaths) {
-      if (!connection.socketPaths.includes(path)) {
-        connection.socketPaths.push(path)
-      }
-    }
-
-    this.debug.log('debug', `📡 Connection pool for VM ${vmId} expanded to ${connection.socketPaths.length} paths`)
+  public async sendCleanTemporaryFiles(
+    vmId: string,
+    targets?: string[],
+    timeout: number = 45000
+  ): Promise<CommandResponse> {
+    return this.commandDispatcher.sendCleanTemporaryFiles(vmId, targets, timeout)
   }
 
-  private rotateToNextSocket(connection: VmConnection): string {
-    // Rotate to the next socket path in the pool
-    connection.currentSocketIndex = (connection.currentSocketIndex + 1) % connection.socketPaths.length
-    const nextPath = connection.socketPaths[connection.currentSocketIndex]
-
-    this.debug.log('debug', `🔄 Rotating to socket path ${connection.currentSocketIndex + 1}/${connection.socketPaths.length} for VM ${connection.vmId}: ${nextPath}`)
-    return nextPath
+  public async sendUpdateSystemSoftware(
+    vmId: string,
+    packageName?: string,
+    timeout: number = 180000
+  ): Promise<CommandResponse> {
+    return this.commandDispatcher.sendUpdateSystemSoftware(vmId, packageName, timeout)
   }
 
-  // Adjust reconnection strategy based on error classification
-  private adjustReconnectionStrategy(connection: VmConnection, errorReport: ErrorReportMessage): void {
-    // Adjust timeouts and retry counts based on error type
-    if (errorReport.error_type === 'ACCESS_DENIED') {
-      // Longer delays for permission issues
-      connection.reconnectBaseDelayMs = Math.max(connection.reconnectBaseDelayMs, 5000)
-      this.debug.log('info', `🔧 Adjusting reconnection delay to ${connection.reconnectBaseDelayMs}ms for ACCESS_DENIED errors on VM ${connection.vmId}`)
-    } else if (errorReport.error_type === 'BROKEN_PIPE' || errorReport.error_type === 'IO_BROKEN_PIPE') {
-      // Shorter delays for connection issues
-      connection.reconnectBaseDelayMs = Math.min(connection.reconnectBaseDelayMs, 2000)
-      this.debug.log('info', `🔧 Adjusting reconnection delay to ${connection.reconnectBaseDelayMs}ms for pipe errors on VM ${connection.vmId}`)
-    } else if (errorReport.error_type === 'FILE_NOT_FOUND' || errorReport.error_type === 'IO_NOT_FOUND') {
-      // Medium delays for device availability issues
-      connection.reconnectBaseDelayMs = Math.min(Math.max(connection.reconnectBaseDelayMs, 3000), 8000)
-      this.debug.log('info', `🔧 Adjusting reconnection delay to ${connection.reconnectBaseDelayMs}ms for device not found errors on VM ${connection.vmId}`)
-    }
-
-    // Update connection quality based on error patterns
-    const recentErrors = connection.errorClassificationHistory.slice(-10)
-    const recentFatalErrors = recentErrors.filter(e => e.severity === 'Fatal').length
-    const recentRecoverableErrors = recentErrors.filter(e => e.severity === 'Recoverable').length
-
-    if (recentFatalErrors >= 3) {
-      connection.connectionQuality = 'critical'
-    } else if (recentRecoverableErrors >= 5) {
-      connection.connectionQuality = 'poor'
-    } else if (recentRecoverableErrors >= 2) {
-      connection.connectionQuality = 'good'
-    } else if (connection.connectionQuality !== 'critical') {
-      connection.connectionQuality = 'excellent'
-    }
-
-    this.debug.log('debug', `🔧 Connection quality for VM ${connection.vmId} updated to: ${connection.connectionQuality}`)
+  public async sendRestartServices(
+    vmId: string,
+    serviceName?: string,
+    timeout: number = 60000
+  ): Promise<CommandResponse> {
+    return this.commandDispatcher.sendRestartServices(vmId, serviceName, timeout)
   }
 
-  // Handle connection error
-  private handleConnectionError(connection: VmConnection): void {
-    connection.isConnected = false
-
-    // Clear ping timer
-    if (connection.pingTimer) {
-      clearInterval(connection.pingTimer)
-      connection.pingTimer = undefined
-    }
-
-    // Clear keep-alive timer
-    if (connection.keepAliveTimer) {
-      clearInterval(connection.keepAliveTimer)
-      connection.keepAliveTimer = undefined
-      this.debug.log('debug', `Cleared keep-alive timer for VM ${connection.vmId}`)
-    }
-
-    // Clear existing reconnect timer
-    if (connection.reconnectTimer) {
-      clearTimeout(connection.reconnectTimer)
-      connection.reconnectTimer = undefined
-    }
-
-    // Check if we should attempt reconnection
-    if (connection.reconnectAttempts >= this.maxReconnectAttempts) {
-      this.debug.log('warn', `Max reconnection attempts (${this.maxReconnectAttempts}) reached for VM ${connection.vmId}, giving up`)
-      this.closeConnection(connection.vmId, 'cleanup or error')
-      return
-    }
-
-    // Calculate exponential backoff delay with smaller multiplier (1.5 instead of 2)
-    const delay = Math.min(
-      connection.reconnectBaseDelayMs * Math.pow(1.5, connection.reconnectAttempts),
-      this.maxReconnectDelay
-    )
-
-    connection.reconnectAttempts++
-    this.debug.log('debug', `🔄 Will attempt reconnection ${connection.reconnectAttempts}/${this.maxReconnectAttempts} for VM ${connection.vmId} in ${delay}ms`)
-
-    connection.reconnectTimer = setTimeout(() => {
-      // Connection pooling: Try alternative socket paths on consecutive failures
-      if (connection.reconnectAttempts > 1 && connection.socketPaths.length === 1) {
-        this.expandConnectionPool(connection)
-      }
-
-      // Get the current socket path (might be rotated)
-      let currentSocketPath = connection.socketPaths[connection.currentSocketIndex]
-
-      // Check if current socket file exists
-      fs.access(currentSocketPath, fs.constants.F_OK, (err) => {
-        if (err && connection.socketPaths.length > 1) {
-          // Current socket failed, try the next one in the pool
-          currentSocketPath = this.rotateToNextSocket(connection)
-          this.debug.log('debug', `Socket file not accessible, rotating to alternative: ${currentSocketPath}`)
-
-          // Update the connection's socketPath to the new one
-          connection.socketPath = currentSocketPath
-
-          // Try the new socket
-          this.debug.log('debug', `🔄 Attempting reconnection for VM ${connection.vmId} with alternative socket`)
-          this.connectToVm(connection.vmId, currentSocketPath)
-        } else if (err) {
-          this.debug.log('debug', `Socket file no longer exists for VM ${connection.vmId}, stopping reconnection`)
-          this.closeConnection(connection.vmId, 'cleanup or error')
-        } else {
-          this.debug.log('debug', `🔄 Attempting reconnection for VM ${connection.vmId}`)
-          this.connectToVm(connection.vmId, currentSocketPath)
-        }
-      })
-    }, delay)
+  public async sendCheckSystemIntegrity(
+    vmId: string,
+    timeout: number = 120000
+  ): Promise<CommandResponse> {
+    return this.commandDispatcher.sendCheckSystemIntegrity(vmId, timeout)
   }
 
-  // Handle connection closed
-  private handleConnectionClosed(connection: VmConnection): void {
-    // If this was an intentional close, don't reconnect
-    if (!this.isRunning) {
-      this.closeConnection(connection.vmId, 'cleanup or error')
-      return
-    }
-
-    // Otherwise, treat as error and attempt reconnection
-    this.handleConnectionError(connection)
+  public async executeCommandWithRetry(
+    vmId: string,
+    commandBuilder: () => Promise<CommandResponse>,
+    maxRetries: number = 3,
+    retryDelay: number = 1000
+  ): Promise<CommandResponse> {
+    return this.commandDispatcher.executeCommandWithRetry(vmId, commandBuilder, maxRetries, retryDelay)
   }
 
-  // Close and clean up a connection with enhanced diagnostics
-  private closeConnection(vmId: string, reason: string = 'unknown'): void {
-    const connection = this.connections.get(vmId)
-    if (!connection) {
-      return
-    }
+  // ──────────────────────────────────────────────────────────────────────────
+  // Connection queries — delegated to ConnectionManager
+  // ──────────────────────────────────────────────────────────────────────────
 
-    const disconnectTime = new Date()
-    const connectionDuration = disconnectTime.getTime() - connection.connectionStartTime.getTime()
-    const wasUnexpected = !['cleanup or error', 'manual cleanup', 'service shutdown'].includes(reason)
-
-    // Record disconnection in history
-    const disconnectionRecord: DisconnectionRecord = {
-      timestamp: disconnectTime,
-      reason,
-      duration: connectionDuration,
-      wasUnexpected
-    }
-
-    connection.disconnectionHistory.push(disconnectionRecord)
-
-    // Keep only last 20 disconnection records
-    if (connection.disconnectionHistory.length > 20) {
-      connection.disconnectionHistory = connection.disconnectionHistory.slice(-20)
-    }
-
-    this.debug.log('info', `🔌 Closing connection for VM ${vmId} (reason: ${reason}, duration: ${connectionDuration}ms, unexpected: ${wasUnexpected})`)
-    this.debug.log('debug', `Connection summary: sent=${connection.messageStats.sent}, received=${connection.messageStats.received}, errors=${connection.messageStats.errors}, quality=${connection.connectionQuality}, stability=${connection.connectionStabilityScore}%`)
-
-    // Log keep-alive summary
-    const successRate = connection.keepAliveSentCount > 0
-      ? (connection.keepAliveReceivedCount / connection.keepAliveSentCount * 100).toFixed(1)
-      : '0'
-    this.debug.log('debug', `Keep-alive summary: sent=${connection.keepAliveSentCount}, received=${connection.keepAliveReceivedCount}, failures=${connection.keepAliveFailureCount}, avg_rtt=${connection.keepAliveAverageRtt.toFixed(0)}ms, success_rate=${successRate}%`)
-
-    // Only reject pending commands if this is unexpected
-    const pendingCount = connection.pendingCommands.size
-    if (pendingCount > 0) {
-      this.debug.log('warn', `Found ${pendingCount} pending commands for VM ${vmId}`)
-
-      for (const [commandId, pending] of connection.pendingCommands) {
-        clearTimeout(pending.timeout)
-        const error = new Error(`Connection to VM ${vmId} closed (${reason}) while command ${commandId} was pending`)
-        pending.reject(error)
-        this.debug.log('warn', `Rejected pending command ${commandId} due to connection close for VM ${vmId}`)
-      }
-      connection.pendingCommands.clear()
-    }
-
-    // Clear timers
-    if (connection.pingTimer) {
-      clearInterval(connection.pingTimer)
-    }
-    if (connection.keepAliveTimer) {
-      clearInterval(connection.keepAliveTimer)
-    }
-    if (connection.reconnectTimer) {
-      clearTimeout(connection.reconnectTimer)
-    }
-
-    // Close socket
-    if (connection.socket) {
-      connection.socket.removeAllListeners()
-      connection.socket.destroy()
-    }
-
-    // Remove from connections map
-    this.connections.delete(vmId)
+  public getConnectionStats() {
+    return this.connectionManager.getConnectionStats()
   }
 
-  // Get comprehensive connection statistics with enhanced diagnostics
-  getConnectionStats(): {
-    totalConnections: number
-    activeConnections: number
-    connections: Array<{
-      vmId: string
-      isConnected: boolean
-      reconnectAttempts: number
-      lastMessageTime: Date
-      errorCount: number
-      lastErrorType?: string
-      pendingCommands: number
-      // Enhanced diagnostics
-      connectionDuration: number
-      messageStats: MessageStats
-      connectionQuality: string
-      connectionStabilityScore: number
-      recentHealthChecks: HealthCheckResult[]
-      transmissionFailures: number
-      lastSuccessfulTransmission?: Date
-      disconnectionCount: number
-      messageTypeCounts: Record<string, number>
-      // Enhanced error tracking statistics
-      errorClassificationHistory: ErrorReportMessage[]
-      recoverableErrorCount: number
-      fatalErrorCount: number
-      lastErrorReport?: ErrorReportMessage
-      lastRecoveryAttempt?: Date
-      // Keep-alive metrics
-      keepAliveSequence: number
-      keepAliveLastSent?: Date
-      keepAliveLastReceived?: Date
-      keepAliveFailureCount: number
-      keepAliveRoundTripTime?: number
-      keepAlive: {
-        sentCount: number
-        receivedCount: number
-        failureCount: number
-        consecutiveFailures: number
-        averageRtt: number
-        lastSent?: Date
-        lastReceived?: Date
-        lastFailure?: Date
-        successRate: string
-      }
-    }>
-    ipDetectionStats: {
-      totalVmsWithIPs: number
-      recentIPUpdates: number
-    }
-    qualityDistribution: {
-      excellent: number
-      good: number
-      poor: number
-      critical: number
-    }
-    overallHealth: {
-      averageStabilityScore: number
-      totalMessages: number
-      totalErrors: number
-      errorRate: number
-    }
-    errorClassification: {
-      totalRecoverableErrors: number
-      totalFatalErrors: number
-      errorPatternAnalysis: Record<string, number>
-      recoverySuccessRate: number
-      averageRetryAttempts: number
-    }
-  } {
-    const now = Date.now()
-    const connections = Array.from(this.connections.values()).map(conn => ({
-      vmId: conn.vmId,
-      isConnected: conn.isConnected,
-      reconnectAttempts: conn.reconnectAttempts,
-      lastMessageTime: conn.lastMessageTime,
-      errorCount: conn.errorCount,
-      lastErrorType: conn.lastErrorType,
-      pendingCommands: conn.pendingCommands.size,
-      // Enhanced diagnostics
-      connectionDuration: now - conn.connectionStartTime.getTime(),
-      messageStats: conn.messageStats,
-      connectionQuality: conn.connectionQuality,
-      connectionStabilityScore: conn.connectionStabilityScore,
-      recentHealthChecks: conn.healthCheckResults.slice(-5), // Last 5 health checks
-      transmissionFailures: conn.transmissionFailureCount,
-      lastSuccessfulTransmission: conn.lastSuccessfulTransmission,
-      disconnectionCount: conn.disconnectionHistory.length,
-      messageTypeCounts: conn.messageTypeCounts,
-      // Enhanced error tracking statistics
-      errorClassificationHistory: conn.errorClassificationHistory.slice(-10), // Last 10 error reports
-      recoverableErrorCount: conn.recoverableErrorCount,
-      fatalErrorCount: conn.fatalErrorCount,
-      lastErrorReport: conn.lastErrorReport,
-      lastRecoveryAttempt: conn.lastRecoveryAttempt,
-      // Keep-alive metrics
-      keepAliveSequence: conn.keepAliveSequence,
-      keepAliveLastSent: conn.keepAliveLastSent,
-      keepAliveLastReceived: conn.keepAliveLastReceived,
-      keepAliveFailureCount: conn.keepAliveFailureCount,
-      keepAliveRoundTripTime: conn.keepAliveLastSent && conn.keepAliveLastReceived
-        ? conn.keepAliveLastReceived.getTime() - conn.keepAliveLastSent.getTime()
-        : undefined,
-      keepAlive: {
-        sentCount: conn.keepAliveSentCount,
-        receivedCount: conn.keepAliveReceivedCount,
-        failureCount: conn.keepAliveFailureCount,
-        consecutiveFailures: conn.keepAliveConsecutiveFailures,
-        averageRtt: conn.keepAliveAverageRtt,
-        lastSent: conn.keepAliveLastSent,
-        lastReceived: conn.keepAliveLastReceived,
-        lastFailure: conn.keepAliveLastFailureTime,
-        successRate: conn.keepAliveSentCount > 0
-          ? (conn.keepAliveReceivedCount / conn.keepAliveSentCount * 100).toFixed(2) + '%'
-          : 'N/A'
-      }
-    }))
-
-    // Calculate quality distribution
-    const qualityDistribution = {
-      excellent: connections.filter(c => c.connectionQuality === 'excellent').length,
-      good: connections.filter(c => c.connectionQuality === 'good').length,
-      poor: connections.filter(c => c.connectionQuality === 'poor').length,
-      critical: connections.filter(c => c.connectionQuality === 'critical').length
-    }
-
-    // Calculate overall health metrics
-    const totalMessages = connections.reduce((sum, c) => sum + c.messageStats.sent + c.messageStats.received, 0)
-    const totalErrors = connections.reduce((sum, c) => sum + c.messageStats.errors, 0)
-    const averageStabilityScore = connections.length > 0
-      ? connections.reduce((sum, c) => sum + c.connectionStabilityScore, 0) / connections.length
-      : 0
-    const errorRate = totalMessages > 0 ? totalErrors / totalMessages : 0
-
-    // Calculate error classification statistics
-    const allConnections = Array.from(this.connections.values())
-    const totalRecoverableErrors = allConnections.reduce((sum, conn) => sum + conn.recoverableErrorCount, 0)
-    const totalFatalErrors = allConnections.reduce((sum, conn) => sum + conn.fatalErrorCount, 0)
-
-    // Analyze error patterns across all connections
-    const errorPatternAnalysis: Record<string, number> = {}
-    allConnections.forEach(conn => {
-      conn.errorClassificationHistory.forEach(errorReport => {
-        errorPatternAnalysis[errorReport.error_type] = (errorPatternAnalysis[errorReport.error_type] || 0) + 1
-      })
-    })
-
-    // Calculate recovery success rate and average retry attempts
-    const allErrorReports = allConnections.flatMap(conn => conn.errorClassificationHistory)
-    const successfulRecoveries = allErrorReports.filter(report => report.retry_attempt < report.max_retries).length
-    const totalRecoveryAttempts = allErrorReports.length
-    const recoverySuccessRate = totalRecoveryAttempts > 0 ? successfulRecoveries / totalRecoveryAttempts : 0
-
-    const averageRetryAttempts = allErrorReports.length > 0
-      ? allErrorReports.reduce((sum, report) => sum + report.retry_attempt, 0) / allErrorReports.length
-      : 0
-
-    return {
-      totalConnections: connections.length,
-      activeConnections: connections.filter(c => c.isConnected).length,
-      connections,
-      ipDetectionStats: {
-        totalVmsWithIPs: 0, // Would be enhanced with actual tracking
-        recentIPUpdates: 0 // Would be enhanced with actual tracking
-      },
-      qualityDistribution,
-      overallHealth: {
-        averageStabilityScore,
-        totalMessages,
-        totalErrors,
-        errorRate
-      },
-      errorClassification: {
-        totalRecoverableErrors,
-        totalFatalErrors,
-        errorPatternAnalysis,
-        recoverySuccessRate,
-        averageRetryAttempts
-      }
-    }
+  public getKeepAliveMetrics(vmId: string) {
+    return this.keepAliveManager.getKeepAliveMetrics(vmId)
   }
 
-  // Get keep-alive metrics for a specific VM
-  public getKeepAliveMetrics(vmId: string): {
-    sentCount: number
-    receivedCount: number
-    failureCount: number
-    consecutiveFailures: number
-    averageRtt: number
-    lastSent?: Date
-    lastReceived?: Date
-    lastFailure?: Date
-    rttHistory: number[]
-  } | null {
-    const connection = this.connections.get(vmId)
-    if (!connection) {
-      return null
-    }
-
-    return {
-      sentCount: connection.keepAliveSentCount,
-      receivedCount: connection.keepAliveReceivedCount,
-      failureCount: connection.keepAliveFailureCount,
-      consecutiveFailures: connection.keepAliveConsecutiveFailures,
-      averageRtt: connection.keepAliveAverageRtt,
-      lastSent: connection.keepAliveLastSent,
-      lastReceived: connection.keepAliveLastReceived,
-      lastFailure: connection.keepAliveLastFailureTime,
-      rttHistory: connection.keepAliveRttHistory
-    }
-  }
-
-  // Get pending commands for a VM
   public getPendingCommands(vmId: string): string[] {
     const connection = this.connections.get(vmId)
     if (!connection) {
@@ -2248,7 +425,6 @@ export class VirtioSocketWatcherService extends EventEmitter {
     return Array.from(connection.pendingCommands.keys())
   }
 
-  // Cancel a specific pending command
   public cancelCommand(vmId: string, commandId: string): boolean {
     const connection = this.connections.get(vmId)
     if (!connection) {
@@ -2263,11 +439,10 @@ export class VirtioSocketWatcherService extends EventEmitter {
     clearTimeout(pendingCommand.timeout)
     pendingCommand.reject(new Error(`Command ${commandId} cancelled by user`))
     connection.pendingCommands.delete(commandId)
-    this.debug.log('info', `Command ${commandId} cancelled for VM ${vmId}`)
+    this.debug.info(`Command ${commandId} cancelled for VM ${vmId}`)
     return true
   }
 
-  // Cancel all pending commands for a VM
   public cancelAllCommands(vmId: string): number {
     const connection = this.connections.get(vmId)
     if (!connection) {
@@ -2280,337 +455,51 @@ export class VirtioSocketWatcherService extends EventEmitter {
       pending.reject(new Error(`Command ${commandId} cancelled`))
     }
     connection.pendingCommands.clear()
-    this.debug.log('info', `Cancelled ${count} pending commands for VM ${vmId}`)
+    this.debug.info(`Cancelled ${count} pending commands for VM ${vmId}`)
     return count
   }
 
-  // Execute command with retry logic
-  public async executeCommandWithRetry(
-    vmId: string,
-    commandBuilder: () => Promise<CommandResponse>,
-    maxRetries: number = 3,
-    retryDelay: number = 1000
-  ): Promise<CommandResponse> {
-    let lastError: Error | null = null
-
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      try {
-        this.debug.log('debug', `Executing command for VM ${vmId}, attempt ${attempt}/${maxRetries}`)
-        const response = await commandBuilder()
-
-        // If command succeeded or failed but got a response, return it
-        if (response.success || attempt === maxRetries) {
-          return response
-        }
-
-        // If command failed but we have retries left, wait and retry
-        this.debug.log('warn', `Command failed for VM ${vmId}, retrying in ${retryDelay}ms...`)
-        await new Promise(resolve => setTimeout(resolve, retryDelay))
-      } catch (error) {
-        lastError = error as Error
-        this.debug.log('warn', `Command attempt ${attempt} failed for VM ${vmId}: ${error}`)
-
-        if (attempt < maxRetries) {
-          await new Promise(resolve => setTimeout(resolve, retryDelay))
-        }
-      }
-    }
-
-    throw lastError || new Error(`Command failed after ${maxRetries} attempts`)
-  }
-
-  // Check if VM has active connection
   public isVmConnected(vmId: string): boolean {
-    const connection = this.connections.get(vmId)
-    return connection?.isConnected || false
+    return this.connectionManager.isVmConnected(vmId)
   }
 
-  // Check if the service is currently running
   public getServiceStatus(): boolean {
-    return this.isRunning
+    return this.connectionManager.getServiceStatus()
   }
 
-  // Get connection details for a VM
-  public getConnectionDetails(vmId: string): { isConnected: boolean; socketPath?: string; lastMessageTime?: Date; errorCount?: number } | null {
-    const connection = this.connections.get(vmId)
-    if (!connection) {
-      return null
-    }
-    return {
-      isConnected: connection.isConnected,
-      socketPath: connection.socketPath,
-      lastMessageTime: connection.lastMessageTime,
-      errorCount: connection.errorCount
-    }
+  public getConnectionDetails(vmId: string) {
+    return this.connectionManager.getConnectionDetails(vmId)
   }
 
-  // Clean up connections for a deleted VM
   async cleanupVmConnection(vmId: string): Promise<void> {
-    this.debug.log('debug', `Cleaning up connection for deleted VM ${vmId}`)
-    this.closeConnection(vmId, 'manual cleanup')
-
-    // Also try to remove the socket file if it exists
-    const socketPath = path.join(this.socketDir, `${vmId}.socket`)
-    try {
-      await fs.promises.unlink(socketPath)
-      this.debug.log('debug', `Removed socket file for VM ${vmId}`)
-    } catch (error) {
-      // Socket file might not exist, which is fine
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-        this.debug.log('warn', `Failed to remove socket file for VM ${vmId}: ${error}`)
-      }
-    }
+    return this.connectionManager.cleanupVmConnection(vmId)
   }
 
-  // Process health check queue when VM connects
+  // ──────────────────────────────────────────────────────────────────────────
+  // Health check queue
+  // ──────────────────────────────────────────────────────────────────────────
+
   private processHealthCheckQueue(connection: VmConnection): void {
     if (!this.queueManager) {
-      this.debug.log('debug', `⚕️ No queue manager available for VM ${connection.vmId}, skipping health check queue processing`)
+      this.debug.debug(`⚕️ No queue manager available for VM ${connection.vmId}, skipping health check queue processing`)
       return
     }
 
-    this.debug.log('info', `⚕️ Processing health check queue for VM ${connection.vmId}`)
+    this.debug.info(`⚕️ Processing health check queue for VM ${connection.vmId}`)
 
     // Process any queued health checks for this VM
     setImmediate(async () => {
       try {
         await this.queueManager!.processQueue(connection.vmId)
       } catch (error) {
-        this.debug.log('error', `Failed to process health queue for VM ${connection.vmId}: ${error}`)
+        this.debug.error(`Failed to process health queue for VM ${connection.vmId}: ${error}`)
       }
     })
   }
 
-  // Helper method for executing PowerShell scripts
-  public async sendMaintenancePowerShellScript(
-    vmId: string,
-    script: string,
-    options: {
-      scriptType?: string
-      timeoutSeconds?: number
-      workingDirectory?: string
-      environmentVars?: Record<string, string>
-      runAsAdmin?: boolean
-    } = {},
-    timeout: number = 60000
-  ): Promise<CommandResponse> {
-    const commandType: SafeCommandType = {
-      action: 'ExecutePowerShellScript',
-      params: {
-        script,
-        script_type: options.scriptType || 'inline',
-        timeout_seconds: options.timeoutSeconds,
-        working_directory: options.workingDirectory,
-        environment_vars: options.environmentVars,
-        run_as_admin: options.runAsAdmin || false
-      }
-    }
-
-    return this.sendSafeCommand(vmId, commandType, timeout)
-  }
-
-  // Helper method for running maintenance tasks
-  public async sendMaintenanceTask(
-    vmId: string,
-    taskType: string,
-    taskName: string,
-    parameters?: Record<string, unknown>,
-    options: {
-      validateBefore?: boolean
-      validateAfter?: boolean
-    } = {},
-    timeout: number = 60000
-  ): Promise<CommandResponse> {
-    const commandType: SafeCommandType = {
-      action: 'RunMaintenanceTask',
-      params: {
-        task_type: taskType,
-        task_name: taskName,
-        parameters,
-        validate_before: options.validateBefore || false,
-        validate_after: options.validateAfter || false
-      }
-    }
-
-    return this.sendSafeCommand(vmId, commandType, timeout)
-  }
-
-  // Helper method for system health validation
-  public async sendValidateSystemHealth(
-    vmId: string,
-    checkName?: string,
-    timeout: number = 30000
-  ): Promise<CommandResponse> {
-    const commandType: SafeCommandType = {
-      action: 'ValidateSystemHealth',
-      params: {
-        check_name: checkName
-      }
-    }
-
-    return this.sendSafeCommand(vmId, commandType, timeout)
-  }
-
-  // Helper method for cleaning temporary files
-  public async sendCleanTemporaryFiles(
-    vmId: string,
-    targets?: string[],
-    timeout: number = 45000
-  ): Promise<CommandResponse> {
-    const commandType: SafeCommandType = {
-      action: 'CleanTemporaryFiles',
-      params: {
-        targets
-      }
-    }
-
-    return this.sendSafeCommand(vmId, commandType, timeout)
-  }
-
-  // Helper method for updating system software
-  public async sendUpdateSystemSoftware(
-    vmId: string,
-    packageName?: string,
-    timeout: number = 180000 // 3 minutes for software updates
-  ): Promise<CommandResponse> {
-    const commandType: SafeCommandType = {
-      action: 'UpdateSystemSoftware',
-      params: {
-        package: packageName
-      }
-    }
-
-    return this.sendSafeCommand(vmId, commandType, timeout)
-  }
-
-  // Helper method for restarting services
-  public async sendRestartServices(
-    vmId: string,
-    serviceName?: string,
-    timeout: number = 60000
-  ): Promise<CommandResponse> {
-    const commandType: SafeCommandType = {
-      action: 'RestartServices',
-      params: {
-        service_name: serviceName
-      }
-    }
-
-    return this.sendSafeCommand(vmId, commandType, timeout)
-  }
-
-  // Helper method for checking system integrity
-  public async sendCheckSystemIntegrity(
-    vmId: string,
-    timeout: number = 120000 // 2 minutes for integrity checks
-  ): Promise<CommandResponse> {
-    const commandType: SafeCommandType = {
-      action: 'CheckSystemIntegrity'
-    }
-
-    return this.sendSafeCommand(vmId, commandType, timeout)
-  }
-
-
-  // Circuit Breaker Helper Methods
-  private async handleCircuitBreakerStateChange(connection: VmConnection, message: CircuitBreakerStateMessage): Promise<void> {
-    const oldState = connection.circuitBreakerState
-    connection.circuitBreakerState = message.state
-    connection.circuitBreakerFailureCount = message.failure_count
-    connection.circuitBreakerLastStateChange = new Date()
-
-    this.debug.log('info', `🔴 Circuit breaker state changed for VM ${connection.vmId}: ${oldState} -> ${message.state} (failures: ${message.failure_count})`)
-
-    // Update connection quality and degradation status based on circuit breaker state
-    switch (message.state) {
-      case 'Open':
-        connection.connectionQuality = 'critical'
-        connection.isDegraded = true
-        connection.degradationReason = 'Circuit breaker open - too many failures'
-        this.debug.log('warn', `VM ${connection.vmId} entering degraded mode due to circuit breaker opening`)
-        break
-
-      case 'HalfOpen':
-        connection.connectionQuality = 'poor'
-        this.debug.log('info', `VM ${connection.vmId} circuit breaker testing recovery`)
-        break
-
-      case 'Closed':
-        if (oldState === 'Open' || oldState === 'HalfOpen') {
-          connection.connectionQuality = 'good'
-          connection.isDegraded = false
-          connection.degradationReason = undefined
-          this.debug.log('info', `VM ${connection.vmId} circuit breaker recovered - normal operation resumed`)
-        }
-        break
-    }
-
-    // Update connection stability score
-    this.updateConnectionStabilityScore(connection)
-  }
-
-  private async handleKeepAliveMessage(connection: VmConnection, message: KeepAliveMessage): Promise<void> {
-    connection.keepAliveLastReceived = new Date()
-
-    // Calculate round-trip time if we have a last sent timestamp
-    let rtt: number | undefined
-    if (connection.keepAliveLastSent) {
-      rtt = connection.keepAliveLastReceived.getTime() - connection.keepAliveLastSent.getTime()
-
-      // Update keep-alive metrics
-      connection.keepAliveReceivedCount++
-      connection.keepAliveRttHistory.push(rtt)
-
-      // Maintain only last 20 RTT values
-      if (connection.keepAliveRttHistory.length > 20) {
-        connection.keepAliveRttHistory.shift()
-      }
-
-      // Calculate average RTT
-      connection.keepAliveAverageRtt = connection.keepAliveRttHistory.reduce((a, b) => a + b, 0) / connection.keepAliveRttHistory.length
-    }
-
-    // Check if sequence number matches the last sent request - if so, reset failure count
-    if (message.sequence_number === connection.keepAliveSequence) {
-      const previousFailures = connection.keepAliveConsecutiveFailures
-      connection.keepAliveConsecutiveFailures = 0
-
-      // Emit recovery event if there were previous failures
-      if (previousFailures > 0) {
-        this.emit('keepAliveRecovered', { vmId: connection.vmId, rtt })
-        this.debug.log('info', `✅ Keep-alive recovered for VM ${connection.vmId} after ${previousFailures} failures`)
-      }
-    }
-
-    // Update sequence number
-    connection.keepAliveSequence = message.sequence_number
-
-    // Log with enhanced metrics
-    const rttText = rtt !== undefined ? `, rtt: ${rtt}ms` : ''
-    const avgRttText = connection.keepAliveAverageRtt > 0 ? `, avg_rtt: ${connection.keepAliveAverageRtt.toFixed(0)}ms` : ''
-    this.debug.log('debug', `💓 Keep-alive received from VM ${connection.vmId} (seq: ${message.sequence_number}${rttText}${avgRttText}, sent: ${connection.keepAliveSentCount}, received: ${connection.keepAliveReceivedCount}, failures: ${connection.keepAliveFailureCount})`)
-
-    // Warn about high latency
-    if (rtt !== undefined && rtt > 5000) {
-      this.debug.log('warn', `⚠️ High keep-alive latency detected for VM ${connection.vmId}: ${rtt}ms`)
-    }
-
-    // Warn about high average latency
-    if (connection.keepAliveAverageRtt > 3000) {
-      this.debug.log('warn', `⚠️ Average keep-alive latency is high for VM ${connection.vmId}: ${connection.keepAliveAverageRtt.toFixed(0)}ms`)
-    }
-
-    // Send keep-alive response immediately using sendMessage for proper error handling
-    const keepAliveResponse = {
-      type: 'keep_alive_response' as const,
-      sequence_number: message.sequence_number,
-      timestamp: new Date().toISOString()
-    }
-
-    // Use sendMessage instead of raw socket.write() for proper error handling
-    this.sendMessage(connection, keepAliveResponse)
-    this.debug.log('debug', `💓 Keep-alive response sent to VM ${connection.vmId} (seq: ${message.sequence_number})`)
-  }
+  // ──────────────────────────────────────────────────────────────────────────
+  // Firewall event handling
+  // ──────────────────────────────────────────────────────────────────────────
 
   /**
    * Handles firewall events from infiniservice (Windows Firewall monitoring)
@@ -2620,13 +509,10 @@ export class VirtioSocketWatcherService extends EventEmitter {
    * Filtering Platform (WFP) API. Currently, this is a placeholder for future implementation.
    *
    * For now, port conflict detection relies on heuristic analysis in PortConflictChecker.
-   *
-   * @param vmId - The VM ID that generated the firewall event
-   * @param message - The firewall event message from infiniservice
    */
   private async handleFirewallEvent(vmId: string, message: FirewallEventMessage): Promise<void> {
     try {
-      this.debug.log('info', `🔥 Firewall event received from VM ${vmId}: ${message.event_type} for port ${message.port}/${message.protocol}`)
+      this.debug.info(`🔥 Firewall event received from VM ${vmId}: ${message.event_type} for port ${message.port}/${message.protocol}`)
 
       // Only store blocked connection events
       if (message.event_type === 'connection_blocked') {
@@ -2645,7 +531,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
           }
         })
 
-        this.debug.log('debug', `📝 Stored blocked connection for VM ${vmId}: port ${message.port}/${message.protocol} by process ${message.process_name || 'unknown'}`)
+        this.debug.debug(`📝 Stored blocked connection for VM ${vmId}: port ${message.port}/${message.protocol} by process ${message.process_name || 'unknown'}`)
 
         // TODO: Emit event for real-time updates when vmEventManager supports firewall events
         // For now, the data is stored in the database and will be picked up by the next
@@ -2653,20 +539,21 @@ export class VirtioSocketWatcherService extends EventEmitter {
       }
     } catch (error) {
       // Non-critical error - log but don't throw
-      this.debug.log('error', `Failed to handle firewall event for VM ${vmId}: ${error}`)
+      this.debug.error(`Failed to handle firewall event for VM ${vmId}: ${error}`)
     }
   }
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // Script handling
+  // ──────────────────────────────────────────────────────────────────────────
 
   /**
    * Handles script completion messages from first-boot scripts executed via infiniservice.
    * Updates ScriptExecution records and emits WebSocket events.
-   *
-   * @param vmId - The VM ID that executed the script
-   * @param message - The script completion message from infiniservice
    */
   private async handleScriptCompletion(vmId: string, message: ScriptCompletionMessage): Promise<void> {
     try {
-      this.debug.log('info', `📜 Script completion received from VM ${vmId}: execution ${message.execution_id}`)
+      this.debug.info(`📜 Script completion received from VM ${vmId}: execution ${message.execution_id}`)
 
       // Find the ScriptExecution record
       const execution = await this.prisma.scriptExecution.findUnique({
@@ -2675,20 +562,19 @@ export class VirtioSocketWatcherService extends EventEmitter {
       })
 
       if (!execution) {
-        this.debug.log('warn', `Script execution ${message.execution_id} not found`)
+        this.debug.warn(`Script execution ${message.execution_id} not found`)
         return
       }
 
       // Validate that the execution belongs to the same VM (security check)
       if (execution.machineId !== vmId) {
-        this.debug.log('warn', `Script execution ${message.execution_id} machineId mismatch: expected ${vmId}, got ${execution.machineId}`)
+        this.debug.warn(`Script execution ${message.execution_id} machineId mismatch: expected ${vmId}, got ${execution.machineId}`)
         return
       }
 
       const now = new Date()
 
       // Determine status based on exit code (SUCCESS/FAILED/TIMEOUT)
-      // Note: TIMEOUT status would need to be sent from InfiniService if timeout occurred
       let status: 'SUCCESS' | 'FAILED' | 'TIMEOUT' = message.exit_code === 0 ? 'SUCCESS' : 'FAILED'
 
       // Check if this is a repeating script
@@ -2700,8 +586,6 @@ export class VirtioSocketWatcherService extends EventEmitter {
         const hasMoreExecutions = execution.maxExecutions === null || currentExecutionCount < execution.maxExecutions
 
         if (isRepeating && status === 'SUCCESS' && hasMoreExecutions) {
-          // For repeating scripts with more executions, update and reschedule
-          // Compute next scheduledFor = addMinutes(now, repeatIntervalMinutes)
           const nextScheduledFor = new Date(now.getTime() + execution.repeatIntervalMinutes! * 60 * 1000)
 
           await tx.scriptExecution.update({
@@ -2714,13 +598,12 @@ export class VirtioSocketWatcherService extends EventEmitter {
               stdout: message.stdout,
               stderr: message.stderr,
               scheduledFor: nextScheduledFor,
-              error: null // Clear error on success
+              error: null
             }
           })
 
-          this.debug.log('info', `Repeating script execution ${message.execution_id} completed (${currentExecutionCount}/${execution.maxExecutions || '∞'}), rescheduled for ${nextScheduledFor.toISOString()}`)
+          this.debug.info(`Repeating script execution ${message.execution_id} completed (${currentExecutionCount}/${execution.maxExecutions || '∞'}), rescheduled for ${nextScheduledFor.toISOString()}`)
         } else {
-          // For one-time scripts or final execution of repeating scripts
           await tx.scriptExecution.update({
             where: { id: message.execution_id },
             data: {
@@ -2729,7 +612,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
               exitCode: message.exit_code,
               stdout: message.stdout,
               stderr: message.stderr,
-              error: status === 'SUCCESS' ? null : execution.error, // Clear error if success
+              error: status === 'SUCCESS' ? null : execution.error,
               ...(isRepeating ? {
                 lastExecutedAt: now,
                 executionCount: currentExecutionCount
@@ -2737,7 +620,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
             }
           })
 
-          this.debug.log('info', `Script execution ${message.execution_id} completed with status ${status}`)
+          this.debug.info(`Script execution ${message.execution_id} completed with status ${status}`)
         }
       })
 
@@ -2758,20 +641,16 @@ export class VirtioSocketWatcherService extends EventEmitter {
         })
       })
     } catch (error) {
-      // Non-critical error - log but don't throw
-      this.debug.log('error', `Failed to handle script completion: ${error}`)
+      this.debug.error(`Failed to handle script completion: ${error}`)
     }
   }
 
   /**
    * Handle request for pending script executions from InfiniService
-   * @param vmId - The VM ID
-   * @param msg - The request pending scripts message
-   * @param connection - The VM connection (for sending response)
    */
   private async handleRequestPendingScripts(vmId: string, msg: RequestPendingScriptsMessage, connection: VmConnection): Promise<void> {
     try {
-      this.debug.log('info', `📜 Pending scripts request received from VM ${vmId}`)
+      this.debug.info(`📜 Pending scripts request received from VM ${vmId}`)
 
       // Use host time (not request_timestamp) to avoid clock skew issues
       const now = new Date()
@@ -2781,7 +660,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
       const maxSkewMs = 2 * 60 * 1000
       const timeDiff = Math.abs(now.getTime() - requestTimestamp.getTime())
       if (timeDiff > maxSkewMs) {
-        this.debug.log('warn', `Clock skew detected: ${timeDiff}ms. Using host time instead.`)
+        this.debug.warn(`Clock skew detected: ${timeDiff}ms. Using host time instead.`)
       }
       const comparisonTime = timeDiff > maxSkewMs ? now : requestTimestamp
 
@@ -2804,37 +683,31 @@ export class VirtioSocketWatcherService extends EventEmitter {
         }
       })
 
-      // Filter executions based on scheduling rules (edge cases handled)
+      // Filter executions based on scheduling rules
       const eligibleExecutions = pendingExecutions.filter(execution => {
-        // If maxExecutions is set and reached, exclude and optionally mark as SUCCESS
         if (execution.maxExecutions !== null && execution.executionCount >= execution.maxExecutions) {
-          // Mark as SUCCESS asynchronously (don't block request)
           setImmediate(async () => {
             try {
               await this.prisma.scriptExecution.update({
                 where: { id: execution.id },
                 data: { status: 'SUCCESS', completedAt: now }
               })
-              this.debug.log('info', `Marked execution ${execution.id} as SUCCESS (max executions reached)`)
+              this.debug.info(`Marked execution ${execution.id} as SUCCESS (max executions reached)`)
             } catch (err) {
-              this.debug.log('error', `Failed to mark execution ${execution.id} as SUCCESS: ${err}`)
+              this.debug.error(`Failed to mark execution ${execution.id} as SUCCESS: ${err}`)
             }
           })
           return false
         }
 
-        // For repeating scripts, check if enough time has passed since last execution
-        // Treat lastExecutedAt=null as eligible if scheduledFor <= now
         if (execution.repeatIntervalMinutes) {
           if (execution.lastExecutedAt === null) {
-            // First execution of repeating script - eligible if scheduled
             return true
           }
 
           const intervalMs = execution.repeatIntervalMinutes * 60 * 1000
           const timeSinceLastExecution = now.getTime() - execution.lastExecutedAt.getTime()
 
-          // Not ready if interval hasn't passed
           if (timeSinceLastExecution < intervalMs) {
             return false
           }
@@ -2843,20 +716,18 @@ export class VirtioSocketWatcherService extends EventEmitter {
         return true
       })
 
-      this.debug.log('info', `Found ${eligibleExecutions.length} pending scripts ready for execution`)
+      this.debug.info(`Found ${eligibleExecutions.length} pending scripts ready for execution`)
 
-      // Process executions in transaction to prevent race conditions
+      // Process executions in transaction
       const scriptManager = new ScriptManager(this.prisma)
       const templateEngine = new TemplateEngine()
       const pendingScripts: PendingScriptInfo[] = []
 
-      // Atomically transition executions from PENDING to RUNNING
       const result = await this.prisma.$transaction(async (tx) => {
         const successfullyUpdated: string[] = []
 
         for (const execution of eligibleExecutions) {
           try {
-            // Atomic update: only update if still PENDING (prevents double-dispatch)
             const updated = await tx.scriptExecution.updateMany({
               where: {
                 id: execution.id,
@@ -2868,18 +739,15 @@ export class VirtioSocketWatcherService extends EventEmitter {
               }
             })
 
-            // If update affected 0 rows, another request already claimed it
             if (updated.count === 0) {
-              this.debug.log('warn', `Execution ${execution.id} was already claimed by another request`)
+              this.debug.warn(`Execution ${execution.id} was already claimed by another request`)
               continue
             }
 
             successfullyUpdated.push(execution.id)
 
-            // Load script content
             const scriptWithContent = await scriptManager.getScript(execution.scriptId)
 
-            // Parse content to get script body
             const format = scriptWithContent.fileName.endsWith('.yaml') ? 'yaml' : 'json'
             const { ScriptParser } = await import('./scripts/ScriptParser')
             const parser = new ScriptParser()
@@ -2887,13 +755,11 @@ export class VirtioSocketWatcherService extends EventEmitter {
               ? parser.parseYAML(scriptWithContent.content)
               : parser.parseJSON(scriptWithContent.content)
 
-            // Interpolate input values into script content
             const interpolatedContent = templateEngine.interpolate(
               parsed.script,
               (execution.inputValues as Record<string, any>) || {}
             )
 
-            // Build PendingScriptInfo (only for successfully claimed executions)
             pendingScripts.push({
               execution_id: execution.id,
               script_id: execution.scriptId,
@@ -2902,14 +768,13 @@ export class VirtioSocketWatcherService extends EventEmitter {
               shell: execution.script.shell,
               execution_type: execution.executionType,
               input_values: (execution.inputValues as Record<string, any>) || {},
-              timeout_seconds: 600, // Default timeout
+              timeout_seconds: 600,
               run_as: execution.executedAs
             })
 
-            this.debug.log('debug', `Script ${scriptWithContent.name} (${execution.id}) prepared for execution`)
+            this.debug.debug(`Script ${scriptWithContent.name} (${execution.id}) prepared for execution`)
           } catch (error) {
-            this.debug.log('error', `Failed to prepare script ${execution.scriptId}: ${error}`)
-            // Mark execution as failed within transaction
+            this.debug.error(`Failed to prepare script ${execution.scriptId}: ${error}`)
             await tx.scriptExecution.update({
               where: { id: execution.id },
               data: {
@@ -2924,7 +789,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
         return { pendingScripts, successfullyUpdated }
       })
 
-      // Send response to VM with only successfully claimed scripts
+      // Send response to VM
       const response: PendingScriptsResponseMessage = {
         type: 'pending_scripts_response',
         timestamp: now.toISOString(),
@@ -2932,18 +797,14 @@ export class VirtioSocketWatcherService extends EventEmitter {
       }
 
       this.sendMessage(connection, response)
-      this.debug.log('info', `Sent ${result.pendingScripts.length} pending scripts to VM ${vmId}`)
+      this.debug.info(`Sent ${result.pendingScripts.length} pending scripts to VM ${vmId}`)
     } catch (error) {
-      this.debug.log('error', `Failed to handle pending scripts request: ${error}`)
+      this.debug.error(`Failed to handle pending scripts request: ${error}`)
     }
   }
 
   /**
    * Proactively push pending scripts to a specific VM without waiting for a request.
-   * This enables immediate script execution for online VMs.
-   *
-   * @param vmId The ID of the VM to push scripts to
-   * @returns Object containing success status, script count, and optional error message
    */
   public async pushPendingScriptsToVM(vmId: string): Promise<{ success: boolean; scriptCount: number; error?: string }> {
     try {
@@ -2957,7 +818,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
         return { success: false, scriptCount: 0, error: 'VM not connected' }
       }
 
-      this.debug.log('info', `Pushing pending scripts to VM ${vmId}`)
+      this.debug.info(`Pushing pending scripts to VM ${vmId}`)
 
       // 2. Query Pending Executions
       const now = new Date()
@@ -2981,34 +842,29 @@ export class VirtioSocketWatcherService extends EventEmitter {
 
       // 3. Filter Eligible Executions
       const eligibleExecutions = pendingExecutions.filter(execution => {
-        // If maxExecutions is set and reached, exclude and optionally mark as SUCCESS
         if (execution.maxExecutions !== null && execution.executionCount >= execution.maxExecutions) {
-          // Mark as SUCCESS asynchronously (don't block request)
           setImmediate(async () => {
             try {
               await this.prisma.scriptExecution.update({
                 where: { id: execution.id },
                 data: { status: 'SUCCESS', completedAt: now }
               })
-              this.debug.log('info', `Marked execution ${execution.id} as SUCCESS (max executions reached)`)
+              this.debug.info(`Marked execution ${execution.id} as SUCCESS (max executions reached)`)
             } catch (err) {
-              this.debug.log('error', `Failed to mark execution ${execution.id} as SUCCESS: ${err}`)
+              this.debug.error(`Failed to mark execution ${execution.id} as SUCCESS: ${err}`)
             }
           })
           return false
         }
 
-        // For repeating scripts, check if enough time has passed since last execution
         if (execution.repeatIntervalMinutes) {
           if (execution.lastExecutedAt === null) {
-            // First execution of repeating script - eligible if scheduled
             return true
           }
 
           const intervalMs = execution.repeatIntervalMinutes * 60 * 1000
           const timeSinceLastExecution = now.getTime() - execution.lastExecutedAt.getTime()
 
-          // Not ready if interval hasn't passed
           if (timeSinceLastExecution < intervalMs) {
             return false
           }
@@ -3017,20 +873,18 @@ export class VirtioSocketWatcherService extends EventEmitter {
         return true
       })
 
-      this.debug.log('info', `Found ${eligibleExecutions.length} pending scripts ready for execution`)
+      this.debug.info(`Found ${eligibleExecutions.length} pending scripts ready for execution`)
 
       // 4. Prepare Scripts in Transaction
       const scriptManager = new ScriptManager(this.prisma)
       const templateEngine = new TemplateEngine()
       const pendingScripts: PendingScriptInfo[] = []
 
-      // Atomically transition executions from PENDING to RUNNING
       const result = await this.prisma.$transaction(async (tx) => {
         const successfullyUpdated: string[] = []
 
         for (const execution of eligibleExecutions) {
           try {
-            // Atomic update: only update if still PENDING (prevents double-dispatch)
             const updated = await tx.scriptExecution.updateMany({
               where: {
                 id: execution.id,
@@ -3042,18 +896,15 @@ export class VirtioSocketWatcherService extends EventEmitter {
               }
             })
 
-            // If update affected 0 rows, another request already claimed it
             if (updated.count === 0) {
-              this.debug.log('warn', `Execution ${execution.id} was already claimed by another request`)
+              this.debug.warn(`Execution ${execution.id} was already claimed by another request`)
               continue
             }
 
             successfullyUpdated.push(execution.id)
 
-            // Load script content
             const scriptWithContent = await scriptManager.getScript(execution.scriptId)
 
-            // Parse content to get script body
             const format = scriptWithContent.fileName.endsWith('.yaml') ? 'yaml' : 'json'
             const { ScriptParser } = await import('./scripts/ScriptParser')
             const parser = new ScriptParser()
@@ -3061,13 +912,11 @@ export class VirtioSocketWatcherService extends EventEmitter {
               ? parser.parseYAML(scriptWithContent.content)
               : parser.parseJSON(scriptWithContent.content)
 
-            // Interpolate input values into script content
             const interpolatedContent = templateEngine.interpolate(
               parsed.script,
               (execution.inputValues as Record<string, any>) || {}
             )
 
-            // Build PendingScriptInfo (only for successfully claimed executions)
             pendingScripts.push({
               execution_id: execution.id,
               script_id: execution.scriptId,
@@ -3076,14 +925,13 @@ export class VirtioSocketWatcherService extends EventEmitter {
               shell: execution.script.shell,
               execution_type: execution.executionType,
               input_values: (execution.inputValues as Record<string, any>) || {},
-              timeout_seconds: 600, // Default timeout
+              timeout_seconds: 600,
               run_as: execution.executedAs
             })
 
-            this.debug.log('debug', `Script ${scriptWithContent.name} (${execution.id}) prepared for execution`)
+            this.debug.debug(`Script ${scriptWithContent.name} (${execution.id}) prepared for execution`)
           } catch (error) {
-            this.debug.log('error', `Failed to prepare script ${execution.scriptId}: ${error}`)
-            // Mark execution as failed within transaction
+            this.debug.error(`Failed to prepare script ${execution.scriptId}: ${error}`)
             await tx.scriptExecution.update({
               where: { id: execution.id },
               data: {
@@ -3106,47 +954,15 @@ export class VirtioSocketWatcherService extends EventEmitter {
       }
 
       this.sendMessage(connection, response)
-      this.debug.log('info', `Pushed ${result.pendingScripts.length} pending scripts to VM ${vmId}`)
+      this.debug.info(`Pushed ${result.pendingScripts.length} pending scripts to VM ${vmId}`)
 
       // 6. Return Result
       return { success: true, scriptCount: result.pendingScripts.length }
     } catch (error) {
-      this.debug.log('error', `Failed to push pending scripts to VM: ${error}`)
+      this.debug.error(`Failed to push pending scripts to VM: ${error}`)
       return { success: false, scriptCount: 0, error: (error as Error).message }
     }
   }
-
-  private updateConnectionStabilityScore(connection: VmConnection): void {
-    let score = 100
-
-    // Deduct points for circuit breaker state
-    switch (connection.circuitBreakerState) {
-      case 'Open':
-        score -= 50
-        break
-      case 'HalfOpen':
-        score -= 25
-        break
-      case 'Closed':
-        // No deduction
-        break
-    }
-
-    // Deduct points for keep-alive failures
-    score -= connection.keepAliveFailureCount * 5
-
-    // Deduct points for transmission failures
-    score -= connection.transmissionFailureCount * 2
-
-    // Deduct points for degraded mode
-    if (connection.isDegraded) {
-      score -= 20
-    }
-
-    // Ensure score doesn't go below 0
-    connection.connectionStabilityScore = Math.max(0, score)
-  }
-
 }
 
 // Singleton instance management

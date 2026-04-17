@@ -66,8 +66,8 @@ describe('VirtioSocketWatcherService', () => {
     }
 
     // Create a fresh instance directly (bypass singleton)
-    // @ts-expect-error - Prisma 6 type compatibility issues with Exact types in mocks
-    service = new VirtioSocketWatcherService(mockPrisma as unknown as PrismaClient)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    service = new VirtioSocketWatcherService(mockPrisma as any)
     // Get the mock socket instance
     mockSocket = new MockSocket();
     (net.Socket as jest.MockedClass<typeof net.Socket>).mockImplementation(() => mockSocket as unknown as net.Socket)
@@ -371,7 +371,8 @@ describe('VirtioSocketWatcherService', () => {
       }
 
       // Create a fresh service and socket for this test
-      service = createVirtioSocketWatcherService(mockPrisma as unknown as PrismaClient)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      service = createVirtioSocketWatcherService(mockPrisma as any)
       const freshSocket = new MockSocket()
       ;(net.Socket as jest.MockedClass<typeof net.Socket>).mockImplementation(() => freshSocket as unknown as net.Socket)
 
@@ -456,7 +457,8 @@ describe('VirtioSocketWatcherService', () => {
       if (service && service.getServiceStatus()) {
         await service.stop()
       }
-
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      service = createVirtioSocketWatcherService(mockPrisma as any)
       service = createVirtioSocketWatcherService(mockPrisma as unknown as PrismaClient)
 
       // Add two VMs
