@@ -1,15 +1,16 @@
 import 'reflect-metadata'
-import { VMHealthQueueManager, QueuedHealthCheck } from '../../../app/services/health/VMHealthQueueManager'
+import { VMHealthQueueManager, QueuedHealthCheck } from '../../../app/services/VMHealthQueueManager'
 import { PrismaClient, TaskPriority } from '@prisma/client'
-import { EventManager } from '../../../app/services/events/EventManager'
+import { EventManager } from '../../../app/services/EventManager'
 
 // Mock VMRecommendationService
-jest.mock('../../../app/services/health/VMRecommendationService', () => ({
+import logger from '@main/logger'
+jest.mock('../../../app/services/VMRecommendationService', () => ({
   VMRecommendationService: jest.fn().mockImplementation(() => ({}))
 }))
 
 // Mock VirtioSocketWatcherService
-jest.mock('../../../app/services/vm/VirtioSocketWatcherService', () => ({
+jest.mock('../../../app/services/VirtioSocketWatcherService', () => ({
   getVirtioSocketWatcherService: jest.fn()
 }))
 
@@ -25,7 +26,7 @@ const mockPrisma = {
     findMany: jest.fn(),
     update: jest.fn(),
     updateMany: jest.fn(),
-    deleteMany: jest.fn(),
+    deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
     findUnique: jest.fn()
   },
   vMHealthSnapshot: {
@@ -51,9 +52,9 @@ describe('VMHealthQueueManager Comprehensive Tests', () => {
   beforeEach(() => {
     jest.clearAllMocks()
     // Suppress constructor console logs
-    jest.spyOn(console, 'log').mockImplementation(() => {})
-    jest.spyOn(console, 'warn').mockImplementation(() => {})
-    jest.spyOn(console, 'error').mockImplementation(() => {})
+    jest.spyOn(logger, 'info').mockImplementation(() => undefined as any)
+    jest.spyOn(logger, 'warn').mockImplementation(() => undefined as any)
+    jest.spyOn(logger, 'error').mockImplementation(() => undefined as any)
 
     queueManager = new VMHealthQueueManager(mockPrisma, mockEventManager)
   })

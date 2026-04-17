@@ -1,12 +1,13 @@
 import 'reflect-metadata'
-import { VMHealthQueueManager } from '@services/health/VMHealthQueueManager'
-import type { EventManager } from '@services/events/EventManager'
+import { VMHealthQueueManager } from '@services/VMHealthQueueManager'
+import type { EventManager } from '@services/EventManager'
 import { mockPrisma } from '../../setup/jest.setup'
 import { TaskStatus, TaskPriority, HealthCheckType } from '@prisma/client'
 import { RUNNING_STATUS, STOPPED_STATUS, PAUSED_STATUS } from '../../../app/constants/machine-status'
 
 // Mock VirtioSocketWatcherService
-jest.mock('@services/vm/VirtioSocketWatcherService', () => ({
+import logger from '@main/logger'
+jest.mock('@services/VirtioSocketWatcherService', () => ({
   getVirtioSocketWatcherService: jest.fn(() => ({
     sendSafeCommand: jest.fn().mockResolvedValue({
       success: true,
@@ -33,8 +34,8 @@ describe('VMHealthQueueManager', () => {
     queueManager = new VMHealthQueueManager(mockPrisma, mockEventManager)
     jest.clearAllMocks()
 
-    // Spy on console.log to verify logging behavior
-    jest.spyOn(console, 'log').mockImplementation(() => { })
+    // Spy on logger.info to verify logging behavior
+    jest.spyOn(logger, 'info').mockImplementation(() => undefined as any)
 
     // Mock machine data for tests - using lowercase status to match database values
     mockPrisma.machine.findUnique.mockResolvedValue({
@@ -60,7 +61,7 @@ describe('VMHealthQueueManager', () => {
   })
 
   afterEach(() => {
-    // Restore console.log and other mocks
+    // Restore mocks
     jest.restoreAllMocks()
   })
 
@@ -111,7 +112,7 @@ describe('VMHealthQueueManager', () => {
 
       expect(mockPrisma.machine.findUnique).toHaveBeenCalledWith({
         where: { id: mockMachineId },
-        select: { id: true, name: true, status: true }
+        select: { id: true, name: true, status: true, os: true }
       })
       expect(mockPrisma.vMHealthCheckQueue.create).toHaveBeenCalled()
       expect(typeof queueId).toBe('string')
@@ -279,7 +280,7 @@ describe('VMHealthQueueManager', () => {
       expect(mockPrisma.vMHealthCheckQueue.create).not.toHaveBeenCalled()
 
       // Verify logging behavior for skipped VM
-      expect(console.log).toHaveBeenCalledWith(
+      expect(logger.info).toHaveBeenCalledWith(
         expect.stringContaining(`Skipping health checks for VM test-vm (${mockMachineId}) - VM status is '${STOPPED_STATUS}', expected '${RUNNING_STATUS}'`)
       )
     })
@@ -293,7 +294,7 @@ describe('VMHealthQueueManager', () => {
       expect(mockPrisma.vMHealthCheckQueue.create).not.toHaveBeenCalled()
 
       // Verify logging behavior for skipped VM
-      expect(console.log).toHaveBeenCalledWith(
+      expect(logger.info).toHaveBeenCalledWith(
         expect.stringContaining(`Skipping health checks for VM test-vm (${mockMachineId}) - VM status is '${PAUSED_STATUS}', expected '${RUNNING_STATUS}'`)
       )
     })
@@ -307,7 +308,7 @@ describe('VMHealthQueueManager', () => {
       expect(mockPrisma.vMHealthCheckQueue.create).not.toHaveBeenCalled()
 
       // Verify logging behavior for skipped VM
-      expect(console.log).toHaveBeenCalledWith(
+      expect(logger.info).toHaveBeenCalledWith(
         expect.stringContaining(`Skipping health checks for VM test-vm (${mockMachineId}) - VM status is 'error', expected '${RUNNING_STATUS}'`)
       )
     })
@@ -321,7 +322,7 @@ describe('VMHealthQueueManager', () => {
       expect(mockPrisma.vMHealthCheckQueue.create).not.toHaveBeenCalled()
 
       // Verify logging behavior for skipped VM
-      expect(console.log).toHaveBeenCalledWith(
+      expect(logger.info).toHaveBeenCalledWith(
         expect.stringContaining(`Skipping health checks for VM test-vm (${mockMachineId}) - VM status is 'creating', expected '${RUNNING_STATUS}'`)
       )
     })
@@ -477,7 +478,7 @@ describe('VMHealthQueueManager', () => {
   describe('health snapshot storage', () => {
     it('should store health check results in snapshots', async () => {
       // Mock successful health check response
-      const { getVirtioSocketWatcherService } = await import('@services/vm/VirtioSocketWatcherService')
+      const { getVirtioSocketWatcherService } = await import('@services/VirtioSocketWatcherService')
       const mockService = getVirtioSocketWatcherService()
       mockService.sendSafeCommand.mockResolvedValue({
         success: true,
@@ -607,7 +608,7 @@ describe('VMHealthQueueManager', () => {
     let mockService: { sendSafeCommand: jest.Mock }
 
     beforeEach(async () => {
-      const { getVirtioSocketWatcherService } = await import('@services/vm/VirtioSocketWatcherService')
+      const { getVirtioSocketWatcherService } = await import('@services/VirtioSocketWatcherService')
       mockService = getVirtioSocketWatcherService()
       mockService.sendSafeCommand = jest.fn().mockResolvedValue({
         success: true,
