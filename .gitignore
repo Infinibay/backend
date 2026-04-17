@@ -75,3 +75,12 @@ typings/
 # VSCode settings
 .vscode/
 .aider*
+
+# Python bytecode (from local tooling)
+__pycache__/
+
+# Local dev artifacts
+.infinidev/
+
+# Backup files
+*.bak
