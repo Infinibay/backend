@@ -1,3 +1,4 @@
+import logger from '@main/logger'
 import { RecommendationChecker, RecommendationContext, RecommendationResult } from './BaseRecommendationChecker'
 
 interface ThreatInfo {
@@ -72,7 +73,7 @@ export class DefenderThreatChecker extends RecommendationChecker {
         : context.latestSnapshot.defenderStatus
 
       if (!defenderData || typeof defenderData !== 'object') {
-        console.warn('VMRecommendationService: Invalid defenderStatus format for threat analysis')
+        logger.warn('VMRecommendationService: Invalid defenderStatus format for threat analysis')
         return results
       }
 
@@ -178,7 +179,7 @@ export class DefenderThreatChecker extends RecommendationChecker {
         }
       }
     } catch (error) {
-      console.warn('VMRecommendationService: Failed to parse defenderStatus for threat analysis:', error)
+      logger.warn('VMRecommendationService: Failed to parse defenderStatus for threat analysis:', error)
     }
 
     return results

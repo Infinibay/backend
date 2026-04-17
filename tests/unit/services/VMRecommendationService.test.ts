@@ -2,7 +2,8 @@ import 'reflect-metadata'
 import { describe, it, expect, beforeEach, jest, afterEach } from '@jest/globals'
 import { PrismaClient, RecommendationType } from '@prisma/client'
 import { mockPrisma } from '../../setup/jest.setup'
-import { VMRecommendationService } from '../../../app/services/health/VMRecommendationService'
+import { VMRecommendationService } from '../../../app/services/VMRecommendationService'
+import logger from '@main/logger'
 import {
   createMockVMRecommendation,
   createMockHealthSnapshot,
@@ -848,8 +849,8 @@ describe('VMRecommendationService', () => {
       const dbError = new Error('ECONNREFUSED: Connection refused')
       mockPrisma.vMHealthSnapshot.findFirst.mockRejectedValue(dbError)
 
-      // Spy on console.error to verify detailed logging
-      const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {})
+      // Spy on logger.error to verify detailed logging
+      const consoleSpy = jest.spyOn(logger, 'error').mockImplementation(() => undefined as any)
 
       await expect(service.generateRecommendations(machineId)).rejects.toThrow('VM recommendation service failed')
 
@@ -871,8 +872,8 @@ describe('VMRecommendationService', () => {
       const serviceError = new Error('Internal service failure')
       mockPrisma.vMRecommendation.findMany.mockRejectedValue(serviceError)
 
-      // Spy on console.error to verify detailed logging
-      const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {})
+      // Spy on logger.error to verify detailed logging
+      const consoleSpy = jest.spyOn(logger, 'error').mockImplementation(() => undefined as any)
 
       await expect(service.getRecommendations(machineId)).rejects.toThrow('VM recommendation service failed')
 
@@ -894,8 +895,8 @@ describe('VMRecommendationService', () => {
       const dbError = new Error('Database connection timeout')
       mockPrisma.vMHealthSnapshot.findFirst.mockRejectedValue(dbError)
 
-      // Spy on console.error to verify detailed logging
-      const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {})
+      // Spy on logger.error to verify detailed logging
+      const consoleSpy = jest.spyOn(logger, 'error').mockImplementation(() => undefined as any)
 
       const result = await service.generateRecommendationsSafe(machineId)
 

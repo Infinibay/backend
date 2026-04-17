@@ -1,3 +1,4 @@
+import logger from '@main/logger'
 import { RecommendationChecker, RecommendationContext, RecommendationResult, DiskUsageData } from './BaseRecommendationChecker'
 
 /**
@@ -81,7 +82,7 @@ export class DiskSpaceChecker extends RecommendationChecker {
     const criticalThreshold = this.getCriticalThreshold()
     const warningThreshold = this.getWarningThreshold()
 
-    console.debug(`VM Recommendations: DiskSpaceChecker using thresholds - Critical: ${criticalThreshold}%, Warning: ${warningThreshold}%`)
+    logger.debug(`VM Recommendations: DiskSpaceChecker using thresholds - Critical: ${criticalThreshold}%, Warning: ${warningThreshold}%`)
 
     const diskUsage = this.extractDiskSpaceData(context)
     if (!diskUsage) {
@@ -133,7 +134,7 @@ export class DiskSpaceChecker extends RecommendationChecker {
         }
       }
     } catch (error) {
-      console.warn('Failed to parse disk space info:', error)
+      logger.warn('Failed to parse disk space info:', error)
     }
 
     return results

@@ -1,3 +1,4 @@
+import logger from '@main/logger'
 import { RecommendationChecker, RecommendationContext, RecommendationResult } from './BaseRecommendationChecker'
 
 /**
@@ -121,7 +122,7 @@ export class DiskIOBottleneckChecker extends RecommendationChecker {
                 }
               }
             } catch (error) {
-              console.warn('Failed to parse diskIOStats:', error)
+              logger.warn('Failed to parse diskIOStats:', error)
             }
           }
           return null
@@ -196,7 +197,7 @@ export class DiskIOBottleneckChecker extends RecommendationChecker {
             }
           }
         } catch (error) {
-          console.warn('Failed to parse resource optimization data for I/O stats:', error)
+          logger.warn('Failed to parse resource optimization data for I/O stats:', error)
         }
       }
 
@@ -270,7 +271,7 @@ export class DiskIOBottleneckChecker extends RecommendationChecker {
         }
       })
     } catch (error) {
-      console.warn('Failed to analyze disk I/O bottlenecks:', error)
+      logger.warn('Failed to analyze disk I/O bottlenecks:', error)
     }
 
     return results

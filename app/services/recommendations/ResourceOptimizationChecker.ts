@@ -1,3 +1,4 @@
+import logger from '@main/logger'
 import { RecommendationChecker, RecommendationContext, RecommendationResult, ProcessData } from './BaseRecommendationChecker'
 import { VMHealthSnapshot } from '@prisma/client'
 
@@ -202,7 +203,7 @@ export class ResourceOptimizationChecker extends RecommendationChecker {
     const highRamThresholdPercent = this.getHighRamThresholdPercent()
     const topAppsLimit = parseInt(process.env.TOP_APPS_LIMIT || '5', 10)
 
-    console.debug(`VM Recommendations: ResourceOptimizationChecker using thresholds - CPU High: ${highCpuThreshold}%, CPU Critical: ${criticalCpuThreshold}%, RAM: ${highRamThresholdMB}MB or ${highRamThresholdPercent}%, Top Apps Limit: ${topAppsLimit}`)
+    logger.debug(`VM Recommendations: ResourceOptimizationChecker using thresholds - CPU High: ${highCpuThreshold}%, CPU Critical: ${criticalCpuThreshold}%, RAM: ${highRamThresholdMB}MB or ${highRamThresholdPercent}%, Top Apps Limit: ${topAppsLimit}`)
 
     if (!context.latestSnapshot) {
       return results
@@ -363,7 +364,7 @@ export class ResourceOptimizationChecker extends RecommendationChecker {
         }
       }
     } catch (error) {
-      console.warn('Failed to analyze process data:', error)
+      logger.warn('Failed to analyze process data:', error)
     }
 
     return results
@@ -443,7 +444,7 @@ export class ResourceOptimizationChecker extends RecommendationChecker {
 
       return null
     } catch (error) {
-      console.warn('Failed to extract process data:', error)
+      logger.warn('Failed to extract process data:', error)
       return null
     }
   }

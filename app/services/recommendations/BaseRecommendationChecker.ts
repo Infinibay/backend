@@ -1,3 +1,4 @@
+import logger from '@main/logger'
 import { PrismaClient, Machine, VMHealthSnapshot, SystemMetrics, ProcessSnapshot, PortUsage, VMRecommendation, RecommendationType } from '@prisma/client'
 
 export interface AppUpdateInfo {
@@ -98,7 +99,7 @@ export abstract class RecommendationChecker {
 
       return { isValid: true, date: parsedDate, daysSince }
     } catch (error) {
-      console.warn('VMRecommendationService: Failed to parse date string:', dateString, error)
+      logger.warn('VMRecommendationService: Failed to parse date string:', dateString, error)
       return { isValid: false, date: null, daysSince: null }
     }
   }
@@ -115,11 +116,11 @@ export abstract class RecommendationChecker {
           if (parsed) return parsed
         }
       } catch (error) {
-        console.warn('Failed to parse diskSpaceInfo:', error)
+        logger.warn('Failed to parse diskSpaceInfo:', error)
       }
     }
 
-    console.debug('VM Recommendations: No disk space data available for analysis')
+    logger.debug('VM Recommendations: No disk space data available for analysis')
     return null
   }
 

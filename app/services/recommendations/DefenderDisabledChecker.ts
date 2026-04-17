@@ -1,3 +1,4 @@
+import logger from '@main/logger'
 import { RecommendationChecker, RecommendationContext, RecommendationResult } from './BaseRecommendationChecker'
 
 interface DefenderStatus {
@@ -59,7 +60,7 @@ export class DefenderDisabledChecker extends RecommendationChecker {
         : context.latestSnapshot.defenderStatus
 
       if (!defenderData || typeof defenderData !== 'object') {
-        console.warn('VMRecommendationService: Invalid defenderStatus format')
+        logger.warn('VMRecommendationService: Invalid defenderStatus format')
         return results
       }
 
@@ -173,7 +174,7 @@ export class DefenderDisabledChecker extends RecommendationChecker {
         }
       }
     } catch (error) {
-      console.warn('VMRecommendationService: Failed to parse defenderStatus:', error)
+      logger.warn('VMRecommendationService: Failed to parse defenderStatus:', error)
     }
 
     return results

@@ -1,3 +1,4 @@
+import logger from '@main/logger'
 import { RecommendationChecker, RecommendationContext, RecommendationResult } from './BaseRecommendationChecker'
 
 interface WindowsUpdate {
@@ -179,7 +180,7 @@ export class OsUpdateChecker extends RecommendationChecker {
         : context.latestSnapshot!.windowsUpdateInfo
 
       if (!updateData || typeof updateData !== 'object') {
-        console.warn('VMRecommendationService: Invalid windowsUpdateInfo format')
+        logger.warn('VMRecommendationService: Invalid windowsUpdateInfo format')
         return results
       }
 
@@ -316,7 +317,7 @@ export class OsUpdateChecker extends RecommendationChecker {
         })
       }
     } catch (error) {
-      console.warn('VMRecommendationService: Failed to parse windowsUpdateInfo:', error)
+      logger.warn('VMRecommendationService: Failed to parse windowsUpdateInfo:', error)
     }
 
     return results
@@ -331,7 +332,7 @@ export class OsUpdateChecker extends RecommendationChecker {
         : context.latestSnapshot!.linuxUpdateInfo
 
       if (!updateData || typeof updateData !== 'object') {
-        console.warn('VMRecommendationService: Invalid linuxUpdateInfo format')
+        logger.warn('VMRecommendationService: Invalid linuxUpdateInfo format')
         return results
       }
 
@@ -432,7 +433,7 @@ export class OsUpdateChecker extends RecommendationChecker {
         })
       }
     } catch (error) {
-      console.warn('VMRecommendationService: Failed to parse linuxUpdateInfo:', error)
+      logger.warn('VMRecommendationService: Failed to parse linuxUpdateInfo:', error)
     }
 
     return results

@@ -2,10 +2,11 @@ import 'reflect-metadata'
 import { describe, it, expect, beforeEach, jest, afterEach } from '@jest/globals'
 import { PrismaClient } from '@prisma/client'
 import { mockPrisma } from '../../setup/jest.setup'
-import { VMRecommendationService } from '../../../app/services/health/VMRecommendationService'
+import { VMRecommendationService } from '../../../app/services/VMRecommendationService'
 import { createMockMachine, createMockDepartment } from '../../setup/mock-factories'
 
 // Mock PackageManager to prevent DB calls during constructor
+import logger from '@main/logger'
 jest.mock('../../../app/services/packages/PackageManager', () => ({
   getPackageManager: jest.fn().mockReturnValue({
     loadAll: jest.fn().mockResolvedValue(undefined as never),
@@ -64,8 +65,8 @@ describe('VMRecommendationService Error Handling', () => {
       const dbError = new Error('ECONNREFUSED: Connection refused')
       mockPrisma.vMHealthSnapshot.findFirst.mockRejectedValue(dbError)
 
-      // Spy on console.error to verify detailed logging
-      const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {})
+      // Spy on logger.error to verify detailed logging
+      const consoleSpy = jest.spyOn(logger, 'error').mockImplementation(() => undefined as any)
 
       await expect(service.generateRecommendations(machineId)).rejects.toThrow('VM recommendation service failed')
 
@@ -87,8 +88,8 @@ describe('VMRecommendationService Error Handling', () => {
       const serviceError = new Error('Internal service failure')
       mockPrisma.vMRecommendation.findMany.mockRejectedValue(serviceError)
 
-      // Spy on console.error to verify detailed logging
-      const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {})
+      // Spy on logger.error to verify detailed logging
+      const consoleSpy = jest.spyOn(logger, 'error').mockImplementation(() => undefined as any)
 
       // getRecommendations wraps non-AppError errors via handleServiceError
       await expect(service.getRecommendations(machineId)).rejects.toThrow('VM recommendation service failed')
@@ -101,8 +102,8 @@ describe('VMRecommendationService Error Handling', () => {
       const dbError = new Error('Database connection timeout')
       mockPrisma.vMHealthSnapshot.findFirst.mockRejectedValue(dbError)
 
-      // Spy on console.error to verify detailed logging
-      const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {})
+      // Spy on logger.error to verify detailed logging
+      const consoleSpy = jest.spyOn(logger, 'error').mockImplementation(() => undefined as any)
 
       const result = await service.generateRecommendationsSafe(machineId)
 
@@ -146,8 +147,8 @@ describe('VMRecommendationService Error Handling', () => {
       const sensitiveError = new Error('PostgreSQL connection failed: password authentication failed for user "db_admin"')
       mockPrisma.vMHealthSnapshot.findFirst.mockRejectedValue(sensitiveError)
 
-      // Spy on console.error to verify detailed logging
-      const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {})
+      // Spy on logger.error to verify detailed logging
+      const consoleSpy = jest.spyOn(logger, 'error').mockImplementation(() => undefined as any)
 
       try {
         await service.generateRecommendations(machineId)

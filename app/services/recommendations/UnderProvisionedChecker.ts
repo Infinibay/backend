@@ -1,3 +1,4 @@
+import logger from '@main/logger'
 import { RecommendationChecker, RecommendationContext, RecommendationResult, DiskUsageData } from './BaseRecommendationChecker'
 
 /**
@@ -404,7 +405,7 @@ export class UnderProvisionedChecker extends RecommendationChecker {
           }
         }
       } catch (error) {
-        console.warn('Failed to analyze disk usage for under-provisioning:', error)
+        logger.warn('Failed to analyze disk usage for under-provisioning:', error)
       }
     }
 

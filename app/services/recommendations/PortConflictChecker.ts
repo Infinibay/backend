@@ -1,3 +1,4 @@
+import logger from '@main/logger'
 import { RecommendationChecker, RecommendationContext, RecommendationResult } from './BaseRecommendationChecker'
 import { PortUsage, FirewallRule } from '@prisma/client'
 import prisma from '@utils/database'
@@ -108,11 +109,11 @@ export class PortConflictChecker extends RecommendationChecker {
       // Prefer real blocked connection data (Strategy 1) over heuristic data (Strategy 2)
       const deduplicated = this.deduplicateRecommendations(results)
 
-      console.debug(`PortConflictChecker: Found ${deduplicated.length} port conflict recommendations for VM ${context.vmId} (${results.length - deduplicated.length} duplicates removed)`)
+      logger.debug(`PortConflictChecker: Found ${deduplicated.length} port conflict recommendations for VM ${context.vmId} (${results.length - deduplicated.length} duplicates removed)`)
 
       return deduplicated
     } catch (error) {
-      console.error(`PortConflictChecker: Error analyzing VM ${context.vmId}:`, error)
+      logger.error(`PortConflictChecker: Error analyzing VM ${context.vmId}:`, error)
       // Return empty array on error to prevent recommendation service failure
       return []
     }
@@ -225,10 +226,10 @@ export class PortConflictChecker extends RecommendationChecker {
       }
 
       if (results.length > 0) {
-        console.debug(`PortConflictChecker: Found ${results.length} real blocked connections for VM ${vmId}`)
+        logger.debug(`PortConflictChecker: Found ${results.length} real blocked connections for VM ${vmId}`)
       }
     } catch (error) {
-      console.error(`PortConflictChecker: Error querying BlockedConnection table for VM ${vmId}:`, error)
+      logger.error(`PortConflictChecker: Error querying BlockedConnection table for VM ${vmId}:`, error)
     }
 
     return results
@@ -261,7 +262,7 @@ export class PortConflictChecker extends RecommendationChecker {
       })
 
       if (!machine?.firewallRuleSet?.rules || machine.firewallRuleSet.rules.length === 0) {
-        console.debug(`PortConflictChecker: No blocking firewall rules found for VM ${context.vmId}`)
+        logger.debug(`PortConflictChecker: No blocking firewall rules found for VM ${context.vmId}`)
         return results
       }
 
@@ -272,7 +273,7 @@ export class PortConflictChecker extends RecommendationChecker {
 
       // Fallback: Query recent PortUsage from DB if context is empty (e.g., first run)
       if (listeningPorts.length === 0) {
-        console.debug(`PortConflictChecker: No listening ports in context for VM ${context.vmId}, querying recent PortUsage from DB`)
+        logger.debug(`PortConflictChecker: No listening ports in context for VM ${context.vmId}, querying recent PortUsage from DB`)
 
         try {
           // Query recent listening ports (last 5 minutes) to avoid heavy reads
@@ -292,15 +293,15 @@ export class PortConflictChecker extends RecommendationChecker {
           })
 
           listeningPorts = recentPorts
-          console.debug(`PortConflictChecker: Found ${listeningPorts.length} recent listening ports from DB for VM ${context.vmId}`)
+          logger.debug(`PortConflictChecker: Found ${listeningPorts.length} recent listening ports from DB for VM ${context.vmId}`)
         } catch (dbError) {
-          console.error(`PortConflictChecker: Error querying recent PortUsage for VM ${context.vmId}:`, dbError)
+          logger.error(`PortConflictChecker: Error querying recent PortUsage for VM ${context.vmId}:`, dbError)
           // Continue with empty array - will return no results
         }
       }
 
       if (listeningPorts.length === 0) {
-        console.debug(`PortConflictChecker: No listening ports found for VM ${context.vmId}`)
+        logger.debug(`PortConflictChecker: No listening ports found for VM ${context.vmId}`)
         return results
       }
 
@@ -331,10 +332,10 @@ export class PortConflictChecker extends RecommendationChecker {
       }
 
       if (results.length > 0) {
-        console.debug(`PortConflictChecker: Found ${results.length} heuristic port conflicts for VM ${context.vmId}`)
+        logger.debug(`PortConflictChecker: Found ${results.length} heuristic port conflicts for VM ${context.vmId}`)
       }
     } catch (error) {
-      console.error(`PortConflictChecker: Error in heuristic detection for VM ${context.vmId}:`, error)
+      logger.error(`PortConflictChecker: Error in heuristic detection for VM ${context.vmId}:`, error)
     }
 
     return results

@@ -1,3 +1,4 @@
+import logger from '@main/logger'
 import { RecommendationChecker, RecommendationContext, RecommendationResult, DiskUsageData } from './BaseRecommendationChecker'
 
 /**
@@ -219,7 +220,7 @@ export class OverProvisionedChecker extends RecommendationChecker {
           })
         }
       } catch (error) {
-        console.warn('Failed to analyze disk usage for over-provisioning:', error)
+        logger.warn('Failed to analyze disk usage for over-provisioning:', error)
       }
     }
 

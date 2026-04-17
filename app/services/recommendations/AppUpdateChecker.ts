@@ -1,3 +1,4 @@
+import logger from '@main/logger'
 import { RecommendationChecker, RecommendationContext, RecommendationResult } from './BaseRecommendationChecker'
 
 interface Application {
@@ -61,7 +62,7 @@ export class AppUpdateChecker extends RecommendationChecker {
         : context.latestSnapshot.applicationInventory
 
       if (!inventoryData || typeof inventoryData !== 'object') {
-        console.warn('VMRecommendationService: Invalid applicationInventory format')
+        logger.warn('VMRecommendationService: Invalid applicationInventory format')
         return results
       }
 
@@ -173,7 +174,7 @@ export class AppUpdateChecker extends RecommendationChecker {
         })
       }
     } catch (error) {
-      console.warn('VMRecommendationService: Failed to parse applicationInventory:', error)
+      logger.warn('VMRecommendationService: Failed to parse applicationInventory:', error)
     }
 
     return results
