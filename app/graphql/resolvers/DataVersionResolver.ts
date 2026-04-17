@@ -1,3 +1,4 @@
+import logger from '@main/logger'
 import { Resolver, Query, Ctx, ObjectType, Field, Authorized, GraphQLISODateTime, Int } from 'type-graphql'
 import { InfinibayContext } from '../../utils/context'
 
@@ -84,7 +85,7 @@ export class DataVersionResolver {
         appSettings: createEntityVersion(appSettingsStats._count.id || 0, appSettingsStats._max.updatedAt)
       }
     } catch (error) {
-      console.error('Error fetching data versions:', error)
+      logger.error('Error fetching data versions:', error)
 
       // Return default version data in case of error
       const makeDefault = () => {

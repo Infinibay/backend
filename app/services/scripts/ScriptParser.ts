@@ -80,7 +80,7 @@ export class ScriptParser {
    */
   parseYAML(content: string): ParsedScript {
     try {
-      const parsed = yaml.load(content) as any;
+      const parsed = yaml.load(content) as Record<string, unknown>;
       return this.normalizeScript(parsed);
     } catch (error) {
       throw new Error(`Failed to parse YAML: ${(error as Error).message}`);
@@ -231,7 +231,7 @@ export class ScriptParser {
   /**
    * Extract metadata from parsed script
    */
-  extractMetadata(scriptObject: ParsedScript): object {
+  extractMetadata(scriptObject: ParsedScript): { name: string; description: string | null; category: string | null; tags: string[]; os: string[]; shell: string } {
     return {
       name: scriptObject.name,
       description: scriptObject.description || null,

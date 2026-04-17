@@ -7,13 +7,13 @@ import { VirtioSocketWatcherService } from '@services/VirtioSocketWatcherService
 jest.mock('@services/ProcessManager')
 
 // Mock SocketService and EventManager to avoid side effects
-jest.mock('@services/events/SocketService', () => ({
+jest.mock('@services/SocketService', () => ({
   getSocketService: jest.fn(() => ({
     sendToUser: jest.fn()
   }))
 }))
 
-jest.mock('@services/events/EventManager', () => ({
+jest.mock('@services/EventManager', () => ({
   getEventManager: jest.fn(() => ({
     dispatchEvent: jest.fn()
   }))

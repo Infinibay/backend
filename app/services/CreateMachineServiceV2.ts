@@ -28,7 +28,8 @@ import {
   DiskConfig
 } from '@infinibay/infinization'
 
-import { Debugger } from '@utils/debug'
+import { Logger } from 'winston'
+import logger from '@main/logger'
 import { getInfinization } from '@services/InfinizationService'
 import { DepartmentNetworkService } from '@services/network/DepartmentNetworkService'
 import { UnattendedManagerBase } from '@services/unattendedManagerBase'
@@ -54,11 +55,11 @@ export interface CreateMachineResult {
 
 export class CreateMachineServiceV2 {
   private prisma: PrismaClient
-  private debug: Debugger
+  private debug: Logger
   private departmentNetworkService: DepartmentNetworkService
 
   constructor (prisma: PrismaClient) {
-    this.debug = new Debugger('create-machine-v2')
+    this.debug = logger.child({ module: 'create-machine-v2' })
     this.prisma = prisma
     this.departmentNetworkService = new DepartmentNetworkService(prisma)
   }
@@ -86,7 +87,7 @@ export class CreateMachineServiceV2 {
     keyboard: string,
     timezone: string
   ): Promise<boolean> {
-    this.debug.log(`Creating machine ${machine.name} using infinization`)
+    this.debug.debug(`Creating machine ${machine.name} using infinization`)
 
     try {
       // Validate preconditions
@@ -121,18 +122,18 @@ export class CreateMachineServiceV2 {
       )
 
       // Create and start VM via infinization
-      this.debug.log('Creating VM via infinization')
+      this.debug.debug('Creating VM via infinization')
       const result = await infinization.createVM(vmConfig)
 
       if (!result.success) {
         throw new Error(`Failed to create VM: ${result.vmId}`)
       }
 
-      this.debug.log(`VM created successfully: ${result.vmId}`)
-      this.debug.log(`  - Display port: ${result.displayPort}`)
-      this.debug.log(`  - Disk paths: ${result.diskPaths.join(', ')}`)
-      this.debug.log(`  - TAP device: ${result.tapDevice}`)
-      this.debug.log(`  - PID: ${result.pid}`)
+      this.debug.debug(`VM created successfully: ${result.vmId}`)
+      this.debug.debug(`  - Display port: ${result.displayPort}`)
+      this.debug.debug(`  - Disk paths: ${result.diskPaths.join(', ')}`)
+      this.debug.debug(`  - TAP device: ${result.tapDevice}`)
+      this.debug.debug(`  - PID: ${result.pid}`)
 
       // Update machine configuration with runtime values
       await this.prisma.machineConfiguration.update({
@@ -156,12 +157,12 @@ export class CreateMachineServiceV2 {
       // VirtioSocketWatcherService will change it to 'running' when it receives
       // the first message from infiniservice, indicating the VM has completed
       // its initial setup (OS installation, infiniservice startup).
-      this.debug.log('info', `VM ${machine.name} started - waiting for infiniservice connection`)
+      this.debug.info(`VM ${machine.name} started - waiting for infiniservice connection`)
 
       return true
     } catch (error: any) {
-      this.debug.log('error', `Error creating machine: ${error.message}`)
-      this.debug.log('error', error.stack)
+      this.debug.error(`Error creating machine: ${error.message}`)
+      this.debug.error(error.stack)
 
       // Rollback
       await this.rollback(machine)
@@ -263,11 +264,11 @@ export class CreateMachineServiceV2 {
     let bridge: string
     if (departmentBridge) {
       bridge = departmentBridge
-      this.debug.log('info', `Using bridge '${bridge}' (dept: ${machine.departmentId})`)
+      this.debug.info(`Using bridge '${bridge}' (dept: ${machine.departmentId})`)
     } else {
       // Fallback to environment variables or default virbr0
       bridge = process.env.LIBVIRT_BRIDGE_NAME ?? process.env.LIBVIRT_NETWORK_NAME ?? 'virbr0'
-      this.debug.log('warn', `Fallback to global bridge for dept ${machine.departmentId}`)
+      this.debug.warn(`Fallback to global bridge for dept ${machine.departmentId}`)
     }
 
     // Find available SPICE port
@@ -287,7 +288,7 @@ export class CreateMachineServiceV2 {
 
     // Generate unattended installation ISO using legacy managers
     let isoPath = baseIsoPath
-    const unattendedManager = this.createUnattendedManager(
+    const unattendedManager = await this.createUnattendedManager(
       machine,
       username,
       password,
@@ -300,14 +301,14 @@ export class CreateMachineServiceV2 {
     )
 
     if (unattendedManager && baseIsoPath) {
-      this.debug.log(`Generating unattended ISO for ${machine.os}`)
+      this.debug.debug(`Generating unattended ISO for ${machine.os}`)
       unattendedManager.isoPath = baseIsoPath
       try {
         isoPath = await unattendedManager.generateNewImage()
-        this.debug.log(`Generated unattended ISO: ${isoPath}`)
+        this.debug.debug(`Generated unattended ISO: ${isoPath}`)
       } catch (error: any) {
-        this.debug.log('warn', `Failed to generate unattended ISO: ${error.message}`)
-        this.debug.log('warn', 'Falling back to base ISO (manual installation required)')
+        this.debug.warn(`Failed to generate unattended ISO: ${error.message}`)
+        this.debug.warn('Falling back to base ISO (manual installation required)')
         isoPath = baseIsoPath
       }
     }
@@ -379,7 +380,7 @@ export class CreateMachineServiceV2 {
    * Creates an unattended manager and generates the installation ISO.
    * Uses the legacy unattended managers for ISO generation.
    */
-  private createUnattendedManager (
+  private async createUnattendedManager (
     machine: Machine,
     username: string,
     password: string,
@@ -389,8 +390,8 @@ export class CreateMachineServiceV2 {
     locale: string,
     keyboard: string,
     timezone: string
-  ): UnattendedManagerBase | null {
-    const osManagers = {
+  ): Promise<UnattendedManagerBase | null> {
+    const osManagers: Record<string, () => UnattendedWindowsManager | UnattendedUbuntuManager | UnattendedRedHatManager> = {
       windows10: () => new UnattendedWindowsManager(10, username, password, productKey, applications, machine.id, scripts),
       windows11: () => new UnattendedWindowsManager(11, username, password, productKey, applications, machine.id, scripts),
       ubuntu: () => new UnattendedUbuntuManager(username, password, applications, machine.id, scripts),
@@ -400,11 +401,17 @@ export class CreateMachineServiceV2 {
 
     const managerCreator = osManagers[machine.os as keyof typeof osManagers]
     if (!managerCreator) {
-      this.debug.log('warn', `No unattended manager for OS: ${machine.os}`)
+      this.debug.warn(`No unattended manager for OS: ${machine.os}`)
       return null
     }
 
-    return managerCreator()
+    const manager = managerCreator()
+    // Async init for language detection (Windows only)
+    if (manager instanceof UnattendedWindowsManager) {
+      await manager.init()
+    }
+
+    return manager
   }
 
   private getUefiFirmwarePath (os: string): string | undefined {
@@ -449,12 +456,12 @@ export class CreateMachineServiceV2 {
 
     for (const p of searchPaths) {
       if (fs.existsSync(p)) {
-        this.debug.log(`Found VirtIO drivers ISO at: ${p}`)
+        this.debug.debug(`Found VirtIO drivers ISO at: ${p}`)
         return p
       }
     }
 
-    this.debug.log('warn', 'VirtIO drivers ISO not found in any standard location')
+    this.debug.warn('VirtIO drivers ISO not found in any standard location')
     return undefined
   }
 
@@ -515,11 +522,11 @@ export class CreateMachineServiceV2 {
       where: { id: machineId },
       data: { status }
     })
-    this.debug.log(`Machine status updated to ${status}`)
+    this.debug.debug(`Machine status updated to ${status}`)
   }
 
   private async rollback (machine: Machine): Promise<void> {
-    this.debug.log(`Rolling back machine ${machine.id}`)
+    this.debug.debug(`Rolling back machine ${machine.id}`)
 
     try {
       // Get infinization and stop the VM if running
@@ -527,11 +534,11 @@ export class CreateMachineServiceV2 {
       const status = await infinization.getVMStatus(machine.id)
 
       if (status.processAlive) {
-        this.debug.log('Stopping VM during rollback')
+        this.debug.debug('Stopping VM during rollback')
         await infinization.stopVM(machine.id, { force: true })
       }
     } catch (error: any) {
-      this.debug.log('warn', `Error during rollback stop: ${error.message}`)
+      this.debug.warn(`Error during rollback stop: ${error.message}`)
     }
 
     // Update status to error
@@ -541,7 +548,7 @@ export class CreateMachineServiceV2 {
       // Ignore status update errors during rollback
     }
 
-    this.debug.log('Rollback completed')
+    this.debug.debug('Rollback completed')
   }
 
   /**

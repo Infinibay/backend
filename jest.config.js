@@ -4,6 +4,9 @@ module.exports = {
     "^.+.tsx?$": ["ts-jest", {}],
   },
   moduleNameMapper: {
+    '^@main/logger$': '<rootDir>/__mocks__/logger.ts',
+    '^@utils/VirtManager$': '<rootDir>/__mocks__/utils/VirtManager/index.ts',
+    '^@utils/VirtManager/(.*)$': '<rootDir>/__mocks__/utils/VirtManager/$1',
     '^@utils/(.*)$': '<rootDir>/app/utils/$1',
     '^@services/(.*)$': '<rootDir>/app/services/$1',
     '^@graphql/(.*)$': '<rootDir>/app/graphql/$1',

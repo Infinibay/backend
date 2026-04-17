@@ -1,6 +1,6 @@
 import 'reflect-metadata'
 import { describe, it, expect, beforeEach } from '@jest/globals'
-import { NetworkService } from '../../../app/services/network/networkService'
+import { NetworkService } from '../../../app/services/networkService'
 
 describe('NetworkService (Deprecated)', () => {
   let networkService: NetworkService

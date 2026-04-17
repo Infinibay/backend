@@ -1,17 +1,13 @@
+import logger from '@main/logger'
 import { Resolver, Query, Arg, Ctx } from 'type-graphql'
 import { InfinibayContext } from '@main/utils/context'
 import { getQemuGuestAgentService } from '@services/QemuGuestAgentService'
 import { getVirtioSocketWatcherService } from '@services/VirtioSocketWatcherService'
 import { VmDiagnostics, SocketConnectionStats, VmConnectionInfo } from './type'
-import { Debugger } from '@main/utils/debug'
 
 @Resolver()
 export class VmDiagnosticsResolver {
-  private debug: Debugger
-
-  constructor () {
-    this.debug = new Debugger('vm-diagnostics')
-  }
+  private debug = logger.child({ module: 'vm-diagnostics' })
 
   /**
    * Maps a service connection object to VmConnectionInfo GraphQL type
@@ -46,7 +42,7 @@ export class VmDiagnosticsResolver {
     @Arg('vmId') vmId: string,
     @Ctx() { prisma }: InfinibayContext
   ): Promise<VmDiagnostics> {
-    this.debug.log('info', `Running diagnostics for VM ${vmId}`)
+    this.debug.info(`Running diagnostics for VM ${vmId}`)
 
     try {
       // Get VM information
@@ -82,7 +78,7 @@ export class VmDiagnosticsResolver {
           connectionStats = this.mapToVmConnectionInfo(vmConnection)
         }
       } catch (error) {
-        this.debug.log('warn', `Could not get socket watcher stats: ${error}`)
+        this.debug.warn(`Could not get socket watcher stats: ${error}`)
       }
 
       return {
@@ -113,7 +109,7 @@ export class VmDiagnosticsResolver {
         ]
       }
     } catch (error) {
-      this.debug.log('error', `Diagnostics failed for VM ${vmId}: ${error}`)
+      this.debug.error(`Diagnostics failed for VM ${vmId}: ${error}`)
       throw error
     }
   }
@@ -133,7 +129,7 @@ export class VmDiagnosticsResolver {
         connections: stats.connections.map(conn => this.mapToVmConnectionInfo(conn))
       }
     } catch (error) {
-      this.debug.log('error', `Failed to get connection stats: ${error}`)
+      this.debug.error(`Failed to get connection stats: ${error}`)
       return null
     }
   }

@@ -1,3 +1,4 @@
+import logger from '@main/logger'
 import { PrismaClient, AppSettings } from '@prisma/client'
 import { promises as fs } from 'fs'
 import path from 'path'
@@ -40,13 +41,13 @@ export class AppSettingsService {
 
       // Return first wallpaper if available
       if (wallpapers.length > 0) {
-        console.log(`Auto-selecting first wallpaper: ${wallpapers[0]}`)
+        logger.info(`Auto-selecting first wallpaper: ${wallpapers[0]}`)
         return wallpapers[0]
       }
 
       return null
     } catch (error) {
-      console.warn('Could not read wallpapers directory:', error)
+      logger.warn('Could not read wallpapers directory:', error)
       return null
     }
   }
@@ -78,13 +79,13 @@ export class AppSettingsService {
             where: { id: 'default-settings' },
             data: { wallpaper: firstWallpaper }
           })
-          console.log('✓ Auto-selected first wallpaper')
+          logger.info('✓ Auto-selected first wallpaper')
         }
       }
 
       return settings
     } catch (error) {
-      console.error('Error retrieving app settings:', error)
+      logger.error('Error retrieving app settings:', error)
       throw error
     }
   }
@@ -108,7 +109,7 @@ export class AppSettingsService {
 
       return updatedSettings
     } catch (error) {
-      console.error('Error updating app settings:', error)
+      logger.error('Error updating app settings:', error)
       throw error
     }
   }
@@ -130,10 +131,10 @@ export class AppSettingsService {
         }
       })
 
-      console.log('Default app settings created successfully')
+      logger.info('Default app settings created successfully')
       return defaultSettings
     } catch (error) {
-      console.error('Error creating default app settings:', error)
+      logger.error('Error creating default app settings:', error)
       throw error
     }
   }
@@ -156,7 +157,7 @@ export class AppSettingsService {
 
       return resetSettings
     } catch (error) {
-      console.error('Error resetting app settings:', error)
+      logger.error('Error resetting app settings:', error)
       throw error
     }
   }

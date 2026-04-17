@@ -12,14 +12,14 @@
  * ```
  */
 
+import logger from '@main/logger'
 import fs from 'fs'
 import path from 'path'
 import { Infinization, VMEventData } from '@infinibay/infinization'
 import prisma from '../utils/database'
 import { getEventManager, EventAction } from './EventManager'
-import { Debugger } from '../utils/debug'
 
-const debug = new Debugger('infinization-service')
+const debug = logger.child({ module: 'infinization-service' })
 
 // Configuration from environment variables
 const INFINIZATION_CONFIG = {
@@ -71,18 +71,18 @@ export async function getInfinization (): Promise<Infinization> {
 async function initializeInfinization (): Promise<Infinization> {
   // Check if running as root (required for nftables)
   if (process.getuid && process.getuid() !== 0) {
-    console.error('')
-    console.error('╔══════════════════════════════════════════════════════════════╗')
-    console.error('║  ERROR: Backend must run as root to use infinization         ║')
-    console.error('║                                                              ║')
-    console.error('║  Infinization requires root permissions for:                 ║')
-    console.error('║    - nftables firewall management                            ║')
-    console.error('║    - TAP network device creation                             ║')
-    console.error('║    - QEMU process management                                 ║')
-    console.error('║                                                              ║')
-    console.error('║  Run with: sudo npm run dev                                  ║')
-    console.error('╚══════════════════════════════════════════════════════════════╝')
-    console.error('')
+    logger.error('')
+    logger.error('╔══════════════════════════════════════════════════════════════╗')
+    logger.error('║  ERROR: Backend must run as root to use infinization         ║')
+    logger.error('║                                                              ║')
+    logger.error('║  Infinization requires root permissions for:                 ║')
+    logger.error('║    - nftables firewall management                            ║')
+    logger.error('║    - TAP network device creation                             ║')
+    logger.error('║    - QEMU process management                                 ║')
+    logger.error('║                                                              ║')
+    logger.error('║  Run with: sudo npm run dev                                  ║')
+    logger.error('╚══════════════════════════════════════════════════════════════╝')
+    logger.error('')
     process.exit(1)
   }
 
@@ -102,11 +102,11 @@ async function initializeInfinization (): Promise<Infinization> {
   for (const dir of requiredDirs) {
     if (!fs.existsSync(dir.path)) {
       fs.mkdirSync(dir.path, { recursive: true, mode: 0o755 })
-      console.log(`📁 Created ${dir.name} directory: ${dir.path}`)
+      logger.info(`📁 Created ${dir.name} directory: ${dir.path}`)
     }
   }
 
-  console.log('🚀 Initializing Infinization service...')
+  logger.info('🚀 Initializing Infinization service...')
 
   const eventManager = getEventManager()
 
@@ -122,10 +122,10 @@ async function initializeInfinization (): Promise<Infinization> {
 
   await infinization.initialize()
 
-  console.log('✅ Infinization service initialized successfully')
-  console.log(`   - Disk directory: ${INFINIZATION_CONFIG.diskDir}`)
-  console.log(`   - QMP socket directory: ${INFINIZATION_CONFIG.qmpSocketDir}`)
-  console.log(`   - Health monitor: ${INFINIZATION_CONFIG.autoStartHealthMonitor ? 'enabled' : 'disabled'}`)
+  logger.info('✅ Infinization service initialized successfully')
+  logger.info(`   - Disk directory: ${INFINIZATION_CONFIG.diskDir}`)
+  logger.info(`   - QMP socket directory: ${INFINIZATION_CONFIG.qmpSocketDir}`)
+  logger.info(`   - Health monitor: ${INFINIZATION_CONFIG.autoStartHealthMonitor ? 'enabled' : 'disabled'}`)
 
   // Subscribe to QMP events for real-time status updates
   subscribeToVMEvents(infinization)
@@ -156,7 +156,7 @@ function subscribeToVMEvents (infinization: Infinization): void {
   eventHandler.on('vm:event', async (eventData: VMEventData) => {
     const action: EventAction = statusToAction[eventData.newStatus] || 'update'
 
-    debug.log(`QMP event: ${eventData.event} for VM ${eventData.vmId} (${eventData.previousStatus} -> ${eventData.newStatus})`)
+    debug.debug(`QMP event: ${eventData.event} for VM ${eventData.vmId} (${eventData.previousStatus} -> ${eventData.newStatus})`)
 
     try {
       // Fetch full VM data for the event payload
@@ -172,20 +172,20 @@ function subscribeToVMEvents (infinization: Infinization): void {
 
       if (vm) {
         await eventManager.dispatchEvent('vms', action, vm)
-        debug.log(`Dispatched vms:${action} event for VM ${vm.name}`)
+        debug.debug(`Dispatched vms:${action} event for VM ${vm.name}`)
       }
     } catch (error) {
-      debug.log('error', `Failed to dispatch event for VM ${eventData.vmId}: ${error}`)
+      debug.error(`Failed to dispatch event for VM ${eventData.vmId}: ${error}`)
     }
   })
 
   // Listen for disconnect events (QMP socket closed unexpectedly)
   eventHandler.on('vm:disconnect', async (data: { vmId: string; timestamp: Date }) => {
-    debug.log(`QMP disconnect for VM ${data.vmId}`)
+    debug.debug(`QMP disconnect for VM ${data.vmId}`)
     // HealthMonitor will handle crash detection; just log here
   })
 
-  console.log('📡 Subscribed to QMP events for real-time status updates')
+  logger.info('📡 Subscribed to QMP events for real-time status updates')
 }
 
 /**
@@ -201,32 +201,32 @@ async function attachToRunningVMs (infinization: Infinization): Promise<void> {
     })
 
     if (runningVMs.length === 0) {
-      console.log('📋 No running VMs to attach to')
+      logger.info('📋 No running VMs to attach to')
       return
     }
 
-    console.log(`📋 Attaching to ${runningVMs.length} running VM(s)...`)
+    logger.info(`📋 Attaching to ${runningVMs.length} running VM(s)...`)
 
     for (const vm of runningVMs) {
       const qmpSocketPath = vm.configuration?.qmpSocketPath
 
       if (!qmpSocketPath) {
-        debug.log(`VM ${vm.name} (${vm.id}) has no QMP socket path, skipping`)
+        debug.debug(`VM ${vm.name} (${vm.id}) has no QMP socket path, skipping`)
         continue
       }
 
       try {
         await infinization.attachToRunningVM(vm.id, qmpSocketPath)
-        debug.log(`Attached to VM ${vm.name} (${vm.id})`)
+        debug.debug(`Attached to VM ${vm.name} (${vm.id})`)
       } catch (error) {
         // VM might have crashed between DB query and attach attempt
-        debug.log('warn', `Failed to attach to VM ${vm.name} (${vm.id}): ${error}`)
+        debug.warn(`Failed to attach to VM ${vm.name} (${vm.id}): ${error}`)
       }
     }
 
-    console.log('✅ Finished attaching to running VMs')
+    logger.info('✅ Finished attaching to running VMs')
   } catch (error) {
-    console.error('❌ Error attaching to running VMs:', error)
+    logger.error('❌ Error attaching to running VMs:', error)
     // Don't fail initialization - health monitor will catch crashed VMs
   }
 }
@@ -241,13 +241,13 @@ export async function shutdownInfinization (): Promise<void> {
     return
   }
 
-  console.log('🛑 Shutting down Infinization service...')
+  logger.info('🛑 Shutting down Infinization service...')
 
   try {
     await infinizationInstance.shutdown()
-    console.log('✅ Infinization service shut down successfully')
+    logger.info('✅ Infinization service shut down successfully')
   } catch (error) {
-    console.error('❌ Error shutting down Infinization:', error)
+    logger.error('❌ Error shutting down Infinization:', error)
     throw error
   } finally {
     infinizationInstance = null
@@ -299,35 +299,35 @@ export async function ejectAllCdroms (vmId: string): Promise<void> {
           }
         }
 
-        debug.log(`Ejecting CD-ROM device: ${block.device} from VM ${vmId}`)
+        debug.debug(`Ejecting CD-ROM device: ${block.device} from VM ${vmId}`)
         try {
           await infinization.ejectCdrom(vmId, block.device)
-          debug.log(`CD-ROM device ${block.device} ejected successfully`)
+          debug.debug(`CD-ROM device ${block.device} ejected successfully`)
         } catch (ejectError: any) {
           // Individual eject failures shouldn't stop the process
-          debug.log('warn', `Failed to eject ${block.device}: ${ejectError.message}`)
+          debug.warn(`Failed to eject ${block.device}: ${ejectError.message}`)
         }
       }
     }
 
-    debug.log(`All CD-ROMs ejected from VM ${vmId}`)
+    debug.debug(`All CD-ROMs ejected from VM ${vmId}`)
 
     // Delete temporary ISOs after successful ejection
     for (const isoPath of tempIsosToDelete) {
       try {
         await fs.promises.unlink(isoPath)
-        debug.log(`Deleted temp ISO: ${isoPath}`)
+        debug.debug(`Deleted temp ISO: ${isoPath}`)
       } catch (unlinkError: any) {
         // Non-fatal: log warning but don't fail the operation
-        debug.log('warn', `Failed to delete temp ISO ${isoPath}: ${unlinkError.message}`)
+        debug.warn(`Failed to delete temp ISO ${isoPath}: ${unlinkError.message}`)
       }
     }
 
     if (tempIsosToDelete.length > 0) {
-      debug.log(`Cleaned up ${tempIsosToDelete.length} temporary ISO(s) for VM ${vmId}`)
+      debug.debug(`Cleaned up ${tempIsosToDelete.length} temporary ISO(s) for VM ${vmId}`)
     }
   } catch (error: any) {
-    debug.log('warn', `Failed to eject CD-ROMs from VM ${vmId}: ${error.message}`)
+    debug.warn(`Failed to eject CD-ROMs from VM ${vmId}: ${error.message}`)
     // Non-fatal: VM can continue running with ISOs mounted
   }
 }

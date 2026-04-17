@@ -1,4 +1,4 @@
-import debug from 'debug'
+import logger from '@main/logger'
 import path from 'path'
 import fs from 'fs/promises'
 import { existsSync } from 'fs'
@@ -13,8 +13,6 @@ import {
 } from './types'
 import { PackageWorker } from './PackageWorker'
 import { getLicenseValidator } from './LicenseValidator'
-
-const log = debug('infinibay:packages')
 
 // Interfaz que deben implementar los checkers de paquetes
 export interface IPackageChecker {
@@ -50,7 +48,7 @@ export class PackageManager {
    * Carga todos los paquetes (built-in y externos)
    */
   async loadAll(): Promise<void> {
-    log('Loading all packages...')
+    logger.debug('Loading all packages...')
 
     // Cargar built-in packages
     await this.loadBuiltinPackages()
@@ -58,7 +56,7 @@ export class PackageManager {
     // Cargar external packages
     await this.loadExternalPackages()
 
-    log('Loaded %d packages (%d builtin, %d external)',
+    logger.debug('Loaded %d packages (%d builtin, %d external)',
       this.loadedPackages.size + this.externalWorkers.size,
       this.loadedPackages.size,
       this.externalWorkers.size)
@@ -69,7 +67,7 @@ export class PackageManager {
    */
   private async loadBuiltinPackages(): Promise<void> {
     if (!existsSync(this.builtinPackagesDir)) {
-      log('Built-in packages directory does not exist: %s', this.builtinPackagesDir)
+      logger.debug('Built-in packages directory does not exist: %s', this.builtinPackagesDir)
       return
     }
 
@@ -82,7 +80,7 @@ export class PackageManager {
       try {
         await this.loadPackage(packagePath, true)
       } catch (error) {
-        log('Failed to load built-in package %s: %s', entry.name, error)
+        logger.debug('Failed to load built-in package %s: %s', entry.name, error)
       }
     }
   }
@@ -93,7 +91,7 @@ export class PackageManager {
    */
   private async loadExternalPackages(): Promise<void> {
     if (!existsSync(this.externalPackagesDir)) {
-      log('External packages directory does not exist: %s', this.externalPackagesDir)
+      logger.debug('External packages directory does not exist: %s', this.externalPackagesDir)
       return
     }
 
@@ -106,7 +104,7 @@ export class PackageManager {
       try {
         await this.loadExternalPackage(packagePath)
       } catch (error) {
-        log('Failed to load external package %s: %s', entry.name, error)
+        logger.debug('Failed to load external package %s: %s', entry.name, error)
       }
     }
   }
@@ -151,9 +149,9 @@ export class PackageManager {
       // Sincronizar con base de datos
       await this.syncPackageToDatabase(manifest, manifestHash, false)
 
-      log('Loaded external package: %s v%s', manifest.name, manifest.version)
+      logger.debug('Loaded external package: %s v%s', manifest.name, manifest.version)
     } catch (error) {
-      log('Failed to spawn worker for package %s: %s', manifest.name, error)
+      logger.debug('Failed to spawn worker for package %s: %s', manifest.name, error)
       throw error
     }
   }
@@ -188,7 +186,7 @@ export class PackageManager {
     for (const checkerDef of manifest.checkers) {
       const checkerPath = path.join(packagePath, checkerDef.file)
       if (!existsSync(checkerPath)) {
-        log('Checker file not found: %s', checkerPath)
+        logger.debug('Checker file not found: %s', checkerPath)
         continue
       }
 
@@ -203,10 +201,10 @@ export class PackageManager {
           // Si exporta un objeto con método analyze
           checkers.set(checkerDef.name, CheckerClass)
         } else {
-          log('Invalid checker export in %s', checkerPath)
+          logger.debug('Invalid checker export in %s', checkerPath)
         }
       } catch (error) {
-        log('Failed to load checker %s: %s', checkerDef.name, error)
+        logger.debug('Failed to load checker %s: %s', checkerDef.name, error)
       }
     }
 
@@ -222,7 +220,7 @@ export class PackageManager {
     // Sincronizar con base de datos
     await this.syncPackageToDatabase(manifest, manifestHash, isBuiltin)
 
-    log('Loaded package: %s v%s (%d checkers)', manifest.name, manifest.version, checkers.size)
+    logger.debug('Loaded package: %s v%s (%d checkers)', manifest.name, manifest.version, checkers.size)
   }
 
   /**
@@ -330,7 +328,7 @@ export class PackageManager {
     })
 
     if (!dbChecker) {
-      log('Checker %s/%s is disabled', packageName, checkerName)
+      logger.debug('Checker %s/%s is disabled', packageName, checkerName)
       return []
     }
 
@@ -366,7 +364,7 @@ export class PackageManager {
     const result = await licenseValidator.validatePackageLicense(packageName)
 
     if (!result.isValid) {
-      log('Package %s license validation failed: %s', packageName, result.message)
+      logger.debug('Package %s license validation failed: %s', packageName, result.message)
     }
 
     return result.isValid
@@ -383,7 +381,7 @@ export class PackageManager {
     // Verificar licencia para paquetes comerciales
     const hasValidLicense = await this.checkPackageLicense(packageName)
     if (!hasValidLicense) {
-      log('Skipping external package %s - no valid license', packageName)
+      logger.debug('Skipping external package %s - no valid license', packageName)
       return []
     }
 
@@ -393,7 +391,7 @@ export class PackageManager {
     })
 
     if (!dbPackage) {
-      log('External package %s is disabled', packageName)
+      logger.debug('External package %s is disabled', packageName)
       return []
     }
 
@@ -430,7 +428,7 @@ export class PackageManager {
           })
           results.push(...checkerResults)
         } catch (error) {
-          log('Error executing checker %s/%s: %s', packageName, checkerName, error)
+          logger.debug('Error executing checker %s/%s: %s', packageName, checkerName, error)
         }
       }
     }
@@ -444,7 +442,7 @@ export class PackageManager {
         })
         results.push(...checkerResults)
       } catch (error) {
-        log('Error executing external package %s: %s', packageName, error)
+        logger.debug('Error executing external package %s: %s', packageName, error)
       }
     }
 
@@ -523,19 +521,19 @@ export class PackageManager {
    * Shutdown all external package workers
    */
   async shutdown(): Promise<void> {
-    log('Shutting down %d external workers...', this.externalWorkers.size)
+    logger.debug('Shutting down %d external workers...', this.externalWorkers.size)
 
     const shutdownPromises: Promise<void>[] = []
 
     for (const [name, worker] of this.externalWorkers) {
-      log('Shutting down worker: %s', name)
+      logger.debug('Shutting down worker: %s', name)
       shutdownPromises.push(worker.shutdown())
     }
 
     await Promise.allSettled(shutdownPromises)
     this.externalWorkers.clear()
 
-    log('All external workers shut down')
+    logger.debug('All external workers shut down')
   }
 }
 

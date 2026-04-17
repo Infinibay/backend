@@ -1,8 +1,9 @@
+import logger from '@main/logger'
 import { exec as execLocal, spawn } from 'child_process'
 import { Client } from 'ssh2'
 import si from 'systeminformation'
 
-import { Debugger } from '@utils/debug'
+/*
 
 /*
     Step:
@@ -23,7 +24,7 @@ class SetupService {
   private currentStep: string = ''
   private hardwareInfo: any // Placeholder type, adjust as needed
   private blockDevices: any[] = [] // Placeholder type, adjust as needed
-  private debug: Debugger = new Debugger('setup-service')
+  private debug = logger.child({ module: 'setup-service' })
 
   constructor (connection: string | undefined = undefined) {
     this.connection = connection
@@ -82,7 +83,7 @@ class SetupService {
 
       // Log or further process this.hardwareInfo as needed
     } catch (error) {
-      this.debug.log('error', `Error detecting hardware: ${error}`)
+      this.debug.error(`Error detecting hardware: ${error}`)
     }
   }
 
@@ -131,7 +132,7 @@ class SetupService {
         size: device.size
       }))
     } catch (error) {
-      this.debug.log('error', `Error listing block devices: ${error}`)
+      this.debug.error(`Error listing block devices: ${error}`)
       return []
     }
   }
@@ -183,9 +184,9 @@ class SetupService {
     try {
       // Execute the command to create the Btrfs volume
       await this.exec(['sudo', ...createVolumeCmd])
-      this.debug.log('info', 'Btrfs volume created successfully.')
+      this.debug.info('Btrfs volume created successfully.')
     } catch (error) {
-      this.debug.log('error', `Error in createBtrfsVolume: ${error}`)
+      this.debug.error(`Error in createBtrfsVolume: ${error}`)
     }
   }
 
@@ -198,9 +199,9 @@ class SetupService {
 
     try {
       await this.exec(mountCmd)
-      this.debug.log('info', 'Btrfs volume mounted at /mnt/storage successfully.')
+      this.debug.info('Btrfs volume mounted at /mnt/storage successfully.')
     } catch (error) {
-      this.debug.log('error', `Error mounting Btrfs volume: ${error}`)
+      this.debug.error(`Error mounting Btrfs volume: ${error}`)
     }
   }
 
@@ -235,23 +236,23 @@ class SetupService {
   exec (args: string[] = []): Promise<string> {
     if (this.connection) {
       // Handle SSH connection
-      this.debug.log('Executing commands over SSH not supported yet')
+      this.debug.debug('Executing commands over SSH not supported yet')
       // const conn = new Client();
       // conn.on('ready', () => {
-      // 	this.debug.log('Client :: ready');
+      // 	this.debug.debug('Client :: ready');
       // 	commands.forEach((command) => {
       // 		conn.exec(command, (err, stream) => {
       // 			if (err) {
-      // 				this.debug.log('error', `SSH exec error: ${err}`);
+      // 				this.debug.error(`SSH exec error: ${err}`);
       // 				return;
       // 			}
       // 			stream.on('close', (code, signal) => {
-      // 				this.debug.log(`Stream :: close :: code: ${code}, signal: ${signal}`);
+      // 				this.debug.debug(`Stream :: close :: code: ${code}, signal: ${signal}`);
       // 				conn.end();
       // 			}).on('data', (data) => {
-      // 				this.debug.log(`SSH STDOUT: ${data}`);
+      // 				this.debug.debug(`SSH STDOUT: ${data}`);
       // 			}).stderr.on('data', (data) => {
-      // 				this.debug.log('error', `SSH STDERR: ${data}`);
+      // 				this.debug.error(`SSH STDERR: ${data}`);
       // 			});
       // 		});
       // 	});
@@ -269,31 +270,31 @@ class SetupService {
     } else {
       // Execute commands locally
       return new Promise((resolve, reject) => {
-        this.debug.log('Executing command: ', args.join(' '))
+        this.debug.debug('Executing command: ', args.join(' '))
         const process = spawn(args[0], args.slice(1))
         let output = ''
 
         process.stdout.on('data', (data) => {
-          this.debug.log(`stdout: ${data}`)
+          this.debug.debug(`stdout: ${data}`)
           output += data
         })
 
         process.stderr.on('data', (data) => {
-          this.debug.log('error', `stderr: ${data}`)
+          this.debug.error(`stderr: ${data}`)
         })
 
         process.on('close', (code) => {
           if (code === 0) {
-            this.debug.log(`Command executed successfully: ${args.join(' ')}`)
+            this.debug.debug(`Command executed successfully: ${args.join(' ')}`)
             resolve(output)
           } else {
-            this.debug.log('error', `Command failed with exit code ${code}: ${args.join(' ')}`)
+            this.debug.error(`Command failed with exit code ${code}: ${args.join(' ')}`)
             reject(new Error(`Command failed with exit code ${code}`))
           }
         })
 
         process.on('error', (error) => {
-          this.debug.log('error', `Error occurred while executing command: ${args.join(' ')}`)
+          this.debug.error(`Error occurred while executing command: ${args.join(' ')}`)
           reject(error)
         })
       })

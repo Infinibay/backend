@@ -1,3 +1,4 @@
+import logger from '@main/logger'
 import { PrismaClient, ISO } from '@prisma/client'
 import * as fs from 'fs/promises'
 import * as path from 'path'
@@ -56,7 +57,7 @@ export class ISOService {
 
           if (!existingISO) {
             // Add to database
-            await prisma.iSO.create({
+            const newISO = await prisma.iSO.create({
               data: {
                 filename,
                 os: osType,
@@ -66,7 +67,10 @@ export class ISOService {
                 lastVerified: new Date()
               }
             })
+            // Emit ISO registered event
+            this.eventManager.emitISORegistered(newISO)
           } else {
+            // Update verification timestamp
             // Update verification timestamp
             await prisma.iSO.update({
               where: { id: existingISO.id },
@@ -93,7 +97,7 @@ export class ISOService {
         }
       }
     } catch (error) {
-      console.error('Error syncing ISOs with filesystem:', error)
+      logger.error('Error syncing ISOs with filesystem:', error)
       throw error
     }
   }
@@ -183,7 +187,7 @@ export class ISOService {
 
       return true
     } catch (error) {
-      console.error('ISO validation failed:', error)
+      logger.error('ISO validation failed:', error)
       return false
     }
   }
@@ -275,7 +279,7 @@ export class ISOService {
     try {
       await fs.unlink(iso.path)
     } catch (error) {
-      console.error('Failed to delete ISO file:', error)
+      logger.error('Failed to delete ISO file:', error)
     }
 
     // Delete from database

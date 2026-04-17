@@ -1,7 +1,6 @@
 import { PrismaClient } from '@prisma/client'
-import { Debugger } from '../../utils/debug'
-
-// TODO: This service needs to be migrated to use infinization instead of libvirt-node
+import { Logger } from 'winston'
+import logger from '@main/logger'// TODO: This service needs to be migrated to use infinization instead of libvirt-node
 // For now, hardware updates should be done by recreating the VM with new settings
 
 /**
@@ -12,13 +11,13 @@ import { Debugger } from '../../utils/debug'
  */
 export class HardwareUpdateService {
   private prisma: PrismaClient
-  private debug: Debugger
+  private debug: Logger
   private machineId: string
 
   constructor (prisma: PrismaClient, machineId: string) {
     this.prisma = prisma
     this.machineId = machineId
-    this.debug = new Debugger('hardware-update-service')
+    this.debug = logger.child({ module: 'hardware-update-service' })
   }
 
   /**
@@ -27,8 +26,8 @@ export class HardwareUpdateService {
    * VMs managed by infinization should be recreated with new settings.
    */
   async updateHardware (): Promise<void> {
-    this.debug.log('warn', `Hardware update requested for ${this.machineId} but this feature is temporarily disabled`)
-    this.debug.log('warn', 'VMs should be recreated with new hardware settings instead')
+    this.debug.warn(`Hardware update requested for ${this.machineId} but this feature is temporarily disabled`)
+    this.debug.warn('VMs should be recreated with new hardware settings instead')
 
     // Update status to indicate the operation is not supported
     await this.prisma.machine.update({

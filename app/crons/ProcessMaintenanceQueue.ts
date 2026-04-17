@@ -1,9 +1,9 @@
+import logger from '@main/logger'
 import { CronJob } from 'cron'
 import { PrismaClient, MaintenanceTrigger, MaintenanceStatus } from '@prisma/client'
 import { MaintenanceService } from '@services/MaintenanceService'
-import { Debugger } from '@utils/debug'
 
-const debug = new Debugger('ProcessMaintenanceQueue')
+const debug = logger.child({ module: 'ProcessMaintenanceQueue' })
 
 /**
  * Cron job to process scheduled maintenance tasks
@@ -22,8 +22,8 @@ export class ProcessMaintenanceQueue {
     // Run every minute to check for due tasks
     this.job = new CronJob('*/1 * * * *', () => {
       this.processDueTasks().catch(error => {
-        debug.log('error', `Failed to process maintenance queue: ${error.message}`)
-        console.error('ProcessMaintenanceQueue error:', error)
+        debug.error(`Failed to process maintenance queue: ${error.message}`)
+        logger.error('ProcessMaintenanceQueue error:', error)
       })
     })
   }
@@ -33,7 +33,7 @@ export class ProcessMaintenanceQueue {
    */
   start (): void {
     if (!this.job.running) {
-      debug.log('Starting ProcessMaintenanceQueue cron job')
+      debug.debug('Starting ProcessMaintenanceQueue cron job')
       this.job.start()
     }
   }
@@ -43,7 +43,7 @@ export class ProcessMaintenanceQueue {
    */
   stop (): void {
     if (this.job.running) {
-      debug.log('Stopping ProcessMaintenanceQueue cron job')
+      debug.debug('Stopping ProcessMaintenanceQueue cron job')
       this.job.stop()
     }
   }
@@ -61,7 +61,7 @@ export class ProcessMaintenanceQueue {
   private async processDueTasks (): Promise<void> {
     // Prevent overlapping executions
     if (this.isRunning) {
-      debug.log('warn', 'ProcessMaintenanceQueue already running, skipping this cycle')
+      debug.warn('ProcessMaintenanceQueue already running, skipping this cycle')
       return
     }
 
@@ -72,17 +72,17 @@ export class ProcessMaintenanceQueue {
       const dueTasks = await this.maintenanceService.getDueTasks()
 
       if (dueTasks.length === 0) {
-        debug.log('No due maintenance tasks found')
+        debug.debug('No due maintenance tasks found')
         return
       }
 
-      debug.log(`Found ${dueTasks.length} due maintenance tasks`)
+      debug.debug(`Found ${dueTasks.length} due maintenance tasks`)
 
       // Process each task
       const results = await Promise.allSettled(
         dueTasks.map(async (task) => {
           try {
-            debug.log(`Executing scheduled maintenance task: ${task.name} (${task.id})`)
+            debug.debug(`Executing scheduled maintenance task: ${task.name} (${task.id})`)
 
             const result = await this.maintenanceService.executeTask(
               task.id,
@@ -90,15 +90,15 @@ export class ProcessMaintenanceQueue {
             )
 
             if (result.success) {
-              debug.log(`Successfully executed maintenance task: ${task.name}`)
+              debug.debug(`Successfully executed maintenance task: ${task.name}`)
             } else {
-              debug.log('error', `Failed to execute maintenance task: ${task.name} - ${result.error}`)
+              debug.error(`Failed to execute maintenance task: ${task.name} - ${result.error}`)
             }
 
             return { taskId: task.id, taskName: task.name, success: result.success, error: result.error }
           } catch (error) {
             const errorMessage = error instanceof Error ? error.message : 'Unknown error'
-            debug.log('error', `Error executing maintenance task ${task.name}: ${errorMessage}`)
+            debug.error(`Error executing maintenance task ${task.name}: ${errorMessage}`)
             return { taskId: task.id, taskName: task.name, success: false, error: errorMessage }
           }
         })
@@ -108,20 +108,20 @@ export class ProcessMaintenanceQueue {
       const successful = results.filter(r => r.status === 'fulfilled' && r.value.success).length
       const failed = results.length - successful
 
-      debug.log(`Maintenance queue processing complete: ${successful} successful, ${failed} failed`)
+      debug.debug(`Maintenance queue processing complete: ${successful} successful, ${failed} failed`)
 
       // Log details for failed tasks
       results.forEach(result => {
         if (result.status === 'fulfilled' && !result.value.success) {
-          debug.log('error', `Task ${result.value.taskName} failed: ${result.value.error}`)
+          debug.error(`Task ${result.value.taskName} failed: ${result.value.error}`)
         } else if (result.status === 'rejected') {
-          debug.log('error', `Task execution rejected: ${result.reason}`)
+          debug.error(`Task execution rejected: ${result.reason}`)
         }
       })
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error'
-      debug.log('error', `Critical error in processDueTasks: ${errorMessage}`)
-      console.error('ProcessMaintenanceQueue critical error:', error)
+      debug.error(`Critical error in processDueTasks: ${errorMessage}`)
+      logger.error('ProcessMaintenanceQueue critical error:', error)
     } finally {
       this.isRunning = false
     }
@@ -131,7 +131,7 @@ export class ProcessMaintenanceQueue {
    * Manually trigger processing of due tasks (for testing/debugging)
    */
   async triggerManualRun (): Promise<void> {
-    debug.log('Manual trigger of maintenance queue processing')
+    debug.debug('Manual trigger of maintenance queue processing')
     await this.processDueTasks()
   }
 

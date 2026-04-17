@@ -1,3 +1,4 @@
+import logger from '@main/logger'
 import { BaseCpuPinningStrategy, CpuPinningConfig } from './BasePinningStrategy'
 import {
   calculateBasicPinning,
@@ -22,14 +23,14 @@ export class BasicStrategy extends BaseCpuPinningStrategy {
     const numaTopology = this.getNumaTopology()
 
     // Log the NUMA topology for debugging purposes
-    console.log(`Setting CPU pinning for ${vcpuCount} vCPUs with NUMA topology:`,
+    logger.info(`Setting CPU pinning for ${vcpuCount} vCPUs with NUMA topology:`,
       Object.entries(numaTopology).map(([node, cpus]) => `${node}: ${cpus.join(',')}`).join(' | '))
 
     if (this.canOptimizeNumaPinning(vcpuCount, numaTopology)) {
-      console.log(`Using NUMA-aware CPU pinning strategy for ${vcpuCount} vCPUs`)
+      logger.info(`Using NUMA-aware CPU pinning strategy for ${vcpuCount} vCPUs`)
       return this.optimizeNumaPinning(vcpuCount, numaTopology)
     } else {
-      console.log(`Using round-robin CPU pinning strategy for ${vcpuCount} vCPUs`)
+      logger.info(`Using round-robin CPU pinning strategy for ${vcpuCount} vCPUs`)
       return this.optimizeRoundRobinPinning(vcpuCount, numaTopology)
     }
   }

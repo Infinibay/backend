@@ -1,12 +1,13 @@
 import { ScheduleOverallScansJob } from '../../app/crons/ScheduleOverallScans'
-import { VMHealthQueueManager } from '../../app/services/health/VMHealthQueueManager'
-import { EventManager } from '../../app/services/events/EventManager'
+import { VMHealthQueueManager } from '../../app/services/VMHealthQueueManager'
+import { EventManager } from '../../app/services/EventManager'
 import { PrismaClient } from '@prisma/client'
 import { mockDeep, DeepMockProxy } from 'jest-mock-extended'
 
+import logger from '@main/logger'
+
 // Type definitions for test data
 interface TestMachine {
-  id: string
   name: string
   status: string
 }
@@ -186,7 +187,7 @@ describe('ScheduleOverallScansJob', () => {
       mockPrisma.vMHealthCheckQueue.findMany.mockResolvedValue([])
       mockQueueManager.queueHealthCheck.mockResolvedValue('queue-id')
 
-      const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation()
+      const consoleErrorSpy = jest.spyOn(logger, 'error').mockImplementation()
 
       const scheduleMethod = (job as unknown as JobWithPrivateMethods).scheduleOverdueScans.bind(job)
       await scheduleMethod()

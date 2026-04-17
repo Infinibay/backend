@@ -1,6 +1,7 @@
 import 'reflect-metadata'
 import { PrismaClient } from '@prisma/client'
 import { mockDeep, mockReset, DeepMockProxy } from 'jest-mock-extended'
+import logger from '@main/logger'
 
 const mocks = { prisma: undefined as any }
 // Mock Prisma Client
@@ -176,8 +177,13 @@ declare global {
 }
 global.testTimeout = 30000
 
-// Suppress console errors during tests unless DEBUG is set
+// Suppress logger and console errors during tests unless DEBUG is set
 if (!process.env.DEBUG) {
   global.console.error = jest.fn()
   global.console.warn = jest.fn()
+  // Suppress winston logger output in tests
+  logger.error = jest.fn()
+  logger.warn = jest.fn()
+  logger.info = jest.fn()
+  logger.debug = jest.fn()
 }

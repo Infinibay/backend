@@ -2,7 +2,7 @@ import { Application } from '@prisma/client'
 import * as fs from 'fs'
 import * as path from 'path'
 
-import { UnattendedWindowsManager } from '@services/vm/unattended/unattendedWindowsManager'
+import { UnattendedWindowsManager } from '@services/unattendedWindowsManager'
 
 // Mock the module dependencies
 jest.mock('fs', () => ({
@@ -171,64 +171,64 @@ describe('UnattendedWindowsManager', () => {
 
   describe('language detection', () => {
     describe('detectISOLanguage', () => {
-      it('should detect English from filename', () => {
+      it('should detect English from filename', async () => {
         ;(fs.existsSync as jest.Mock).mockReturnValue(true)
         const managerEN = new UnattendedWindowsManager(10, mockUsername, mockPassword, mockProductKey, [])
         managerEN['isoPath'] = '/opt/infinibay/iso/Windows 10 EN-US.iso'
 
-        const lang = (managerEN as any).detectISOLanguage()
+        const lang = await (managerEN as any).detectISOLanguage()
         expect(lang).toBe('en-US')
       })
 
-      it('should detect Spanish from filename', () => {
+      it('should detect Spanish from filename', async () => {
         ;(fs.existsSync as jest.Mock).mockReturnValue(true)
         const managerES = new UnattendedWindowsManager(10, mockUsername, mockPassword, mockProductKey, [])
         managerES['isoPath'] = '/opt/infinibay/iso/Windows 11 es-ES.iso'
 
-        const lang = (managerES as any).detectISOLanguage()
+        const lang = await (managerES as any).detectISOLanguage()
         expect(lang).toBe('es-ES')
       })
 
-      it('should detect language from ISO filename', () => {
+      it('should detect language from ISO filename', async () => {
         ;(fs.existsSync as jest.Mock).mockReturnValue(true)
         const manager = new UnattendedWindowsManager(10, mockUsername, mockPassword, mockProductKey, [])
         manager['isoPath'] = '/opt/infinibay/iso/Windows 10 Pro en-US.iso'
 
-        const lang = (manager as any).detectISOLanguage()
+        const lang = await (manager as any).detectISOLanguage()
         expect(lang).toBe('en-US')
       })
 
-      it('should fallback to host system language when ISO not found', () => {
+      it('should fallback to host system language when ISO not found', async () => {
         ;(fs.existsSync as jest.Mock).mockReturnValue(false)
         const manager = new UnattendedWindowsManager(10, mockUsername, mockPassword, mockProductKey, [])
         manager['isoPath'] = '/nonexistent/iso.iso'
 
-        const lang = (manager as any).detectISOLanguage()
+        const lang = await (manager as any).detectISOLanguage()
         // Should return null when ISO not found
         expect(lang).toBeNull()
       })
 
-      it('should return null when ISO file does not exist', () => {
+      it('should return null when ISO file does not exist', async () => {
         ;(fs.existsSync as jest.Mock).mockReturnValue(false)
         const manager = new UnattendedWindowsManager(10, mockUsername, mockPassword, mockProductKey, [])
         manager['isoPath'] = '/nonexistent/iso.iso'
 
-        const lang = (manager as any).detectISOLanguage()
+        const lang = await (manager as any).detectISOLanguage()
         expect(lang).toBeNull()
       })
     })
 
     describe('detectLanguage', () => {
-      it('should prioritize ISO language over host system language', () => {
+      it('should prioritize ISO language over host system language', async () => {
         ;(fs.existsSync as jest.Mock).mockReturnValue(true)
         const manager = new UnattendedWindowsManager(10, mockUsername, mockPassword, mockProductKey, [])
         manager['isoPath'] = '/opt/infinibay/iso/Windows 10 EN-US.iso'
 
-        const langConfig = (manager as any).detectLanguage()
+        const langConfig = await (manager as any).detectLanguage()
         expect(langConfig.uiLanguage).toBe('en-US')
       })
 
-      it('should fallback to host system language when ISO not found', () => {
+      it('should fallback to host system language when ISO not found', async () => {
         // Set LANG env var so getHostSystemLanguage finds it
         const origLang = process.env.LANG
         process.env.LANG = 'de_DE.UTF-8'
@@ -236,7 +236,7 @@ describe('UnattendedWindowsManager', () => {
         const manager = new UnattendedWindowsManager(10, mockUsername, mockPassword, mockProductKey, [])
         manager['isoPath'] = '/nonexistent/iso.iso'
 
-        const langConfig = (manager as any).detectLanguage()
+        const langConfig = await (manager as any).detectLanguage()
         expect(langConfig.uiLanguage).toBe('de-DE')
 
         // Restore
@@ -247,7 +247,7 @@ describe('UnattendedWindowsManager', () => {
         }
       })
 
-      it('should use default en-US when no language detected', () => {
+      it('should use default en-US when no language detected', async () => {
         ;(fs.existsSync as jest.Mock).mockReturnValue(false)
         const origLang = process.env.LANG
         delete process.env.LANG
@@ -259,7 +259,7 @@ describe('UnattendedWindowsManager', () => {
         const execSync = require('child_process').execSync
         execSync.mockReturnValue('')
 
-        const langConfig = (manager as any).detectLanguage()
+        const langConfig = await (manager as any).detectLanguage()
         expect(langConfig.uiLanguage).toBe('en-US')
 
         if (origLang !== undefined) {

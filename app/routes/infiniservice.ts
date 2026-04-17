@@ -1,3 +1,4 @@
+import logger from '@main/logger'
 import express from 'express'
 import path from 'path'
 import fs from 'fs/promises'
@@ -58,7 +59,7 @@ router.get('/:platform/binary', async (req, res) => {
     const fileStream = await fs.readFile(binaryPath)
     res.send(fileStream)
   } catch (error) {
-    console.error('Error serving InfiniService binary:', error)
+    logger.error('Error serving InfiniService binary:', error)
     res.status(500).json({ error: 'Internal server error' })
   }
 })
@@ -99,7 +100,7 @@ router.get('/:platform/script', async (req, res) => {
     const fileContent = await fs.readFile(scriptPath, 'utf-8')
     res.send(fileContent)
   } catch (error) {
-    console.error('Error serving InfiniService script:', error)
+    logger.error('Error serving InfiniService script:', error)
     res.status(500).json({ error: 'Internal server error' })
   }
 })
@@ -127,7 +128,7 @@ router.get('/metadata', async (req, res) => {
       })
     }
   } catch (error) {
-    console.error('Error serving InfiniService metadata:', error)
+    logger.error('Error serving InfiniService metadata:', error)
     res.status(500).json({ error: 'Internal server error' })
   }
 })

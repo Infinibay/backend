@@ -1,10 +1,12 @@
+import logger from '@main/logger'
 import fs from 'fs'
 import path from 'path'
 import { exec } from 'child_process'
 import { promisify } from 'util'
-import { Debugger } from '@utils/debug'
 
 const execAsync = promisify(exec)
+
+/**
 
 /**
  * VirtIOPathResolver - Automatically detects VirtIO Windows drivers ISO location
@@ -23,7 +25,7 @@ const execAsync = promisify(exec)
  */
 export class VirtIOPathResolver {
   private static cachedPath: string | null = null
-  private static debug = new Debugger('virtio-path-resolver')
+  private static debug = logger.child({ module: 'virtio-path-resolver' })
 
   /**
    * Get search paths, including environment-configured directories
@@ -54,28 +56,28 @@ export class VirtIOPathResolver {
   public static async resolve (forceRefresh: boolean = false): Promise<string | null> {
     // Return cached result if available and not forcing refresh
     if (this.cachedPath !== null && !forceRefresh) {
-      this.debug.log('Returning cached VirtIO ISO path:', this.cachedPath)
+      this.debug.debug('Returning cached VirtIO ISO path:', this.cachedPath)
       return this.cachedPath
     }
 
-    this.debug.log('Searching for VirtIO Windows drivers ISO...')
+    this.debug.debug('Searching for VirtIO Windows drivers ISO...')
 
     // Priority 1: Check environment variable
     const envPath = process.env.VIRTIO_WIN_ISO_PATH
     if (envPath) {
       if (fs.existsSync(envPath)) {
-        this.debug.log('Found VirtIO ISO via environment variable:', envPath)
+        this.debug.debug('Found VirtIO ISO via environment variable:', envPath)
         this.cachedPath = envPath
         return envPath
       } else {
-        this.debug.log('warning', `VIRTIO_WIN_ISO_PATH is set but file does not exist: ${envPath}`)
+        this.debug.debug('warning', `VIRTIO_WIN_ISO_PATH is set but file does not exist: ${envPath}`)
       }
     }
 
     // Priority 2-5: Search common filesystem locations
     const foundPath = await this.searchFilesystem()
     if (foundPath) {
-      this.debug.log('Found VirtIO ISO at:', foundPath)
+      this.debug.debug('Found VirtIO ISO at:', foundPath)
       this.cachedPath = foundPath
       return foundPath
     }
@@ -83,12 +85,12 @@ export class VirtIOPathResolver {
     // Priority 6: Try package manager queries (slower, so last resort)
     const pkgPath = await this.queryPackageManager()
     if (pkgPath) {
-      this.debug.log('Found VirtIO ISO via package manager:', pkgPath)
+      this.debug.debug('Found VirtIO ISO via package manager:', pkgPath)
       this.cachedPath = pkgPath
       return pkgPath
     }
 
-    this.debug.log('warning', 'VirtIO Windows drivers ISO not found in any known location')
+    this.debug.debug('warning', 'VirtIO Windows drivers ISO not found in any known location')
     this.logSearchHints()
 
     return null
@@ -120,7 +122,7 @@ export class VirtIOPathResolver {
           }
         }
       } catch (error) {
-        this.debug.log('error', `Error reading directory ${searchPath}: ${String(error)}`)
+        this.debug.error(`Error reading directory ${searchPath}: ${String(error)}`)
       }
     }
 
@@ -169,21 +171,21 @@ export class VirtIOPathResolver {
    * Logs helpful hints for users when VirtIO ISO is not found
    */
   private static logSearchHints (): void {
-    console.error('\n=== VirtIO Windows Drivers ISO Not Found ===')
-    console.error('The virtio-win ISO is required for Windows VM installations.')
-    console.error('\nPlease install it using one of these methods:\n')
-    console.error('Ubuntu/Debian:')
-    console.error('  1. Download from: https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/')
-    console.error('  2. Place in: /var/lib/libvirt/images/virtio-win.iso')
-    console.error('  3. Or set VIRTIO_WIN_ISO_PATH in .env\n')
-    console.error('Fedora/RHEL/CentOS:')
-    console.error('  sudo dnf install virtio-win\n')
-    console.error('Manual installation:')
-    console.error('  1. Download ISO from: https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/')
-    console.error('  2. Set VIRTIO_WIN_ISO_PATH=/path/to/virtio-win.iso in .env')
-    console.error('\nSearched locations:')
-    this.getSearchPaths().forEach(p => console.error(`  - ${p}`))
-    console.error('==========================================\n')
+    logger.error('\n=== VirtIO Windows Drivers ISO Not Found ===')
+    logger.error('The virtio-win ISO is required for Windows VM installations.')
+    logger.error('\nPlease install it using one of these methods:\n')
+    logger.error('Ubuntu/Debian:')
+    logger.error('  1. Download from: https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/')
+    logger.error('  2. Place in: /var/lib/libvirt/images/virtio-win.iso')
+    logger.error('  3. Or set VIRTIO_WIN_ISO_PATH in .env\n')
+    logger.error('Fedora/RHEL/CentOS:')
+    logger.error('  sudo dnf install virtio-win\n')
+    logger.error('Manual installation:')
+    logger.error('  1. Download ISO from: https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/')
+    logger.error('  2. Set VIRTIO_WIN_ISO_PATH=/path/to/virtio-win.iso in .env')
+    logger.error('\nSearched locations:')
+    this.getSearchPaths().forEach(p => logger.error(`  - ${p}`))
+    logger.error('==========================================\n')
   }
 
   /**
@@ -219,6 +221,6 @@ export class VirtIOPathResolver {
    */
   public static clearCache (): void {
     this.cachedPath = null
-    this.debug.log('Cache cleared')
+    this.debug.debug('Cache cleared')
   }
 }

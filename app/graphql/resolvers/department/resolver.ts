@@ -1,3 +1,4 @@
+import logger from '@main/logger'
 import { Resolver, Query, Mutation, Arg, Ctx, Authorized, Int } from 'type-graphql'
 import { UserInputError } from 'apollo-server-errors'
 import { DepartmentType, UpdateDepartmentNameInput, UpdateDepartmentNetworkInput, CreateDepartmentFirewallInput, UpdateDepartmentFirewallPolicyInput, DepartmentNetworkDiagnosticsType, DhcpTrafficCaptureType } from './type'
@@ -174,7 +175,7 @@ export class DepartmentResolver {
       await networkService.configureNetwork(department.id, ipSubnet)
     } catch (networkError) {
       // Network configuration failed - delete the department and throw
-      console.error(`Failed to configure network for department ${department.id}:`, networkError)
+      logger.error(`Failed to configure network for department ${department.id}:`, networkError)
       await prisma.department.delete({ where: { id: department.id } })
       const errorMessage = networkError instanceof Error ? networkError.message : String(networkError)
       throw new UserInputError(`Failed to configure department network: ${errorMessage}`)
@@ -193,9 +194,9 @@ export class DepartmentResolver {
     try {
       const eventManager = getEventManager()
       await eventManager.dispatchEvent('departments', 'create', { id: department.id }, user?.id)
-      console.log(`🎯 Triggered real-time event: departments:create for department ${department.id}`)
+      logger.info(`🎯 Triggered real-time event: departments:create for department ${department.id}`)
     } catch (eventError) {
-      console.error('Failed to trigger real-time event:', eventError)
+      logger.error('Failed to trigger real-time event:', eventError)
       // Don't fail the main operation if event triggering fails
     }
 
@@ -246,9 +247,9 @@ export class DepartmentResolver {
     try {
       const eventManager = getEventManager()
       await eventManager.dispatchEvent('departments', 'delete', { id }, user?.id)
-      console.log(`🎯 Triggered real-time event: departments:delete for department ${id}`)
+      logger.info(`🎯 Triggered real-time event: departments:delete for department ${id}`)
     } catch (eventError) {
-      console.error('Failed to trigger real-time event:', eventError)
+      logger.error('Failed to trigger real-time event:', eventError)
       // Don't fail the main operation if event triggering fails
     }
 
@@ -335,9 +336,9 @@ export class DepartmentResolver {
     try {
       const eventManager = getEventManager()
       await eventManager.dispatchEvent('departments', 'update', { id: updatedDepartment.id }, user?.id)
-      console.log(`🎯 Triggered real-time event: departments:update for department ${updatedDepartment.id}`)
+      logger.info(`🎯 Triggered real-time event: departments:update for department ${updatedDepartment.id}`)
     } catch (eventError) {
-      console.error('Failed to trigger real-time event:', eventError)
+      logger.error('Failed to trigger real-time event:', eventError)
       // Don't fail the main operation if event triggering fails
     }
 
@@ -455,7 +456,7 @@ export class DepartmentResolver {
       try {
         await networkService.restartDnsmasq(id)
       } catch (networkError) {
-        console.error(`Failed to restart dnsmasq for department ${id}:`, networkError)
+        logger.error(`Failed to restart dnsmasq for department ${id}:`, networkError)
         // Don't fail the mutation, just log the error - the new config will be applied on next restart
       }
     }
@@ -464,9 +465,9 @@ export class DepartmentResolver {
     try {
       const eventManager = getEventManager()
       await eventManager.dispatchEvent('departments', 'update', { id: updatedDepartment.id }, user?.id)
-      console.log(`🎯 Triggered real-time event: departments:update for department ${updatedDepartment.id}`)
+      logger.info(`🎯 Triggered real-time event: departments:update for department ${updatedDepartment.id}`)
     } catch (eventError) {
-      console.error('Failed to trigger real-time event:', eventError)
+      logger.error('Failed to trigger real-time event:', eventError)
     }
 
     return {
@@ -537,7 +538,7 @@ export class DepartmentResolver {
       if (!existingConfigValid) {
         // Existing config is incompatible with new policy - use policy's default
         effectiveDefaultConfig = firewallPolicy === 'BLOCK_ALL' ? 'allow_outbound' : 'none'
-        console.log(`⚠️ Existing config '${existingConfig}' incompatible with ${firewallPolicy}, using default '${effectiveDefaultConfig}'`)
+        logger.info(`⚠️ Existing config '${existingConfig}' incompatible with ${firewallPolicy}, using default '${effectiveDefaultConfig}'`)
       }
     }
 
@@ -558,7 +559,7 @@ export class DepartmentResolver {
 
     // Restart the department subnet if policy changed and network is configured
     if (policyChanged && department.bridgeName && department.ipSubnet) {
-      console.log(`🔄 Firewall policy changed for department ${id}. Restarting subnet...`)
+      logger.info(`🔄 Firewall policy changed for department ${id}. Restarting subnet...`)
 
       try {
         // Initialize firewall services
@@ -582,9 +583,9 @@ export class DepartmentResolver {
         )
 
         await networkService.restartDepartmentSubnet(id)
-        console.log(`✅ Subnet restarted successfully for department ${id}`)
+        logger.info(`✅ Subnet restarted successfully for department ${id}`)
       } catch (networkError) {
-        console.error(`❌ Failed to restart subnet for department ${id}:`, networkError)
+        logger.error(`❌ Failed to restart subnet for department ${id}:`, networkError)
         // Don't fail the mutation - the policy is saved, network will sync on next restart
         // The user will see the policy change but may need to manually restart VMs
       }
@@ -594,9 +595,9 @@ export class DepartmentResolver {
     try {
       const eventManager = getEventManager()
       await eventManager.dispatchEvent('departments', 'update', { id: updatedDepartment.id }, user?.id)
-      console.log(`🎯 Triggered real-time event: departments:update for firewall policy change`)
+      logger.info(`🎯 Triggered real-time event: departments:update for firewall policy change`)
     } catch (eventError) {
-      console.error('Failed to trigger real-time event:', eventError)
+      logger.error('Failed to trigger real-time event:', eventError)
     }
 
     return {

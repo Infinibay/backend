@@ -1,6 +1,10 @@
+import logger from '@main/logger'
 import { MachineApplication, Application } from '@prisma/client'
 import { Builder, parseString } from 'xml2js'
-import { spawn, execSync } from 'child_process'
+import { spawn, exec } from 'child_process'
+import { promisify } from 'util'
+
+const execAsync = promisify(exec)
 import * as fs from 'fs'
 import * as os from 'os'
 import * as path from 'path'
@@ -190,11 +194,20 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
     this.password = password
     this.productKey = productKey
     this.applications = applications
-    this.vmId = vmId || ''
-    this.scripts = scripts
-    this.enableCommandLogging = enableCommandLogging
     this.isoPath = path.join(path.join(process.env.INFINIBAY_BASE_DIR ?? '/opt/infinibay', 'iso'), 'windows' + this.version.toString() + '.iso')
-    this.languageConfig = this.detectLanguage()
+    // Language detection is deferred to async init() — defaults to en-US until then
+    this.languageConfig = UnattendedWindowsManager.LANGUAGE_MAP['en-US']
+    if (vmId !== undefined) this.vmId = vmId
+    if (scripts.length > 0) this.scripts = scripts
+    this.enableCommandLogging = enableCommandLogging
+  }
+
+  /**
+   * Async initializer — detects language from ISO and host system.
+   * Must be called after construction for full language support.
+   */
+  async init (): Promise<void> {
+    this.languageConfig = await this.detectLanguage()
   }
 
   /**
@@ -337,31 +350,27 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
    * Detects the appropriate language configuration for the Windows installation.
    * Priority: 1. ISO language, 2. Host system language, 3. Default to en-US
    */
-  private detectLanguage (): LanguageConfig {
+  private async detectLanguage (): Promise<LanguageConfig> {
     // First try to detect ISO language
-    const isoLanguage = this.detectISOLanguage()
+    const isoLanguage = await this.detectISOLanguage()
     if (isoLanguage && UnattendedWindowsManager.LANGUAGE_MAP[isoLanguage]) {
-      console.log(`Using ISO language: ${isoLanguage}`)
+      logger.info(`Using ISO language: ${isoLanguage}`)
       return UnattendedWindowsManager.LANGUAGE_MAP[isoLanguage]
     }
 
     // Fallback to host system language
-    const hostLanguage = this.getHostSystemLanguage()
+    const hostLanguage = await this.getHostSystemLanguage()
     if (hostLanguage && UnattendedWindowsManager.LANGUAGE_MAP[hostLanguage]) {
-      console.log(`Using host system language: ${hostLanguage}`)
+      logger.info(`Using host system language: ${hostLanguage}`)
       return UnattendedWindowsManager.LANGUAGE_MAP[hostLanguage]
     }
 
     // Default to en-US
-    console.log('Using default language: en-US')
+    logger.info('Using default language: en-US')
     return UnattendedWindowsManager.LANGUAGE_MAP['en-US']
   }
 
-  /**
-   * Attempts to detect the language from the Windows ISO file.
-   * This checks the ISO filename and content for language indicators.
-   */
-  private detectISOLanguage (): string | null {
+  private async detectISOLanguage (): Promise<string | null> {
     try {
       // Check if ISO path is set and file exists
       if (!this.isoPath || !fs.existsSync(this.isoPath)) {
@@ -419,7 +428,10 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
 
       // Try to extract ISO info using isoinfo if available
       try {
-        const isoInfo = execSync(`isoinfo -d -i "${this.isoPath}" 2>/dev/null | grep -i "volume id" || true`, { encoding: 'utf-8' })
+        const { stdout: isoInfo } = await execAsync(
+          `isoinfo -d -i "${this.isoPath}" 2>/dev/null | grep -i "volume id" || true`,
+          { encoding: 'utf-8', timeout: 30000 }
+        )
         const volumeId = isoInfo.toLowerCase()
 
         for (const [pattern, language] of Object.entries(languagePatterns)) {
@@ -427,13 +439,13 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
             return language
           }
         }
-      } catch (e) {
+      } catch {
         // isoinfo not available or failed, continue
       }
 
       return null
     } catch (error) {
-      console.error('Error detecting ISO language:', error)
+      logger.error('Error detecting ISO language:', error)
       return null
     }
   }
@@ -441,7 +453,7 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
   /**
    * Gets the language configuration from the host system.
    */
-  private getHostSystemLanguage (): string | null {
+  private async getHostSystemLanguage (): Promise<string | null> {
     try {
       // Try to get locale from environment variables
       const locale = process.env.LANG || process.env.LC_ALL || process.env.LC_MESSAGES
@@ -467,7 +479,7 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
 
       // Try to get locale using the locale command
       try {
-        const localeOutput = execSync('locale | grep LANG=', { encoding: 'utf-8' })
+        const { stdout: localeOutput } = await execAsync('locale | grep LANG=', { encoding: 'utf-8', timeout: 10000 })
         const match = localeOutput.match(/LANG=([a-z]{2})_([A-Z]{2})/)
         if (match) {
           const language = `${match[1]}-${match[2]}`
@@ -475,13 +487,13 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
             return language
           }
         }
-      } catch (e) {
+      } catch {
         // locale command not available or failed
       }
 
       return null
     } catch (error) {
-      console.error('Error detecting host system language:', error)
+      logger.error('Error detecting host system language:', error)
       return null
     }
   }
@@ -1229,7 +1241,7 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
             return
           }
 
-          this.debug.log('Windows Autounattend XML validation passed')
+          this.debug.debug('Windows Autounattend XML validation passed')
           resolve({ valid: true, errors: [] })
         } catch (error) {
           const errorMsg = error instanceof Error ? error.message : String(error)

@@ -8,11 +8,9 @@
  * - Machine count limits
  */
 
-import debug from 'debug'
+import logger from '@main/logger'
 import { createHash, createHmac } from 'crypto'
 import { PrismaClient, PackageLicense, Package } from '@prisma/client'
-
-const log = debug('infinibay:licenses')
 
 // License key format: XXXX-XXXX-XXXX-XXXX (16 chars + 3 dashes)
 const LICENSE_KEY_REGEX = /^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/
@@ -127,7 +125,7 @@ export class LicenseValidator {
   async activateLicense(input: ActivateLicenseInput): Promise<LicenseValidationResult> {
     const { packageName, licenseKey } = input
 
-    log('Activating license for package: %s', packageName)
+    logger.debug('Activating license for package: %s', packageName)
 
     // Validate key format
     if (!this.isValidKeyFormat(licenseKey)) {
@@ -140,7 +138,7 @@ export class LicenseValidator {
 
     // Verify signature
     if (!this.verifyLicenseSignature(licenseKey)) {
-      log('License signature verification failed for package: %s', packageName)
+      logger.debug('License signature verification failed for package: %s', packageName)
       return {
         isValid: false,
         status: 'invalid',
@@ -225,7 +223,7 @@ export class LicenseValidator {
       }
     })
 
-    log('License activated successfully for package: %s (type: %s)', packageName, licenseType)
+    logger.debug('License activated successfully for package: %s (type: %s)', packageName, licenseType)
 
     return {
       isValid: true,
@@ -377,7 +375,7 @@ export class LicenseValidator {
       }
     })
 
-    log('License revoked for package: %s', packageName)
+    logger.debug('License revoked for package: %s', packageName)
     return true
   }
 
@@ -405,7 +403,7 @@ export class LicenseValidator {
       }
     })
 
-    log('Grace period started for package: %s (ends: %s)', packageName, gracePeriodEnds.toISOString())
+    logger.debug('Grace period started for package: %s (ends: %s)', packageName, gracePeriodEnds.toISOString())
     return true
   }
 

@@ -6,7 +6,8 @@
  */
 
 import { PrismaClient } from '@prisma/client'
-import { Debugger } from '@utils/debug'
+import { Logger } from 'winston'
+import logger from '@main/logger'
 import { getInfinization } from './InfinizationService'
 
 export interface VMOperationResult {
@@ -17,18 +18,18 @@ export interface VMOperationResult {
 
 export class VMOperationsService {
   private prisma: PrismaClient
-  private debug: Debugger
+  private debug: Logger
 
   constructor (prisma: PrismaClient) {
     this.prisma = prisma
-    this.debug = new Debugger('vm-operations')
+    this.debug = logger.child({ module: 'vm-operations' })
   }
 
   /**
    * Restart a virtual machine (graceful shutdown then start)
    */
   async restartMachine (machineId: string): Promise<VMOperationResult> {
-    this.debug.log(`Restarting machine ${machineId}`)
+    this.debug.debug(`Restarting machine ${machineId}`)
 
     try {
       const infinization = await getInfinization()
@@ -46,7 +47,7 @@ export class VMOperationsService {
         }
       }
     } catch (error: any) {
-      this.debug.log('error', `Error restarting machine: ${error.message}`)
+      this.debug.error(`Error restarting machine: ${error.message}`)
       return {
         success: false,
         error: error.message
@@ -58,7 +59,7 @@ export class VMOperationsService {
    * Force power off a virtual machine (immediate destroy)
    */
   async forcePowerOff (machineId: string): Promise<VMOperationResult> {
-    this.debug.log(`Force powering off machine ${machineId}`)
+    this.debug.debug(`Force powering off machine ${machineId}`)
 
     try {
       const infinization = await getInfinization()
@@ -79,7 +80,7 @@ export class VMOperationsService {
         }
       }
     } catch (error: any) {
-      this.debug.log('error', `Error force powering off machine: ${error.message}`)
+      this.debug.error(`Error force powering off machine: ${error.message}`)
       return {
         success: false,
         error: error.message
@@ -91,7 +92,7 @@ export class VMOperationsService {
    * Graceful power off a virtual machine
    */
   async gracefulPowerOff (machineId: string): Promise<VMOperationResult> {
-    this.debug.log(`Gracefully powering off machine ${machineId}`)
+    this.debug.debug(`Gracefully powering off machine ${machineId}`)
 
     try {
       const infinization = await getInfinization()
@@ -113,7 +114,7 @@ export class VMOperationsService {
         }
       }
     } catch (error: any) {
-      this.debug.log('error', `Error powering off machine: ${error.message}`)
+      this.debug.error(`Error powering off machine: ${error.message}`)
       return {
         success: false,
         error: error.message
@@ -125,7 +126,7 @@ export class VMOperationsService {
    * Reset a virtual machine (hardware reset)
    */
   async resetMachine (machineId: string): Promise<VMOperationResult> {
-    this.debug.log(`Resetting machine ${machineId}`)
+    this.debug.debug(`Resetting machine ${machineId}`)
 
     try {
       const infinization = await getInfinization()
@@ -143,7 +144,7 @@ export class VMOperationsService {
         }
       }
     } catch (error: any) {
-      this.debug.log('error', `Error resetting machine: ${error.message}`)
+      this.debug.error(`Error resetting machine: ${error.message}`)
       return {
         success: false,
         error: error.message
@@ -155,7 +156,7 @@ export class VMOperationsService {
    * Start a virtual machine
    */
   async startMachine (machineId: string): Promise<VMOperationResult> {
-    this.debug.log(`Starting machine ${machineId}`)
+    this.debug.debug(`Starting machine ${machineId}`)
 
     try {
       const infinization = await getInfinization()
@@ -173,7 +174,7 @@ export class VMOperationsService {
         }
       }
     } catch (error: any) {
-      this.debug.log('error', `Error starting machine: ${error.message}`)
+      this.debug.error(`Error starting machine: ${error.message}`)
       return {
         success: false,
         error: error.message
@@ -185,7 +186,7 @@ export class VMOperationsService {
    * Suspend a virtual machine
    */
   async suspendMachine (machineId: string): Promise<VMOperationResult> {
-    this.debug.log(`Suspending machine ${machineId}`)
+    this.debug.debug(`Suspending machine ${machineId}`)
 
     try {
       const infinization = await getInfinization()
@@ -203,7 +204,7 @@ export class VMOperationsService {
         }
       }
     } catch (error: any) {
-      this.debug.log('error', `Error suspending machine: ${error.message}`)
+      this.debug.error(`Error suspending machine: ${error.message}`)
       return {
         success: false,
         error: error.message
@@ -215,7 +216,7 @@ export class VMOperationsService {
    * Resume a suspended virtual machine
    */
   async resumeMachine (machineId: string): Promise<VMOperationResult> {
-    this.debug.log(`Resuming machine ${machineId}`)
+    this.debug.debug(`Resuming machine ${machineId}`)
 
     try {
       const infinization = await getInfinization()
@@ -233,7 +234,7 @@ export class VMOperationsService {
         }
       }
     } catch (error: any) {
-      this.debug.log('error', `Error resuming machine: ${error.message}`)
+      this.debug.error(`Error resuming machine: ${error.message}`)
       return {
         success: false,
         error: error.message
@@ -259,7 +260,7 @@ export class VMOperationsService {
         consistent: result.consistent
       }
     } catch (error: any) {
-      this.debug.log('error', `Error getting machine status: ${error.message}`)
+      this.debug.error(`Error getting machine status: ${error.message}`)
       return null
     }
   }
@@ -281,14 +282,14 @@ export class VMOperationsService {
       }
 
       retries++
-      this.debug.log(`Restart attempt ${retries} failed, retrying...`)
+      this.debug.debug(`Restart attempt ${retries} failed, retrying...`)
 
       // Wait a bit before retrying
       await new Promise(resolve => setTimeout(resolve, 2000))
     }
 
     // If all retries failed, try force power off and start
-    this.debug.log('All restart attempts failed, trying force power off and start')
+    this.debug.debug('All restart attempts failed, trying force power off and start')
 
     const forceOffResult = await this.forcePowerOff(machineId)
     if (!forceOffResult.success) {

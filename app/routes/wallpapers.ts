@@ -1,3 +1,4 @@
+import logger from '@main/logger'
 import { Router } from 'express'
 import { promises as fs } from 'fs'
 import path from 'path'
@@ -26,7 +27,7 @@ router.get('/', async (_req, res) => {
     try {
       await fs.access(WALLPAPERS_DIR)
     } catch (error) {
-      console.warn(`Wallpapers directory not found: ${WALLPAPERS_DIR}`)
+      logger.warn(`Wallpapers directory not found: ${WALLPAPERS_DIR}`)
       return res.json([])
     }
 
@@ -57,10 +58,10 @@ router.get('/', async (_req, res) => {
       wallpapers[0].isDefault = true
     }
 
-    console.log(`Found ${wallpapers.length} wallpapers in ${WALLPAPERS_DIR}`)
+    logger.info(`Found ${wallpapers.length} wallpapers in ${WALLPAPERS_DIR}`)
     res.json(wallpapers)
   } catch (error) {
-    console.error('Error reading wallpapers directory:', error)
+    logger.error('Error reading wallpapers directory:', error)
     res.status(500).json({
       error: 'Failed to load wallpapers',
       message: error instanceof Error ? error.message : 'Unknown error'
@@ -116,7 +117,7 @@ router.get('/image/:filename', async (req, res) => {
     const fileStream = require('fs').createReadStream(filePath)
     fileStream.pipe(res)
   } catch (error) {
-    console.error('Error serving wallpaper image:', error)
+    logger.error('Error serving wallpaper image:', error)
     res.status(500).json({
       error: 'Failed to serve wallpaper',
       message: error instanceof Error ? error.message : 'Unknown error'

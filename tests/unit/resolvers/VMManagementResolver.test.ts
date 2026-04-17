@@ -1,6 +1,6 @@
 import { mockDeep, mockReset } from 'jest-mock-extended'
 import { VMManagementResolver } from '../../../app/graphql/resolvers/vmManagement/resolver'
-import { VirtioSocketWatcherService } from '@services/vm/VirtioSocketWatcherService'
+import { VirtioSocketWatcherService } from '@services/VirtioSocketWatcherService'
 import {
   createMockUser,
   createMockAdminUser,
@@ -14,7 +14,7 @@ import {
 import { UserInputError } from 'apollo-server-core'
 
 // Mock the service modules
-jest.mock('@services/vm/VirtioSocketWatcherService')
+jest.mock('@services/VirtioSocketWatcherService')
 
 const MockVirtioSocketWatcherService = VirtioSocketWatcherService as jest.MockedClass<typeof VirtioSocketWatcherService>
 

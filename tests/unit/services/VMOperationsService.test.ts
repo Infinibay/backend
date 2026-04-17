@@ -1,8 +1,9 @@
 import 'reflect-metadata'
-import { VMOperationsService, VMOperationResult } from '../../../app/services/vm/VMOperationsService'
+import { VMOperationsService, VMOperationResult } from '../../../app/services/VMOperationsService'
 import { PrismaClient } from '@prisma/client'
 
 // Mock InfinizationService
+import logger from '@main/logger'
 const mockInfinization = {
   startVM: jest.fn(),
   stopVM: jest.fn(),
@@ -29,7 +30,7 @@ describe('VMOperationsService', () => {
     jest.clearAllMocks()
     mockPrisma = {} as PrismaClient
     service = new VMOperationsService(mockPrisma)
-    jest.spyOn(console, 'log').mockImplementation(() => {})
+    jest.spyOn(logger, 'info').mockImplementation(() => undefined as any)
   })
 
   afterEach(() => {

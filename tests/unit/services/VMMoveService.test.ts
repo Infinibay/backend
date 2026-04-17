@@ -1,21 +1,22 @@
 import { PrismaClient, Machine, MachineConfiguration, Department } from '@prisma/client'
-import { VMMoveService, MoveResult } from '../../../app/services/vm/VMMoveService'
+import { VMMoveService, MoveResult } from '../../../app/services/VMMoveService'
 import { FirewallOrchestrationService } from '../../../app/services/firewall/FirewallOrchestrationService'
 import { TapDeviceManager } from '@infinibay/infinization'
 import { createMockMachine, createMockMachineConfiguration, createMockDepartment } from '../../setup/mock-factories'
 
 // Create a configurable mock for InfinizationService
 let mockGetVMStatusResult: any = { processAlive: true }
+import logger from '@main/logger'
 
 // Set up mock module BEFORE it is used
-jest.mock('../../../app/services/vm/InfinizationService', () => ({
+jest.mock('../../../app/services/InfinizationService', () => ({
   __esModule: true,
   getInfinization: jest.fn(),
   initializeInfinization: jest.fn()
 }))
 
 // Import mocked module
-import * as InfinizationService from '../../../app/services/vm/InfinizationService'
+import * as InfinizationService from '../../../app/services/InfinizationService'
 
 describe('VMMoveService', () => {
   let prisma: PrismaConfig
@@ -71,9 +72,9 @@ describe('VMMoveService', () => {
 
     moveService = new VMMoveService(prisma as unknown as PrismaClient, firewallOrchestration)
 
-    debugLogSpy = jest.spyOn(console, 'log').mockImplementation(() => {})
-    jest.spyOn(console, 'warn').mockImplementation(() => {})
-    jest.spyOn(console, 'error').mockImplementation(() => {})
+    debugLogSpy = jest.spyOn(logger, 'info').mockImplementation(() => undefined as any)
+    jest.spyOn(logger, 'warn').mockImplementation(() => undefined as any)
+    jest.spyOn(logger, 'error').mockImplementation(() => undefined as any)
   })
 
   afterEach(() => {
@@ -113,7 +114,7 @@ describe('VMMoveService', () => {
     describe('successful moves', () => {
       it('should move a running VM with hot-swap when bridges differ', async () => {
         mockGetVMStatusResult = { processAlive: true }
-        jest.spyOn(console, 'log').mockImplementation(() => {})
+        jest.spyOn(logger, 'info').mockImplementation(() => undefined as any)
 
         jest.mocked(prisma.machine.findUnique).mockResolvedValueOnce({
           ...mockVM,
@@ -163,7 +164,7 @@ describe('VMMoveService', () => {
 
       it('should update database only when VM is stopped', async () => {
         mockGetVMStatusResult = { processAlive: false }
-        jest.spyOn(console, 'log').mockImplementation(() => {})
+        jest.spyOn(logger, 'info').mockImplementation(() => undefined as any)
 
         jest.mocked(prisma.machine.findUnique).mockResolvedValueOnce({
           ...mockVM,
@@ -196,7 +197,7 @@ describe('VMMoveService', () => {
 
       it('should move VM with no existing configuration', async () => {
         mockGetVMStatusResult = { processAlive: false }
-        jest.spyOn(console, 'log').mockImplementation(() => {})
+        jest.spyOn(logger, 'info').mockImplementation(() => undefined as any)
 
         jest.mocked(prisma.machine.findUnique).mockResolvedValueOnce({
           ...mockVM,
@@ -224,7 +225,7 @@ describe('VMMoveService', () => {
 
       it('should skip network change when bridges are the same', async () => {
         mockGetVMStatusResult = { processAlive: true }
-        jest.spyOn(console, 'log').mockImplementation(() => {})
+        jest.spyOn(logger, 'info').mockImplementation(() => undefined as any)
 
         jest.mocked(prisma.machine.findUnique).mockResolvedValueOnce({
           ...mockVM,
@@ -264,7 +265,7 @@ describe('VMMoveService', () => {
 
     describe('error handling', () => {
       it('should return error when VM not found', async () => {
-        jest.spyOn(console, 'log').mockImplementation(() => {})
+        jest.spyOn(logger, 'info').mockImplementation(() => undefined as any)
 
         jest.mocked(prisma.machine.findUnique).mockResolvedValueOnce(null)
 
@@ -281,7 +282,7 @@ describe('VMMoveService', () => {
       })
 
       it('should return error when target department not found', async () => {
-        jest.spyOn(console, 'log').mockImplementation(() => {})
+        jest.spyOn(logger, 'info').mockImplementation(() => undefined as any)
 
         jest.mocked(prisma.machine.findUnique).mockResolvedValueOnce({
           ...mockVM,
@@ -300,7 +301,7 @@ describe('VMMoveService', () => {
       })
 
       it('should return error when target department has no network', async () => {
-        jest.spyOn(console, 'log').mockImplementation(() => {})
+        jest.spyOn(logger, 'info').mockImplementation(() => undefined as any)
 
         const deptWithoutNetwork: Department = {
           ...mockNewDept,
@@ -322,7 +323,7 @@ describe('VMMoveService', () => {
       })
 
       it('should return error when VM has no department', async () => {
-        jest.spyOn(console, 'log').mockImplementation(() => {})
+        jest.spyOn(logger, 'info').mockImplementation(() => undefined as any)
 
         const vmNoDept = { ...mockVM, departmentId: null }
 
@@ -339,8 +340,8 @@ describe('VMMoveService', () => {
       })
 
       it('should continue with firewall rollback even if rollback fails', async () => {
-        jest.spyOn(console, 'log').mockImplementation(() => {})
-        jest.spyOn(console, 'error').mockImplementation(() => {})
+        jest.spyOn(logger, 'info').mockImplementation(() => undefined as any)
+        jest.spyOn(logger, 'error').mockImplementation(() => undefined as any)
 
         jest.mocked(prisma.machine.findUnique).mockResolvedValueOnce({
           ...mockVM,
@@ -365,8 +366,8 @@ describe('VMMoveService', () => {
 
       it('should not block move if firewall application fails', async () => {
         mockGetVMStatusResult = { processAlive: true }
-        jest.spyOn(console, 'log').mockImplementation(() => {})
-        jest.spyOn(console, 'warn').mockImplementation(() => {})
+        jest.spyOn(logger, 'info').mockImplementation(() => undefined as any)
+        jest.spyOn(logger, 'warn').mockImplementation(() => undefined as any)
 
         jest.mocked(prisma.machine.findUnique).mockResolvedValueOnce({
           ...mockVM,
@@ -401,8 +402,8 @@ describe('VMMoveService', () => {
 
     describe('rollback behavior', () => {
       it('should rollback all changes when database update fails', async () => {
-        jest.spyOn(console, 'log').mockImplementation(() => {})
-        jest.spyOn(console, 'error').mockImplementation(() => {})
+        jest.spyOn(logger, 'info').mockImplementation(() => undefined as any)
+        jest.spyOn(logger, 'error').mockImplementation(() => undefined as any)
 
         const originalVM = { ...mockVM, configuration: mockConfig, department: mockOldDept }
         const updatedVM = { ...mockVM, department: mockNewDept }
@@ -436,8 +437,8 @@ describe('VMMoveService', () => {
 
       it('should rollback network change if firewall fails', async () => {
         mockGetVMStatusResult = { processAlive: true }
-        jest.spyOn(console, 'log').mockImplementation(() => {})
-        jest.spyOn(console, 'warn').mockImplementation(() => {})
+        jest.spyOn(logger, 'info').mockImplementation(() => undefined as any)
+        jest.spyOn(logger, 'warn').mockImplementation(() => undefined as any)
 
         jest.mocked(prisma.machine.findUnique).mockResolvedValueOnce({
           ...mockVM,

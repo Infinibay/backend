@@ -1,3 +1,4 @@
+import logger from '@main/logger'
 import { Request } from 'express'
 import { User } from '@prisma/client'
 import jwt from 'jsonwebtoken'
@@ -57,7 +58,7 @@ function extractToken (req: Request): { token: string | null; hasBearer: boolean
 /**
  * Gets the JWT secret with production-safe fallback handling
  */
-function getJWTSecret (): string {
+export function getJWTSecret (): string {
   const secret = process.env.TOKENKEY
 
   if (!secret) {
@@ -66,7 +67,7 @@ function getJWTSecret (): string {
         'missing_secret_production',
         'TOKENKEY environment variable is required in production'
       )
-      console.error('🚨 JWT Critical Error - Missing TOKENKEY in production')
+      logger.error('🚨 JWT Critical Error - Missing TOKENKEY in production')
       throw error
     }
 
@@ -76,16 +77,16 @@ function getJWTSecret (): string {
         'missing_secret_non_production',
         'TOKENKEY environment variable is required. Set ALLOW_INSECURE_JWT_FALLBACK=1 to use fallback secret in development'
       )
-      console.error('🚨 JWT Critical Error - Missing TOKENKEY and fallback not allowed')
+      logger.error('🚨 JWT Critical Error - Missing TOKENKEY and fallback not allowed')
       throw error
     }
 
-    console.warn('⚠️ JWT Warning - Using insecure fallback secret in development')
+    logger.warn('⚠️ JWT Warning - Using insecure fallback secret in development')
     return 'development-fallback-secret'
   }
 
   if (secret.length < 8) {
-    console.warn('⚠️ JWT Warning - TOKENKEY is too short, consider using a longer secret')
+    logger.warn('⚠️ JWT Warning - TOKENKEY is too short, consider using a longer secret')
   }
 
   return secret
@@ -151,7 +152,7 @@ async function fetchAndValidateUser (decoded: DecodedToken, debugAuth?: boolean)
 
   // Role validation - ensure token role matches database role
   if (user.role !== decoded.userRole) {
-    console.warn('⚠️ JWT Security Warning - Role mismatch detected:', {
+    logger.warn('⚠️ JWT Security Warning - Role mismatch detected:', {
       tokenRole: '[REDACTED]',
       databaseRole: '[REDACTED]',
       userId: '[REDACTED]'
@@ -205,7 +206,7 @@ export async function verifyRequestAuth (
 
   if (!token) {
     if (debugAuth) {
-      console.log('🔑 JWT Debug - No authorization token provided')
+      logger.info('🔑 JWT Debug - No authorization token provided')
     }
 
     return {
@@ -244,7 +245,7 @@ export async function verifyRequestAuth (
     const jwtError = categorizeJWTError(error)
 
     // Log categorized error
-    console.error(`${method} token verification failed [${jwtError.category}]:`, jwtError.message)
+    logger.error(`${method} token verification failed [${jwtError.category}]:`, jwtError.message)
 
     // Determine status from error category
     let status: AuthenticationMetadata['status']

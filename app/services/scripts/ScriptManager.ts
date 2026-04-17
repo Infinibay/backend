@@ -1,3 +1,4 @@
+import logger from '@main/logger'
 import { PrismaClient, Prisma, Script, OS, ShellType } from '@prisma/client';
 import fs from 'fs/promises';
 import path from 'path';
@@ -107,7 +108,7 @@ export class ScriptManager {
       })
     } catch (error) {
       // Log error but don't fail the main operation
-      console.error('Failed to create audit log:', error)
+      logger.error('Failed to create audit log:', error)
     }
   }
 
@@ -168,8 +169,8 @@ export class ScriptManager {
         fileName: fileName,
         category: data.category || parsed.category || null,
         tags: data.tags || parsed.tags || [],
-        os: (metadata as any).os as OS[],
-        shell: (metadata as any).shell as ShellType,
+        os: metadata.os as OS[],
+        shell: metadata.shell as ShellType,
         createdById: userId
       }
     });
@@ -249,7 +250,7 @@ export class ScriptManager {
             await fs.rename(oldFilePath, newFilePath);
           } else {
             // Log warning but continue with database update
-            console.warn(`Script file not found at ${oldFilePath}, continuing with database update only`);
+            logger.warn(`Script file not found at ${oldFilePath}, continuing with database update only`);
             // Don't set newFileName if file doesn't exist, so we don't update fileName in DB
             newFileName = null;
           }
@@ -289,10 +290,10 @@ export class ScriptManager {
 
         // Extract metadata
         const metadata = this.parser.extractMetadata(parsed);
-        updateData.os = (metadata as any).os as OS[];
-        updateData.shell = (metadata as any).shell as ShellType;
-        updateData.category = (metadata as any).category;
-        updateData.tags = (metadata as any).tags;
+        updateData.os = metadata.os as OS[];
+        updateData.shell = metadata.shell as ShellType;
+        updateData.category = metadata.category;
+        updateData.tags = metadata.tags;
       }
 
       // Update other fields
@@ -319,9 +320,9 @@ export class ScriptManager {
       if (oldFilePath && newFilePath && newFileName) {
         try {
           await fs.rename(newFilePath, oldFilePath);
-          console.log(`Successfully rolled back file rename from ${newFilePath} to ${oldFilePath}`);
+          logger.info(`Successfully rolled back file rename from ${newFilePath} to ${oldFilePath}`);
         } catch (rollbackError) {
-          console.error(`Failed to rollback file rename: ${(rollbackError as Error).message}`);
+          logger.error(`Failed to rollback file rename: ${(rollbackError as Error).message}`);
         }
       }
       // Re-throw the original error
@@ -530,7 +531,7 @@ export class ScriptManager {
       }
     });
 
-    return scripts;
+    return scripts as unknown as Script[];
   }
 
   /**

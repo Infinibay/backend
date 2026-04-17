@@ -1,8 +1,8 @@
 import 'reflect-metadata'
 import { describe, it, expect, beforeEach, jest } from '@jest/globals'
 import { PrismaClient, Machine } from '@prisma/client'
-import { ProcessManager, ProcessSortBy } from '../../../app/services/vm/ProcessManager'
-import { VirtioSocketWatcherService } from '../../../app/services/vm/VirtioSocketWatcherService'
+import { ProcessManager, ProcessSortBy } from '../../../app/services/ProcessManager'
+import { VirtioSocketWatcherService } from '../../../app/services/VirtioSocketWatcherService'
 
 const mockInfinization = {
   getVMStatus: jest.fn() as jest.Mock<() => Promise<{ processAlive: boolean }>>

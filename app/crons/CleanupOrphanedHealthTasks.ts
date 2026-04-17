@@ -1,10 +1,10 @@
+import logger from '@main/logger'
 import { CronJob } from 'cron'
 import { PrismaClient } from '@prisma/client'
 import { getVMHealthQueueManager } from '../services/VMHealthQueueManager'
 import { getEventManager } from '../services/EventManager'
-import { Debugger } from '../utils/debug'
 
-const debug = new Debugger('CleanupOrphanedHealthTasksJob')
+const debug = logger.child({ module: 'CleanupOrphanedHealthTasksJob' })
 
 export class CleanupOrphanedHealthTasksJob {
   private job: CronJob | null = null
@@ -14,7 +14,7 @@ export class CleanupOrphanedHealthTasksJob {
 
   start (): void {
     if (this.job) {
-      debug.log('CleanupOrphanedHealthTasks job is already running')
+      debug.debug('CleanupOrphanedHealthTasks job is already running')
       return
     }
 
@@ -23,7 +23,7 @@ export class CleanupOrphanedHealthTasksJob {
       '0 0 * * * *', // Every hour at minute 0
       async () => {
         if (this.isRunning) {
-          debug.log('Previous cleanup still running, skipping...')
+          debug.debug('Previous cleanup still running, skipping...')
           return
         }
 
@@ -31,7 +31,7 @@ export class CleanupOrphanedHealthTasksJob {
         try {
           await this.cleanupOrphanedTasks()
         } catch (error) {
-          console.error('🗂️ Error in CleanupOrphanedHealthTasks job:', error)
+          logger.error('🗂️ Error in CleanupOrphanedHealthTasks job:', error)
         } finally {
           this.isRunning = false
         }
@@ -41,20 +41,20 @@ export class CleanupOrphanedHealthTasksJob {
       'UTC'
     )
 
-    console.log('🗂️ CleanupOrphanedHealthTasks job started (every hour)')
+    logger.info('🗂️ CleanupOrphanedHealthTasks job started (every hour)')
   }
 
   stop (): void {
     if (this.job) {
       this.job.stop()
       this.job = null
-      console.log('🗂️ CleanupOrphanedHealthTasks job stopped')
+      logger.info('🗂️ CleanupOrphanedHealthTasks job stopped')
     }
   }
 
   private async cleanupOrphanedTasks (): Promise<void> {
     try {
-      debug.log('Starting orphaned health tasks cleanup')
+      debug.debug('Starting orphaned health tasks cleanup')
 
       // Get the singleton queue manager
       const eventManager = getEventManager()
@@ -63,9 +63,9 @@ export class CleanupOrphanedHealthTasksJob {
       // Run the cleanup
       await queueManager.cleanupOrphanedTasks()
 
-      debug.log('Orphaned health tasks cleanup completed')
+      debug.debug('Orphaned health tasks cleanup completed')
     } catch (error) {
-      console.error('🗂️ Error during orphaned tasks cleanup:', error)
+      logger.error('🗂️ Error during orphaned tasks cleanup:', error)
       throw error
     }
   }

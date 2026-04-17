@@ -15,10 +15,24 @@
 
 import { PrismaClient, Department, RuleSetType } from '@prisma/client'
 import { BridgeManager, DepartmentNatService, TapDeviceManager } from '@infinibay/infinization'
-import { execSync, spawn } from 'child_process'
+import { exec, spawn } from 'child_process'
+import { promisify } from 'util'
+
+const execAsync = promisify(exec)
+
+/**
+ * Sanitize a string for safe interpolation into shell commands.
+ * Throws if the string contains characters outside [a-zA-Z0-9._-].
+ */
+function sanitizeShellArg (value: string, label = 'argument'): string {
+  if (!/^[a-zA-Z0-9._-]+$/.test(value)) {
+    throw new Error(`Unsafe shell ${label}: "${value}" contains disallowed characters`)
+  }
+  return value
+}
 import { promises as fs } from 'fs'
 import path from 'path'
-import { Debugger } from '../../utils/debug'
+import logger from '@main/logger'
 import { FirewallPolicyService } from '../firewall/FirewallPolicyService'
 import { FirewallRuleService } from '../firewall/FirewallRuleService'
 import { FirewallOrchestrationService } from '../firewall/FirewallOrchestrationService'
@@ -60,7 +74,7 @@ export interface ForceDestroyResult {
   }
 }
 
-const debug = new Debugger('dept-network')
+const debug = logger.child({ module: 'dept-network' })
 
 /** Configuration directories */
 const DNSMASQ_CONFIG_DIR = '/etc/infinibay/dnsmasq.d'
@@ -224,7 +238,7 @@ export class DepartmentNetworkService {
    * @throws Error if configuration fails
    */
   async configureNetwork (departmentId: string, subnet: string): Promise<void> {
-    debug.log('info', `Configuring network for department ${departmentId}: ${subnet}`)
+    debug.info(`Configuring network for department ${departmentId}: ${subnet}`)
 
     // 1. Validate and parse subnet
     const config = this.parseSubnet(subnet, departmentId)
@@ -260,23 +274,23 @@ export class DepartmentNetworkService {
       // 4. Create bridge
       await this.bridgeManager.create(config.bridgeName)
       created.bridge = true
-      debug.log('info', `Created bridge: ${config.bridgeName}`)
+      debug.info(`Created bridge: ${config.bridgeName}`)
 
       // 5. Assign gateway IP to bridge
       const ipWithCidr = `${config.gatewayIP}/${config.netmask}`
       await this.bridgeManager.assignIP(config.bridgeName, ipWithCidr)
       created.ip = true
-      debug.log('info', `Assigned IP: ${ipWithCidr} to ${config.bridgeName}`)
+      debug.info(`Assigned IP: ${ipWithCidr} to ${config.bridgeName}`)
 
       // 5. Start dnsmasq for DHCP
       const dnsmasqPid = await this.startDnsmasq(config)
       created.dnsmasq = true
-      debug.log('info', `Started dnsmasq with PID: ${dnsmasqPid}`)
+      debug.info(`Started dnsmasq with PID: ${dnsmasqPid}`)
 
       // 6. Configure NAT
       await this.natService.addMasquerade(subnet, config.bridgeName)
       created.nat = true
-      debug.log('info', `Configured NAT for ${subnet}`)
+      debug.info(`Configured NAT for ${subnet}`)
 
       // 7. Apply default firewall policy
       await this.applyDefaultFirewallPolicy(departmentId)
@@ -294,10 +308,10 @@ export class DepartmentNetworkService {
         }
       })
 
-      debug.log('info', `Network configured successfully for department ${departmentId}`)
+      debug.info(`Network configured successfully for department ${departmentId}`)
     } catch (error) {
       // Rollback on failure
-      debug.log('error', `Network configuration failed, rolling back: ${error}`)
+      debug.error(`Network configuration failed, rolling back: ${error}`)
       await this.rollback(config, created)
       throw error
     }
@@ -310,19 +324,19 @@ export class DepartmentNetworkService {
    * @param departmentId - The department ID
    */
   async destroyNetwork (departmentId: string): Promise<void> {
-    debug.log('info', `Destroying network for department ${departmentId}`)
+    debug.info(`Destroying network for department ${departmentId}`)
 
     const department = await this.prisma.department.findUnique({
       where: { id: departmentId }
     })
 
     if (!department) {
-      debug.log('warn', `Department ${departmentId} not found`)
+      debug.warn(`Department ${departmentId} not found`)
       return
     }
 
     if (!department.bridgeName) {
-      debug.log('info', `Department ${departmentId} has no network configured`)
+      debug.info(`Department ${departmentId} has no network configured`)
       return
     }
 
@@ -338,8 +352,8 @@ export class DepartmentNetworkService {
     // Fallback: kill any dnsmasq process associated with this bridge
     // This handles cases where PID is stale (server restart) or null
     try {
-      execSync(`pkill -f "dnsmasq.*${bridgeName}"`, { stdio: 'pipe' })
-      debug.log('info', `Killed dnsmasq by bridge name: ${bridgeName}`)
+      await execAsync(`pkill -f "dnsmasq.*${sanitizeShellArg(bridgeName, 'bridgeName')}"`)
+      debug.info(`Killed dnsmasq by bridge name: ${bridgeName}`)
     } catch {
       // No process found or already killed - ignore
     }
@@ -347,7 +361,7 @@ export class DepartmentNetworkService {
     // Verify dnsmasq is stopped
     const dnsmasqStopped = await this.verifyDnsmasqStopped(bridgeName)
     if (!dnsmasqStopped) {
-      debug.log('warn', `dnsmasq may still be running for ${bridgeName} - continuing cleanup`)
+      debug.warn(`dnsmasq may still be running for ${bridgeName} - continuing cleanup`)
     }
 
     // 3. Remove NAT
@@ -356,7 +370,7 @@ export class DepartmentNetworkService {
     // Verify NAT removed
     const natRemoved = !(await this.natService.hasMasquerade(bridgeName))
     if (!natRemoved) {
-      debug.log('warn', `NAT rules may still exist for ${bridgeName} - continuing cleanup`)
+      debug.warn(`NAT rules may still exist for ${bridgeName} - continuing cleanup`)
     }
 
     // 4. Destroy bridge
@@ -365,7 +379,7 @@ export class DepartmentNetworkService {
     // Verify bridge destroyed
     const bridgeDestroyed = !(await this.bridgeManager.exists(bridgeName))
     if (!bridgeDestroyed) {
-      debug.log('warn', `Bridge ${bridgeName} may still exist - continuing cleanup`)
+      debug.warn(`Bridge ${bridgeName} may still exist - continuing cleanup`)
     }
 
     // 5. Clean up config files
@@ -374,7 +388,7 @@ export class DepartmentNetworkService {
     // Verify files removed
     const filesRemoved = await this.verifyConfigFilesRemoved(bridgeName)
     if (!filesRemoved) {
-      debug.log('warn', `Some config files may still exist for ${bridgeName}`)
+      debug.warn(`Some config files may still exist for ${bridgeName}`)
     }
 
     // 6. Update database
@@ -394,18 +408,18 @@ export class DepartmentNetworkService {
 
     // 8. Final verification and summary
     const verification = await this.verifyNetworkCleanup(bridgeName)
-    debug.log('info', `Network cleanup verification for ${bridgeName}:`)
-    debug.log('info', `  - Bridge removed: ${verification.bridgeRemoved}`)
-    debug.log('info', `  - dnsmasq stopped: ${verification.dnsmasqStopped}`)
-    debug.log('info', `  - NAT removed: ${verification.natRemoved}`)
-    debug.log('info', `  - Files removed: ${verification.filesRemoved}`)
-    debug.log('info', `  - All clean: ${verification.allClean}`)
+    debug.info(`Network cleanup verification for ${bridgeName}:`)
+    debug.info(`  - Bridge removed: ${verification.bridgeRemoved}`)
+    debug.info(`  - dnsmasq stopped: ${verification.dnsmasqStopped}`)
+    debug.info(`  - NAT removed: ${verification.natRemoved}`)
+    debug.info(`  - Files removed: ${verification.filesRemoved}`)
+    debug.info(`  - All clean: ${verification.allClean}`)
 
     if (!verification.allClean) {
-      debug.log('warn', `Incomplete cleanup for ${bridgeName}: ${JSON.stringify(verification.details)}`)
+      debug.warn(`Incomplete cleanup for ${bridgeName}: ${JSON.stringify(verification.details)}`)
     }
 
-    debug.log('info', `Network destroyed for department ${departmentId}`)
+    debug.info(`Network destroyed for department ${departmentId}`)
   }
 
   /**
@@ -433,7 +447,7 @@ export class DepartmentNetworkService {
   private async applyDefaultFirewallPolicy (departmentId: string): Promise<void> {
     // Skip if firewall services are not available
     if (!this.firewallPolicyService || !this.firewallRuleService) {
-      debug.log('info', `Skipping firewall policy application - services not available`)
+      debug.info(`Skipping firewall policy application - services not available`)
       return
     }
 
@@ -443,7 +457,7 @@ export class DepartmentNetworkService {
     })
 
     if (!department) {
-      debug.log('warn', `Department ${departmentId} not found for firewall policy`)
+      debug.warn(`Department ${departmentId} not found for firewall policy`)
       return
     }
 
@@ -464,7 +478,7 @@ export class DepartmentNetworkService {
         data: { firewallRuleSetId: ruleSetId }
       })
 
-      debug.log('info', `Created firewall rule set ${ruleSetId} for department ${departmentId}`)
+      debug.info(`Created firewall rule set ${ruleSetId} for department ${departmentId}`)
     }
 
     // Apply policy rules - derive appropriate default based on policy type
@@ -482,7 +496,7 @@ export class DepartmentNetworkService {
       defaultConfig
     )
 
-    debug.log('info', `Applied firewall policy ${department.firewallPolicy}/${defaultConfig} to department ${departmentId}`)
+    debug.info(`Applied firewall policy ${department.firewallPolicy}/${defaultConfig} to department ${departmentId}`)
   }
 
   /**
@@ -494,7 +508,7 @@ export class DepartmentNetworkService {
    * @param departmentId - The department ID
    */
   async restartDepartmentSubnet (departmentId: string): Promise<void> {
-    debug.log('info', `Restarting subnet for department ${departmentId}`)
+    debug.info(`Restarting subnet for department ${departmentId}`)
 
     const department = await this.prisma.department.findUnique({
       where: { id: departmentId },
@@ -516,7 +530,7 @@ export class DepartmentNetworkService {
     // 3. Reapply firewall rules to all VMs in the department
     await this.reapplyFirewallToAllVMs(departmentId)
 
-    debug.log('info', `Subnet restarted successfully for department ${departmentId}`)
+    debug.info(`Subnet restarted successfully for department ${departmentId}`)
   }
 
   /**
@@ -528,7 +542,7 @@ export class DepartmentNetworkService {
   private async reapplyFirewallToAllVMs (departmentId: string): Promise<void> {
     // Skip if firewall orchestration service is not available
     if (!this.firewallOrchestrationService) {
-      debug.log('info', `Skipping firewall reapplication - orchestration service not available`)
+      debug.info(`Skipping firewall reapplication - orchestration service not available`)
       return
     }
 
@@ -537,21 +551,21 @@ export class DepartmentNetworkService {
       include: { configuration: true }
     })
 
-    debug.log('info', `Reapplying firewall rules to ${machines.length} VMs in department ${departmentId}`)
+    debug.info(`Reapplying firewall rules to ${machines.length} VMs in department ${departmentId}`)
 
     for (const machine of machines) {
       // Skip VMs without TAP device (not running)
       if (!machine.configuration?.tapDeviceName) {
-        debug.log('warn', `Skipping VM ${machine.id} (${machine.name}) - no TAP device`)
+        debug.warn(`Skipping VM ${machine.id} (${machine.name}) - no TAP device`)
         continue
       }
 
       try {
         await this.firewallOrchestrationService.applyVMRules(machine.id)
-        debug.log('info', `Reapplied firewall rules to VM ${machine.id} (${machine.name})`)
+        debug.info(`Reapplied firewall rules to VM ${machine.id} (${machine.name})`)
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error)
-        debug.log('error', `Failed to reapply rules to VM ${machine.id} (${machine.name}): ${errorMessage}`)
+        debug.error(`Failed to reapply rules to VM ${machine.id} (${machine.name}): ${errorMessage}`)
         // Continue with other VMs even if one fails
       }
     }
@@ -562,7 +576,7 @@ export class DepartmentNetworkService {
    * Recreates bridges and restarts dnsmasq for departments with configured networks.
    */
   async restoreAllNetworks (): Promise<void> {
-    debug.log('info', 'Restoring all department networks')
+    debug.info('Restoring all department networks')
 
     // Configure bridge netfilter settings first - critical for DHCP to work after reboot
     // This ensures br_netfilter is loaded and sysctls are set before creating bridges
@@ -589,7 +603,7 @@ export class DepartmentNetworkService {
         const bridgeExists = await this.bridgeManager.exists(dept.bridgeName)
 
         if (!bridgeExists) {
-          debug.log('info', `Restoring network for department ${dept.name}`)
+          debug.info(`Restoring network for department ${dept.name}`)
           // Recreate the network
           const config = this.parseSubnet(dept.ipSubnet, dept.id)
           config.bridgeName = dept.bridgeName // Use existing bridge name
@@ -613,11 +627,11 @@ export class DepartmentNetworkService {
             data: { dnsmasqPid }
           })
 
-          debug.log('info', `Restored network for department ${dept.name}`)
+          debug.info(`Restored network for department ${dept.name}`)
         } else {
           // Bridge exists, just ensure dnsmasq is running
           // Also ensure checksum offloading is disabled (may not be if bridge was created externally)
-          debug.log('info', `Ensuring checksum offloading is disabled for existing bridge ${dept.bridgeName}`)
+          debug.info(`Ensuring checksum offloading is disabled for existing bridge ${dept.bridgeName}`)
           await this.bridgeManager.disableChecksumOffloading(dept.bridgeName)
           await this.ensureDnsmasqRunning(dept)
           // Ensure NAT is configured
@@ -625,14 +639,14 @@ export class DepartmentNetworkService {
           if (!hasNat) {
             await this.natService.addMasquerade(dept.ipSubnet, dept.bridgeName)
           }
-          debug.log('info', `Network already active for department ${dept.name}`)
+          debug.info(`Network already active for department ${dept.name}`)
         }
       } catch (error) {
-        debug.log('error', `Failed to restore network for department ${dept.name}: ${error}`)
+        debug.error(`Failed to restore network for department ${dept.name}: ${error}`)
       }
     }
 
-    debug.log('info', 'Finished restoring department networks')
+    debug.info('Finished restoring department networks')
   }
 
   // ===========================================================================
@@ -647,7 +661,7 @@ export class DepartmentNetworkService {
    * @returns Complete network diagnostics including recommendations
    */
   async diagnoseDepartmentNetwork (departmentId: string): Promise<DepartmentNetworkDiagnostics> {
-    debug.log('info', `Starting network diagnostics for department ${departmentId}`)
+    debug.info(`Starting network diagnostics for department ${departmentId}`)
 
     // Get department from database
     const department = await this.prisma.department.findUnique({
@@ -677,16 +691,14 @@ export class DepartmentNetworkService {
     ])
 
     // Log TAP devices diagnostics
-    debug.log('info',
-      `TAP devices on ${bridgeName}: ${tapDevices.totalDevices} total, ` +
+    debug.info(`TAP devices on ${bridgeName}: ${tapDevices.totalDevices} total, ` +
       `${tapDevices.devicesWithCarrier} with carrier, ` +
       `${tapDevices.orphanedDevices} orphaned, ` +
       `${tapDevices.devicesWithoutCarrier} without carrier`
     )
 
     if (tapDevices.devicesWithoutCarrier > 0) {
-      debug.log('warn',
-        `TAP devices without carrier detected: ${tapDevices.devices.filter(d => !d.hasCarrier).map(d => d.name).join(', ')}`
+      debug.warn(`TAP devices without carrier detected: ${tapDevices.devices.filter(d => !d.hasCarrier).map(d => d.name).join(', ')}`
       )
     }
 
@@ -709,7 +721,7 @@ export class DepartmentNetworkService {
       manualCommands
     }
 
-    debug.log('info', `Network diagnostics complete for department ${departmentId}`)
+    debug.info(`Network diagnostics complete for department ${departmentId}`)
     return diagnostics
   }
 
@@ -749,7 +761,7 @@ export class DepartmentNetworkService {
       throw new Error(`Bridge ${bridgeName} does not exist`)
     }
 
-    debug.log('info', `Starting DHCP traffic capture on ${bridgeName} for ${durationSeconds}s`)
+    debug.info(`Starting DHCP traffic capture on ${bridgeName} for ${durationSeconds}s`)
 
     return new Promise<DhcpTrafficCapture>((resolve, reject) => {
       const packets: string[] = []
@@ -839,7 +851,7 @@ export class DepartmentNetworkService {
           parseLine(stderrBuffer)
         }
 
-        debug.log('info', `DHCP capture complete: ${packets.length} packets captured (exit code: ${code})`)
+        debug.info(`DHCP capture complete: ${packets.length} packets captured (exit code: ${code})`)
 
         resolve({
           bridgeName,
@@ -857,7 +869,7 @@ export class DepartmentNetworkService {
 
       tcpdumpProcess.on('error', (error) => {
         clearTimeout(timeoutId)
-        debug.log('error', `DHCP capture failed: ${error.message}`)
+        debug.error(`DHCP capture failed: ${error.message}`)
         reject(new Error(`Failed to start tcpdump: ${error.message}`))
       })
     })
@@ -1016,14 +1028,14 @@ export class DepartmentNetworkService {
    * @param moduleName - Name of the kernel module to check
    * @returns true if module is loaded, false otherwise
    */
-  private isModuleLoaded (moduleName: string): boolean {
+  private async isModuleLoaded (moduleName: string): Promise<boolean> {
     try {
-      const output = execSync(`lsmod | grep ${moduleName}`, { encoding: 'utf8', stdio: 'pipe' })
+      const { stdout: output } = await execAsync(`lsmod | grep ${sanitizeShellArg(moduleName, 'moduleName')}`)
       const isLoaded = output.includes(moduleName)
-      debug.log('info', `Module ${moduleName} is ${isLoaded ? 'loaded' : 'not loaded'}`)
+      debug.info(`Module ${moduleName} is ${isLoaded ? 'loaded' : 'not loaded'}`)
       return isLoaded
     } catch {
-      debug.log('info', `Module ${moduleName} is not loaded`)
+      debug.info(`Module ${moduleName} is not loaded`)
       return false
     }
   }
@@ -1034,26 +1046,26 @@ export class DepartmentNetworkService {
    * @param moduleName - Name of the kernel module to load
    * @returns true if module was loaded successfully, false otherwise
    */
-  private loadKernelModule (moduleName: string): boolean {
-    if (this.isModuleLoaded(moduleName)) {
-      debug.log('info', `Module ${moduleName} is already loaded, skipping modprobe`)
+  private async loadKernelModule (moduleName: string): Promise<boolean> {
+    if (await this.isModuleLoaded(moduleName)) {
+      debug.info(`Module ${moduleName} is already loaded, skipping modprobe`)
       return true
     }
 
     try {
-      debug.log('info', `Loading kernel module: ${moduleName}`)
-      execSync(`modprobe ${moduleName}`, { stdio: 'pipe' })
+      debug.info(`Loading kernel module: ${moduleName}`)
+      await execAsync(`modprobe ${sanitizeShellArg(moduleName, 'moduleName')}`)
 
-      if (this.isModuleLoaded(moduleName)) {
-        debug.log('info', `Successfully loaded kernel module: ${moduleName}`)
+      if (await this.isModuleLoaded(moduleName)) {
+        debug.info(`Successfully loaded kernel module: ${moduleName}`)
         return true
       } else {
-        debug.log('error', `modprobe succeeded but module ${moduleName} is not visible in lsmod`)
+        debug.error(`modprobe succeeded but module ${moduleName} is not visible in lsmod`)
         return false
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error)
-      debug.log('error', `Failed to load kernel module ${moduleName}: ${errorMessage}`)
+      debug.error(`Failed to load kernel module ${moduleName}: ${errorMessage}`)
       return false
     }
   }
@@ -1076,10 +1088,10 @@ ${moduleName}
       // Ensure directory exists (may be called before ensureDirectories in restoreAllNetworks)
       await fs.mkdir(MODULES_LOAD_DIR, { recursive: true })
       await fs.writeFile(MODULES_LOAD_FILE, content)
-      debug.log('info', `Created module persistence file: ${MODULES_LOAD_FILE}`)
+      debug.info(`Created module persistence file: ${MODULES_LOAD_FILE}`)
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error)
-      debug.log('error', `Failed to create module persistence file: ${errorMessage}`)
+      debug.error(`Failed to create module persistence file: ${errorMessage}`)
     }
   }
 
@@ -1101,16 +1113,16 @@ ${moduleName}
   private async configureBridgeNetfilter (): Promise<void> {
     // Skip if already configured in this process to avoid repeated work
     if (bridgeNetfilterConfigured) {
-      debug.log('info', 'Bridge netfilter already configured in this process, skipping')
+      debug.info('Bridge netfilter already configured in this process, skipping')
       return
     }
 
-    debug.log('info', 'Configuring bridge netfilter settings for DHCP')
+    debug.info('Configuring bridge netfilter settings for DHCP')
 
     // Step 1: Check and load br_netfilter module
-    const moduleWasLoaded = this.isModuleLoaded('br_netfilter')
+    const moduleWasLoaded = await this.isModuleLoaded('br_netfilter')
     if (!moduleWasLoaded) {
-      const loadSuccess = this.loadKernelModule('br_netfilter')
+      const loadSuccess = await this.loadKernelModule('br_netfilter')
       if (!loadSuccess) {
         throw new Error('Failed to load br_netfilter kernel module. DHCP will not work correctly.')
       }
@@ -1120,10 +1132,10 @@ ${moduleName}
     try {
       await this.persistModuleLoad('br_netfilter')
       await fs.access(MODULES_LOAD_FILE)
-      debug.log('info', `Verified module persistence file exists: ${MODULES_LOAD_FILE}`)
+      debug.info(`Verified module persistence file exists: ${MODULES_LOAD_FILE}`)
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error)
-      debug.log('warn', `Failed to persist module load (non-critical): ${errorMessage}`)
+      debug.warn(`Failed to persist module load (non-critical): ${errorMessage}`)
       // Continue - module is loaded in memory, persistence is nice-to-have
     }
 
@@ -1144,43 +1156,43 @@ net.bridge.bridge-nf-call-arptables=0
 
     try {
       await fs.writeFile(SYSCTL_CONFIG_FILE, sysctlContent)
-      debug.log('info', `Created sysctl config: ${SYSCTL_CONFIG_FILE}`)
+      debug.info(`Created sysctl config: ${SYSCTL_CONFIG_FILE}`)
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error)
-      debug.log('warn', `Failed to write sysctl config: ${errorMessage}`)
+      debug.warn(`Failed to write sysctl config: ${errorMessage}`)
     }
 
     // Step 4: Apply sysctl settings immediately
     try {
-      execSync('sysctl -w net.bridge.bridge-nf-call-iptables=0', { stdio: 'pipe' })
-      execSync('sysctl -w net.bridge.bridge-nf-call-ip6tables=0', { stdio: 'pipe' })
-      execSync('sysctl -w net.bridge.bridge-nf-call-arptables=0', { stdio: 'pipe' })
-      debug.log('info', 'Applied bridge netfilter sysctl settings')
+      await execAsync('sysctl -w net.bridge.bridge-nf-call-iptables=0')
+      await execAsync('sysctl -w net.bridge.bridge-nf-call-ip6tables=0')
+      await execAsync('sysctl -w net.bridge.bridge-nf-call-arptables=0')
+      debug.info('Applied bridge netfilter sysctl settings')
 
       // Verify settings were applied
-      const verifyIptables = execSync('sysctl net.bridge.bridge-nf-call-iptables', { encoding: 'utf8' }).trim()
-      const verifyIp6tables = execSync('sysctl net.bridge.bridge-nf-call-ip6tables', { encoding: 'utf8' }).trim()
-      const verifyArptables = execSync('sysctl net.bridge.bridge-nf-call-arptables', { encoding: 'utf8' }).trim()
-      debug.log('info', `Verified: ${verifyIptables}`)
-      debug.log('info', `Verified: ${verifyIp6tables}`)
-      debug.log('info', `Verified: ${verifyArptables}`)
+      const { stdout: verifyIptables } = await execAsync('sysctl net.bridge.bridge-nf-call-iptables')
+      const { stdout: verifyIp6tables } = await execAsync('sysctl net.bridge.bridge-nf-call-ip6tables')
+      const { stdout: verifyArptables } = await execAsync('sysctl net.bridge.bridge-nf-call-arptables')
+      debug.info(`Verified: ${verifyIptables.trim()}`)
+      debug.info(`Verified: ${verifyIp6tables.trim()}`)
+      debug.info(`Verified: ${verifyArptables.trim()}`)
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error)
-      debug.log('warn', `Failed to apply sysctl settings: ${errorMessage}`)
+      debug.warn(`Failed to apply sysctl settings: ${errorMessage}`)
     }
 
     // Step 5: Final verification and summary
     try {
-      const lsmodOutput = execSync('lsmod | grep br_netfilter', { encoding: 'utf8', stdio: 'pipe' }).trim()
-      debug.log('info', `Module verification: ${lsmodOutput}`)
+      const { stdout: lsmodOutput } = await execAsync('lsmod | grep br_netfilter')
+      debug.info(`Module verification: ${lsmodOutput.trim()}`)
     } catch {
-      debug.log('warn', 'br_netfilter not visible in lsmod during final verification')
+      debug.warn('br_netfilter not visible in lsmod during final verification')
     }
 
-    debug.log('info', 'Bridge netfilter configuration complete:')
-    debug.log('info', `  - Module loaded: yes`)
-    debug.log('info', `  - Persistence file: ${MODULES_LOAD_FILE}`)
-    debug.log('info', `  - Sysctl file: ${SYSCTL_CONFIG_FILE}`)
+    debug.info('Bridge netfilter configuration complete:')
+    debug.info(`  - Module loaded: yes`)
+    debug.info(`  - Persistence file: ${MODULES_LOAD_FILE}`)
+    debug.info(`  - Sysctl file: ${SYSCTL_CONFIG_FILE}`)
 
     // Mark as configured to avoid repeated work in this process
     bridgeNetfilterConfigured = true
@@ -1190,12 +1202,12 @@ net.bridge.bridge-nf-call-arptables=0
    * Validates a dnsmasq configuration file before starting the service.
    * Uses dnsmasq's built-in test mode to check syntax.
    */
-  private validateDnsmasqConfig (configPath: string): void {
+  private async validateDnsmasqConfig (configPath: string): Promise<void> {
     try {
-      execSync(`dnsmasq --test --conf-file=${configPath}`, {
-        stdio: 'pipe'
+      await execAsync(`dnsmasq --test --conf-file=${configPath}`, {
+        encoding: 'utf8'
       })
-      debug.log('info', `dnsmasq config validated: ${configPath}`)
+      debug.info(`dnsmasq config validated: ${configPath}`)
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error)
       throw new Error(`Invalid dnsmasq configuration: ${errorMessage}`)
@@ -1244,10 +1256,10 @@ net.bridge.bridge-nf-call-arptables=0
 
     // Log if NTP servers were filtered out
     if (config.ntpServers && config.ntpServers.length > 0 && ntpServers.length === 0) {
-      debug.log('warn', `All NTP servers filtered out (DHCP option 42 requires IP addresses): ${config.ntpServers.join(', ')}`)
+      debug.warn(`All NTP servers filtered out (DHCP option 42 requires IP addresses): ${config.ntpServers.join(', ')}`)
     } else if (config.ntpServers && config.ntpServers.length > ntpServers.length) {
       const filtered = config.ntpServers.filter(ntp => !this.isValidIPv4(ntp))
-      debug.log('warn', `Filtered out invalid NTP servers (not IP addresses): ${filtered.join(', ')}`)
+      debug.warn(`Filtered out invalid NTP servers (not IP addresses): ${filtered.join(', ')}`)
     }
 
     // MTU configuration with fallback to standard Ethernet MTU
@@ -1357,18 +1369,16 @@ log-queries
 `
     await fs.writeFile(configPath, configContent)
 
-    debug.log('info', `Created dnsmasq config: ${configPath}`)
-    debug.log('info', `DHCP range: ${config.dhcpStart} - ${config.dhcpEnd}`)
-    debug.log('info', `Gateway: ${config.gatewayIP}, Subnet: ${networkAddresses.subnetMask}`)
+    debug.info(`Created dnsmasq config: ${configPath}`)
+    debug.info(`DHCP range: ${config.dhcpStart} - ${config.dhcpEnd}`)
+    debug.info(`Gateway: ${config.gatewayIP}, Subnet: ${networkAddresses.subnetMask}`)
 
     // Validate configuration before starting
-    this.validateDnsmasqConfig(configPath)
+    await this.validateDnsmasqConfig(configPath)
 
     // Start dnsmasq
     try {
-      execSync(`dnsmasq --conf-file=${configPath} --pid-file=${pidPath}`, {
-        stdio: 'pipe'
-      })
+      await execAsync(`dnsmasq --conf-file=${configPath} --pid-file=${pidPath}`)
 
       // Read PID from file
       const pidContent = await fs.readFile(pidPath, 'utf8')
@@ -1378,24 +1388,24 @@ log-queries
         throw new Error('Failed to read dnsmasq PID')
       }
 
-      debug.log('info', `dnsmasq started (PID: ${pid}) for ${config.bridgeName}`)
+      debug.info(`dnsmasq started (PID: ${pid}) for ${config.bridgeName}`)
 
       // Verify dnsmasq is listening on DHCP port
-      this.verifyDnsmasqListening(config.bridgeName)
+      await this.verifyDnsmasqListening(config.bridgeName)
 
       // Log DHCP leases for debugging
       try {
-        const leasesContent = execSync(`cat ${leasePath} 2>/dev/null || echo "No leases yet"`, { encoding: 'utf8' })
-        debug.log('info', `[DHCP] Current leases:\n${leasesContent}`)
+        const { stdout: leasesContent } = await execAsync(`cat ${leasePath} 2>/dev/null || echo "No leases yet"`)
+        debug.info(`[DHCP] Current leases:\n${leasesContent}`)
       } catch {
-        debug.log('info', '[DHCP] Lease file not accessible yet')
+        debug.info('[DHCP] Lease file not accessible yet')
       }
 
       return pid
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error)
-      debug.log('error', `Failed to start dnsmasq for ${config.bridgeName}: ${errorMessage}`)
-      debug.log('error', `Config path: ${configPath}`)
+      debug.error(`Failed to start dnsmasq for ${config.bridgeName}: ${errorMessage}`)
+      debug.error(`Config path: ${configPath}`)
       throw new Error(`Failed to start dnsmasq: ${errorMessage}`)
     }
   }
@@ -1404,33 +1414,33 @@ log-queries
    * Verifies that dnsmasq is listening on the DHCP port (67).
    * Logs the result for diagnostics.
    */
-  private verifyDnsmasqListening (bridgeName: string): void {
+  private async verifyDnsmasqListening (bridgeName: string): Promise<void> {
     try {
       // Check if dnsmasq is listening on UDP port 67
-      const ssOutput = execSync('ss -ulnp | grep :67 || true', { encoding: 'utf8' })
+      const { stdout: ssOutput } = await execAsync('ss -ulnp | grep :67 || true')
       if (ssOutput.includes(':67')) {
-        debug.log('info', `[DHCP] dnsmasq is listening on port 67`)
-        debug.log('info', `[DHCP] ${ssOutput.trim()}`)
+        debug.info(`[DHCP] dnsmasq is listening on port 67`)
+        debug.info(`[DHCP] ${ssOutput.trim()}`)
       } else {
-        debug.log('warn', `[DHCP] dnsmasq may not be listening on port 67`)
+        debug.warn(`[DHCP] dnsmasq may not be listening on port 67`)
       }
 
       // Log bridge configuration for debugging
-      const bridgeInfo = execSync(`ip addr show ${bridgeName} 2>/dev/null || true`, { encoding: 'utf8' })
+      const { stdout: bridgeInfo } = await execAsync(`ip addr show ${bridgeName} 2>/dev/null || true`)
       if (bridgeInfo) {
-        debug.log('info', `[BRIDGE] Configuration for ${bridgeName}:`)
-        debug.log('info', bridgeInfo.trim())
+        debug.info(`[BRIDGE] Configuration for ${bridgeName}:`)
+        debug.info(bridgeInfo.trim())
       }
 
       // Log connected interfaces
-      const bridgeLinks = execSync('bridge link show 2>/dev/null || true', { encoding: 'utf8' })
+      const { stdout: bridgeLinks } = await execAsync('bridge link show 2>/dev/null || true')
       if (bridgeLinks) {
-        debug.log('info', `[BRIDGE] Connected interfaces:`)
-        debug.log('info', bridgeLinks.trim())
+        debug.info(`[BRIDGE] Connected interfaces:`)
+        debug.info(bridgeLinks.trim())
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error)
-      debug.log('warn', `[DHCP] Failed to verify dnsmasq status: ${errorMessage}`)
+      debug.warn(`[DHCP] Failed to verify dnsmasq status: ${errorMessage}`)
     }
   }
 
@@ -1447,14 +1457,14 @@ log-queries
       try {
         process.kill(pid, 0) // Check if alive
         process.kill(pid, 'SIGKILL')
-        debug.log('info', `Force killed dnsmasq (PID: ${pid})`)
+        debug.info(`Force killed dnsmasq (PID: ${pid})`)
       } catch {
         // Process already exited
-        debug.log('info', `Stopped dnsmasq (PID: ${pid})`)
+        debug.info(`Stopped dnsmasq (PID: ${pid})`)
       }
     } catch (error) {
       // Process might not exist
-      debug.log('warn', `Could not stop dnsmasq (PID: ${pid}): ${error}`)
+      debug.warn(`Could not stop dnsmasq (PID: ${pid}): ${error}`)
     }
   }
 
@@ -1492,7 +1502,7 @@ log-queries
       data: { dnsmasqPid: newPid }
     })
 
-    debug.log('info', `Restarted dnsmasq for department ${departmentId} with new PID: ${newPid}`)
+    debug.info(`Restarted dnsmasq for department ${departmentId} with new PID: ${newPid}`)
   }
 
   /**
@@ -1504,10 +1514,10 @@ log-queries
     // Check if process is running
     try {
       process.kill(dept.dnsmasqPid, 0)
-      debug.log('info', `dnsmasq already running for ${dept.bridgeName} (PID: ${dept.dnsmasqPid})`)
+      debug.info(`dnsmasq already running for ${dept.bridgeName} (PID: ${dept.dnsmasqPid})`)
     } catch {
       // Process not running, restart it
-      debug.log('info', `Restarting dnsmasq for ${dept.bridgeName}`)
+      debug.info(`Restarting dnsmasq for ${dept.bridgeName}`)
       const config = this.parseSubnet(dept.ipSubnet, dept.id)
       config.bridgeName = dept.bridgeName
       config.dnsServers = dept.dnsServers
@@ -1536,7 +1546,7 @@ log-queries
     for (const file of files) {
       try {
         await fs.unlink(file)
-        debug.log('info', `Removed: ${file}`)
+        debug.info(`Removed: ${file}`)
       } catch {
         // File doesn't exist, ignore
       }
@@ -1558,7 +1568,7 @@ log-queries
       const contents = await fs.readdir(dirPath)
       if (contents.length === 0) {
         await fs.rmdir(dirPath)
-        debug.log('info', `Removed empty directory: ${dirPath}`)
+        debug.info(`Removed empty directory: ${dirPath}`)
       }
     } catch {
       // Directory doesn't exist or couldn't be read/removed - ignore
@@ -1574,47 +1584,47 @@ log-queries
    * This must be called BEFORE destroying the bridge.
    */
   private async cleanupOrphanedTapDevices (bridgeName: string): Promise<void> {
-    debug.log('info', `Checking for orphaned TAP devices on bridge ${bridgeName}`)
+    debug.info(`Checking for orphaned TAP devices on bridge ${bridgeName}`)
 
     try {
       // Get all interfaces attached to the bridge
       const interfaces = await this.bridgeManager.listInterfaces(bridgeName)
 
       if (interfaces.length === 0) {
-        debug.log('info', `No interfaces attached to bridge ${bridgeName}`)
+        debug.info(`No interfaces attached to bridge ${bridgeName}`)
         return
       }
 
-      debug.log('info', `Found ${interfaces.length} interfaces on bridge ${bridgeName}: ${interfaces.join(', ')}`)
+      debug.info(`Found ${interfaces.length} interfaces on bridge ${bridgeName}: ${interfaces.join(', ')}`)
 
       const tapManager = new TapDeviceManager()
 
       for (const iface of interfaces) {
         // Only clean up TAP devices (vnet-* or tap-* prefixes)
         if (!iface.startsWith('vnet-') && !iface.startsWith('tap-')) {
-          debug.log('info', `Skipping non-TAP interface: ${iface}`)
+          debug.info(`Skipping non-TAP interface: ${iface}`)
           continue
         }
 
-        debug.log('info', `Cleaning up orphaned TAP device: ${iface}`)
+        debug.info(`Cleaning up orphaned TAP device: ${iface}`)
 
         try {
           // First, detach from the bridge
           await this.bridgeManager.removeInterface(bridgeName, iface)
-          debug.log('info', `Detached ${iface} from bridge ${bridgeName}`)
+          debug.info(`Detached ${iface} from bridge ${bridgeName}`)
 
           // Then, destroy the TAP device
           await tapManager.destroy(iface)
-          debug.log('info', `Destroyed orphaned TAP device: ${iface}`)
+          debug.info(`Destroyed orphaned TAP device: ${iface}`)
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : String(error)
           // Log warning but continue - device may be in use by an active VM
-          debug.log('warn', `Could not cleanup TAP device ${iface}: ${errorMessage}`)
+          debug.warn(`Could not cleanup TAP device ${iface}: ${errorMessage}`)
         }
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error)
-      debug.log('warn', `Error checking for orphaned TAP devices: ${errorMessage}`)
+      debug.warn(`Error checking for orphaned TAP devices: ${errorMessage}`)
     }
   }
 
@@ -1624,16 +1634,16 @@ log-queries
   private async verifyDnsmasqStopped (bridgeName: string): Promise<boolean> {
     try {
       // Check using pgrep
-      const output = execSync(`pgrep -f "dnsmasq.*${bridgeName}" || true`, { encoding: 'utf8', stdio: 'pipe' })
+      const { stdout: output } = await execAsync(`pgrep -f "dnsmasq.*${bridgeName}" || true`)
       if (output.trim()) {
-        debug.log('warn', `dnsmasq still running for ${bridgeName}: PIDs ${output.trim()}`)
+        debug.warn(`dnsmasq still running for ${bridgeName}: PIDs ${output.trim()}`)
         return false
       }
 
       // Also check if port 67 is still in use by dnsmasq for this bridge
-      const ssOutput = execSync(`ss -ulnp | grep ":67 " | grep "${bridgeName}" || true`, { encoding: 'utf8', stdio: 'pipe' })
+      const { stdout: ssOutput } = await execAsync(`ss -ulnp | grep ":67 " | grep "${bridgeName}" || true`)
       if (ssOutput.trim()) {
-        debug.log('warn', `dnsmasq may still be listening for ${bridgeName}`)
+        debug.warn(`dnsmasq may still be listening for ${bridgeName}`)
         return false
       }
 
@@ -1659,7 +1669,7 @@ log-queries
     for (const file of files) {
       try {
         await fs.access(file)
-        debug.log('warn', `File still exists: ${file}`)
+        debug.warn(`File still exists: ${file}`)
         allRemoved = false
       } catch {
         // File doesn't exist - good
@@ -1683,16 +1693,16 @@ log-queries
       })
 
       if (count > 0) {
-        debug.log('info', `${count} department(s) still have configured networks, keeping system files`)
+        debug.info(`${count} department(s) still have configured networks, keeping system files`)
         return
       }
 
-      debug.log('info', 'Last department network destroyed, cleaning up system files')
+      debug.info('Last department network destroyed, cleaning up system files')
 
       // Remove sysctl config file
       try {
         await fs.unlink(SYSCTL_CONFIG_FILE)
-        debug.log('info', `Removed system file: ${SYSCTL_CONFIG_FILE}`)
+        debug.info(`Removed system file: ${SYSCTL_CONFIG_FILE}`)
       } catch {
         // File doesn't exist or couldn't be removed
       }
@@ -1700,7 +1710,7 @@ log-queries
       // Remove modules-load config file
       try {
         await fs.unlink(MODULES_LOAD_FILE)
-        debug.log('info', `Removed system file: ${MODULES_LOAD_FILE}`)
+        debug.info(`Removed system file: ${MODULES_LOAD_FILE}`)
       } catch {
         // File doesn't exist or couldn't be removed
       }
@@ -1708,10 +1718,10 @@ log-queries
       // Reset the in-process flag so netfilter will be configured again if needed
       bridgeNetfilterConfigured = false
 
-      debug.log('info', 'System files cleanup complete')
+      debug.info('System files cleanup complete')
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error)
-      debug.log('warn', `Error during system files cleanup: ${errorMessage}`)
+      debug.warn(`Error during system files cleanup: ${errorMessage}`)
     }
   }
 
@@ -1739,8 +1749,9 @@ log-queries
     }
 
     // Check dnsmasq
+    // Check dnsmasq
     try {
-      const psOutput = execSync(`pgrep -f "dnsmasq.*${bridgeName}" || true`, { encoding: 'utf8', stdio: 'pipe' })
+      const { stdout: psOutput } = await execAsync(`pgrep -f "dnsmasq.*${bridgeName}" || true`)
       if (psOutput.trim()) {
         result.dnsmasqStopped = false
         result.allClean = false
@@ -1793,7 +1804,7 @@ log-queries
    * @returns Result with status of each cleanup operation
    */
   async forceDestroyNetwork (departmentId: string): Promise<ForceDestroyResult> {
-    debug.log('info', `Force destroying network for department ${departmentId}`)
+    debug.info(`Force destroying network for department ${departmentId}`)
 
     const result: ForceDestroyResult = {
       success: false,
@@ -1813,13 +1824,13 @@ log-queries
     })
 
     if (!department) {
-      debug.log('warn', `Department ${departmentId} not found for force destroy`)
+      debug.warn(`Department ${departmentId} not found for force destroy`)
       return result
     }
 
     const bridgeName = department.bridgeName
     if (!bridgeName) {
-      debug.log('info', `Department ${departmentId} has no network configured`)
+      debug.info(`Department ${departmentId} has no network configured`)
       result.success = true
       return result
     }
@@ -1831,7 +1842,7 @@ log-queries
       result.operations.tapDevicesCleanup.success = true
     } catch (error) {
       result.operations.tapDevicesCleanup.error = error instanceof Error ? error.message : String(error)
-      debug.log('warn', `Force destroy: TAP cleanup failed: ${result.operations.tapDevicesCleanup.error}`)
+      debug.warn(`Force destroy: TAP cleanup failed: ${result.operations.tapDevicesCleanup.error}`)
     }
 
     // 2. Force stop dnsmasq
@@ -1843,14 +1854,14 @@ log-queries
       }
       // Then force kill by name
       try {
-        execSync(`pkill -9 -f "dnsmasq.*${bridgeName}"`, { stdio: 'pipe' })
+        await execAsync(`pkill -9 -f "dnsmasq.*${bridgeName}"`)
       } catch {
         // No process found - OK
       }
       result.operations.dnsmasqStop.success = true
     } catch (error) {
       result.operations.dnsmasqStop.error = error instanceof Error ? error.message : String(error)
-      debug.log('warn', `Force destroy: dnsmasq stop failed: ${result.operations.dnsmasqStop.error}`)
+      debug.warn(`Force destroy: dnsmasq stop failed: ${result.operations.dnsmasqStop.error}`)
     }
 
     // 3. Force remove NAT
@@ -1860,7 +1871,7 @@ log-queries
       result.operations.natRemoval.success = true
     } catch (error) {
       result.operations.natRemoval.error = error instanceof Error ? error.message : String(error)
-      debug.log('warn', `Force destroy: NAT removal failed: ${result.operations.natRemoval.error}`)
+      debug.warn(`Force destroy: NAT removal failed: ${result.operations.natRemoval.error}`)
     }
 
     // 4. Force destroy bridge
@@ -1872,12 +1883,12 @@ log-queries
     } catch (error) {
       // Try aggressive deletion with ip link
       try {
-        execSync(`ip link set ${bridgeName} down 2>/dev/null || true`, { stdio: 'pipe' })
-        execSync(`ip link del ${bridgeName} 2>/dev/null || true`, { stdio: 'pipe' })
+        await execAsync(`ip link set ${bridgeName} down 2>/dev/null || true`)
+        await execAsync(`ip link del ${bridgeName} 2>/dev/null || true`)
         result.operations.bridgeDestruction.success = true
       } catch {
         result.operations.bridgeDestruction.error = error instanceof Error ? error.message : String(error)
-        debug.log('warn', `Force destroy: bridge destruction failed: ${result.operations.bridgeDestruction.error}`)
+        debug.warn(`Force destroy: bridge destruction failed: ${result.operations.bridgeDestruction.error}`)
       }
     }
 
@@ -1888,7 +1899,7 @@ log-queries
       result.operations.fileCleanup.success = true
     } catch (error) {
       result.operations.fileCleanup.error = error instanceof Error ? error.message : String(error)
-      debug.log('warn', `Force destroy: file cleanup failed: ${result.operations.fileCleanup.error}`)
+      debug.warn(`Force destroy: file cleanup failed: ${result.operations.fileCleanup.error}`)
     }
 
     // 6. Update database
@@ -1907,7 +1918,7 @@ log-queries
       result.operations.databaseUpdate.success = true
     } catch (error) {
       result.operations.databaseUpdate.error = error instanceof Error ? error.message : String(error)
-      debug.log('warn', `Force destroy: database update failed: ${result.operations.databaseUpdate.error}`)
+      debug.warn(`Force destroy: database update failed: ${result.operations.databaseUpdate.error}`)
     }
 
     // 7. Clean up system files if last department
@@ -1917,7 +1928,7 @@ log-queries
       result.operations.systemFilesCleanup.success = true
     } catch (error) {
       result.operations.systemFilesCleanup.error = error instanceof Error ? error.message : String(error)
-      debug.log('warn', `Force destroy: system files cleanup failed: ${result.operations.systemFilesCleanup.error}`)
+      debug.warn(`Force destroy: system files cleanup failed: ${result.operations.systemFilesCleanup.error}`)
     }
 
     // Determine overall success - all attempted operations must succeed
@@ -1933,7 +1944,7 @@ log-queries
     // Only consider operations that were attempted
     result.success = allOps.every(op => !op.attempted || op.success)
 
-    debug.log('info', `Force destroy completed for department ${departmentId}: success=${result.success}`)
+    debug.info(`Force destroy completed for department ${departmentId}: success=${result.success}`)
     return result
   }
 
@@ -1944,20 +1955,20 @@ log-queries
     config: SubnetConfig,
     created: { bridge: boolean; ip: boolean; dnsmasq: boolean; nat: boolean }
   ): Promise<void> {
-    debug.log('info', `Rolling back network configuration for ${config.bridgeName}`)
+    debug.info(`Rolling back network configuration for ${config.bridgeName}`)
 
     if (created.nat) {
       try {
         await this.natService.removeMasquerade(config.bridgeName)
       } catch (e) {
-        debug.log('error', `Rollback: Failed to remove NAT: ${e}`)
+        debug.error(`Rollback: Failed to remove NAT: ${e}`)
       }
     }
 
     if (created.dnsmasq) {
       // Try to kill dnsmasq by name
       try {
-        execSync(`pkill -f "dnsmasq.*${config.bridgeName}"`, { stdio: 'pipe' })
+        await execAsync(`pkill -f "dnsmasq.*${config.bridgeName}"`)
       } catch {
         // Ignore
       }
@@ -1967,7 +1978,7 @@ log-queries
       try {
         await this.bridgeManager.destroy(config.bridgeName)
       } catch (e) {
-        debug.log('error', `Rollback: Failed to destroy bridge: ${e}`)
+        debug.error(`Rollback: Failed to destroy bridge: ${e}`)
       }
     }
 
@@ -2005,8 +2016,9 @@ log-queries
       result.attachedInterfaces = await this.bridgeManager.listInterfaces(bridgeName)
 
       // Get detailed status from ip command
+      // Get detailed status from ip command
       try {
-        const ipOutput = execSync(`ip -details link show ${bridgeName}`, { encoding: 'utf8', stdio: 'pipe' })
+        const { stdout: ipOutput } = await execAsync(`ip -details link show ${bridgeName}`)
 
         // Check if UP (admin state)
         // Bridge can be administratively UP but operationally DOWN (no carrier/no VMs attached)
@@ -2025,10 +2037,10 @@ log-queries
           result.state = stateMatch[1]
         }
       } catch (error) {
-        debug.log('warn', `Failed to get detailed bridge status: ${error}`)
+        debug.warn(`Failed to get detailed bridge status: ${error}`)
       }
     } catch (error) {
-      debug.log('warn', `Failed to check bridge status for ${bridgeName}: ${error}`)
+      debug.warn(`Failed to check bridge status for ${bridgeName}: ${error}`)
     }
 
     return result
@@ -2079,7 +2091,7 @@ log-queries
 
         // Read last 50 lines of log
         try {
-          const logContent = execSync(`tail -50 ${logPath}`, { encoding: 'utf8', stdio: 'pipe' })
+          const { stdout: logContent } = await execAsync(`tail -50 ${logPath}`)
           result.recentLogLines = logContent.split('\n').filter(line => line.trim() !== '')
         } catch {
           // Ignore read errors
@@ -2105,7 +2117,7 @@ log-queries
       // Check if any dnsmasq is running for this bridge
       if (!result.isRunning && department.bridgeName) {
         try {
-          const psOutput = execSync(`pgrep -f "dnsmasq.*${department.bridgeName}" || true`, { encoding: 'utf8', stdio: 'pipe' })
+          const { stdout: psOutput } = await execAsync(`pgrep -f "dnsmasq.*${department.bridgeName}" || true`)
           if (psOutput.trim()) {
             result.isRunning = true
             result.pidMatches = false // Running but PID doesn't match stored
@@ -2121,13 +2133,13 @@ log-queries
 
       // Check if listening on port 67
       try {
-        const ssOutput = execSync('ss -ulnp | grep :67 || true', { encoding: 'utf8', stdio: 'pipe' })
+        const { stdout: ssOutput } = await execAsync('ss -ulnp | grep :67 || true')
         result.listeningPort = ssOutput.includes(':67')
       } catch {
         // Ignore
       }
     } catch (error) {
-      debug.log('warn', `Failed to check dnsmasq status: ${error}`)
+      debug.warn(`Failed to check dnsmasq status: ${error}`)
     }
 
     return result
@@ -2147,25 +2159,25 @@ log-queries
 
     try {
       // Check if module is loaded
-      result.moduleLoaded = this.isModuleLoaded('br_netfilter')
+      result.moduleLoaded = await this.isModuleLoaded('br_netfilter')
 
       // Read sysctl values
       try {
-        const iptablesOutput = execSync('sysctl -n net.bridge.bridge-nf-call-iptables 2>/dev/null || echo -1', { encoding: 'utf8', stdio: 'pipe' })
+        const { stdout: iptablesOutput } = await execAsync('sysctl -n net.bridge.bridge-nf-call-iptables 2>/dev/null || echo -1')
         result.callIptables = parseInt(iptablesOutput.trim(), 10)
       } catch {
         result.callIptables = -1
       }
 
       try {
-        const ip6tablesOutput = execSync('sysctl -n net.bridge.bridge-nf-call-ip6tables 2>/dev/null || echo -1', { encoding: 'utf8', stdio: 'pipe' })
+        const { stdout: ip6tablesOutput } = await execAsync('sysctl -n net.bridge.bridge-nf-call-ip6tables 2>/dev/null || echo -1')
         result.callIp6tables = parseInt(ip6tablesOutput.trim(), 10)
       } catch {
         result.callIp6tables = -1
       }
 
       try {
-        const arptablesOutput = execSync('sysctl -n net.bridge.bridge-nf-call-arptables 2>/dev/null || echo -1', { encoding: 'utf8', stdio: 'pipe' })
+        const { stdout: arptablesOutput } = await execAsync('sysctl -n net.bridge.bridge-nf-call-arptables 2>/dev/null || echo -1')
         result.callArptables = parseInt(arptablesOutput.trim(), 10)
       } catch {
         result.callArptables = -1
@@ -2179,7 +2191,7 @@ log-queries
         result.persistenceFileExists = false
       }
     } catch (error) {
-      debug.log('warn', `Failed to check br_netfilter status: ${error}`)
+      debug.warn(`Failed to check br_netfilter status: ${error}`)
     }
 
     return result
@@ -2202,7 +2214,7 @@ log-queries
 
       // Check nft table and chain
       try {
-        const nftOutput = execSync('nft list chain ip infinibay_nat postrouting 2>/dev/null || true', { encoding: 'utf8', stdio: 'pipe' })
+        const { stdout: nftOutput } = await execAsync('nft list chain ip infinibay_nat postrouting 2>/dev/null || true')
         result.tableExists = nftOutput.includes('infinibay_nat')
         result.chainExists = nftOutput.includes('postrouting')
         if (nftOutput.trim()) {
@@ -2214,13 +2226,13 @@ log-queries
 
       // Check IP forwarding
       try {
-        const forwardOutput = execSync('sysctl -n net.ipv4.ip_forward', { encoding: 'utf8', stdio: 'pipe' })
+        const { stdout: forwardOutput } = await execAsync('sysctl -n net.ipv4.ip_forward')
         result.ipForwardingEnabled = forwardOutput.trim() === '1'
       } catch {
         result.ipForwardingEnabled = false
       }
     } catch (error) {
-      debug.log('warn', `Failed to check NAT status: ${error}`)
+      debug.warn(`Failed to check NAT status: ${error}`)
     }
 
     return result
@@ -2230,11 +2242,11 @@ log-queries
    * Finds the QEMU process that owns a TAP device by scanning /proc/{pid}/fd.
    * Returns process info if found, undefined otherwise.
    */
-  private findQemuProcessForTap (tapName: string): QemuProcessInfo | undefined {
+  private async findQemuProcessForTap (tapName: string): Promise<QemuProcessInfo | undefined> {
     try {
       // Use lsof to find processes with the TAP device open
       // lsof output format: COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME
-      const lsofOutput = execSync(`lsof /dev/net/tun 2>/dev/null || true`, { encoding: 'utf8', stdio: 'pipe' })
+      const { stdout: lsofOutput } = await execAsync('lsof /dev/net/tun 2>/dev/null || true')
 
       if (!lsofOutput.trim()) {
         return undefined
@@ -2256,7 +2268,7 @@ log-queries
 
         // Verify this QEMU process owns this specific TAP device by checking its cmdline
         try {
-          const cmdline = execSync(`cat /proc/${pid}/cmdline 2>/dev/null | tr '\\0' ' ' || true`, { encoding: 'utf8', stdio: 'pipe' })
+          const { stdout: cmdline } = await execAsync(`cat /proc/${pid}/cmdline 2>/dev/null | tr '\\0' ' ' || true`)
           if (cmdline.includes(tapName)) {
             return { pid, command: cmdline.trim().substring(0, 200) } // Truncate long commands
           }
@@ -2268,7 +2280,7 @@ log-queries
 
       // Alternative: scan /proc/*/fd for the TAP device
       try {
-        const procOutput = execSync(`ls -la /proc/*/fd 2>/dev/null | grep -E "net/tun" || true`, { encoding: 'utf8', stdio: 'pipe' })
+        const { stdout: procOutput } = await execAsync('ls -la /proc/*/fd 2>/dev/null | grep -E "net/tun" || true')
         const procLines = procOutput.trim().split('\n')
 
         for (const procLine of procLines) {
@@ -2280,11 +2292,11 @@ log-queries
 
           // Get the command name
           try {
-            const comm = execSync(`cat /proc/${pid}/comm 2>/dev/null || true`, { encoding: 'utf8', stdio: 'pipe' }).trim()
-            if (!comm.toLowerCase().includes('qemu')) continue
+            const { stdout: comm } = await execAsync(`cat /proc/${pid}/comm 2>/dev/null || true`)
+            if (!comm.trim().toLowerCase().includes('qemu')) continue
 
             // Check if this QEMU process references this TAP device
-            const cmdline = execSync(`cat /proc/${pid}/cmdline 2>/dev/null | tr '\\0' ' ' || true`, { encoding: 'utf8', stdio: 'pipe' })
+            const { stdout: cmdline } = await execAsync(`cat /proc/${pid}/cmdline 2>/dev/null | tr '\\0' ' ' || true`)
             if (cmdline.includes(tapName)) {
               return { pid, command: cmdline.trim().substring(0, 200) }
             }
@@ -2299,11 +2311,12 @@ log-queries
       return undefined
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error)
-      debug.log('warn', `Failed to find QEMU process for TAP ${tapName}: ${errorMessage}`)
+      debug.warn(`Failed to find QEMU process for TAP ${tapName}: ${errorMessage}`)
       return undefined
     }
   }
 
+  /**
   /**
    * Checks the status of TAP devices attached to a bridge and system-wide orphaned devices.
    * Detects orphaned devices, carrier status, QEMU process ownership, and unbridged devices.
@@ -2343,7 +2356,7 @@ log-queries
           const state = stateMatch ? stateMatch[1] : 'UNKNOWN'
 
           // Find QEMU process that owns this TAP device
-          const qemuProcess = this.findQemuProcessForTap(tapName)
+          const qemuProcess = await this.findQemuProcessForTap(tapName)
 
           // connectedToQemu is now based on explicit process linkage, not just carrier
           const connectedToQemu = qemuProcess !== undefined
@@ -2375,7 +2388,7 @@ log-queries
           }
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : String(error)
-          debug.log('warn', `Failed to check TAP device ${tapName}: ${errorMessage}`)
+          debug.warn(`Failed to check TAP device ${tapName}: ${errorMessage}`)
 
           // Add device with unknown state
           result.devices.push({
@@ -2410,7 +2423,7 @@ log-queries
           const state = stateMatch ? stateMatch[1] : 'UNKNOWN'
 
           // Find QEMU process that owns this TAP device
-          const qemuProcess = this.findQemuProcessForTap(tapName)
+          const qemuProcess = await this.findQemuProcessForTap(tapName)
           const connectedToQemu = qemuProcess !== undefined
 
           // Only include unbridged devices that are orphaned (persist on, no carrier)
@@ -2435,7 +2448,7 @@ log-queries
           }
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : String(error)
-          debug.log('warn', `Failed to check unbridged TAP device ${tapName}: ${errorMessage}`)
+          debug.warn(`Failed to check unbridged TAP device ${tapName}: ${errorMessage}`)
         }
       }
 
@@ -2444,7 +2457,7 @@ log-queries
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error)
-      debug.log('warn', `Failed to check TAP devices status for ${bridgeName}: ${errorMessage}`)
+      debug.warn(`Failed to check TAP devices status for ${bridgeName}: ${errorMessage}`)
     }
 
     return result

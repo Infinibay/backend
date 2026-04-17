@@ -1,3 +1,4 @@
+import logger from '@main/logger'
 import { PrismaClient, Prisma } from '@prisma/client'
 import { beforeCreateMachine, afterCreateMachine } from './modelCallbacks/machine'
 import { afterCreateDepartment } from './modelCallbacks/department'
@@ -81,5 +82,5 @@ export function createPrismaClientWithCallbacks (prisma: PrismaClient) {
 export default function installCallbacks (prisma: PrismaClient) {
   // This function is kept for backward compatibility but doesn't do anything
   // The actual extension is applied in database.ts when creating the client
-  console.warn('installCallbacks is deprecated. Callbacks are now automatically applied via Prisma Client Extensions.')
+  logger.warn('installCallbacks is deprecated. Callbacks are now automatically applied via Prisma Client Extensions.')
 }

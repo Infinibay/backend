@@ -1,4 +1,5 @@
-import { Debugger } from '../utils/debug'
+import { Logger } from 'winston'
+import logger from '@main/logger'
 import { getInfinization } from './InfinizationService'
 import { Infinization } from '@infinibay/infinization'
 
@@ -8,11 +9,11 @@ import { Infinization } from '@infinibay/infinization'
  * InfiniService installation and connection problems
  */
 export class QemuGuestAgentService {
-  private debug: Debugger
+  private debug: Logger
   private infinization: Infinization | null = null
 
   constructor () {
-    this.debug = new Debugger('qemu-guest-agent')
+    this.debug = logger.child({ module: 'qemu-guest-agent' })
   }
 
   /**
@@ -21,9 +22,9 @@ export class QemuGuestAgentService {
   async initialize (): Promise<void> {
     try {
       this.infinization = await getInfinization()
-      this.debug.log('info', 'QEMU Guest Agent Service initialized')
+      this.debug.info('QEMU Guest Agent Service initialized')
     } catch (error) {
-      this.debug.log('error', `Failed to initialize infinization: ${error}`)
+      this.debug.error(`Failed to initialize infinization: ${error}`)
       throw error
     }
   }
@@ -50,11 +51,11 @@ export class QemuGuestAgentService {
 
       // Note: qemuAgentCommand is not yet implemented in infinization
       // This is a placeholder for when it becomes available
-      this.debug.log('warn', 'qemuAgentCommand is not yet implemented in infinization')
+      this.debug.warn('qemuAgentCommand is not yet implemented in infinization')
 
       // For now, provide manual debugging instructions
       const virshCommand = this.buildVirshCommand(vmId, command, args)
-      this.debug.log('info', `To manually debug, run: ${virshCommand}`)
+      this.debug.info(`To manually debug, run: ${virshCommand}`)
 
       return {
         success: false,
@@ -110,7 +111,7 @@ export class QemuGuestAgentService {
       return { success: false, error: 'Command execution timeout' }
       */
     } catch (error) {
-      this.debug.log('error', `Failed to execute command in VM ${vmId}: ${error}`)
+      this.debug.error(`Failed to execute command in VM ${vmId}: ${error}`)
       return { success: false, error: String(error) }
     }
   }

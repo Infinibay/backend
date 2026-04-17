@@ -1,8 +1,10 @@
+import logger from '@main/logger'
 import {
   PrismaClient,
   ExecutionType,
   ExecutionStatus,
   ShellType,
+  OS,
   ScriptExecution,
 } from '@prisma/client';
 import {
@@ -14,7 +16,7 @@ import { ScriptManager, ScriptWithContent } from './ScriptManager';
 import { TemplateEngine } from './TemplateEngine';
 import { ScriptParser } from './ScriptParser';
 
-const debug = require('debug')('infinibay:service:script-executor');
+const log = logger.child({ module: 'infinibay:service:script-executor' });
 
 export interface ExecuteScriptOptions {
   scriptId: string;
@@ -65,7 +67,7 @@ export class ScriptExecutor {
 
     try {
       // 1. Load and validate script
-      debug('Loading script %s', scriptId);
+      log.debug('Loading script %s', scriptId);
       const script: ScriptWithContent =
         await this.scriptManager.getScript(scriptId);
 
@@ -74,7 +76,7 @@ export class ScriptExecutor {
       }
 
       // 2. Validate machine and permissions
-      debug('Validating machine and OS compatibility');
+      log.debug('Validating machine and OS compatibility');
       const machine = await this.prisma.machine.findUnique({
         where: { id: machineId },
         include: { user: true },
@@ -94,7 +96,7 @@ export class ScriptExecutor {
           );
         }
 
-        if (!script.os.includes(genericMachineOS as any)) {
+        if (!script.os.includes(genericMachineOS as OS)) {
           throw new Error(
             `Script is not compatible with OS ${machine.os}. Compatible OS: ${script.os.join(', ')}`
           );
@@ -102,7 +104,7 @@ export class ScriptExecutor {
       }
 
       // 3. Validate input values
-      debug('Validating input values');
+      log.debug('Validating input values');
       this.templateEngine.validateRequiredInputs(
         script.parsedInputs,
         inputValues
@@ -118,10 +120,10 @@ export class ScriptExecutor {
       // Sanitize password inputs for logging (but keep original values for DB)
       const sanitizedInputs =
         this.templateEngine.sanitizeForLogging(inputValues, script.parsedInputs);
-      debug('Input values validated (sanitized): %O', sanitizedInputs);
+      log.debug('Input values validated (sanitized): %O', sanitizedInputs);
 
       // 4. Create ScriptExecution record (PENDING)
-      debug('Creating ScriptExecution record');
+      log.debug('Creating ScriptExecution record');
       const execution = await this.prisma.scriptExecution.create({
         data: {
           scriptId,
@@ -141,7 +143,7 @@ export class ScriptExecutor {
       });
 
       executionId = execution.id;
-      debug('Created ScriptExecution with ID %s', executionId);
+      log.debug('Created ScriptExecution with ID %s', executionId);
 
       // Create audit log for execution
       await this.createExecutionAuditLog(
@@ -157,14 +159,14 @@ export class ScriptExecutor {
       )
 
       // 5. Interpolate script content (use scriptBody, not the full YAML content)
-      debug('Interpolating script content');
+      log.debug('Interpolating script content');
       const interpolatedScript = this.templateEngine.interpolate(
         script.scriptBody,
         inputValues
       );
 
       // 6. Update status to RUNNING and emit started event
-      debug('Updating status to RUNNING');
+      log.debug('Updating status to RUNNING');
       await this.prisma.scriptExecution.update({
         where: { id: executionId },
         data: {
@@ -187,7 +189,7 @@ export class ScriptExecutor {
       );
 
       // 7. Execute script via VirtioSocketWatcherService
-      debug('Executing script on VM');
+      log.debug('Executing script on VM');
       const timeout = 600 * 1000; // Default 600 seconds (10 minutes)
       const shellType = script.shell || ShellType.BASH;
       const virtioService = getVirtioSocketWatcherService();
@@ -209,7 +211,7 @@ export class ScriptExecutor {
             triggeredById
           );
         } catch (error: any) {
-          debug('Error emitting progress event: %s', error.message);
+          log.debug('Error emitting progress event: %s', error.message);
         }
       }, 5000);
 
@@ -221,7 +223,7 @@ export class ScriptExecutor {
 
         if (isWindows && isPowerShell) {
           // Use safe command for Windows PowerShell with elevation support
-          debug('Using ExecutePowerShellScript safe command with runAs: %s', runAs);
+          log.debug('Using ExecutePowerShellScript safe command with runAs: %s', runAs);
           const shouldElevate = runAs?.toLowerCase() === 'administrator' || runAs?.toLowerCase() === 'system';
 
           const commandType = {
@@ -243,7 +245,7 @@ export class ScriptExecutor {
           // TODO: Add Linux safe shell execution with run_as_user support
           // For now, use unsafe command for Linux/other shells
           // This requires a future 'ExecuteShellScript' safe command with user impersonation
-          debug('Using unsafe command for shell: %s, runAs: %s', shellType, runAs);
+          log.debug('Using unsafe command for shell: %s, runAs: %s', shellType, runAs);
           commandResponse = await virtioService.sendUnsafeCommand(
             machineId,
             interpolatedScript,
@@ -294,7 +296,7 @@ export class ScriptExecutor {
       }
 
       // 8. Handle command response
-      debug('Command response received: %O', {
+      log.debug('Command response received: %O', {
         success: commandResponse.success,
         exitCode: commandResponse.exit_code,
       });
@@ -343,7 +345,7 @@ export class ScriptExecutor {
         error: errorMessage || undefined,
       };
     } catch (error: any) {
-      debug('Error executing script: %s', error.message);
+      log.debug('Error executing script: %s', error.message);
 
       // Update execution record if it was created
       if (executionId) {
@@ -385,7 +387,7 @@ export class ScriptExecutor {
    */
   async cancelScriptExecution(executionId: string): Promise<boolean> {
     try {
-      debug('Cancelling script execution %s', executionId);
+      log.debug('Cancelling script execution %s', executionId);
 
       const execution = await this.prisma.scriptExecution.findUnique({
         where: { id: executionId },
@@ -426,10 +428,10 @@ export class ScriptExecutor {
         execution.triggeredById || undefined
       );
 
-      debug('Script execution cancelled successfully');
+      log.debug('Script execution cancelled successfully');
       return true;
     } catch (error: any) {
-      debug('Error cancelling script execution: %s', error.message);
+      log.debug('Error cancelling script execution: %s', error.message);
       throw error;
     }
   }
@@ -501,7 +503,7 @@ export class ScriptExecutor {
         }
       })
     } catch (error) {
-      console.error('Failed to create execution audit log:', error)
+      logger.error('Failed to create execution audit log:', error)
     }
   }
 
@@ -559,7 +561,7 @@ export class ScriptExecutor {
       const targetUsers = await this.getTargetUsers(machineId, triggeredById);
       const socketService = getSocketService();
 
-      debug('Emitting event %s to users: %O', action, targetUsers);
+      log.debug('Emitting event %s to users: %O', action, targetUsers);
 
       for (const userId of targetUsers) {
         socketService.sendToUser(userId, 'scripts', action, {
@@ -568,7 +570,7 @@ export class ScriptExecutor {
         });
       }
     } catch (error: any) {
-      debug('Error emitting execution event: %s', error.message);
+      log.debug('Error emitting execution event: %s', error.message);
       // Don't throw - event emission failures shouldn't block execution
     }
   }

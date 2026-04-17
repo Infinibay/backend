@@ -1,10 +1,14 @@
+// Apollo Server 4 — GraphQL Server
+// Official Docs: https://www.apollographql.com/docs/apollo-server/
+// Repository: https://github.com/apollographql/apollo-server
+import logger from '@main/logger'
 import { ApolloServer } from '@apollo/server'
 import { GraphQLError } from 'graphql'
 import { buildSchema } from 'type-graphql'
 import path from 'node:path'
-import { InfinibayContext } from '../utils/context'
-import { authChecker } from '../utils/authChecker'
-import resolvers from '../graphql/resolvers'
+import { InfinibayContext } from '@main/utils/context'
+import { authChecker } from '@main/utils/authChecker'
+import resolvers from '@main/graphql/resolvers'
 
 export const createApolloServer = async (): Promise<ApolloServer> => {
   // Build TypeGraphQL executable schema
@@ -20,7 +24,7 @@ export const createApolloServer = async (): Promise<ApolloServer> => {
     cache: 'bounded',
     plugins: [],
     formatError: (error: any): GraphQLError => {
-      console.error(error)
+      logger.error(error)
 
       // Check if it's an unauthorized exception
       if (error?.extensions?.code === 'UNAUTHORIZED' ||

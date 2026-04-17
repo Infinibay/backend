@@ -1,25 +1,28 @@
 import { ProcessHealthQueueJob } from '../../app/crons/ProcessHealthQueue'
-import { VMHealthQueueManager } from '../../app/services/health/VMHealthQueueManager'
-import { EventManager } from '../../app/services/events/EventManager'
+import { VMHealthQueueManager } from '../../app/services/VMHealthQueueManager'
+import { EventManager } from '../../app/services/EventManager'
 import { PrismaClient } from '@prisma/client'
 import { mockDeep, DeepMockProxy } from 'jest-mock-extended'
 
-// Mock debug module with proper jest.mock structure
-jest.mock('../../app/utils/debug', () => {
-  const mockLog = jest.fn()
+import logger from '@main/logger'
+
+// Mock the logger to prevent import issues and allow test assertions
+jest.mock('@main/logger', () => {
+  const mockChild = {
+    debug: jest.fn(),
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+    log: jest.fn()
+  }
   return {
-    Debugger: jest.fn().mockImplementation(() => ({
-      log: mockLog
-    })),
-    __mockLog: mockLog // Export the mock for testing
+    __esModule: true,
+    default: {
+      ...mockChild,
+      child: jest.fn(() => mockChild)
+    }
   }
 })
-
-// Type for the mocked debug module
-interface MockedDebugModule {
-  Debugger: jest.MockedFunction<() => { log: jest.MockedFunction<(message: string) => void> }>
-  __mockLog: jest.MockedFunction<(message: string) => void>
-}
 
 // Type definitions for test data
 interface TestMachine {
@@ -39,12 +42,11 @@ describe('ProcessHealthQueueJob', () => {
   let mockPrisma: DeepMockProxy<PrismaClient>
   let mockEventManager: DeepMockProxy<EventManager>
   let mockQueueManager: DeepMockProxy<VMHealthQueueManager>
+  let mockDebug: jest.Mocked<typeof logger>
 
   beforeEach(() => {
     jest.clearAllMocks()
-    // Clear the mock log function
-    const debugModule = require('../../app/utils/debug') as MockedDebugModule
-    debugModule.__mockLog.mockClear()
+    mockDebug = logger.child({}) as jest.Mocked<typeof logger>
 
     mockPrisma = mockDeep<PrismaClient>()
     mockEventManager = mockDeep<EventManager>()
@@ -55,14 +57,10 @@ describe('ProcessHealthQueueJob', () => {
     ;(job as unknown as JobWithPrivateMethods).queueManager = mockQueueManager
   })
 
-  const getMockDebugLog = () => {
-    const debugModule = require('../../app/utils/debug') as MockedDebugModule
-    return debugModule.__mockLog
-  }
-
   afterEach(() => {
     job.stop()
   })
+
 
   describe('processHealthQueues', () => {
     it('should process queues for all running VMs', async () => {
@@ -151,7 +149,7 @@ describe('ProcessHealthQueueJob', () => {
         vmQueues: 0
       })
 
-      const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation()
+      const consoleErrorSpy = jest.spyOn(logger, 'error').mockImplementation()
 
       const processMethod = (job as unknown as JobWithPrivateMethods).processHealthQueues.bind(job)
       await processMethod()
@@ -179,9 +177,7 @@ describe('ProcessHealthQueueJob', () => {
 
       const processMethod = (job as unknown as JobWithPrivateMethods).processHealthQueues.bind(job)
       await processMethod()
-
-      const mockDebugLogFn = getMockDebugLog()
-      expect(mockDebugLogFn).toHaveBeenCalledWith(
+      expect(mockDebug.debug).toHaveBeenCalledWith(
         'Queue stats: 3 queued, 1 active, 1 VM queues'
       )
     })
@@ -202,8 +198,7 @@ describe('ProcessHealthQueueJob', () => {
       await processMethod()
 
       // Should not log stats when everything is zero
-      const mockDebugLogFn = getMockDebugLog()
-      expect(mockDebugLogFn).not.toHaveBeenCalledWith(
+      expect(mockDebug.debug).not.toHaveBeenCalledWith(
         expect.stringContaining('Queue stats:')
       )
     })

@@ -4,14 +4,14 @@
  * Periodically checks VM status and updates the database.
  * Uses infinization for process status verification instead of libvirt.
  */
+import logger from '@main/logger'
 import { CronJob } from 'cron'
 import prisma from '../utils/database'
 import { getEventManager } from '../services/EventManager'
 import { getVMHealthQueueManager } from '../services/VMHealthQueueManager'
 import { getInfinization } from '../services/InfinizationService'
-import { Debugger } from '../utils/debug'
 
-const debug = new Debugger('cron:update-vm-status')
+const debug = logger.child({ module: 'cron:update-vm-status' })
 
 /**
  * Gets the running status of all VMs using infinization.
@@ -34,7 +34,7 @@ async function getVMStatuses (machineIds: string[]): Promise<Map<string, boolean
       }
     }))
   } catch (error) {
-    debug.log('error', `Failed to get VM statuses: ${error}`)
+    debug.error(`Failed to get VM statuses: ${error}`)
   }
 
   return statuses
@@ -102,17 +102,17 @@ const UpdateVmStatusJob = new CronJob('*/5 * * * *', async () => {
           })
           if (vm) {
             await eventManager.dispatchEvent('vms', 'update', vm)
-            debug.log(`VM status update: ${vm.name} (${vmId}) -> running`)
+            debug.debug(`VM status update: ${vm.name} (${vmId}) -> running`)
 
             // Trigger queue processing for newly running VM
             try {
               await queueManager.processQueue(vmId)
             } catch (error) {
-              debug.log('error', `Failed to process health queue for newly running VM ${vm.name} (${vmId}): ${error}`)
+              debug.error(`Failed to process health queue for newly running VM ${vm.name} (${vmId}): ${error}`)
             }
           }
         } catch (error) {
-          debug.log('error', `Failed to emit update event for VM ${vmId}: ${error}`)
+          debug.error(`Failed to emit update event for VM ${vmId}: ${error}`)
         }
       }
     }
@@ -139,15 +139,15 @@ const UpdateVmStatusJob = new CronJob('*/5 * * * *', async () => {
           })
           if (vm) {
             await eventManager.dispatchEvent('vms', 'update', vm)
-            debug.log(`VM status update: ${vm.name} (${vmId}) -> off`)
+            debug.debug(`VM status update: ${vm.name} (${vmId}) -> off`)
           }
         } catch (error) {
-          debug.log('error', `Failed to emit update event for VM ${vmId}: ${error}`)
+          debug.error(`Failed to emit update event for VM ${vmId}: ${error}`)
         }
       }
     }
   } catch (error) {
-    debug.log('error', `Error in UpdateVmStatusJob: ${error}`)
+    debug.error(`Error in UpdateVmStatusJob: ${error}`)
   }
 })
 

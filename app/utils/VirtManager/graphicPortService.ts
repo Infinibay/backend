@@ -12,16 +12,16 @@
  * ```
  * const graphicPortService = new GraphicPortService(prisma)
  * const port = await graphicPortService.getGraphicPort('vm-internal-name', 'spice')
- * console.log(`Graphics port: ${port}`)
+ * logger.info(`Graphics port: ${port}`)
  * ```
  */
 
+import logger from '@main/logger'
 import { PrismaClient } from '@prisma/client'
-import { Debugger } from '@utils/debug'
 import { getInfinization } from '@services/InfinizationService'
 
 export class GraphicPortService {
-  private debug: Debugger = new Debugger('graphic-port-service')
+  private debug = logger.child({ module: 'graphic-port-service' })
   private prisma: PrismaClient | null = null
 
   constructor (prisma?: PrismaClient) {
@@ -36,7 +36,7 @@ export class GraphicPortService {
    * @returns {Promise<number>} - The port number, or -1 if not available.
    */
   async getGraphicPort (domainName: string, type: string): Promise<number> {
-    this.debug.log(`Getting graphic port for domain: ${domainName}, type: ${type}`)
+    this.debug.debug(`Getting graphic port for domain: ${domainName}, type: ${type}`)
 
     try {
       // First, try to get from database
@@ -55,14 +55,14 @@ export class GraphicPortService {
             // Validate port explicitly - must be > 0 and <= 65535
             const port = config.graphicPort
             if (port !== null && port > 0 && port <= 65535) {
-              this.debug.log(`Found valid ${type} port from DB: ${port}`)
+              this.debug.debug(`Found valid ${type} port from DB: ${port}`)
               return port
             }
 
             // Check if configuration is corrupted (protocol set but port invalid)
             const validationError = this.validateGraphicConfig(config)
             if (validationError) {
-              this.debug.log('warn', `Corrupted graphics config for ${domainName}: ${validationError}. Falling through to fallback path.`)
+              this.debug.warn(`Corrupted graphics config for ${domainName}: ${validationError}. Falling through to fallback path.`)
             }
           }
         }
@@ -87,17 +87,17 @@ export class GraphicPortService {
           if (status.processAlive) {
             // VM is running but we couldn't get port from DB
             // This shouldn't happen normally as port is set during creation
-            this.debug.log('warn', `VM ${domainName} is running but no port in DB`)
+            this.debug.warn(`VM ${domainName} is running but no port in DB`)
           }
         }
       } catch {
         // Ignore infinization errors, just return -1
       }
 
-      this.debug.log(`No ${type} port found for ${domainName}`)
+      this.debug.debug(`No ${type} port found for ${domainName}`)
       return -1
     } catch (error) {
-      this.debug.log('error', `Failed to get graphic port: ${error}`)
+      this.debug.error(`Failed to get graphic port: ${error}`)
       return -1
     }
   }
@@ -135,7 +135,7 @@ export class GraphicPortService {
       const hasNoConfig = (config.graphicProtocol === null || config.graphicProtocol === undefined) &&
         (config.graphicPort === null || config.graphicPort === undefined)
       if (hasNoConfig) {
-        this.debug.log(`No graphics configuration set for ${domainName}`)
+        this.debug.debug(`No graphics configuration set for ${domainName}`)
         return null
       }
 
@@ -143,14 +143,14 @@ export class GraphicPortService {
       // A valid configuration must have a port > 0 when protocol is set
       const isCorrupted = this.validateGraphicConfig(config)
       if (isCorrupted) {
-        this.debug.log('warn', `Corrupted graphics config for ${domainName}: ${isCorrupted}`)
+        this.debug.warn(`Corrupted graphics config for ${domainName}: ${isCorrupted}`)
         return null
       }
 
       // Only return valid configuration with actual values
       // Don't synthesize defaults - if we got here, the config should be valid
       if (!config.graphicPort || config.graphicPort <= 0 || !config.graphicProtocol) {
-        this.debug.log('warn', `Invalid graphics config values for ${domainName}: port=${config.graphicPort}, protocol=${config.graphicProtocol}`)
+        this.debug.warn(`Invalid graphics config values for ${domainName}: port=${config.graphicPort}, protocol=${config.graphicProtocol}`)
         return null
       }
 
@@ -161,7 +161,7 @@ export class GraphicPortService {
         host: config.graphicHost ?? '0.0.0.0'
       }
     } catch (error) {
-      this.debug.log('error', `Failed to get graphic config: ${error}`)
+      this.debug.error(`Failed to get graphic config: ${error}`)
       return null
     }
   }
@@ -251,11 +251,11 @@ export class GraphicPortService {
         data: { graphicPort: portToAssign }
       })
 
-      this.debug.log(`Repaired graphics port for VM ${vmId} (${machine.name}): assigned port ${portToAssign}`)
+      this.debug.debug(`Repaired graphics port for VM ${vmId} (${machine.name}): assigned port ${portToAssign}`)
 
       return { success: true, port: portToAssign }
     } catch (error) {
-      this.debug.log('error', `Failed to repair graphics port for VM ${vmId}: ${error}`)
+      this.debug.error(`Failed to repair graphics port for VM ${vmId}: ${error}`)
       return { success: false, error: (error as Error).message }
     }
   }

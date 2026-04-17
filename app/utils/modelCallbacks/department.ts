@@ -1,8 +1,8 @@
+import logger from '@main/logger'
 import { PrismaClient, Prisma, RuleSetType } from '@prisma/client'
 import { FirewallManagerV2 } from '@services/firewall/FirewallManagerV2'
-import { Debugger } from '@utils/debug'
 
-const debug = new Debugger('infinibay:callback:department')
+const debug = logger.child({ module: 'callback:department' })
 
 /**
  * Callback executed after a department is created in the database.
@@ -27,20 +27,20 @@ export async function afterCreateDepartment (
   const departmentName = result.name
 
   try {
-    debug.log('info', `Creating firewall infrastructure for department ${departmentId} (${departmentName})`)
+    debug.info(`Creating firewall infrastructure for department ${departmentId} (${departmentName})`)
 
     // Create FirewallManagerV2 instance (nftables-based, no libvirt needed)
     const firewallManager = new FirewallManagerV2(prisma)
 
     // Create firewall infrastructure (database ruleset only)
-    debug.log('info', `Calling ensureFirewallInfrastructure for department ${departmentId}`)
+    debug.info(`Calling ensureFirewallInfrastructure for department ${departmentId}`)
     const infraResult = await firewallManager.ensureFirewallInfrastructure(
       RuleSetType.DEPARTMENT,
       departmentId,
       `Department Firewall: ${departmentName}`
     )
 
-    debug.log('info', `Firewall infrastructure result: ruleSetCreated=${infraResult.ruleSetCreated}`)
+    debug.info(`Firewall infrastructure result: ruleSetCreated=${infraResult.ruleSetCreated}`)
 
     // Verify the FK was set
     const updatedDept = await prisma.department.findUnique({
@@ -49,7 +49,7 @@ export async function afterCreateDepartment (
     })
 
     if (!updatedDept?.firewallRuleSetId) {
-      debug.log('warn', `WARNING: FirewallRuleSet created but foreign key not set for department ${departmentId}, attempting self-heal`)
+      debug.warn(`WARNING: FirewallRuleSet created but foreign key not set for department ${departmentId}, attempting self-heal`)
 
       // Self-heal: Find the ruleset by entityType and entityId
       const orphanedRuleSet = await prisma.firewallRuleSet.findFirst({
@@ -64,18 +64,18 @@ export async function afterCreateDepartment (
           where: { id: departmentId },
           data: { firewallRuleSetId: orphanedRuleSet.id }
         })
-        debug.log('info', `Self-healed: linked ruleset ${orphanedRuleSet.id} to department ${departmentId}`)
+        debug.info(`Self-healed: linked ruleset ${orphanedRuleSet.id} to department ${departmentId}`)
       } else {
-        debug.log('error', `Self-heal failed: no ruleset found for department ${departmentId}`)
+        debug.error(`Self-heal failed: no ruleset found for department ${departmentId}`)
       }
     } else {
-      debug.log('info', `Firewall infrastructure created and linked for department ${departmentId}`)
+      debug.info(`Firewall infrastructure created and linked for department ${departmentId}`)
     }
   } catch (error) {
     // Log error but don't fail the department creation
     const errorMessage = (error as Error).message
-    debug.log('error', `Failed to create firewall for department ${departmentId} (${departmentName}): ${errorMessage}`)
-    debug.log('error', (error as Error).stack || 'No stack trace available')
+    debug.error(`Failed to create firewall for department ${departmentId} (${departmentName}): ${errorMessage}`)
+    debug.error((error as Error).stack || 'No stack trace available')
     // Continue - the firewall can be created later via manual resync if needed
   }
 }

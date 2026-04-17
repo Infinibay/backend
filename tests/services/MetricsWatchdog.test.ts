@@ -1,6 +1,7 @@
 import { MetricsWatchdogJob } from '../../app/crons/MetricsWatchdog'
 import { PrismaClient } from '@prisma/client'
 import { mockDeep, DeepMockProxy } from 'jest-mock-extended'
+import logger from '@main/logger'
 
 // Type definitions for test data - matching what the query actually selects
 type TestMachine = {
@@ -71,7 +72,7 @@ describe('MetricsWatchdogJob', () => {
       mockPrisma.systemMetrics.findFirst.mockResolvedValue(null) // No recent metrics
       mockVirtioService.sendSafeCommand.mockResolvedValue({ success: true })
 
-      const consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation()
+      const consoleWarnSpy = jest.spyOn(logger, 'warn').mockImplementation()
 
       const checkMethod = (job as unknown as JobWithPrivateMethods).checkStaleMetrics.bind(job)
       await checkMethod()
@@ -117,7 +118,7 @@ describe('MetricsWatchdogJob', () => {
       mockPrisma.machine.findMany.mockResolvedValue(runningVMs as never[])
       mockPrisma.systemMetrics.findFirst.mockResolvedValue(recentMetric as never)
 
-      const consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation()
+      const consoleWarnSpy = jest.spyOn(logger, 'warn').mockImplementation()
 
       const checkMethod = (job as unknown as JobWithPrivateMethods).checkStaleMetrics.bind(job)
       await checkMethod()
@@ -141,8 +142,8 @@ describe('MetricsWatchdogJob', () => {
       mockPrisma.systemMetrics.findFirst.mockResolvedValue(null) // No recent metrics
       mockVirtioService.sendSafeCommand.mockRejectedValue(new Error('Connection failed'))
 
-      const consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation()
-      const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation()
+      const consoleWarnSpy = jest.spyOn(logger, 'warn').mockImplementation()
+      const consoleErrorSpy = jest.spyOn(logger, 'error').mockImplementation()
 
       const checkMethod = (job as unknown as JobWithPrivateMethods).checkStaleMetrics.bind(job)
       await checkMethod()
@@ -219,8 +220,8 @@ describe('MetricsWatchdogJob', () => {
 
       mockVirtioService.sendSafeCommand.mockResolvedValue({ success: true })
 
-      const consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation()
-      const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation()
+      const consoleWarnSpy = jest.spyOn(logger, 'warn').mockImplementation()
+      const consoleErrorSpy = jest.spyOn(logger, 'error').mockImplementation()
 
       const checkMethod = (job as unknown as JobWithPrivateMethods).checkStaleMetrics.bind(job)
       await checkMethod()
@@ -262,7 +263,7 @@ describe('MetricsWatchdogJob', () => {
 
       mockVirtioService.sendSafeCommand.mockResolvedValue({ success: true })
 
-      const consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation()
+      const consoleWarnSpy = jest.spyOn(logger, 'warn').mockImplementation()
 
       const checkMethod = (job as unknown as JobWithPrivateMethods).checkStaleMetrics.bind(job)
       await checkMethod()

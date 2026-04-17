@@ -9,7 +9,11 @@ import CleanupStuckScripts from './CleanupStuckScripts'
 import prisma from '../utils/database'
 import { getEventManager } from '../services/EventManager'
 
-export async function startCrons () {
+export interface CronHandles {
+  stop: () => void
+}
+
+export async function startCrons (): Promise<CronHandles> {
   UpdateVmStatusJob.start()
   UpdateGraphicsInformationJob.start()
 
@@ -37,4 +41,17 @@ export async function startCrons () {
   // Periodic rescheduling is handled in-place by VirtioSocketWatcherService.handleScriptCompletion()
   // which updates the same execution record with new scheduledFor = lastExecutedAt + repeatIntervalMinutes.
   // This avoids creating duplicate execution records and maintains a single source of truth.
+
+  return {
+    stop: () => {
+      UpdateVmStatusJob.stop()
+      UpdateGraphicsInformationJob.stop()
+      processHealthQueueJob.stop()
+      scheduleOverallScansJob.stop()
+      metricsWatchdogJob.stop()
+      cleanupOrphanedHealthTasksJob.stop()
+      maintenanceQueue.stop()
+      cleanupStuckScripts.stop()
+    }
+  }
 }

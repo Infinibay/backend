@@ -1,3 +1,4 @@
+import logger from '@main/logger'
 import { Arg, Authorized, Ctx, Mutation, Query, Resolver } from 'type-graphql'
 import { ApplicationType, CreateApplicationInputType } from './type'
 import { InfinibayContext } from '@main/utils/context'
@@ -48,9 +49,9 @@ export class ApplicationMutations {
     try {
       const eventManager = getEventManager()
       await eventManager.dispatchEvent('applications', 'create', { id: application.id }, user?.id)
-      console.log(`🎯 Triggered real-time event: applications:create for application ${application.id}`)
+      logger.info(`🎯 Triggered real-time event: applications:create for application ${application.id}`)
     } catch (eventError) {
-      console.error('Failed to trigger real-time event:', eventError)
+      logger.error('Failed to trigger real-time event:', eventError)
       // Don't fail the main operation if event triggering fails
     }
 
@@ -79,9 +80,9 @@ export class ApplicationMutations {
     try {
       const eventManager = getEventManager()
       await eventManager.dispatchEvent('applications', 'update', { id }, user?.id)
-      console.log(`🎯 Triggered real-time event: applications:update for application ${id}`)
+      logger.info(`🎯 Triggered real-time event: applications:update for application ${id}`)
     } catch (eventError) {
-      console.error('Failed to trigger real-time event:', eventError)
+      logger.error('Failed to trigger real-time event:', eventError)
       // Don't fail the main operation if event triggering fails
     }
 
@@ -103,15 +104,15 @@ export class ApplicationMutations {
       try {
         const eventManager = getEventManager()
         await eventManager.dispatchEvent('applications', 'delete', { id }, user?.id)
-        console.log(`🎯 Triggered real-time event: applications:delete for application ${id}`)
+        logger.info(`🎯 Triggered real-time event: applications:delete for application ${id}`)
       } catch (eventError) {
-        console.error('Failed to trigger real-time event:', eventError)
+        logger.error('Failed to trigger real-time event:', eventError)
         // Don't fail the main operation if event triggering fails
       }
 
       return true
     } catch (error) {
-      console.error(error)
+      logger.error(error)
       return false
     }
   }

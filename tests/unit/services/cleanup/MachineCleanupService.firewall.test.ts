@@ -13,7 +13,7 @@ jest.mock('@services/InfinizationService', () => ({
 }))
 
 // Mock VirtioSocketWatcherService
-jest.mock('@services/vm/VirtioSocketWatcherService', () => ({
+jest.mock('@services/VirtioSocketWatcherService', () => ({
   getVirtioSocketWatcherService: jest.fn(() => ({
     cleanupVmConnection: jest.fn()
   }))

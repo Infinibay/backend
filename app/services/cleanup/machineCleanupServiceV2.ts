@@ -14,7 +14,7 @@ import { PrismaClient } from '@prisma/client'
 import { unlink } from 'fs/promises'
 import path from 'path'
 
-import { Debugger } from '../../utils/debug'
+import logger from '@main/logger'
 import { getInfinization } from '@services/InfinizationService'
 import { getVirtioSocketWatcherService } from '../VirtioSocketWatcherService'
 
@@ -47,7 +47,7 @@ interface CleanupSummary {
 
 export class MachineCleanupServiceV2 {
   private prisma: PrismaClient
-  private debug = new Debugger('machine-cleanup-v2')
+  private debug = logger.child({ module: 'machine-cleanup-v2' })
 
   constructor (prisma: PrismaClient) {
     this.prisma = prisma
@@ -82,7 +82,7 @@ export class MachineCleanupServiceV2 {
       errors: []
     }
 
-    this.debug.log('info', `Starting cleanup for VM ${machineId} at ${new Date(summary.startTime).toISOString()}`)
+    this.debug.info(`Starting cleanup for VM ${machineId} at ${new Date(summary.startTime).toISOString()}`)
 
     const machine = await this.prisma.machine.findUnique({
       where: { id: machineId },
@@ -92,12 +92,12 @@ export class MachineCleanupServiceV2 {
     })
 
     if (!machine) {
-      this.debug.log('warn', `Machine ${machineId} not found in database`)
+      this.debug.warn(`Machine ${machineId} not found in database`)
       return
     }
 
     // 1. Stop and clean up VM via infinization
-    this.debug.log('info', `[1/6] Cleaning VM resources (TAP, firewall)`)
+    this.debug.info(`[1/6] Cleaning VM resources (TAP, firewall)`)
     const vmResourcesResult = await this.cleanupVMResources(machineId, summary)
     summary.operations.push(vmResourcesResult)
     summary.resourcesCleaned.vmResources = vmResourcesResult.success
@@ -106,33 +106,33 @@ export class MachineCleanupServiceV2 {
     if (vmResourcesResult.error) summary.errors.push(vmResourcesResult.error)
 
     // 2. Clean up disk files
-    this.debug.log('info', `[2/6] Cleaning disk files`)
+    this.debug.info(`[2/6] Cleaning disk files`)
     const diskResult = await this.cleanupDiskFiles(machine.internalName, summary)
     summary.operations.push(diskResult)
     if (diskResult.error) summary.errors.push(diskResult.error)
 
     // 3. Clean up VirtioSocket connection
-    this.debug.log('info', `[3/6] Cleaning VirtioSocket connection`)
+    this.debug.info(`[3/6] Cleaning VirtioSocket connection`)
     const virtioResult = await this.cleanupVirtioSocket(machineId, summary)
     summary.operations.push(virtioResult)
     summary.resourcesCleaned.virtioSocket = virtioResult.success
     if (virtioResult.error) summary.errors.push(virtioResult.error)
 
     // 4. Clean up InfiniService socket file
-    this.debug.log('info', `[4/6] Cleaning InfiniService socket`)
+    this.debug.info(`[4/6] Cleaning InfiniService socket`)
     const infiniServiceResult = await this.cleanupInfiniServiceSocket(machineId, summary)
     summary.operations.push(infiniServiceResult)
     summary.resourcesCleaned.infiniServiceSocket = infiniServiceResult.success
     if (infiniServiceResult.error) summary.errors.push(infiniServiceResult.error)
 
     // 5. Clean up additional socket files (guest agent, etc)
-    this.debug.log('info', `[5/6] Cleaning additional socket files (QMP, guest agent, TPM)`)
+    this.debug.info(`[5/6] Cleaning additional socket files (QMP, guest agent, TPM)`)
     const socketResult = await this.cleanupSocketFiles(machine.internalName, machineId, summary)
     summary.operations.push(socketResult)
     if (socketResult.error) summary.errors.push(socketResult.error)
 
     // 6. Remove database records
-    this.debug.log('info', `[6/6] Cleaning database records`)
+    this.debug.info(`[6/6] Cleaning database records`)
     let dbCleanupError: Error | null = null
 
     try {
@@ -167,31 +167,31 @@ export class MachineCleanupServiceV2 {
    * Logs the cleanup summary with detailed statistics.
    */
   private logCleanupSummary (summary: CleanupSummary): void {
-    this.debug.log('info', `===== CLEANUP SUMMARY FOR VM ${summary.vmId} =====`)
-    this.debug.log('info', `Total Duration: ${summary.totalDuration}ms`)
-    this.debug.log('info', `Started: ${new Date(summary.startTime).toISOString()}`)
-    this.debug.log('info', `Completed: ${new Date(summary.endTime!).toISOString()}`)
-    this.debug.log('info', ``)
-    this.debug.log('info', `Resources Cleaned:`)
+    this.debug.info(`===== CLEANUP SUMMARY FOR VM ${summary.vmId} =====`)
+    this.debug.info(`Total Duration: ${summary.totalDuration}ms`)
+    this.debug.info(`Started: ${new Date(summary.startTime).toISOString()}`)
+    this.debug.info(`Completed: ${new Date(summary.endTime!).toISOString()}`)
+    this.debug.info(``)
+    this.debug.info(`Resources Cleaned:`)
 
     for (const op of summary.operations) {
       const status = op.success ? '✓' : '✗'
-      this.debug.log('info', `  ${status} ${op.resource}: ${op.success ? 'Success' : 'Failed'} (${op.duration}ms)`)
+      this.debug.info(`  ${status} ${op.resource}: ${op.success ? 'Success' : 'Failed'} (${op.duration}ms)`)
       if (op.details) {
-        this.debug.log('info', `    - ${op.details}`)
+        this.debug.info(`    - ${op.details}`)
       }
     }
 
     if (summary.errors.length > 0) {
-      this.debug.log('warn', ``)
-      this.debug.log('warn', `Errors Encountered: ${summary.errors.length}`)
+      this.debug.warn(``)
+      this.debug.warn(`Errors Encountered: ${summary.errors.length}`)
       for (const error of summary.errors) {
-        this.debug.log('warn', `  - ${error}`)
+        this.debug.warn(`  - ${error}`)
       }
     }
 
-    this.debug.log('info', ``)
-    this.debug.log('info', `===== END CLEANUP SUMMARY =====`)
+    this.debug.info(``)
+    this.debug.info(`===== END CLEANUP SUMMARY =====`)
   }
 
   /**
@@ -230,7 +230,7 @@ export class MachineCleanupServiceV2 {
 
       const infinization = await getInfinization()
 
-      this.debug.log('info', `Destroying VM resources for ${machineId} (TAP device: ${tapDeviceName}, Firewall chain: ${firewallChainName})`)
+      this.debug.info(`Destroying VM resources for ${machineId} (TAP device: ${tapDeviceName}, Firewall chain: ${firewallChainName})`)
       const destroyResult = await infinization.destroyVM(machineId)
 
       result.duration = Date.now() - startTime
@@ -238,17 +238,17 @@ export class MachineCleanupServiceV2 {
       if (!destroyResult.success) {
         result.success = false
         result.error = `Failed to destroy VM resources: ${destroyResult.error}`
-        this.debug.log('warn', `✗ Failed to destroy VM resources after ${result.duration}ms: ${destroyResult.error}`)
+        this.debug.warn(`✗ Failed to destroy VM resources after ${result.duration}ms: ${destroyResult.error}`)
       } else {
         result.success = true
         result.details = `TAP: ${tapDeviceName}, Firewall: ${firewallChainName}`
-        this.debug.log('info', `✓ VM resources destroyed successfully in ${result.duration}ms (TAP: ${tapDeviceName}, Firewall: ${firewallChainName})`)
+        this.debug.info(`✓ VM resources destroyed successfully in ${result.duration}ms (TAP: ${tapDeviceName}, Firewall: ${firewallChainName})`)
       }
     } catch (error: any) {
       result.duration = Date.now() - startTime
       result.success = false
       result.error = `Error during VM resource cleanup: ${error.message}`
-      this.debug.log('error', `✗ Error during VM resource cleanup after ${result.duration}ms: ${error.message}`)
+      this.debug.error(`✗ Error during VM resource cleanup after ${result.duration}ms: ${error.message}`)
     }
 
     return result
@@ -272,7 +272,7 @@ export class MachineCleanupServiceV2 {
       path.join(diskDir, `${internalName}-0.qcow2`)
     ]
 
-    this.debug.log('info', `Removing disk files for ${internalName}`)
+    this.debug.info(`Removing disk files for ${internalName}`)
     const removedFiles: string[] = []
     const errors: string[] = []
 
@@ -281,11 +281,11 @@ export class MachineCleanupServiceV2 {
         await unlink(diskPath)
         removedFiles.push(diskPath)
         summary.resourcesCleaned.diskFiles.push(diskPath)
-        this.debug.log('info', `✓ Removed disk file: ${diskPath}`)
+        this.debug.info(`✓ Removed disk file: ${diskPath}`)
       } catch (e: any) {
         if (e.code !== 'ENOENT') {
           errors.push(`${diskPath}: ${e.message}`)
-          this.debug.log('warn', `⚠ Could not remove disk file ${diskPath}: ${e.message}`)
+          this.debug.warn(`⚠ Could not remove disk file ${diskPath}: ${e.message}`)
         }
       }
     }
@@ -302,7 +302,7 @@ export class MachineCleanupServiceV2 {
       result.success = true
     }
 
-    this.debug.log('info', `Disk cleanup completed in ${result.duration}ms: ${removedFiles.length}/${diskPatterns.length} files removed`)
+    this.debug.info(`Disk cleanup completed in ${result.duration}ms: ${removedFiles.length}/${diskPatterns.length} files removed`)
 
     return result
   }
@@ -319,18 +319,18 @@ export class MachineCleanupServiceV2 {
     }
 
     try {
-      this.debug.log('info', `Cleaning VirtioSocket connection for VM ${machineId}`)
+      this.debug.info(`Cleaning VirtioSocket connection for VM ${machineId}`)
       const virtioSocketWatcher = getVirtioSocketWatcherService()
       await virtioSocketWatcher.cleanupVmConnection(machineId)
       result.duration = Date.now() - startTime
       result.success = true
       result.details = `Connection cleaned for ${machineId}`
-      this.debug.log('info', `✓ VirtioSocket connection cleaned in ${result.duration}ms`)
+      this.debug.info(`✓ VirtioSocket connection cleaned in ${result.duration}ms`)
     } catch (e: any) {
       result.duration = Date.now() - startTime
       result.success = false
       result.error = `VirtioSocket cleanup skipped (service not initialized): ${e.message}`
-      this.debug.log('warn', `⚠ VirtioSocket cleanup skipped (service not initialized): ${e.message}`)
+      this.debug.warn(`⚠ VirtioSocket cleanup skipped (service not initialized): ${e.message}`)
     }
 
     return result
@@ -350,24 +350,24 @@ export class MachineCleanupServiceV2 {
     const baseDir = process.env.INFINIBAY_BASE_DIR ?? '/opt/infinibay'
     const socketPath = path.join(baseDir, 'sockets', `${machineId}.socket`)
 
-    this.debug.log('info', `Removing InfiniService socket: ${socketPath}`)
+    this.debug.info(`Removing InfiniService socket: ${socketPath}`)
 
     try {
       await unlink(socketPath)
       result.duration = Date.now() - startTime
       result.success = true
       result.details = socketPath
-      this.debug.log('info', `✓ InfiniService socket removed in ${result.duration}ms: ${socketPath}`)
+      this.debug.info(`✓ InfiniService socket removed in ${result.duration}ms: ${socketPath}`)
     } catch (e: any) {
       result.duration = Date.now() - startTime
       if (e.code === 'ENOENT') {
         result.success = true
         result.details = 'Socket not found (already cleaned)'
-        this.debug.log('info', `InfiniService socket not found (already cleaned): ${socketPath}`)
+        this.debug.info(`InfiniService socket not found (already cleaned): ${socketPath}`)
       } else {
         result.success = false
         result.error = `Could not remove InfiniService socket: ${e.message}`
-        this.debug.log('warn', `⚠ Could not remove InfiniService socket: ${e.message}`)
+        this.debug.warn(`⚠ Could not remove InfiniService socket: ${e.message}`)
       }
     }
 
@@ -394,7 +394,7 @@ export class MachineCleanupServiceV2 {
       path.join(socketDir, `${internalName}-tpm.sock`)
     ]
 
-    this.debug.log('info', `Removing additional socket files (QMP, guest agent, infini, TPM)`)
+    this.debug.info(`Removing additional socket files (QMP, guest agent, infini, TPM)`)
     const removedSockets: string[] = []
     const errors: string[] = []
 
@@ -403,11 +403,11 @@ export class MachineCleanupServiceV2 {
         await unlink(socketPath)
         removedSockets.push(socketPath)
         summary.resourcesCleaned.socketFiles.push(socketPath)
-        this.debug.log('info', `✓ Removed socket: ${socketPath}`)
+        this.debug.info(`✓ Removed socket: ${socketPath}`)
       } catch (e: any) {
         if (e.code !== 'ENOENT') {
           errors.push(`${socketPath}: ${e.message}`)
-          this.debug.log('warn', `⚠ Could not remove socket ${socketPath}: ${e.message}`)
+          this.debug.warn(`⚠ Could not remove socket ${socketPath}: ${e.message}`)
         }
       }
     }
@@ -424,7 +424,7 @@ export class MachineCleanupServiceV2 {
       result.success = true
     }
 
-    this.debug.log('info', `Socket cleanup completed in ${result.duration}ms: ${removedSockets.length}/${socketPaths.length} sockets removed`)
+    this.debug.info(`Socket cleanup completed in ${result.duration}ms: ${removedSockets.length}/${socketPaths.length} sockets removed`)
 
     return result
   }
@@ -444,7 +444,7 @@ export class MachineCleanupServiceV2 {
       duration: 0
     }
 
-    this.debug.log('info', `Removing database records for VM ${machineId}`)
+    this.debug.info(`Removing database records for VM ${machineId}`)
 
     try {
       let appCount = 0
@@ -455,7 +455,7 @@ export class MachineCleanupServiceV2 {
       await this.prisma.$transaction(async tx => {
         // Delete machine configuration
         if (configurationId) {
-          this.debug.log('info', `Deleting machine configuration...`)
+          this.debug.info(`Deleting machine configuration...`)
           await tx.machineConfiguration.delete({
             where: { machineId }
           }).catch(() => {
@@ -468,28 +468,28 @@ export class MachineCleanupServiceV2 {
           where: { machineId }
         })
         appCount = appResult.count
-        this.debug.log('info', `Deleting ${appCount} machine applications...`)
+        this.debug.info(`Deleting ${appCount} machine applications...`)
 
         // Delete pending commands
         const pendingCmdResult = await tx.pendingCommand.deleteMany({
           where: { machineId }
         })
         pendingCmdCount = pendingCmdResult.count
-        this.debug.log('info', `Deleting ${pendingCmdCount} pending commands...`)
+        this.debug.info(`Deleting ${pendingCmdCount} pending commands...`)
 
         // Delete script executions
         const scriptResult = await tx.scriptExecution.deleteMany({
           where: { machineId }
         })
         scriptCount = scriptResult.count
-        this.debug.log('info', `Deleting ${scriptCount} script executions...`)
+        this.debug.info(`Deleting ${scriptCount} script executions...`)
 
         // Delete firewall rules and ruleset
-        this.debug.log('info', `Deleting firewall ruleset...`)
+        this.debug.info(`Deleting firewall ruleset...`)
         firewallRuleCount = await this.cleanupFirewallRuleSet(tx, machineId)
 
         // Delete machine
-        this.debug.log('info', `Deleting machine record...`)
+        this.debug.info(`Deleting machine record...`)
         await tx.machine.delete({
           where: { id: machineId }
         })
@@ -498,12 +498,12 @@ export class MachineCleanupServiceV2 {
       result.duration = Date.now() - startTime
       result.success = true
       result.details = `Configuration, ${appCount} applications, ${pendingCmdCount} pending commands, ${scriptCount} scripts, ${firewallRuleCount} firewall rules`
-      this.debug.log('info', `✓ Database records removed in ${result.duration}ms (config, ${appCount} apps, ${pendingCmdCount} pending commands, ${scriptCount} scripts, ${firewallRuleCount} firewall rules, machine)`)
+      this.debug.info(`✓ Database records removed in ${result.duration}ms (config, ${appCount} apps, ${pendingCmdCount} pending commands, ${scriptCount} scripts, ${firewallRuleCount} firewall rules, machine)`)
     } catch (e: any) {
       result.duration = Date.now() - startTime
       result.success = false
       result.error = `Failed to remove database records: ${e.message}`
-      this.debug.log('error', `✗ Failed to remove database records after ${result.duration}ms: ${e.message}`)
+      this.debug.error(`✗ Failed to remove database records after ${result.duration}ms: ${e.message}`)
       throw e
     }
 
@@ -516,7 +516,7 @@ export class MachineCleanupServiceV2 {
    */
   private async cleanupFirewallRuleSet (tx: any, vmId: string): Promise<number> {
     try {
-      this.debug.log('info', `Cleaning firewall ruleset for VM ${vmId}`)
+      this.debug.info(`Cleaning firewall ruleset for VM ${vmId}`)
 
       // Find VM's firewall rule set
       const vm = await tx.machine.findUnique({
@@ -534,27 +534,27 @@ export class MachineCleanupServiceV2 {
         const ruleSetId = vm.firewallRuleSet.id
         const ruleCount = vm.firewallRuleSet.rules.length
 
-        this.debug.log('info', `Found firewall ruleset ${ruleSetId} with ${ruleCount} rules`)
+        this.debug.info(`Found firewall ruleset ${ruleSetId} with ${ruleCount} rules`)
 
         // Delete all rules in the rule set
         await tx.firewallRule.deleteMany({
           where: { ruleSetId }
         })
-        this.debug.log('info', `Deleted ${ruleCount} firewall rules`)
+        this.debug.info(`Deleted ${ruleCount} firewall rules`)
 
         // Delete the rule set itself
         await tx.firewallRuleSet.delete({
           where: { id: ruleSetId }
         })
-        this.debug.log('info', `✓ Deleted firewall ruleset ${ruleSetId}`)
+        this.debug.info(`✓ Deleted firewall ruleset ${ruleSetId}`)
 
         return ruleCount
       } else {
-        this.debug.log('info', `No firewall ruleset found (already cleaned)`)
+        this.debug.info(`No firewall ruleset found (already cleaned)`)
         return 0
       }
     } catch (e: any) {
-      this.debug.log('warn', `⚠ Error cleaning firewall ruleset: ${e.message}`)
+      this.debug.warn(`⚠ Error cleaning firewall ruleset: ${e.message}`)
       // Don't throw - allow VM deletion to proceed
       return 0
     }
@@ -569,14 +569,14 @@ export class MachineCleanupServiceV2 {
    */
   async cleanupRuntimeResources (machineId: string, deleteDisks: boolean = false): Promise<void> {
     const startTime = Date.now()
-    this.debug.log('info', `Cleaning runtime resources for VM ${machineId} (deleteDisks: ${deleteDisks})`)
+    this.debug.info(`Cleaning runtime resources for VM ${machineId} (deleteDisks: ${deleteDisks})`)
 
     const machine = await this.prisma.machine.findUnique({
       where: { id: machineId }
     })
 
     if (!machine) {
-      this.debug.log('warn', `Machine ${machineId} not found`)
+      this.debug.warn(`Machine ${machineId} not found`)
       return
     }
 
@@ -614,6 +614,6 @@ export class MachineCleanupServiceV2 {
 
     const totalDuration = Date.now() - startTime
     const successCount = summary.operations.filter(op => op.success).length
-    this.debug.log('info', `Runtime resources cleaned in ${totalDuration}ms (${successCount}/${summary.operations.length} operations successful)`)
+    this.debug.info(`Runtime resources cleaned in ${totalDuration}ms (${successCount}/${summary.operations.length} operations successful)`)
   }
 }

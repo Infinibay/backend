@@ -4,6 +4,8 @@ import { EventManager } from '../../app/services/EventManager'
 import { PrismaClient } from '@prisma/client'
 import { mockDeep, DeepMockProxy } from 'jest-mock-extended'
 
+import logger from '@main/logger'
+
 // Type definitions for test
 interface JobWithPrivateMethods {
   cleanupOrphanedTasks: () => Promise<void>
@@ -58,7 +60,7 @@ describe('CleanupOrphanedHealthTasksJob', () => {
       const cleanupError = new Error('Cleanup failed')
       mockQueueManager.cleanupOrphanedTasks.mockRejectedValue(cleanupError)
 
-      const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation()
+      const consoleErrorSpy = jest.spyOn(logger, 'error').mockImplementation()
 
       const cleanupMethod = (job as unknown as JobWithPrivateMethods).cleanupOrphanedTasks.bind(job)
 
@@ -142,7 +144,7 @@ describe('CleanupOrphanedHealthTasksJob', () => {
       const executionError = new Error('Job execution failed')
       mockQueueManager.cleanupOrphanedTasks.mockRejectedValue(executionError)
 
-      const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation()
+      const consoleErrorSpy = jest.spyOn(logger, 'error').mockImplementation()
 
       // Test error handling by directly calling the cleanup method
       const cleanupMethod = (job as unknown as JobWithPrivateMethods).cleanupOrphanedTasks.bind(job)

@@ -1,3 +1,4 @@
+import logger from '@main/logger'
 import express, { Express, Request, Response, NextFunction } from 'express'
 import path from 'path'
 import bodyParser from 'body-parser'
@@ -20,28 +21,28 @@ export const configureServer = (app: Express, httpServer: Server): void => {
 const configureSocketHandling = (httpServer: Server): void => {
   httpServer.on('connection', (socket) => {
     socket.setTimeout(ONE_HOUR_MS)
-    console.log(`[${new Date().toISOString()}] New connection established - Remote Address: ${socket.remoteAddress}`)
+    logger.info(`[${new Date().toISOString()}] New connection established - Remote Address: ${socket.remoteAddress}`)
 
     socket.on('error', (error) => {
-      console.error(`[${new Date().toISOString()}] Socket error from ${socket.remoteAddress}:`, error)
+      logger.error(`[${new Date().toISOString()}] Socket error from ${socket.remoteAddress}:`, error)
     })
 
     socket.on('close', (hadError) => {
-      console.log(`[${new Date().toISOString()}] Connection closed from ${socket.remoteAddress} ${hadError ? 'due to error' : 'normally'}`)
+      logger.info(`[${new Date().toISOString()}] Connection closed from ${socket.remoteAddress} ${hadError ? 'due to error' : 'normally'}`)
     })
 
     socket.on('timeout', () => {
-      console.log(`[${new Date().toISOString()}] Connection timeout from ${socket.remoteAddress}`)
+      logger.info(`[${new Date().toISOString()}] Connection timeout from ${socket.remoteAddress}`)
       socket.end()
     })
   })
 
   httpServer.on('error', (error) => {
-    console.error(`[${new Date().toISOString()}] Server error:`, error)
+    logger.error(`[${new Date().toISOString()}] Server error:`, error)
   })
 
   httpServer.on('clientError', (error, socket) => {
-    console.error(`[${new Date().toISOString()}] Client error:`, error)
+    logger.error(`[${new Date().toISOString()}] Client error:`, error)
     socket.end('HTTP/1.1 400 Bad Request\r\n\r\n')
   })
 }
@@ -64,7 +65,7 @@ const configureMiddleware = (app: Express): void => {
     index: false, // Prevent directory listing
     dotfiles: 'ignore' // Ignore dotfiles for security
   }))
-  console.log(`[${new Date().toISOString()}] Static file serving configured: ${publicPath}`)
+  logger.info(`[${new Date().toISOString()}] Static file serving configured: ${publicPath}`)
 
   // Configure express for large file uploads
   app.use(bodyParser.json({ limit: MAX_UPLOAD_SIZE }))

@@ -1,7 +1,5 @@
-import debug from 'debug'
+import logger from '@main/logger'
 import { PackageCapabilities } from './types'
-
-const log = debug('infinibay:packages:capabilities')
 
 /**
  * Capability types that packages can request
@@ -175,9 +173,9 @@ export class CapabilityManager {
     allowed: boolean
   ): void {
     if (allowed) {
-      log('Package %s used capability %s: %s', packageName, capability, details)
+      logger.debug('Package %s used capability %s: %s', packageName, capability, details)
     } else {
-      log('Package %s DENIED capability %s: %s', packageName, capability, details)
+      logger.debug('Package %s DENIED capability %s: %s', packageName, capability, details)
     }
   }
 }

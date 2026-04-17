@@ -1,9 +1,9 @@
+import logger from '@main/logger'
 import { CronJob } from 'cron'
 import { PrismaClient } from '@prisma/client'
 import { getVirtioSocketWatcherService } from '../services/VirtioSocketWatcherService'
-import { Debugger } from '../utils/debug'
 
-const debug = new Debugger('MetricsWatchdogJob')
+const debug = logger.child({ module: 'MetricsWatchdogJob' })
 
 export class MetricsWatchdogJob {
   private job: CronJob | null = null
@@ -13,7 +13,7 @@ export class MetricsWatchdogJob {
 
   start (): void {
     if (this.job) {
-      debug.log('MetricsWatchdog job is already running')
+      debug.debug('MetricsWatchdog job is already running')
       return
     }
 
@@ -22,7 +22,7 @@ export class MetricsWatchdogJob {
       '0 */3 * * * *', // Every 3 minutes
       async () => {
         if (this.isRunning) {
-          debug.log('Previous metrics watchdog check still running, skipping...')
+          debug.debug('Previous metrics watchdog check still running, skipping...')
           return
         }
 
@@ -30,7 +30,7 @@ export class MetricsWatchdogJob {
         try {
           await this.checkStaleMetrics()
         } catch (error) {
-          console.error('🗂️ Error in MetricsWatchdog job:', error)
+          logger.error('🗂️ Error in MetricsWatchdog job:', error)
         } finally {
           this.isRunning = false
         }
@@ -40,20 +40,20 @@ export class MetricsWatchdogJob {
       'UTC'
     )
 
-    console.log('🗂️ MetricsWatchdog job started (every 3 minutes)')
+    logger.info('🗂️ MetricsWatchdog job started (every 3 minutes)')
   }
 
   stop (): void {
     if (this.job) {
       this.job.stop()
       this.job = null
-      console.log('🗂️ MetricsWatchdog job stopped')
+      logger.info('🗂️ MetricsWatchdog job stopped')
     }
   }
 
   private async checkStaleMetrics (): Promise<void> {
     try {
-      debug.log('Starting stale metrics check')
+      debug.debug('Starting stale metrics check')
 
       // Get all running VMs
       const runningVMs = await this.prisma.machine.findMany({
@@ -67,11 +67,11 @@ export class MetricsWatchdogJob {
       })
 
       if (runningVMs.length === 0) {
-        debug.log('No running VMs found, skipping stale metrics check')
+        debug.debug('No running VMs found, skipping stale metrics check')
         return
       }
 
-      debug.log(`Checking ${runningVMs.length} running VMs for stale metrics`)
+      debug.debug(`Checking ${runningVMs.length} running VMs for stale metrics`)
 
       const staleThresholdMs = 2 * 60 * 1000 // 2 minutes
       const now = new Date()
@@ -94,12 +94,12 @@ export class MetricsWatchdogJob {
 
           if (!recentMetrics) {
             staleVMsCount++
-            console.warn(`⚠️ VM ${vm.name} (${vm.id}) has no recent metrics (last 2 minutes)`)
+            logger.warn(`⚠️ VM ${vm.name} (${vm.id}) has no recent metrics (last 2 minutes)`)
 
             // Try to ping the VM or request metrics
             try {
               const virtioService = getVirtioSocketWatcherService()
-              debug.log(`Attempting to request metrics from VM ${vm.name}`)
+              debug.debug(`Attempting to request metrics from VM ${vm.name}`)
 
               await virtioService.sendSafeCommand(
                 vm.id,
@@ -107,21 +107,21 @@ export class MetricsWatchdogJob {
                 30000 // 30 seconds timeout
               )
             } catch (pingError) {
-              console.error(`🗂️ Failed to ping VM ${vm.name} for metrics:`, pingError)
+              logger.error(`🗂️ Failed to ping VM ${vm.name} for metrics:`, pingError)
             }
           }
         } catch (error) {
-          console.error(`🗂️ Failed to check metrics for VM ${vm.name} (${vm.id}):`, error)
+          logger.error(`🗂️ Failed to check metrics for VM ${vm.name} (${vm.id}):`, error)
         }
       }
 
       if (staleVMsCount > 0) {
-        console.warn(`🗂️ Found ${staleVMsCount} VMs with stale metrics`)
+        logger.warn(`🗂️ Found ${staleVMsCount} VMs with stale metrics`)
       } else {
-        debug.log('All running VMs have recent metrics')
+        debug.debug('All running VMs have recent metrics')
       }
     } catch (error) {
-      console.error('🗂️ Error checking stale metrics:', error)
+      logger.error('🗂️ Error checking stale metrics:', error)
       throw error
     }
   }

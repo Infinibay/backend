@@ -1,10 +1,10 @@
 import 'reflect-metadata'
 import { describe, it, expect, beforeEach, jest } from '@jest/globals'
 import { PrismaClient, MaintenanceTaskType, MaintenanceStatus, MaintenanceTrigger } from '@prisma/client'
-import { MaintenanceService, MaintenanceTaskConfig } from '../../../app/services/maintenance/MaintenanceService'
-import { VirtioSocketWatcherService, getVirtioSocketWatcherService } from '../../../app/services/vm/VirtioSocketWatcherService'
+import { MaintenanceService, MaintenanceTaskConfig } from '../../../app/services/MaintenanceService'
+import { VirtioSocketWatcherService, getVirtioSocketWatcherService } from '../../../app/services/VirtioSocketWatcherService'
 
-jest.mock('../../../app/services/vm/VirtioSocketWatcherService')
+jest.mock('../../../app/services/VirtioSocketWatcherService')
 
 jest.mock('@utils/cronParser', () => ({
   CronParser: {

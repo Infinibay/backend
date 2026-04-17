@@ -5,13 +5,13 @@
  * With infinization, graphics info is stored in MachineConfiguration during VM creation.
  * This cron verifies running VMs have valid graphics configuration.
  */
+import logger from '@main/logger'
 import { CronJob } from 'cron'
 import { networkInterfaces } from 'systeminformation'
 import prisma from '../utils/database'
 import { getInfinization } from '../services/InfinizationService'
-import { Debugger } from '../utils/debug'
 
-const debug = new Debugger('cron:update-graphics')
+const debug = logger.child({ module: 'cron:update-graphics' })
 
 // Cache the local IP to avoid frequent lookups
 let cachedLocalIP: string | null = null
@@ -33,7 +33,7 @@ async function getLocalIP (): Promise<string> {
     }
     throw new Error('No suitable network interface found')
   } catch (err) {
-    debug.log('error', `Error getting local IP: ${err}`)
+    debug.error(`Error getting local IP: ${err}`)
     return '127.0.0.1' // Fallback to localhost
   }
 }
@@ -62,7 +62,7 @@ const UpdateGraphicsInformationJob = new CronJob('*/1 * * * *', async () => {
         // Detect and log corrupted configurations (port -1 with protocol configured)
         // This indicates the cron previously overwrote a valid port
         if (config.graphicPort === -1 && config.graphicProtocol) {
-          debug.log('warn', `Corrupted graphics config detected for ${machine.name}: port=-1 but protocol=${config.graphicProtocol}. This VM may need repair.`)
+          debug.warn(`Corrupted graphics config detected for ${machine.name}: port=-1 but protocol=${config.graphicProtocol}. This VM may need repair.`)
         }
 
         // Get VM status from infinization
@@ -82,7 +82,7 @@ const UpdateGraphicsInformationJob = new CronJob('*/1 * * * *', async () => {
                 // Explicitly NOT updating graphicPort, graphicProtocol, graphicPassword
               }
             })
-            debug.log(`Updated graphicHost for running VM ${machine.name}: ${storedHost} -> ${newHost}`)
+            debug.debug(`Updated graphicHost for running VM ${machine.name}: ${storedHost} -> ${newHost}`)
           }
         }
         // For stopped VMs: DO NOTHING
@@ -90,11 +90,11 @@ const UpdateGraphicsInformationJob = new CronJob('*/1 * * * *', async () => {
         // and must persist across power cycles. The port is statically assigned and
         // doesn't change when the VM stops.
       } catch (err) {
-        debug.log('error', `Error processing machine ${machine.name}: ${err}`)
+        debug.error(`Error processing machine ${machine.name}: ${err}`)
       }
     }
   } catch (err) {
-    debug.log('error', `Error in UpdateGraphicsInformationJob: ${err}`)
+    debug.error(`Error in UpdateGraphicsInformationJob: ${err}`)
   }
 })
 

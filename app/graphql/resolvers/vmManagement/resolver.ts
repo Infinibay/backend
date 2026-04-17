@@ -1,3 +1,4 @@
+import logger from '@main/logger'
 import { Resolver, Query, Mutation, Arg, ID, Ctx, Authorized } from 'type-graphql'
 import { UserInputError } from 'apollo-server-core'
 import { InfinibayContext } from '@utils/context'
@@ -92,7 +93,7 @@ export class VMManagementResolver {
         startupType: svc.startup_type || svc.StartType || 'unknown'
       }))
     } catch (error) {
-      console.error('Error listing VM services:', error)
+      logger.error('Error listing VM services:', error)
       throw new UserInputError('Failed to list VM services')
     }
   }
@@ -137,7 +138,7 @@ export class VMManagementResolver {
         source: pkg.source || 'unknown'
       }))
     } catch (error) {
-      console.error('Error listing VM packages:', error)
+      logger.error('Error listing VM packages:', error)
       throw new UserInputError('Failed to list VM packages')
     }
   }
@@ -171,7 +172,7 @@ export class VMManagementResolver {
       }))
       */
     } catch (error) {
-      console.error('Error listing VM snapshots:', error)
+      logger.error('Error listing VM snapshots:', error)
       throw new UserInputError('Failed to list VM snapshots')
     }
   }
@@ -310,7 +311,7 @@ export class VMManagementResolver {
       }
       */
     } catch (error: unknown) {
-      console.error('Error creating VM snapshot:', error)
+      logger.error('Error creating VM snapshot:', error)
       throw new UserInputError(error instanceof Error ? error.message : 'Failed to create snapshot')
     }
   }
@@ -338,7 +339,7 @@ export class VMManagementResolver {
       return true
       */
     } catch (error: unknown) {
-      console.error('Error reverting VM snapshot:', error)
+      logger.error('Error reverting VM snapshot:', error)
       throw new UserInputError(error instanceof Error ? error.message : 'Failed to revert snapshot')
     }
   }
@@ -366,7 +367,7 @@ export class VMManagementResolver {
       return true
       */
     } catch (error: unknown) {
-      console.error('Error deleting VM snapshot:', error)
+      logger.error('Error deleting VM snapshot:', error)
       throw new UserInputError(error instanceof Error ? error.message : 'Failed to delete snapshot')
     }
   }

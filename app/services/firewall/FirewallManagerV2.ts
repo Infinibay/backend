@@ -19,10 +19,10 @@
 import { PrismaClient, RuleSetType } from '@prisma/client'
 import { NftablesService, FirewallRuleInput } from '@infinibay/infinization'
 
-import { Debugger } from '@utils/debug'
+import logger from '@main/logger'
 import { getInfinization } from '@services/InfinizationService'
 
-const debug = new Debugger('firewall-manager-v2')
+const debug = logger.child({ module: 'firewall-manager-v2' })
 
 /**
  * Result of firewall setup operation.
@@ -52,7 +52,7 @@ export class FirewallManagerV2 {
 
   constructor (prisma: PrismaClient) {
     this.prisma = prisma
-    debug.log('info', 'FirewallManagerV2 initialized')
+    debug.info('FirewallManagerV2 initialized')
   }
 
   /**
@@ -78,7 +78,7 @@ export class FirewallManagerV2 {
     entityId: string,
     description: string
   ): Promise<{ ruleSetCreated: boolean }> {
-    debug.log('info', `Ensuring firewall infrastructure for ${entityType} ${entityId}`)
+    debug.info(`Ensuring firewall infrastructure for ${entityType} ${entityId}`)
 
     const result = { ruleSetCreated: false }
 
@@ -89,7 +89,7 @@ export class FirewallManagerV2 {
       })
 
       if (!existingRuleSet) {
-        debug.log('info', `Creating ${entityType} ruleset for ${entityId}`)
+        debug.info(`Creating ${entityType} ruleset for ${entityId}`)
 
         const internalName = this.generateInternalName(entityType, entityId)
         const priority = entityType === RuleSetType.DEPARTMENT ? 1000 : 500
@@ -113,20 +113,20 @@ export class FirewallManagerV2 {
             where: { id: entityId },
             data: { firewallRuleSetId: ruleSet.id }
           }).catch(e => {
-            debug.log('warn', `Failed to link ruleset to department: ${e.message}`)
+            debug.warn(`Failed to link ruleset to department: ${e.message}`)
           })
         } else if (entityType === RuleSetType.VM) {
           await this.prisma.machine.update({
             where: { id: entityId },
             data: { firewallRuleSetId: ruleSet.id }
           }).catch(e => {
-            debug.log('warn', `Failed to link ruleset to VM: ${e.message}`)
+            debug.warn(`Failed to link ruleset to VM: ${e.message}`)
           })
         }
 
-        debug.log('info', `Created ruleset ${ruleSet.id} for ${entityType} ${entityId}`)
+        debug.info(`Created ruleset ${ruleSet.id} for ${entityType} ${entityId}`)
       } else {
-        debug.log('info', `${entityType} ruleset already exists for ${entityId}`)
+        debug.info(`${entityType} ruleset already exists for ${entityId}`)
 
         // Self-heal broken FK links
         await this.repairRuleSetLink(entityType, entityId, existingRuleSet.id)
@@ -134,7 +134,7 @@ export class FirewallManagerV2 {
 
       return result
     } catch (error) {
-      debug.log('error', `Failed to ensure firewall infrastructure: ${(error as Error).message}`)
+      debug.error(`Failed to ensure firewall infrastructure: ${(error as Error).message}`)
       throw error
     }
   }
@@ -156,7 +156,7 @@ export class FirewallManagerV2 {
     departmentId: string,
     tapDeviceName: string
   ): Promise<FirewallSetupResult> {
-    debug.log('info', `Ensuring firewall for VM ${vmId} (TAP: ${tapDeviceName})`)
+    debug.info(`Ensuring firewall for VM ${vmId} (TAP: ${tapDeviceName})`)
 
     const result: FirewallSetupResult = {
       departmentRuleSetCreated: false,
@@ -228,11 +228,11 @@ export class FirewallManagerV2 {
       result.vmRulesApplied = vmRules.length
       result.success = applyResult.failedRules === 0
 
-      debug.log('info', `Firewall setup complete for VM ${vmId}: ${applyResult.appliedRules} rules applied`)
+      debug.info(`Firewall setup complete for VM ${vmId}: ${applyResult.appliedRules} rules applied`)
 
       return result
     } catch (error) {
-      debug.log('error', `Failed to ensure firewall for VM ${vmId}: ${(error as Error).message}`)
+      debug.error(`Failed to ensure firewall for VM ${vmId}: ${(error as Error).message}`)
       throw error
     }
   }
@@ -252,7 +252,7 @@ export class FirewallManagerV2 {
     vmId: string,
     tapDeviceName: string
   ): Promise<FirewallResyncResult> {
-    debug.log('info', `Re-syncing firewall for VM ${vmId}`)
+    debug.info(`Re-syncing firewall for VM ${vmId}`)
 
     const result: FirewallResyncResult = {
       ruleSetCreated: false,
@@ -307,10 +307,10 @@ export class FirewallManagerV2 {
       result.chainApplied = applyResult.failedRules === 0
       result.success = true
 
-      debug.log('info', `Firewall resync complete for VM ${vmId}`)
+      debug.info(`Firewall resync complete for VM ${vmId}`)
       return result
     } catch (error) {
-      debug.log('error', `Failed to resync firewall for VM ${vmId}: ${(error as Error).message}`)
+      debug.error(`Failed to resync firewall for VM ${vmId}: ${(error as Error).message}`)
       throw error
     }
   }
@@ -323,14 +323,14 @@ export class FirewallManagerV2 {
    * @param vmId - VM UUID
    */
   async removeVMFirewall (vmId: string): Promise<void> {
-    debug.log('info', `Removing firewall for VM ${vmId}`)
+    debug.info(`Removing firewall for VM ${vmId}`)
 
     try {
       const nftables = await this.getNftables()
       await nftables.removeVMChain(vmId)
-      debug.log('info', `Firewall removed for VM ${vmId}`)
+      debug.info(`Firewall removed for VM ${vmId}`)
     } catch (error) {
-      debug.log('warn', `Failed to remove firewall for VM ${vmId}: ${(error as Error).message}`)
+      debug.warn(`Failed to remove firewall for VM ${vmId}: ${(error as Error).message}`)
       // Don't throw - cleanup should be best-effort
     }
   }
@@ -343,14 +343,14 @@ export class FirewallManagerV2 {
    * @param vmId - VM UUID
    */
   async flushVMRules (vmId: string): Promise<void> {
-    debug.log('info', `Flushing firewall rules for VM ${vmId}`)
+    debug.info(`Flushing firewall rules for VM ${vmId}`)
 
     try {
       const nftables = await this.getNftables()
       await nftables.flushVMRules(vmId)
-      debug.log('info', `Firewall rules flushed for VM ${vmId}`)
+      debug.info(`Firewall rules flushed for VM ${vmId}`)
     } catch (error) {
-      debug.log('warn', `Failed to flush firewall rules for VM ${vmId}: ${(error as Error).message}`)
+      debug.warn(`Failed to flush firewall rules for VM ${vmId}: ${(error as Error).message}`)
     }
   }
 
@@ -386,7 +386,7 @@ export class FirewallManagerV2 {
             where: { id: entityId },
             data: { firewallRuleSetId: ruleSetId }
           })
-          debug.log('info', `Self-healed: linked ruleset to department ${entityId}`)
+          debug.info(`Self-healed: linked ruleset to department ${entityId}`)
         }
       } else if (entityType === RuleSetType.VM) {
         const machine = await this.prisma.machine.findUnique({
@@ -398,11 +398,11 @@ export class FirewallManagerV2 {
             where: { id: entityId },
             data: { firewallRuleSetId: ruleSetId }
           })
-          debug.log('info', `Self-healed: linked ruleset to VM ${entityId}`)
+          debug.info(`Self-healed: linked ruleset to VM ${entityId}`)
         }
       }
     } catch (error) {
-      debug.log('warn', `Failed to repair ruleset link: ${(error as Error).message}`)
+      debug.warn(`Failed to repair ruleset link: ${(error as Error).message}`)
     }
   }
 

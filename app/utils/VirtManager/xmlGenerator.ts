@@ -1,3 +1,4 @@
+import logger from '@main/logger'
 import xml2js from 'xml2js'
 import { v4 as uuidv4 } from 'uuid'
 import path from 'path'
@@ -291,7 +292,7 @@ export class XMLGenerator {
   }
 
   setVCPUs (count: number): void {
-    console.log(`Setting VCPUs to ${count}: ${this.xml.domain}`)
+    logger.info(`Setting VCPUs to ${count}: ${this.xml.domain}`)
     this.xml.domain.vcpu = [{ _: count, $: { placement: 'static', current: count } }]
     this.xml.domain.cpu = {
       $: {
@@ -402,7 +403,7 @@ export class XMLGenerator {
     }
 
     // Log the CPU configuration for debugging
-    console.log('Applied CPU configuration:', JSON.stringify(this.xml.domain.cpu, null, 2))
+    logger.info('Applied CPU configuration:', JSON.stringify(this.xml.domain.cpu, null, 2))
   }
 
   // Renamed method: setBootDevice -> setBootOrder
@@ -544,7 +545,7 @@ export class XMLGenerator {
    * This ensures the XML references the correct path where libvirt actually created the volume.
    */
   setStorage (size: number): void {
-    console.warn(
+    logger.warn(
       'DEPRECATED: setStorage() hardcodes the disk path and may not match the actual storage pool location. ' +
       'Use addDisk() with the actual volume path from StorageVol.getPath() instead.'
     )
@@ -626,8 +627,8 @@ export class XMLGenerator {
   generate (): string {
     // Convert the JSON object to XML
     const builder = new xml2js.Builder()
-    console.log('Generating XML')
-    console.log(builder.buildObject(this.xml))
+    logger.info('Generating XML')
+    logger.info(builder.buildObject(this.xml))
     return builder.buildObject(this.xml)
   }
 
@@ -793,7 +794,7 @@ export class XMLGenerator {
         fs.mkdirSync(socketsDir, { recursive: true, mode: 0o755 })
       }
     } catch (error) {
-      console.error(`Failed to create sockets directory at ${socketsDir}:`, error)
+      logger.error(`Failed to create sockets directory at ${socketsDir}:`, error)
     }
 
     // Get the next available port number for virtio-serial
@@ -853,7 +854,7 @@ export class XMLGenerator {
 
     this.xml.domain.devices[0].channel.push(infiniServiceChannel)
 
-    console.log(`InfiniService channel configured with socket at ${socketPath} on port ${nextPort}`)
+    logger.info(`InfiniService channel configured with socket at ${socketPath} on port ${nextPort}`)
   }
 
   /*

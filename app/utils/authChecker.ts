@@ -1,10 +1,10 @@
+import logger from '@main/logger'
 import { AuthChecker } from 'type-graphql'
-import { Debugger } from './debug'
 import { InfinibayContext, createUserValidationHelpers, SafeUser } from './context'
 import { verifyRequestAuth, DecodedToken } from './jwtAuth'
 import { Request } from 'express'
 
-const debug = new Debugger('auth')
+const debug = logger.child({ module: 'auth' })
 
 export const authChecker: AuthChecker<InfinibayContext> = async (
   resolverData,
@@ -19,29 +19,29 @@ export const authChecker: AuthChecker<InfinibayContext> = async (
   // Check if user is already populated in context (from index.ts)
   if (context.user) {
     if (debugAuth) {
-      console.log('🔐 AuthChecker Debug - User already in context')
-      console.log('🔐 AuthChecker Debug - Context user details:', {
+      logger.info('🔐 AuthChecker Debug - User already in context')
+      logger.info('🔐 AuthChecker Debug - Context user details:', {
         userId: '[REDACTED]',
         userRole: context.user.role,
         userEmail: context.user.email,
         userDeleted: context.user.deleted
       })
     }
-    debug.log('User already in context, checking access...')
+    debug.debug('User already in context, checking access...')
     const decoded: DecodedToken = {
       userId: context.user.id,
       userRole: context.user.role
     }
     const accessResult = checkAccess(decoded, roles, context, debugAuth)
     if (debugAuth) {
-      console.log('🔐 AuthChecker Debug - Access check result for existing user:', accessResult)
+      logger.info('🔐 AuthChecker Debug - Access check result for existing user:', accessResult)
     }
     return accessResult
   }
 
   // Fallback: Try to verify token if user not in context
   if (debugAuth) {
-    console.log('🔐 AuthChecker Debug - No user in context, trying fallback token verification')
+    logger.info('🔐 AuthChecker Debug - No user in context, trying fallback token verification')
   }
 
   try {
@@ -53,9 +53,9 @@ export const authChecker: AuthChecker<InfinibayContext> = async (
 
     if (!authResult.user || !authResult.decoded) {
       if (debugAuth) {
-        console.log('🔐 AuthChecker Debug - Fallback authentication failed')
+        logger.info('🔐 AuthChecker Debug - Fallback authentication failed')
       }
-      debug.log('Fallback authentication failed.')
+      debug.debug('Fallback authentication failed.')
       return false
     }
 
@@ -68,25 +68,25 @@ export const authChecker: AuthChecker<InfinibayContext> = async (
       context.userHelpers = createUserValidationHelpers(authResult.user, authResult.meta)
     }
 
-    debug.log('Fallback authentication successful.')
+    debug.debug('Fallback authentication successful.')
 
     const accessResult = checkAccess(authResult.decoded, roles, context, debugAuth)
     if (debugAuth) {
-      console.log('🔐 AuthChecker Debug - Final fallback access result:', accessResult)
+      logger.info('🔐 AuthChecker Debug - Final fallback access result:', accessResult)
     }
     return accessResult
   } catch (error) {
     if (debugAuth) {
-      console.log('🔐 AuthChecker Debug - Fallback authentication error:', error instanceof Error ? error.message : String(error))
+      logger.info('🔐 AuthChecker Debug - Fallback authentication error:', error instanceof Error ? error.message : String(error))
     }
-    debug.log('error', `Fallback authentication error: ${error}`)
+    debug.error(`Fallback authentication error: ${error}`)
     return false
   }
 }
 
 function checkAccess (decoded: DecodedToken, roles: string[], context: InfinibayContext, debugAuth?: boolean): boolean {
   if (debugAuth) {
-    console.log('🔐 AuthChecker Debug - checkAccess called with:', {
+    logger.info('🔐 AuthChecker Debug - checkAccess called with:', {
       decodedUserId: '[REDACTED]',
       decodedUserRole: decoded.userRole,
       requiredRoles: roles,
@@ -100,9 +100,9 @@ function checkAccess (decoded: DecodedToken, roles: string[], context: Infinibay
   if (context.user) {
     if (decoded.userId !== context.user.id) {
       if (debugAuth) {
-        console.log('🔐 AuthChecker Debug - Token userId does not match context user ID')
+        logger.info('🔐 AuthChecker Debug - Token userId does not match context user ID')
       }
-      console.warn('⚠️ JWT Security Warning - Token userId does not match context user:', {
+      logger.warn('⚠️ JWT Security Warning - Token userId does not match context user:', {
         tokenUserId: '[REDACTED]',
         contextUserId: '[REDACTED]'
       })
@@ -112,9 +112,9 @@ function checkAccess (decoded: DecodedToken, roles: string[], context: Infinibay
     const roleField = decoded.userRole || decoded.role
     if (roleField !== context.user.role) {
       if (debugAuth) {
-        console.log('🔐 AuthChecker Debug - Token role does not match context user role')
+        logger.info('🔐 AuthChecker Debug - Token role does not match context user role')
       }
-      console.warn('⚠️ JWT Security Warning - Token role does not match context user role:', {
+      logger.warn('⚠️ JWT Security Warning - Token role does not match context user role:', {
         tokenRole: '[REDACTED]',
         contextUserRole: '[REDACTED]'
       })
@@ -124,69 +124,69 @@ function checkAccess (decoded: DecodedToken, roles: string[], context: Infinibay
 
   if (roles.includes('ADMIN')) {
     if (debugAuth) {
-      console.log('🔐 AuthChecker Debug - Checking ADMIN access')
+      logger.info('🔐 AuthChecker Debug - Checking ADMIN access')
     }
     const adminResult = checkAdminAccess(decoded)
     if (debugAuth) {
-      console.log('🔐 AuthChecker Debug - ADMIN access result:', adminResult)
+      logger.info('🔐 AuthChecker Debug - ADMIN access result:', adminResult)
     }
     return adminResult
   }
 
   if (roles.includes('USER')) {
     if (debugAuth) {
-      console.log('🔐 AuthChecker Debug - Checking USER access')
+      logger.info('🔐 AuthChecker Debug - Checking USER access')
     }
     const userResult = checkUserAccess(decoded)
     if (debugAuth) {
-      console.log('🔐 AuthChecker Debug - USER access result:', userResult)
+      logger.info('🔐 AuthChecker Debug - USER access result:', userResult)
     }
     return userResult
   }
 
   if (roles.includes('SETUP_MODE')) {
     if (debugAuth) {
-      console.log('🔐 AuthChecker Debug - Checking SETUP_MODE access')
+      logger.info('🔐 AuthChecker Debug - Checking SETUP_MODE access')
     }
     const setupResult = checkSetupModeAccess(context)
     if (debugAuth) {
-      console.log('🔐 AuthChecker Debug - SETUP_MODE access result:', setupResult)
+      logger.info('🔐 AuthChecker Debug - SETUP_MODE access result:', setupResult)
     }
     return setupResult
   }
 
   if (debugAuth) {
-    console.log('🔐 AuthChecker Debug - No valid role found, access denied')
+    logger.info('🔐 AuthChecker Debug - No valid role found, access denied')
   }
-  debug.log('No valid role found, access denied.')
+  debug.debug('No valid role found, access denied.')
   return false
 }
 
 function checkAdminAccess (decoded: DecodedToken): boolean {
   const roleField = decoded.userRole || decoded.role
   if (roleField === 'ADMIN' || roleField === 'SUPER_ADMIN') {
-    debug.log('Access granted for ADMIN/SUPER_ADMIN.')
+    debug.debug('Access granted for ADMIN/SUPER_ADMIN.')
     return true
   }
-  debug.log('Access denied for ADMIN.')
+  debug.debug('Access denied for ADMIN.')
   return false
 }
 
 function checkUserAccess (decoded: DecodedToken): boolean {
   if (decoded.userId) {
-    debug.log('Access granted for USER.')
+    debug.debug('Access granted for USER.')
     return true
   }
-  debug.log('Access denied for USER.')
+  debug.debug('Access denied for USER.')
   return false
 }
 
 function checkSetupModeAccess (context: InfinibayContext): boolean {
   if (context.setupMode) {
-    debug.log('Access granted for SETUP_MODE.')
+    debug.debug('Access granted for SETUP_MODE.')
     return true
   }
-  debug.log('Access denied for SETUP_MODE.')
+  debug.debug('Access denied for SETUP_MODE.')
   return false
 }
 
@@ -223,19 +223,19 @@ export async function validateDepartmentAccess (
   departmentId: string
 ): Promise<boolean> {
   if (!user) {
-    debug.log('Department access denied: No user provided')
+    debug.debug('Department access denied: No user provided')
     return false
   }
 
   if (user.role === 'ADMIN' || user.role === 'SUPER_ADMIN') {
-    debug.log(`Department access granted: Admin/Super admin user ${user.id}`)
+    debug.debug(`Department access granted: Admin/Super admin user ${user.id}`)
     return true
   }
 
   const userDepartmentIds = await getUserAccessibleDepartments(prisma, user.id)
   const hasAccess = userDepartmentIds.includes(departmentId)
 
-  debug.log(`Department access ${hasAccess ? 'granted' : 'denied'}: User ${user.id} for department ${departmentId}`)
+  debug.debug(`Department access ${hasAccess ? 'granted' : 'denied'}: User ${user.id} for department ${departmentId}`)
   return hasAccess
 }
 
@@ -251,18 +251,18 @@ export async function validateResourceDepartmentAccess (
   options: { includeGeneric?: boolean } = {}
 ): Promise<boolean> {
   if (!user) {
-    debug.log(`Resource access denied: No user provided for ${resourceType} ${resourceId}`)
+    debug.debug(`Resource access denied: No user provided for ${resourceType} ${resourceId}`)
     return false
   }
 
   if (user.role === 'ADMIN' || user.role === 'SUPER_ADMIN') {
-    debug.log(`Resource access granted: Admin/Super admin user ${user.id} for ${resourceType} ${resourceId}`)
+    debug.debug(`Resource access granted: Admin/Super admin user ${user.id} for ${resourceType} ${resourceId}`)
     return true
   }
 
   const userDepartmentIds = await getUserAccessibleDepartments(prisma, user.id)
   if (userDepartmentIds.length === 0) {
-    debug.log(`Resource access denied: User ${user.id} has no accessible departments`)
+    debug.debug(`Resource access denied: User ${user.id} has no accessible departments`)
     return false
   }
 
@@ -276,7 +276,7 @@ export async function validateResourceDepartmentAccess (
     })
 
     if (!filter) {
-      debug.log(`Resource access denied: Filter ${resourceId} not found`)
+      debug.debug(`Resource access denied: Filter ${resourceId} not found`)
       return false
     }
 
@@ -299,7 +299,7 @@ export async function validateResourceDepartmentAccess (
     })
 
     if (!vm) {
-      debug.log(`Resource access denied: VM ${resourceId} not found`)
+      debug.debug(`Resource access denied: VM ${resourceId} not found`)
       return false
     }
 
@@ -313,11 +313,11 @@ export async function validateResourceDepartmentAccess (
     break
 
   default:
-    debug.log(`Resource access denied: Unknown resource type ${resourceType}`)
+    debug.debug(`Resource access denied: Unknown resource type ${resourceType}`)
     return false
   }
 
-  debug.log(`Resource access ${hasAccess ? 'granted' : 'denied'}: User ${user.id} for ${resourceType} ${resourceId}`)
+  debug.debug(`Resource access ${hasAccess ? 'granted' : 'denied'}: User ${user.id} for ${resourceType} ${resourceId}`)
   return hasAccess
 }
 

@@ -1,3 +1,4 @@
+import logger from '@main/logger'
 import { PrismaClient } from '@prisma/client'
 import bcrypt from 'bcrypt'
 import jwt from 'jsonwebtoken'
@@ -197,9 +198,9 @@ export class UserResolver implements UserResolverInterface {
     try {
       const eventManager = getEventManager()
       await eventManager.dispatchEvent('users', 'create', { id: user.id }, user.id)
-      console.log(`🎯 Triggered real-time event: users:create for user ${user.id}`)
+      logger.info(`🎯 Triggered real-time event: users:create for user ${user.id}`)
     } catch (eventError) {
-      console.error('Failed to trigger real-time event:', eventError)
+      logger.error('Failed to trigger real-time event:', eventError)
       // Don't fail the main operation if event triggering fails
     }
 
@@ -230,12 +231,12 @@ export class UserResolver implements UserResolverInterface {
     @Ctx() context: InfinibayContext
   ): Promise<UserType> {
     const { password, passwordConfirmation, currentPassword, ...safeInput } = input
-    console.log('🔧 Backend updateUser called:', {
+    logger.info('🔧 Backend updateUser called:', {
       id,
       inputKeys: Object.keys(safeInput),
       hasRole: 'role' in safeInput,
       roleValue: safeInput.role,
-      willUpdateFields: Object.keys(safeInput).filter(key => (safeInput as any)[key] !== undefined)
+      willUpdateFields: Object.keys(safeInput).filter(key => safeInput[key as keyof typeof safeInput] !== undefined)
     })
 
     const prisma = new PrismaClient()
@@ -306,14 +307,14 @@ export class UserResolver implements UserResolverInterface {
       updateData.role = input.role
     }
 
-    console.log('📦 Final update data to be sent to database:', updateData)
+    logger.info('📦 Final update data to be sent to database:', updateData)
 
     const updatedUser = await prisma.user.update({
       where: { id },
       data: updateData
     })
 
-    console.log('✅ User updated successfully:', {
+    logger.info('✅ User updated successfully:', {
       userId: updatedUser.id,
       updatedFields: Object.keys(updateData)
     })
@@ -322,9 +323,9 @@ export class UserResolver implements UserResolverInterface {
     try {
       const eventManager = getEventManager()
       await eventManager.dispatchEvent('users', 'update', { id }, updatedUser.id)
-      console.log(`🎯 Triggered real-time event: users:update for user ${id}`)
+      logger.info(`🎯 Triggered real-time event: users:update for user ${id}`)
     } catch (eventError) {
-      console.error('Failed to trigger real-time event:', eventError)
+      logger.error('Failed to trigger real-time event:', eventError)
       // Don't fail the main operation if event triggering fails
     }
 

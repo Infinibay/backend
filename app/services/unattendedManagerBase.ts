@@ -1,3 +1,5 @@
+import { Logger } from 'winston'
+import logger from '@main/logger'
 import { Application } from '@prisma/client'
 import { Builder } from 'xml2js'
 import { spawn } from 'child_process'
@@ -6,11 +8,9 @@ import * as os from 'os'
 import * as path from 'path'
 import { promises as fsPromises } from 'fs'
 
-import { Debugger } from '@utils/debug'
-// ... other imports ...
 
 export class UnattendedManagerBase {
-  protected debug: Debugger = new Debugger('unattended-manager-base')
+  protected debug: Logger = logger.child({ module: 'unattended-manager-base' })
 
   configFileName: string | null = null
   isoPath: string | null = null
@@ -37,62 +37,62 @@ export class UnattendedManagerBase {
    * @throws If there is an error generating the image.
    */
   async generateNewImage (): Promise<string> {
-    this.debug.log('Starting to generate new image')
+    this.debug.debug('Starting to generate new image')
     let extractDir: string | null = null
     try {
-      this.debug.log('Validating ISO path')
+      this.debug.debug('Validating ISO path')
       if (!this.isoPath) {
         throw Error('No ISO path specified')
       }
-      this.debug.log('Generating config')
+      this.debug.debug('Generating config')
       const configContent = await this.generateConfig()
-      this.debug.log(configContent)
+      this.debug.debug(configContent)
 
       // Validate the generated configuration
-      this.debug.log('Validating generated configuration')
+      this.debug.debug('Validating generated configuration')
       const validation = await this.validateConfig(configContent)
       if (!validation.valid) {
         const errorMsg = `Configuration validation failed: ${validation.errors.join('; ')}`
-        this.debug.log('error', errorMsg)
+        this.debug.error(errorMsg)
         throw new Error(errorMsg)
       }
-      this.debug.log('Configuration validation passed')
+      this.debug.debug('Configuration validation passed')
 
-      this.debug.log('Validating output path')
+      this.debug.debug('Validating output path')
       // Use the temp ISO directory for generated ISOs
       const baseDir = process.env.INFINIBAY_BASE_DIR ?? '/opt/infinibay'
       const tempIsoDir = process.env.INFINIBAY_ISO_TEMP_DIR ?? path.join(baseDir, 'iso', 'temp')
       const outputPath = this.validatePath(tempIsoDir, '/opt/infinibay/iso/temp')
 
-      this.debug.log('Generating random file name for new ISO')
+      this.debug.debug('Generating random file name for new ISO')
       const newIsoName = this.generateRandomFileName()
       const newIsoPath = path.join(outputPath, newIsoName)
 
-      this.debug.log('Extracting ISO')
+      this.debug.debug('Extracting ISO')
       extractDir = await this.extractISO(this.isoPath)
       if (this.configFileName) {
-        this.debug.log('Adding autoinstall config file')
-        console.log('Adding autoinstall config file')
-        console.log(configContent)
+        this.debug.debug('Adding autoinstall config file')
+        logger.info('Adding autoinstall config file')
+        logger.info(configContent)
         await this.addAutonistallConfigFile(configContent, extractDir, this.configFileName)
       } else {
-        this.debug.log('Error: configFileName is not set')
+        this.debug.debug('Error: configFileName is not set')
         throw new Error('configFileName is not set')
       }
-      this.debug.log('Creating new ISO')
+      this.debug.debug('Creating new ISO')
       await this.createISO(newIsoPath, extractDir)
       // Note: Temp ISO cleanup is handled by ejectAllCdroms() in InfinizationService.ts
 
       // Optional: Clean up extracted files
-      this.debug.log('Cleaning up extracted files')
+      this.debug.debug('Cleaning up extracted files')
       await this.cleanup(extractDir)
 
-      this.debug.log('New image generated successfully')
+      this.debug.debug('New image generated successfully')
       return newIsoPath
     } catch (error) {
-      this.debug.log(`Error generating new image: ${error}`)
+      this.debug.debug(`Error generating new image: ${error}`)
       if (extractDir) {
-        this.debug.log('Cleaning up extracted files due to error')
+        this.debug.debug('Cleaning up extracted files due to error')
         await this.cleanup(extractDir)
       }
       throw error
@@ -110,7 +110,7 @@ export class UnattendedManagerBase {
     const finalPath = envPath || defaultPath
 
     if (!fs.existsSync(finalPath)) {
-      this.debug.log(`Path does not exist, creating: ${finalPath}`)
+      this.debug.debug(`Path does not exist, creating: ${finalPath}`)
       fs.mkdirSync(finalPath, { recursive: true })
     }
 
@@ -177,10 +177,10 @@ export class UnattendedManagerBase {
    * @returns {Promise<void>}
    */
   protected async addAutonistallConfigFile (content: string, extractDir: string, fileName: string): Promise<void> {
-    this.debug.log(`Starting to add Autonistall Config File: ${fileName}`)
+    this.debug.debug(`Starting to add Autonistall Config File: ${fileName}`)
     const destPath = path.join(extractDir, fileName)
     await fsPromises.writeFile(destPath, content)
-    this.debug.log(`Successfully added Autonistall Config File: ${fileName}`)
+    this.debug.debug(`Successfully added Autonistall Config File: ${fileName}`)
   }
 
   /**
@@ -207,13 +207,13 @@ export class UnattendedManagerBase {
         throw new Error('Invalid directory path for cleanup.')
       }
 
-      this.debug.log(`Starting cleanup of directory: ${extractDir}`)
+      this.debug.debug(`Starting cleanup of directory: ${extractDir}`)
 
       await fsPromises.rm(extractDir, { recursive: true, force: true })
 
-      this.debug.log(`Successfully cleaned up directory: ${extractDir}`)
+      this.debug.debug(`Successfully cleaned up directory: ${extractDir}`)
     } catch (error) {
-      this.debug.log(`Error during cleanup: ${error}`)
+      this.debug.debug(`Error during cleanup: ${error}`)
       // We'll just log the error and continue, as cleanup failure shouldn't stop the process
     }
   }
@@ -235,20 +235,20 @@ export class UnattendedManagerBase {
       })
 
       process.stderr.on('data', (data) => {
-        console.error(`stderr: ${data}`)
+        logger.error(`stderr: ${data}`)
       })
 
       process.on('close', (code) => {
         if (code === 0) {
           resolve(output)
         } else {
-          console.error(`Command failed with exit code ${code}: ${commandParts.join(' ')}`)
+          logger.error(`Command failed with exit code ${code}: ${commandParts.join(' ')}`)
           reject(new Error(`Command failed with exit code ${code}`))
         }
       })
 
       process.on('error', (error) => {
-        console.error(`Error occurred while executing command: ${commandParts.join(' ')}`)
+        logger.error(`Error occurred while executing command: ${commandParts.join(' ')}`)
         reject(error)
       })
     })

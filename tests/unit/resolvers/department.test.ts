@@ -1,7 +1,7 @@
 import 'reflect-metadata'
 import { describe, it, expect, beforeEach, jest } from '@jest/globals'
 import { DepartmentResolver } from '../../../app/graphql/resolvers/department/resolver'
-import { getEventManager } from '../../../app/services/events/EventManager'
+import { getEventManager } from '../../../app/services/EventManager'
 import { DepartmentCleanupService } from '../../../app/services/cleanup/departmentCleanupService'
 import { mockPrisma } from '../../setup/jest.setup'
 import {

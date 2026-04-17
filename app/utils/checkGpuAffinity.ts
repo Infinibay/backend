@@ -1,8 +1,8 @@
+import logger from '@main/logger'
 import si from 'systeminformation'
 import { PrismaClient } from '@prisma/client'
-import { Debugger } from './debug'
 
-const debug = new Debugger('gpu-affinity')
+const debug = logger.child({ module: 'gpu-affinity' })
 
 /**
  * Checks existing GPU assignments at startup and removes stale assignments.
@@ -18,22 +18,22 @@ export async function checkGpuAffinity (prisma: PrismaClient): Promise<void> {
   })
 
   if (!assignments.length) {
-    debug.log('No GPU assignments found')
+    debug.debug('No GPU assignments found')
     return
   }
 
-  debug.log(`Found ${assignments.length} GPU assignments to verify`)
+  debug.debug(`Found ${assignments.length} GPU assignments to verify`)
 
   const controllers = (await si.graphics()).controllers
   const availableBuses = controllers.map(
     c => c.pciBus || `00000000:${c.busAddress}`
   )
 
-  debug.log(`Available GPU buses: ${availableBuses.join(', ')}`)
+  debug.debug(`Available GPU buses: ${availableBuses.join(', ')}`)
 
   for (const { machineId, assignedGpuBus } of assignments) {
     if (assignedGpuBus && !availableBuses.includes(assignedGpuBus)) {
-      debug.log('warn', `GPU ${assignedGpuBus} not found for VM ${machineId}, removing assignment`)
+      debug.warn(`GPU ${assignedGpuBus} not found for VM ${machineId}, removing assignment`)
 
       // Remove stale assignment from database
       // The VM will pick up this change on next start
@@ -42,9 +42,9 @@ export async function checkGpuAffinity (prisma: PrismaClient): Promise<void> {
         data: { assignedGpuBus: null }
       })
 
-      debug.log(`Removed stale GPU assignment for VM ${machineId}`)
+      debug.debug(`Removed stale GPU assignment for VM ${machineId}`)
     }
   }
 
-  debug.log('GPU affinity check completed')
+  debug.debug('GPU affinity check completed')
 }

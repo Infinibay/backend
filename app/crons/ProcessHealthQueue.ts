@@ -1,10 +1,10 @@
+import logger from '@main/logger'
 import { CronJob } from 'cron'
 import { PrismaClient } from '@prisma/client'
 import { getVMHealthQueueManager, QUEUE_PROCESSING_INTERVAL_SECONDS } from '../services/VMHealthQueueManager'
 import { EventManager } from '../services/EventManager'
-import { Debugger } from '../utils/debug'
 
-const debug = new Debugger('ProcessHealthQueueJob')
+const debug = logger.child({ module: 'ProcessHealthQueueJob' })
 
 export class ProcessHealthQueueJob {
   private job: CronJob | null = null
@@ -20,7 +20,7 @@ export class ProcessHealthQueueJob {
 
   start (): void {
     if (this.job) {
-      debug.log('ProcessHealthQueue job is already running')
+      debug.debug('ProcessHealthQueue job is already running')
       return
     }
 
@@ -31,7 +31,7 @@ export class ProcessHealthQueueJob {
       cronPattern,
       async () => {
         if (this.isRunning) {
-          debug.log('Previous health queue processing still running, skipping...')
+          debug.debug('Previous health queue processing still running, skipping...')
           return
         }
 
@@ -39,7 +39,7 @@ export class ProcessHealthQueueJob {
         try {
           await this.processHealthQueues()
         } catch (error) {
-          console.error('🗂️ Error in ProcessHealthQueue job:', error)
+          logger.error('🗂️ Error in ProcessHealthQueue job:', error)
         } finally {
           this.isRunning = false
         }
@@ -49,20 +49,20 @@ export class ProcessHealthQueueJob {
       'UTC'
     )
 
-    console.log(`🗂️ ProcessHealthQueue job started (every ${QUEUE_PROCESSING_INTERVAL_SECONDS} seconds)`)
+    logger.info(`🗂️ ProcessHealthQueue job started (every ${QUEUE_PROCESSING_INTERVAL_SECONDS} seconds)`)
   }
 
   stop (): void {
     if (this.job) {
       this.job.stop()
       this.job = null
-      console.log('🗂️ ProcessHealthQueue job stopped')
+      logger.info('🗂️ ProcessHealthQueue job stopped')
     }
   }
 
   private async processHealthQueues (): Promise<void> {
     try {
-      debug.log('Starting health queue processing cycle')
+      debug.debug('Starting health queue processing cycle')
 
       // Sync from database first
       await this.queueManager.syncFromDatabase()
@@ -79,11 +79,11 @@ export class ProcessHealthQueueJob {
       })
 
       if (runningVMs.length === 0) {
-        debug.log('No running VMs found, skipping queue processing')
+        debug.debug('No running VMs found, skipping queue processing')
         return
       }
 
-      debug.log(`Processing health queues for ${runningVMs.length} running VMs`)
+      debug.debug(`Processing health queues for ${runningVMs.length} running VMs`)
 
       // Process VMs in batches to respect system-wide concurrency limits
       const BATCH_SIZE = 50 // Process up to 50 VMs at a time
@@ -97,7 +97,7 @@ export class ProcessHealthQueueJob {
           try {
             await this.queueManager.processQueue(vm.id)
           } catch (error) {
-            console.error(`🗂️ Failed to process health queue for VM ${vm.name} (${vm.id}):`, error)
+            logger.error(`🗂️ Failed to process health queue for VM ${vm.name} (${vm.id}):`, error)
           }
         })
 
@@ -107,10 +107,10 @@ export class ProcessHealthQueueJob {
       // Log queue statistics
       const stats = this.queueManager.getQueueStatistics()
       if (stats.totalQueued > 0 || stats.activeChecks > 0) {
-        debug.log(`Queue stats: ${stats.totalQueued} queued, ${stats.activeChecks} active, ${stats.vmQueues} VM queues`)
+        debug.debug(`Queue stats: ${stats.totalQueued} queued, ${stats.activeChecks} active, ${stats.vmQueues} VM queues`)
       }
     } catch (error) {
-      console.error('🗂️ Error processing health queues:', error)
+      logger.error('🗂️ Error processing health queues:', error)
       throw error
     }
   }

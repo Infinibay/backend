@@ -1,4 +1,5 @@
-import { UnattendedManagerBase } from '../../../app/services/vm/unattended/unattendedManagerBase'
+import { UnattendedManagerBase } from '../../../app/services/unattendedManagerBase'
+import logger from '@main/logger'
 
 class TestUnattendedManager extends UnattendedManagerBase {
   // Expose protected properties for testing
@@ -53,10 +54,10 @@ describe('UnattendedManagerBase', () => {
     manager.setTestIsoPath('/tmp/test.iso')
     manager.setTestConfigFileName('test.cfg')
 
-    // Mock console.log and console.error
-    jest.spyOn(console, 'log').mockImplementation(() => {})
-    jest.spyOn(console, 'error').mockImplementation(() => {})
-    jest.spyOn(console, 'warn').mockImplementation(() => {})
+    // Mock logger methods
+    jest.spyOn(logger, 'info').mockImplementation(() => undefined as any)
+    jest.spyOn(logger, 'error').mockImplementation(() => undefined as any)
+    jest.spyOn(logger, 'warn').mockImplementation(() => undefined as any)
   })
 
   describe('constructor and initialization', () => {

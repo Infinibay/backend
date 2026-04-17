@@ -1,3 +1,4 @@
+import logger from '@main/logger'
 import { PrismaClient } from '@prisma/client'
 import { createPrismaClientWithCallbacks } from './modelsCallbacks'
 
@@ -32,17 +33,21 @@ const prismaClientSingleton = (): ExtendedPrismaClient => {
     }
   })
 
-  // Eagerly connect to ensure the connection pool is established
-  baseClient.$connect()
-    .then(() => {
-      console.log('✅ Database connected successfully with connection pooling')
-      console.log('   Connection limit: 20, Pool timeout: 10s')
-      console.log('   Prisma Client Extensions: Model callbacks enabled')
-    })
-    .catch((error) => {
-      console.error('❌ Failed to connect to database:', error)
-      process.exit(1)
-    })
+  // Eagerly connect to ensure the connection pool is established.
+  // Skipped under NODE_ENV=test because the mocked PrismaClient in the suite
+  // does not return a Promise from $connect(), which would throw here.
+  if (process.env.NODE_ENV !== 'test') {
+    baseClient.$connect()
+      .then(() => {
+        logger.info('✅ Database connected successfully with connection pooling')
+        logger.info('   Connection limit: 20, Pool timeout: 10s')
+        logger.info('   Prisma Client Extensions: Model callbacks enabled')
+      })
+      .catch((error) => {
+        logger.error('❌ Failed to connect to database:', error)
+        process.exit(1)
+      })
+  }
 
   // Apply client extensions with model callbacks
   // We cast to ExtendedPrismaClient to maintain type compatibility with existing code
@@ -59,19 +64,19 @@ if (process.env.NODE_ENV !== 'production') {
 
 // Graceful shutdown
 process.on('beforeExit', async () => {
-  console.log('Disconnecting from database...')
+  logger.info('Disconnecting from database...')
   await prisma.$disconnect()
 })
 
 // Handle termination signals
 process.on('SIGINT', async () => {
-  console.log('SIGINT received, disconnecting from database...')
+  logger.info('SIGINT received, disconnecting from database...')
   await prisma.$disconnect()
   process.exit(0)
 })
 
 process.on('SIGTERM', async () => {
-  console.log('SIGTERM received, disconnecting from database...')
+  logger.info('SIGTERM received, disconnecting from database...')
   await prisma.$disconnect()
   process.exit(0)
 })

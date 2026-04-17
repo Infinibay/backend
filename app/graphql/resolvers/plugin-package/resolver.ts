@@ -1,12 +1,11 @@
+import logger from '@main/logger'
 import { Resolver, Query, Mutation, Arg, Ctx, Authorized } from 'type-graphql'
 import { InfinibayContext } from '@utils/context'
 import { getPackageManager } from '@services/packages/PackageManager'
 import { PackageType, PackageCheckerType, PackageStatusType } from '../../types/PluginPackageTypes'
 import * as fs from 'fs'
 import * as path from 'path'
-import Debug from 'debug'
 
-const debug = Debug('infinibay:plugin-package-resolver')
 const EXTERNAL_PACKAGES_DIR = '/var/infinibay/packages'
 
 @Resolver()
@@ -69,7 +68,7 @@ export class PluginPackageResolver {
   async packages(
     @Ctx() ctx: InfinibayContext
   ): Promise<PackageType[]> {
-    debug('Fetching all packages')
+    logger.debug('Fetching all packages')
 
     const packages = await ctx.prisma.package.findMany({
       include: { checkers: true },
@@ -88,7 +87,7 @@ export class PluginPackageResolver {
     @Arg('name') name: string,
     @Ctx() ctx: InfinibayContext
   ): Promise<PackageType | null> {
-    debug('Fetching package: %s', name)
+    logger.debug('Fetching package: %s', name)
 
     const pkg = await ctx.prisma.package.findUnique({
       where: { name },
@@ -109,7 +108,7 @@ export class PluginPackageResolver {
   async packageStatuses(
     @Ctx() ctx: InfinibayContext
   ): Promise<PackageStatusType[]> {
-    debug('Fetching package statuses')
+    logger.debug('Fetching package statuses')
 
     const pm = getPackageManager(ctx.prisma)
     const statuses = pm.getPackageStatuses()
@@ -136,7 +135,7 @@ export class PluginPackageResolver {
     @Arg('name') name: string,
     @Ctx() ctx: InfinibayContext
   ): Promise<PackageType | null> {
-    debug('Enabling package: %s', name)
+    logger.debug('Enabling package: %s', name)
 
     const pkg = await ctx.prisma.package.findUnique({ where: { name } })
     if (!pkg) {
@@ -161,7 +160,7 @@ export class PluginPackageResolver {
     @Arg('name') name: string,
     @Ctx() ctx: InfinibayContext
   ): Promise<PackageType | null> {
-    debug('Disabling package: %s', name)
+    logger.debug('Disabling package: %s', name)
 
     const pkg = await ctx.prisma.package.findUnique({ where: { name } })
     if (!pkg) {
@@ -185,7 +184,7 @@ export class PluginPackageResolver {
     @Arg('name') name: string,
     @Ctx() ctx: InfinibayContext
   ): Promise<boolean> {
-    debug('Uninstalling package: %s', name)
+    logger.debug('Uninstalling package: %s', name)
 
     const pkg = await ctx.prisma.package.findUnique({ where: { name } })
     if (!pkg) {
@@ -203,7 +202,7 @@ export class PluginPackageResolver {
     const packagePath = path.join(EXTERNAL_PACKAGES_DIR, name)
     if (fs.existsSync(packagePath)) {
       fs.rmSync(packagePath, { recursive: true })
-      debug('Deleted package directory: %s', packagePath)
+      logger.debug('Deleted package directory: %s', packagePath)
     }
 
     return true

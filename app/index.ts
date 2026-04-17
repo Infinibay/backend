@@ -1,4 +1,5 @@
 // Module aliases must be registered first
+import logger from '@main/logger'
 import 'module-alias/register'
 
 // External Libraries
@@ -40,10 +41,14 @@ import { BackgroundTaskService } from './services/BackgroundTaskService'
 import { ErrorHandler } from './utils/errors/ErrorHandler'
 
 // Crons
-import { startCrons } from './crons/all'
+import { startCrons, CronHandles } from './crons/all'
 
 // Store services for cleanup
 let virtioSocketWatcherService: ReturnType<typeof createVirtioSocketWatcherService> | null = null
+let httpServerRef: http.Server | null = null
+let cronHandles: CronHandles | null = null
+let backgroundHealthServiceRef: BackgroundHealthService | null = null
+let shuttingDown = false
 
 async function bootstrap (): Promise<void> {
   try {
@@ -54,9 +59,9 @@ async function bootstrap (): Promise<void> {
     try {
       const networkService = new DepartmentNetworkService(prisma)
       await networkService.restoreAllNetworks()
-      console.log('🌐 Department networks restored successfully')
+      logger.info('🌐 Department networks restored successfully')
     } catch (networkError) {
-      console.error('⚠️ Failed to restore department networks:', networkError)
+      logger.error('⚠️ Failed to restore department networks:', networkError)
       // Don't fail server startup - networks can be restored later
     }
 
@@ -122,7 +127,7 @@ async function bootstrap (): Promise<void> {
 
     // Initialize ErrorHandler for background services
     ErrorHandler.initialize(prisma, eventManager)
-    console.log('⚠️ Error Handler initialized')
+    logger.info('⚠️ Error Handler initialized')
 
     // Initialize VMDetailEventManager for VM detail-specific events
     const { createVMDetailEventManager } = await import('./services/VMDetailEventManager')
@@ -146,11 +151,11 @@ async function bootstrap (): Promise<void> {
     eventManager.registerResourceManager('vms', vmEventManager)
     eventManager.registerResourceManager('scripts', scriptsEventManager)
 
-    console.log('🎯 Real-time event system initialized with all resource managers')
+    logger.info('🎯 Real-time event system initialized with all resource managers')
 
     // Initialize health monitoring system
     const healthQueueManager = new VMHealthQueueManager(prisma, eventManager)
-    console.log('⚕️ VM Health Queue Manager initialized')
+    logger.info('⚕️ VM Health Queue Manager initialized')
 
     // Initialize and start background health service
     const backgroundTaskService = new BackgroundTaskService(prisma, eventManager)
@@ -161,7 +166,8 @@ async function bootstrap (): Promise<void> {
       healthQueueManager
     )
     backgroundHealthService.start()
-    console.log('🏥 Background Health Service initialized and started')
+    backgroundHealthServiceRef = backgroundHealthService
+    logger.info('🏥 Background Health Service initialized and started')
 
     // Initialize and start VirtioSocketWatcherService (already created earlier for context)
     virtioSocketWatcher.initialize(vmEventManager, healthQueueManager)
@@ -174,9 +180,9 @@ async function bootstrap (): Promise<void> {
     try {
       await virtioSocketWatcher.start()
       virtioSocketWatcherService = virtioSocketWatcher // Store for cleanup
-      console.log('🔌 VirtioSocketWatcherService started successfully')
+      logger.info('🔌 VirtioSocketWatcherService started successfully')
     } catch (error) {
-      console.error('⚠️ Failed to start VirtioSocketWatcherService:', error)
+      logger.error('⚠️ Failed to start VirtioSocketWatcherService:', error)
       // Don't fail the server startup if the virtio socket watcher fails
     }
 
@@ -185,9 +191,9 @@ async function bootstrap (): Promise<void> {
       try {
         const { initializeScriptFileWatcher } = await import('./services/scripts/ScriptFileWatcher')
         initializeScriptFileWatcher()
-        console.log('✅ Script file watcher initialized')
+        logger.info('✅ Script file watcher initialized')
       } catch (error) {
-        console.error('❌ Failed to initialize script file watcher:', error)
+        logger.error('❌ Failed to initialize script file watcher:', error)
       }
     }
 
@@ -195,13 +201,13 @@ async function bootstrap (): Promise<void> {
     try {
       const { createScriptSchedulePushService } = await import('./services/scripts/ScriptSchedulePushService')
       createScriptSchedulePushService(prisma)
-      console.log('✅ Script schedule push service initialized')
+      logger.info('✅ Script schedule push service initialized')
     } catch (error) {
-      console.error('❌ Failed to initialize script schedule push service:', error)
+      logger.error('❌ Failed to initialize script schedule push service:', error)
     }
 
     // Start cron jobs
-    await startCrons()
+    cronHandles = await startCrons()
 
     // Start server
     const port = parseInt(process.env.PORT || '4000', 10)
@@ -209,36 +215,70 @@ async function bootstrap (): Promise<void> {
 
     await new Promise<void>((resolve) => {
       httpServer.listen({ port, host }, () => {
-        console.log(`🚀 Server ready at http://${host}:${port}`)
-        console.log(`🚀 GraphQL endpoint: http://${host}:${port}/graphql`)
-        console.log(`🚀 Health check endpoint available at http://${host}:${port}/health`)
-        console.log('🔌 Socket.io ready for real-time connections')
+        httpServerRef = httpServer
+        logger.info(`🚀 Server ready at http://${host}:${port}`)
+        logger.info(`🚀 GraphQL endpoint: http://${host}:${port}/graphql`)
+        logger.info(`🚀 Health check endpoint available at http://${host}:${port}/health`)
+        logger.info('🔌 Socket.io ready for real-time connections')
         resolve()
       })
     })
   } catch (error) {
-    console.error('Failed to start server:', error)
+    logger.error('Failed to start server:', error)
     process.exit(1)
   }
 }
 
 // Graceful shutdown handler
 async function shutdown (): Promise<void> {
-  console.log('\n🛑 Shutting down gracefully...')
+  if (shuttingDown) return
+  shuttingDown = true
+  logger.info('\n🛑 Shutting down gracefully...')
+
+  // Stop accepting new HTTP / Socket.io connections first
+  if (httpServerRef) {
+    await new Promise<void>((resolve) => {
+      httpServerRef!.close((err) => {
+        if (err) logger.error('⚠️ Error closing HTTP server:', err)
+        else logger.info('✅ HTTP server closed')
+        resolve()
+      })
+    })
+  }
+
+  // Stop cron jobs so they don't enqueue new work during shutdown
+  if (cronHandles) {
+    try {
+      cronHandles.stop()
+      logger.info('✅ Cron jobs stopped')
+    } catch (error) {
+      logger.error('⚠️ Error stopping cron jobs:', error)
+    }
+  }
+
+  // Stop background health service
+  if (backgroundHealthServiceRef) {
+    try {
+      backgroundHealthServiceRef.stop()
+      logger.info('✅ BackgroundHealthService stopped')
+    } catch (error) {
+      logger.error('⚠️ Error stopping BackgroundHealthService:', error)
+    }
+  }
 
   // Stop VirtioSocketWatcherService
   if (virtioSocketWatcherService) {
     try {
       await virtioSocketWatcherService.stop()
-      console.log('✅ VirtioSocketWatcherService stopped')
+      logger.info('✅ VirtioSocketWatcherService stopped')
     } catch (error) {
-      console.error('⚠️ Error stopping VirtioSocketWatcherService:', error)
+      logger.error('⚠️ Error stopping VirtioSocketWatcherService:', error)
     }
   }
 
   // Disconnect Prisma
   await prisma.$disconnect()
-  console.log('✅ Database connections closed')
+  logger.info('✅ Database connections closed')
 
   process.exit(0)
 }
@@ -248,6 +288,6 @@ process.on('SIGTERM', shutdown)
 process.on('SIGINT', shutdown)
 
 void bootstrap().catch((error) => {
-  console.error('Unhandled error during bootstrap:', error)
+  logger.error('Unhandled error during bootstrap:', error)
   process.exit(1)
 })

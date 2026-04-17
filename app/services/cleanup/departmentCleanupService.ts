@@ -1,7 +1,7 @@
 import { PrismaClient } from '@prisma/client'
 import { TapDeviceManager, generateVMChainName } from '@infinibay/infinization'
 
-import { Debugger } from '../../utils/debug'
+import logger from '@main/logger'
 import { DepartmentNetworkService, ForceDestroyResult } from '../network/DepartmentNetworkService'
 import { getInfinization } from '../InfinizationService'
 
@@ -37,7 +37,7 @@ interface CleanupResult {
 
 export class DepartmentCleanupService {
   private prisma: PrismaClient
-  private debug = new Debugger('department-cleanup-service')
+  private debug = logger.child({ module: 'department-cleanup-service' })
 
   constructor (prisma: PrismaClient) {
     this.prisma = prisma
@@ -81,7 +81,7 @@ export class DepartmentCleanupService {
     })
 
     if (!department) {
-      this.debug.log(`Department ${departmentId} not found`)
+      this.debug.debug(`Department ${departmentId} not found`)
       result.errors.push(`Department ${departmentId} not found`)
       return result
     }
@@ -94,7 +94,7 @@ export class DepartmentCleanupService {
     }
 
     // Verify no orphaned VM resources exist
-    this.debug.log('Verifying no orphaned VM resources exist')
+    this.debug.debug('Verifying no orphaned VM resources exist')
 
     let orphanedResources: OrphanedResource[]
     try {
@@ -106,7 +106,7 @@ export class DepartmentCleanupService {
       ])
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error)
-      this.debug.log('error', `Orphaned resource validation failed: ${errorMessage}`)
+      this.debug.error(`Orphaned resource validation failed: ${errorMessage}`)
       result.errors.push(`Orphaned resource validation failed: ${errorMessage}`)
       throw new Error(
         `Cannot delete department: Orphaned-resource validation failed or timed out.\n\n` +
@@ -133,7 +133,7 @@ export class DepartmentCleanupService {
       )
     }
 
-    this.debug.log('Orphaned resource check passed')
+    this.debug.debug('Orphaned resource check passed')
 
     // Destroy network infrastructure (bridge, dnsmasq, NAT)
     if (department.bridgeName) {
@@ -149,22 +149,22 @@ export class DepartmentCleanupService {
       try {
         await networkService.destroyNetwork(departmentId)
         result.networkCleanup.normalCleanupSuccess = true
-        this.debug.log(`Destroyed network infrastructure for department ${departmentId}`)
+        this.debug.debug(`Destroyed network infrastructure for department ${departmentId}`)
       } catch (networkError) {
         const errorMessage = networkError instanceof Error ? networkError.message : String(networkError)
-        this.debug.log('error', `Network cleanup failed for department ${departmentId}: ${errorMessage}`)
+        this.debug.error(`Network cleanup failed for department ${departmentId}: ${errorMessage}`)
         result.errors.push(`Normal network cleanup failed: ${errorMessage}`)
 
         // Try force cleanup if enabled
         if (forceCleanupOnFailure) {
-          this.debug.log('info', `Attempting force cleanup for department ${departmentId}`)
+          this.debug.info(`Attempting force cleanup for department ${departmentId}`)
           result.networkCleanup.forceCleanupAttempted = true
 
           const forceResult = await networkService.forceDestroyNetwork(departmentId)
           result.networkCleanup.forceCleanupResult = forceResult
 
           if (forceResult.success) {
-            this.debug.log('info', `Force cleanup succeeded for department ${departmentId}`)
+            this.debug.info(`Force cleanup succeeded for department ${departmentId}`)
           } else {
             // Log detailed failure info
             const failedOps = Object.entries(forceResult.operations)
@@ -172,7 +172,7 @@ export class DepartmentCleanupService {
               .map(([name, op]) => `${name}: ${op.error || 'unknown error'}`)
 
             if (failedOps.length > 0) {
-              this.debug.log('warn', `Force cleanup partial failure: ${failedOps.join(', ')}`)
+              this.debug.warn(`Force cleanup partial failure: ${failedOps.join(', ')}`)
               result.errors.push(`Force cleanup partial failure: ${failedOps.join(', ')}`)
             }
 
@@ -198,12 +198,12 @@ export class DepartmentCleanupService {
         // Delete department
         await tx.department.delete({ where: { id: departmentId } })
 
-        this.debug.log(`Successfully cleaned up department ${departmentId}`)
+        this.debug.debug(`Successfully cleaned up department ${departmentId}`)
       })
       result.databaseCleanup.success = true
     } catch (e) {
       const errorMessage = e instanceof Error ? e.message : String(e)
-      this.debug.log('error', `Error removing DB records: ${errorMessage}`)
+      this.debug.error(`Error removing DB records: ${errorMessage}`)
       result.errors.push(`Database cleanup failed: ${errorMessage}`)
       throw e
     }
@@ -222,40 +222,40 @@ export class DepartmentCleanupService {
    * Logs a detailed summary of the cleanup operation
    */
   private logCleanupSummary (departmentId: string, result: CleanupResult): void {
-    this.debug.log('info', `=== Cleanup Summary for Department ${departmentId} ===`)
-    this.debug.log('info', `Overall success: ${result.success}`)
+    this.debug.info(`=== Cleanup Summary for Department ${departmentId} ===`)
+    this.debug.info(`Overall success: ${result.success}`)
 
     if (result.networkCleanup) {
-      this.debug.log('info', `Network cleanup:`)
-      this.debug.log('info', `  - Normal cleanup attempted: ${result.networkCleanup.normalCleanupAttempted}`)
-      this.debug.log('info', `  - Normal cleanup success: ${result.networkCleanup.normalCleanupSuccess}`)
-      this.debug.log('info', `  - Force cleanup attempted: ${result.networkCleanup.forceCleanupAttempted}`)
+      this.debug.info(`Network cleanup:`)
+      this.debug.info(`  - Normal cleanup attempted: ${result.networkCleanup.normalCleanupAttempted}`)
+      this.debug.info(`  - Normal cleanup success: ${result.networkCleanup.normalCleanupSuccess}`)
+      this.debug.info(`  - Force cleanup attempted: ${result.networkCleanup.forceCleanupAttempted}`)
 
       if (result.networkCleanup.forceCleanupResult) {
-        this.debug.log('info', `  - Force cleanup success: ${result.networkCleanup.forceCleanupResult.success}`)
+        this.debug.info(`  - Force cleanup success: ${result.networkCleanup.forceCleanupResult.success}`)
         const ops = result.networkCleanup.forceCleanupResult.operations
-        this.debug.log('info', `  - TAP devices: ${ops.tapDevicesCleanup.success ? 'cleaned' : 'failed'}`)
-        this.debug.log('info', `  - dnsmasq: ${ops.dnsmasqStop.success ? 'stopped' : 'failed'}`)
-        this.debug.log('info', `  - NAT: ${ops.natRemoval.success ? 'removed' : 'failed'}`)
-        this.debug.log('info', `  - Bridge: ${ops.bridgeDestruction.success ? 'destroyed' : 'failed'}`)
-        this.debug.log('info', `  - Files: ${ops.fileCleanup.success ? 'cleaned' : 'failed'}`)
-        this.debug.log('info', `  - Database: ${ops.databaseUpdate.success ? 'updated' : 'failed'}`)
-        this.debug.log('info', `  - System files: ${ops.systemFilesCleanup.success ? 'cleaned' : 'failed'}`)
+        this.debug.info(`  - TAP devices: ${ops.tapDevicesCleanup.success ? 'cleaned' : 'failed'}`)
+        this.debug.info(`  - dnsmasq: ${ops.dnsmasqStop.success ? 'stopped' : 'failed'}`)
+        this.debug.info(`  - NAT: ${ops.natRemoval.success ? 'removed' : 'failed'}`)
+        this.debug.info(`  - Bridge: ${ops.bridgeDestruction.success ? 'destroyed' : 'failed'}`)
+        this.debug.info(`  - Files: ${ops.fileCleanup.success ? 'cleaned' : 'failed'}`)
+        this.debug.info(`  - Database: ${ops.databaseUpdate.success ? 'updated' : 'failed'}`)
+        this.debug.info(`  - System files: ${ops.systemFilesCleanup.success ? 'cleaned' : 'failed'}`)
       }
     }
 
-    this.debug.log('info', `Database cleanup:`)
-    this.debug.log('info', `  - Attempted: ${result.databaseCleanup.attempted}`)
-    this.debug.log('info', `  - Success: ${result.databaseCleanup.success}`)
+    this.debug.info(`Database cleanup:`)
+    this.debug.info(`  - Attempted: ${result.databaseCleanup.attempted}`)
+    this.debug.info(`  - Success: ${result.databaseCleanup.success}`)
 
     if (result.errors.length > 0) {
-      this.debug.log('warn', `Errors encountered (${result.errors.length}):`)
+      this.debug.warn(`Errors encountered (${result.errors.length}):`)
       for (const error of result.errors) {
-        this.debug.log('warn', `  - ${error}`)
+        this.debug.warn(`  - ${error}`)
       }
     }
 
-    this.debug.log('info', `=== End Cleanup Summary ===`)
+    this.debug.info(`=== End Cleanup Summary ===`)
   }
 
   /**
@@ -280,9 +280,9 @@ export class DepartmentCleanupService {
         where: { id: ruleSetId }
       })
 
-      this.debug.log(`Cleaned up FirewallRuleSet ${ruleSetId}`)
+      this.debug.debug(`Cleaned up FirewallRuleSet ${ruleSetId}`)
     } catch (e) {
-      this.debug.log(`Error cleaning up FirewallRuleSet: ${String(e)}`)
+      this.debug.debug(`Error cleaning up FirewallRuleSet: ${String(e)}`)
       // Don't throw - allow department deletion to proceed even if firewall cleanup fails
     }
   }
@@ -303,7 +303,7 @@ export class DepartmentCleanupService {
    * @returns Array of orphaned resources found (only for VMs still in DB)
    */
   private async checkOrphanedVMResources (departmentId: string): Promise<OrphanedResource[]> {
-    this.debug.log(`Checking for orphaned VM resources in department ${departmentId}`)
+    this.debug.debug(`Checking for orphaned VM resources in department ${departmentId}`)
 
     // Get all VMs that belong(ed) to this department (including configuration for TAP device name)
     const machines = await this.prisma.machine.findMany({
@@ -316,9 +316,7 @@ export class DepartmentCleanupService {
       // resources (i.e., OS-level resources left behind by VMs that were already deleted from
       // the database). This is a known limitation - there is no audit/history table that tracks
       // deleted VMs and their associated resource identifiers (VM IDs, TAP device names).
-      this.debug.log(
-        'warn',
-        `No VMs found in department ${departmentId}. Orphaned resource check is skipped. ` +
+      this.debug.warn(`No VMs found in department ${departmentId}. Orphaned resource check is skipped. ` +
         'Note: This mechanism cannot detect OS-level orphans (TAP devices, nftables chains) ' +
         'for VMs that have already been deleted from the database without a corresponding history record.'
       )
@@ -335,13 +333,13 @@ export class DepartmentCleanupService {
       nftablesService = infinization.getNftablesService()
       tapManager = new TapDeviceManager()
     } catch (error) {
-      this.debug.log('warn', `Failed to initialize infinization for orphaned resource check: ${String(error)}`)
+      this.debug.warn(`Failed to initialize infinization for orphaned resource check: ${String(error)}`)
       // If we can't check, assume no orphaned resources and allow the operation
       return []
     }
 
     for (const machine of machines) {
-      this.debug.log(`Checking VM ${machine.name} (${machine.id})`)
+      this.debug.debug(`Checking VM ${machine.name} (${machine.id})`)
 
       const orphaned: OrphanedResource = {
         vmId: machine.id,
@@ -351,32 +349,32 @@ export class DepartmentCleanupService {
 
       // Check nftables chain
       const chainName = generateVMChainName(machine.id)
-      this.debug.log(`Checking nftables chain: ${chainName}`)
+      this.debug.debug(`Checking nftables chain: ${chainName}`)
 
       try {
         const chainExists = await nftablesService.chainExists(chainName)
-        this.debug.log(`Chain ${chainName} exists: ${chainExists}`)
+        this.debug.debug(`Chain ${chainName} exists: ${chainExists}`)
         if (chainExists) {
           orphaned.nftablesChain = chainName
         }
       } catch (error) {
-        this.debug.log('warn', `Error checking nftables chain ${chainName}: ${String(error)}`)
+        this.debug.warn(`Error checking nftables chain ${chainName}: ${String(error)}`)
         // Continue checking other resources
       }
 
       // Check TAP device (if tapDeviceName is known)
       const tapDeviceName = machine.configuration?.tapDeviceName
       if (tapDeviceName) {
-        this.debug.log(`Checking TAP device: ${tapDeviceName}`)
+        this.debug.debug(`Checking TAP device: ${tapDeviceName}`)
 
         try {
           const tapExists = await tapManager.exists(tapDeviceName)
-          this.debug.log(`TAP device ${tapDeviceName} exists: ${tapExists}`)
+          this.debug.debug(`TAP device ${tapDeviceName} exists: ${tapExists}`)
           if (tapExists) {
             orphaned.tapDevice = tapDeviceName
           }
         } catch (error) {
-          this.debug.log('warn', `Error checking TAP device ${tapDeviceName}: ${String(error)}`)
+          this.debug.warn(`Error checking TAP device ${tapDeviceName}: ${String(error)}`)
           // Continue checking other resources
         }
       }
@@ -388,9 +386,9 @@ export class DepartmentCleanupService {
     }
 
     if (orphanedResources.length === 0) {
-      this.debug.log(`No orphaned resources found in department ${departmentId}`)
+      this.debug.debug(`No orphaned resources found in department ${departmentId}`)
     } else {
-      this.debug.log(`Found ${orphanedResources.length} orphaned resource(s) in department ${departmentId}`)
+      this.debug.debug(`Found ${orphanedResources.length} orphaned resource(s) in department ${departmentId}`)
     }
 
     return orphanedResources

@@ -1,5 +1,5 @@
 import { Application } from '@prisma/client'
-import { UnattendedUbuntuManager } from '../../../app/services/vm/unattended/unattendedUbuntuManager'
+import { UnattendedUbuntuManager } from '../../../app/services/unattendedUbuntuManager'
 import * as fs from 'fs'
 import * as os from 'os'
 import * as path from 'path'

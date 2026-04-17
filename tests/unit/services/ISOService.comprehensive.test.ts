@@ -63,7 +63,7 @@ jest.mock('../../../app/services/EventManagers/ISOEventManager', () => ({
   }
 }))
 
-import { ISOService, ISOStatus } from '../../../app/services/vm/ISOService'
+import { ISOService, ISOStatus } from '../../../app/services/ISOService'
 
 describe('ISOService', () => {
   const originalEnv = process.env

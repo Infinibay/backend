@@ -1,10 +1,8 @@
+import logger from '@main/logger'
 import { ChildProcess, spawn } from 'child_process'
 import { EventEmitter } from 'events'
 import path from 'path'
-import debug from 'debug'
 import { PackageCheckerContext, PackageCheckerResult, PackageManifest } from './types'
-
-const log = debug('infinibay:packages:worker')
 
 interface JsonRpcRequest {
   jsonrpc: '2.0'
@@ -93,17 +91,17 @@ export class PackageWorker extends EventEmitter {
     })
 
     this.process.stderr?.on('data', (data: Buffer) => {
-      log('Worker stderr [%s]: %s', this.manifest.name, data.toString())
+      logger.debug('Worker stderr [%s]: %s', this.manifest.name, data.toString())
     })
 
     this.process.on('exit', (code, signal) => {
-      log('Worker exited [%s]: code=%d signal=%s', this.manifest.name, code, signal)
+      logger.debug('Worker exited [%s]: code=%d signal=%s', this.manifest.name, code, signal)
       this.process = null
       this.handleExit(code, signal)
     })
 
     this.process.on('error', (error) => {
-      log('Worker error [%s]: %s', this.manifest.name, error.message)
+      logger.debug('Worker error [%s]: %s', this.manifest.name, error.message)
       this.emit('error', error)
     })
 
@@ -113,7 +111,7 @@ export class PackageWorker extends EventEmitter {
     this.stats.startedAt = new Date()
     this.startHealthCheckTimer()
 
-    log('Worker spawned successfully [%s]', this.manifest.name)
+    logger.debug('Worker spawned successfully [%s]', this.manifest.name)
     this.restartAttempts = 0
   }
 
@@ -129,7 +127,7 @@ export class PackageWorker extends EventEmitter {
         } else {
           this.healthCheckFailures++
           if (this.healthCheckFailures >= 3) {
-            log('Worker %s failed 3 health checks, restarting...', this.manifest.name)
+            logger.debug('Worker %s failed 3 health checks, restarting...', this.manifest.name)
             await this.restart()
           }
         }
@@ -187,7 +185,7 @@ export class PackageWorker extends EventEmitter {
         const response: JsonRpcResponse = JSON.parse(line)
         this.handleResponse(response)
       } catch (error) {
-        log('Failed to parse worker response: %s', line)
+        logger.debug('Failed to parse worker response: %s', line)
       }
     }
   }
@@ -198,7 +196,7 @@ export class PackageWorker extends EventEmitter {
   private handleResponse(response: JsonRpcResponse): void {
     const pending = this.pendingRequests.get(response.id)
     if (!pending) {
-      log('Received response for unknown request id: %d', response.id)
+      logger.debug('Received response for unknown request id: %d', response.id)
       return
     }
 
@@ -227,12 +225,12 @@ export class PackageWorker extends EventEmitter {
     // Auto-restart if enabled and not shutting down
     if (this.options.autoRestart && !this.isShuttingDown && this.restartAttempts < this.maxRestartAttempts) {
       this.restartAttempts++
-      log('Attempting to restart worker [%s] (attempt %d/%d)',
+      logger.debug('Attempting to restart worker [%s] (attempt %d/%d)',
         this.manifest.name, this.restartAttempts, this.maxRestartAttempts)
 
       setTimeout(() => {
         this.spawn().catch(error => {
-          log('Failed to restart worker: %s', error.message)
+          logger.debug('Failed to restart worker: %s', error.message)
           this.emit('error', error)
         })
       }, 1000 * this.restartAttempts) // Exponential backoff

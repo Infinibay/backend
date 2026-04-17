@@ -13,9 +13,8 @@
 
 import { PrismaClient } from '@prisma/client'
 import { VirtioSocketWatcherService, CommandResponse } from './VirtioSocketWatcherService'
-import { Debugger } from '../utils/debug'
-
-// InfiniService response types
+import { Logger } from 'winston'
+import logger from '@main/logger'// InfiniService response types
 interface InfiniServicePackage {
   // PascalCase fields from InfiniService
   Name?: string
@@ -79,12 +78,12 @@ export enum PackageAction {
 export class DirectPackageManager {
   private prisma: PrismaClient
   private virtioService: VirtioSocketWatcherService
-  private debug: Debugger
+  private debug: Logger
 
   constructor (prisma: PrismaClient, virtioService: VirtioSocketWatcherService) {
     this.prisma = prisma
     this.virtioService = virtioService
-    this.debug = new Debugger('infinibay:package-manager')
+    this.debug = logger.child({ module: 'infinibay:package-manager' })
   }
 
   /**
@@ -106,7 +105,7 @@ export class DirectPackageManager {
         throw new Error(`Machine ${machine.name} is not running`)
       }
 
-      this.debug.log('info', `Listing packages for VM ${machineId} (${machine.name})`)
+      this.debug.info(`Listing packages for VM ${machineId} (${machine.name})`)
 
       // Implement retry logic with exponential backoff
       const maxRetries = 3
@@ -117,7 +116,7 @@ export class DirectPackageManager {
         try {
           // Check if VM is connected before attempting command
           if (!this.virtioService.isVmConnected(machineId)) {
-            this.debug.log('warn', `VM ${machineId} is not connected, waiting for connection...`)
+            this.debug.warn(`VM ${machineId} is not connected, waiting for connection...`)
             // Wait a bit for connection to establish
             await new Promise(resolve => setTimeout(resolve, 2000))
 
@@ -130,7 +129,7 @@ export class DirectPackageManager {
           // Increase timeout for each retry: 15s, 30s, 45s
           const timeout = 15000 * attempt
 
-          this.debug.log('info', `Package list attempt ${attempt}/${maxRetries} with timeout ${timeout}ms`)
+          this.debug.info(`Package list attempt ${attempt}/${maxRetries} with timeout ${timeout}ms`)
 
           // Send package list command to InfiniService
           const cmdResponse = await this.virtioService.sendPackageCommand(
@@ -158,7 +157,7 @@ export class DirectPackageManager {
           break
         } catch (error) {
           lastError = error as Error
-          this.debug.log('warn', `Package list attempt ${attempt} failed: ${error}`)
+          this.debug.warn(`Package list attempt ${attempt} failed: ${error}`)
 
           // Check if it's a connection error or timeout
           const errorStr = String(error)
@@ -172,7 +171,7 @@ export class DirectPackageManager {
 
           // Wait before retry (exponential backoff)
           const waitTime = isConnectionError ? 3000 * attempt : 1000 * attempt
-          this.debug.log('info', `Waiting ${waitTime}ms before retry...`)
+          this.debug.info(`Waiting ${waitTime}ms before retry...`)
           await new Promise(resolve => setTimeout(resolve, waitTime))
         }
       }
@@ -188,10 +187,10 @@ export class DirectPackageManager {
       // Parse response data into PackageInfo array
       const packages = this.parsePackageList(response.data, machine.os)
 
-      this.debug.log('info', `Found ${packages.length} packages on VM ${machineId}`)
+      this.debug.info(`Found ${packages.length} packages on VM ${machineId}`)
       return packages
     } catch (error) {
-      this.debug.log('error', `Failed to list packages for VM ${machineId}: ${error}`)
+      this.debug.error(`Failed to list packages for VM ${machineId}: ${error}`)
       throw error
     }
   }
@@ -223,7 +222,7 @@ export class DirectPackageManager {
         }
       }
 
-      this.debug.log('info', `Installing package ${packageName} on VM ${machineId} (${machine.name})`)
+      this.debug.info(`Installing package ${packageName} on VM ${machineId} (${machine.name})`)
 
       // Send install command to InfiniService
       const response = await this.virtioService.sendPackageCommand(
@@ -243,7 +242,7 @@ export class DirectPackageManager {
         error: response.error
       }
     } catch (error) {
-      this.debug.log('error', `Failed to install package ${packageName} on VM ${machineId}: ${error}`)
+      this.debug.error(`Failed to install package ${packageName} on VM ${machineId}: ${error}`)
       return {
         success: false,
         message: `Failed to install package: ${error}`,
@@ -279,7 +278,7 @@ export class DirectPackageManager {
         }
       }
 
-      this.debug.log('info', `Removing package ${packageName} from VM ${machineId} (${machine.name})`)
+      this.debug.info(`Removing package ${packageName} from VM ${machineId} (${machine.name})`)
 
       // Send remove command to InfiniService
       const response = await this.virtioService.sendPackageCommand(
@@ -299,7 +298,7 @@ export class DirectPackageManager {
         error: response.error
       }
     } catch (error) {
-      this.debug.log('error', `Failed to remove package ${packageName} from VM ${machineId}: ${error}`)
+      this.debug.error(`Failed to remove package ${packageName} from VM ${machineId}: ${error}`)
       return {
         success: false,
         message: `Failed to remove package: ${error}`,
@@ -335,7 +334,7 @@ export class DirectPackageManager {
         }
       }
 
-      this.debug.log('info', `Updating package ${packageName} on VM ${machineId} (${machine.name})`)
+      this.debug.info(`Updating package ${packageName} on VM ${machineId} (${machine.name})`)
 
       // Send update command to InfiniService
       const response = await this.virtioService.sendPackageCommand(
@@ -355,7 +354,7 @@ export class DirectPackageManager {
         error: response.error
       }
     } catch (error) {
-      this.debug.log('error', `Failed to update package ${packageName} on VM ${machineId}: ${error}`)
+      this.debug.error(`Failed to update package ${packageName} on VM ${machineId}: ${error}`)
       return {
         success: false,
         message: `Failed to update package: ${error}`,
@@ -383,7 +382,7 @@ export class DirectPackageManager {
         throw new Error(`Machine ${machine.name} is not running`)
       }
 
-      this.debug.log('info', `Searching packages for query "${query}" on VM ${machineId}`)
+      this.debug.info(`Searching packages for query "${query}" on VM ${machineId}`)
 
       // Implement retry logic with exponential backoff
       const maxRetries = 3
@@ -394,7 +393,7 @@ export class DirectPackageManager {
         try {
           // Check if VM is connected before attempting command
           if (!this.virtioService.isVmConnected(machineId)) {
-            this.debug.log('warn', `VM ${machineId} is not connected, waiting for connection...`)
+            this.debug.warn(`VM ${machineId} is not connected, waiting for connection...`)
             // Wait a bit for connection to establish
             await new Promise(resolve => setTimeout(resolve, 2000))
 
@@ -407,7 +406,7 @@ export class DirectPackageManager {
           // Increase timeout for each retry: 15s, 30s, 45s
           const timeout = 15000 * attempt
 
-          this.debug.log('info', `Package search attempt ${attempt}/${maxRetries} with timeout ${timeout}ms`)
+          this.debug.info(`Package search attempt ${attempt}/${maxRetries} with timeout ${timeout}ms`)
 
           // Send search command to InfiniService
           const cmdResponse = await this.virtioService.sendPackageCommand(
@@ -435,7 +434,7 @@ export class DirectPackageManager {
           break
         } catch (error) {
           lastError = error as Error
-          this.debug.log('warn', `Package search attempt ${attempt} failed: ${error}`)
+          this.debug.warn(`Package search attempt ${attempt} failed: ${error}`)
 
           // Check if it's a connection error or timeout
           const errorStr = String(error)
@@ -449,7 +448,7 @@ export class DirectPackageManager {
 
           // Wait before retry (exponential backoff)
           const waitTime = isConnectionError ? 3000 * attempt : 1000 * attempt
-          this.debug.log('info', `Waiting ${waitTime}ms before retry...`)
+          this.debug.info(`Waiting ${waitTime}ms before retry...`)
           await new Promise(resolve => setTimeout(resolve, waitTime))
         }
       }
@@ -465,10 +464,10 @@ export class DirectPackageManager {
       // Parse response data into PackageInfo array
       const packages = this.parsePackageList(response.data, machine.os)
 
-      this.debug.log('info', `Found ${packages.length} packages matching "${query}" on VM ${machineId}`)
+      this.debug.info(`Found ${packages.length} packages matching "${query}" on VM ${machineId}`)
       return packages
     } catch (error) {
-      this.debug.log('error', `Failed to search packages on VM ${machineId}: ${error}`)
+      this.debug.error(`Failed to search packages on VM ${machineId}: ${error}`)
       throw error
     }
   }

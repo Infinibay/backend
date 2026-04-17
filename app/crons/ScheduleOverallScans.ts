@@ -1,10 +1,10 @@
+import logger from '@main/logger'
 import { CronJob } from 'cron'
 import { PrismaClient } from '@prisma/client'
 import { getVMHealthQueueManager, OVERALL_SCAN_INTERVAL_MINUTES } from '../services/VMHealthQueueManager'
 import { EventManager } from '../services/EventManager'
-import { Debugger } from '../utils/debug'
 
-const debug = new Debugger('ScheduleOverallScansJob')
+const debug = logger.child({ module: 'ScheduleOverallScansJob' })
 
 export class ScheduleOverallScansJob {
   private job: CronJob | null = null
@@ -20,7 +20,7 @@ export class ScheduleOverallScansJob {
 
   start (): void {
     if (this.job) {
-      debug.log('ScheduleOverallScans job is already running')
+      debug.debug('ScheduleOverallScans job is already running')
       return
     }
 
@@ -29,7 +29,7 @@ export class ScheduleOverallScansJob {
       '0 */30 * * * *', // Every 30 minutes
       async () => {
         if (this.isRunning) {
-          debug.log('Previous overall scan scheduling still running, skipping...')
+          debug.debug('Previous overall scan scheduling still running, skipping...')
           return
         }
 
@@ -37,7 +37,7 @@ export class ScheduleOverallScansJob {
         try {
           await this.scheduleOverdueScans()
         } catch (error) {
-          console.error('🗂️ Error in ScheduleOverallScans job:', error)
+          logger.error('🗂️ Error in ScheduleOverallScans job:', error)
         } finally {
           this.isRunning = false
         }
@@ -47,20 +47,20 @@ export class ScheduleOverallScansJob {
       'UTC'
     )
 
-    console.log(`🗂️ ScheduleOverallScans job started (every 30 minutes, scan interval: ${OVERALL_SCAN_INTERVAL_MINUTES} minutes)`)
+    logger.info(`🗂️ ScheduleOverallScans job started (every 30 minutes, scan interval: ${OVERALL_SCAN_INTERVAL_MINUTES} minutes)`)
   }
 
   stop (): void {
     if (this.job) {
       this.job.stop()
       this.job = null
-      console.log('🗂️ ScheduleOverallScans job stopped')
+      logger.info('🗂️ ScheduleOverallScans job stopped')
     }
   }
 
   private async scheduleOverdueScans (): Promise<void> {
     try {
-      debug.log('Starting overdue scan scheduling cycle')
+      debug.debug('Starting overdue scan scheduling cycle')
 
       // Get all running VMs (only schedule scans for running VMs to avoid wasting queue capacity)
       const runningVMs = await this.prisma.machine.findMany({
@@ -75,11 +75,11 @@ export class ScheduleOverallScansJob {
       })
 
       if (runningVMs.length === 0) {
-        debug.log('No running VMs found, skipping overdue scan scheduling')
+        debug.debug('No running VMs found, skipping overdue scan scheduling')
         return
       }
 
-      debug.log(`Checking ${runningVMs.length} running VMs for overdue overall scans`)
+      debug.debug(`Checking ${runningVMs.length} running VMs for overdue overall scans`)
 
       const now = new Date()
       let scansScheduled = 0
@@ -97,14 +97,14 @@ export class ScheduleOverallScansJob {
           if (!lastScanTime) {
             // No previous scan found
             needsScan = true
-            debug.log(`VM ${vm.name} (${vm.id}) has no previous overall scan (interval: ${scanIntervalMinutes}min)`)
+            debug.debug(`VM ${vm.name} (${vm.id}) has no previous overall scan (interval: ${scanIntervalMinutes}min)`)
           } else {
             // Check if last scan is older than per-VM threshold
             const timeSinceLastScan = now.getTime() - lastScanTime.getTime()
             if (timeSinceLastScan > scanThresholdMs) {
               needsScan = true
               const minutesOverdue = Math.floor(timeSinceLastScan / (60 * 1000))
-              debug.log(`VM ${vm.name} (${vm.id}) overall scan is overdue by ${minutesOverdue} minutes (interval: ${scanIntervalMinutes}min)`)
+              debug.debug(`VM ${vm.name} (${vm.id}) overall scan is overdue by ${minutesOverdue} minutes (interval: ${scanIntervalMinutes}min)`)
             }
           }
 
@@ -112,7 +112,7 @@ export class ScheduleOverallScansJob {
             // Check for exponential backoff if there were recent failures
             const backoffDelay = await this.calculateBackoffDelay(vm.id)
             if (backoffDelay > 0) {
-              debug.log(`VM ${vm.name} (${vm.id}) is in backoff period, skipping scan (${Math.ceil(backoffDelay / 1000)}s remaining)`)
+              debug.debug(`VM ${vm.name} (${vm.id}) is in backoff period, skipping scan (${Math.ceil(backoffDelay / 1000)}s remaining)`)
               continue
             }
 
@@ -131,23 +131,23 @@ export class ScheduleOverallScansJob {
               // Queue new overall status check
               await this.queueManager.queueHealthCheck(vm.id, 'OVERALL_STATUS', 'MEDIUM')
               scansScheduled++
-              console.log(`🗂️ Scheduled overdue overall scan for VM ${vm.name} (${vm.id})`)
+              logger.info(`🗂️ Scheduled overdue overall scan for VM ${vm.name} (${vm.id})`)
             } else {
-              debug.log(`VM ${vm.name} (${vm.id}) already has pending overall scan, skipping`)
+              debug.debug(`VM ${vm.name} (${vm.id}) already has pending overall scan, skipping`)
             }
           }
         } catch (error) {
-          console.error(`🗂️ Failed to check/schedule overall scan for VM ${vm.name} (${vm.id}):`, error)
+          logger.error(`🗂️ Failed to check/schedule overall scan for VM ${vm.name} (${vm.id}):`, error)
         }
       }
 
       if (scansScheduled > 0) {
-        console.log(`🗂️ Scheduled ${scansScheduled} overdue overall scans`)
+        logger.info(`🗂️ Scheduled ${scansScheduled} overdue overall scans`)
       } else {
-        debug.log('No overdue overall scans found')
+        debug.debug('No overdue overall scans found')
       }
     } catch (error) {
-      console.error('🗂️ Error scheduling overdue scans:', error)
+      logger.error('🗂️ Error scheduling overdue scans:', error)
       throw error
     }
   }
@@ -209,7 +209,7 @@ export class ScheduleOverallScansJob {
 
       return 0
     } catch (error) {
-      console.error(`🗂️ Failed to calculate backoff delay for VM ${machineId}:`, error)
+      logger.error(`🗂️ Failed to calculate backoff delay for VM ${machineId}:`, error)
       return 0 // Don't block scheduling on backoff calculation errors
     }
   }
@@ -235,9 +235,9 @@ export class ScheduleOverallScansJob {
         }
       })
 
-      console.warn(`🚨 Health alert raised for VM ${machineId}: ${failureCount} consecutive scan failures`)
+      logger.warn(`🚨 Health alert raised for VM ${machineId}: ${failureCount} consecutive scan failures`)
     } catch (error) {
-      console.error(`🗂️ Failed to raise health alert for VM ${machineId}:`, error)
+      logger.error(`🗂️ Failed to raise health alert for VM ${machineId}:`, error)
     }
   }
 }

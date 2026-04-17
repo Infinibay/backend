@@ -1,6 +1,6 @@
 import 'reflect-metadata'
 import { describe, it, expect, beforeEach, jest } from '@jest/globals'
-import { SocketService, createSocketService, getSocketService } from '../../../app/services/events/SocketService'
+import { SocketService, createSocketService, getSocketService } from '../../../app/services/SocketService'
 import { Server as SocketIOServer } from 'socket.io'
 import { Server as HTTPServer } from 'http'
 import { PrismaClient } from '@prisma/client'

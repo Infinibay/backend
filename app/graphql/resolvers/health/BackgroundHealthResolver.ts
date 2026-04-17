@@ -1,3 +1,4 @@
+import logger from '@main/logger'
 import { Resolver, Query, Mutation, Authorized, Ctx, ObjectType, Field, Int } from 'type-graphql'
 import { InfinibayContext } from '@utils/context'
 import { BackgroundHealthService } from '@services/BackgroundHealthService'
@@ -237,7 +238,7 @@ export class BackgroundHealthResolver {
           successCount++
         } catch (error) {
           failureCount++
-          console.error(`Failed to queue health checks for VM ${vm.name}:`, error)
+          logger.error(`Failed to queue health checks for VM ${vm.name}:`, error)
         }
       }
 

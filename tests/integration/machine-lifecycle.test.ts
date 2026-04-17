@@ -1,6 +1,6 @@
 import 'reflect-metadata'
 import { PrismaClient, User, Prisma } from '@prisma/client'
-import { MachineLifecycleService } from '@services/vm/machineLifecycleService'
+import { MachineLifecycleService } from '@services/machineLifecycleService'
 import { MachineCleanupServiceV2 as MachineCleanupService } from '@services/cleanup/machineCleanupServiceV2'
 import {
   createMockUser,

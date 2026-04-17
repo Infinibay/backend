@@ -1,6 +1,6 @@
 import 'reflect-metadata'
 import { describe, it, expect, beforeEach, jest, afterEach } from '@jest/globals'
-import { AppSettingsService, AppSettingsUpdateInput } from '../../../app/services/maintenance/AppSettingsService'
+import { AppSettingsService, AppSettingsUpdateInput } from '../../../app/services/AppSettingsService'
 import { PrismaClient, AppSettings } from '@prisma/client'
 import { promises as fs } from 'fs'
 import path from 'path'

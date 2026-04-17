@@ -1,7 +1,7 @@
+import logger from '@main/logger'
 import { PrismaClient, Prisma } from '@prisma/client'
-import { Debugger } from '@utils/debug'
 
-const debug = new Debugger('infinibay:callback:machine')
+const debug = logger.child({ module: 'callback:machine' })
 
 export async function beforeCreateMachine (
   prisma: PrismaClient,
@@ -35,5 +35,5 @@ export async function afterCreateMachine (
 ): Promise<void> {
   // No-op: Firewall infrastructure is created in backgroundCode after transaction commits.
   // See machineLifecycleService.ts -> backgroundCode()
-  debug.log('info', `VM ${result.id} (${result.name}) created - firewall will be set up in background`)
+  debug.info(`VM ${result.id} (${result.name}) created - firewall will be set up in background`)
 }

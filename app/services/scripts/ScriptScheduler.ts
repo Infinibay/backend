@@ -1,11 +1,12 @@
-import { PrismaClient, ExecutionType, ExecutionStatus, Prisma } from '@prisma/client';
+import logger from '@main/logger'
+import { PrismaClient, ExecutionType, ExecutionStatus, Prisma, OS } from '@prisma/client';
 import { ScriptManager, ScriptWithContent } from './ScriptManager';
 import { TemplateEngine } from './TemplateEngine';
 import { ScriptParser } from './ScriptParser';
 import { getEventManager } from '../EventManager';
 import { getVirtioSocketWatcherService } from '../VirtioSocketWatcherService';
 
-const debug = require('debug')('infinibay:service:script-scheduler');
+const log = logger.child({ module: 'infinibay:service:script-scheduler' });
 
 // Configuration interfaces
 export interface ScheduleScriptConfig {
@@ -47,7 +48,7 @@ export class ScriptScheduler {
    */
   async scheduleScript(config: ScheduleScriptConfig): Promise<ScheduleScriptResult> {
     try {
-      debug('Scheduling script: %s, type: %s', config.scriptId, config.scheduleType);
+      log.debug('Scheduling script: %s, type: %s', config.scriptId, config.scheduleType);
 
       // 1. Validate script exists
       const script: ScriptWithContent = await this.scriptManager.getScript(config.scriptId);
@@ -69,7 +70,7 @@ export class ScriptScheduler {
         throw new Error('No target machines found');
       }
 
-      debug('Target machines: %O', targetMachineIds);
+      log.debug('Target machines: %O', targetMachineIds);
 
       // 3. Validate script OS compatibility
       await this.validateScriptOSCompatibility(config.scriptId, targetMachineIds);
@@ -86,7 +87,7 @@ export class ScriptScheduler {
         offlineVMs.forEach(vm => {
           warnings.push(`VM "${vm.name}" is currently offline. Schedule will execute when VM starts.`);
         });
-        debug('Warning: %d VMs are offline', offlineVMs.length);
+        log.debug('Warning: %d VMs are offline', offlineVMs.length);
       }
 
       // 4. Validate input values
@@ -149,7 +150,7 @@ export class ScriptScheduler {
         });
 
         executionIds.push(execution.id);
-        debug('Created ScriptExecution: %s for machine: %s', execution.id, machineId);
+        log.debug('Created ScriptExecution: %s for machine: %s', execution.id, machineId);
 
         // Create audit log
         await this.createScheduleAuditLog(
@@ -197,17 +198,17 @@ export class ScriptScheduler {
               if (machine && machine.status === 'running') {
                 // Push scripts to online VM
                 const result = await virtioService.pushPendingScriptsToVM(machineId);
-                debug('Pushed scripts to online VM %s: success=%s, count=%d', machineId, result.success, result.scriptCount);
+                log.debug('Pushed scripts to online VM %s: success=%s, count=%d', machineId, result.success, result.scriptCount);
 
                 if (!result.success) {
-                  debug('Failed to push scripts to VM %s: %s (will be picked up on next poll)', machineId, result.error);
+                  log.debug('Failed to push scripts to VM %s: %s (will be picked up on next poll)', machineId, result.error);
                   warnings.push(`Failed to immediately push script to VM "${machine.name}". Script will execute on next VM poll.`);
                 }
               } else {
-                debug('VM %s is offline (status: %s), scripts will be picked up on next boot/poll', machineId, machine?.status || 'unknown');
+                log.debug('VM %s is offline (status: %s), scripts will be picked up on next boot/poll', machineId, machine?.status || 'unknown');
               }
             } catch (error) {
-              debug('Error pushing scripts to VM %s: %s (will be picked up on next poll)', machineId, (error as Error).message);
+              log.debug('Error pushing scripts to VM %s: %s (will be picked up on next poll)', machineId, (error as Error).message);
               // Don't add to warnings - the offline warning already covers this case
             }
           };
@@ -218,10 +219,10 @@ export class ScriptScheduler {
             await Promise.allSettled(chunk.map(pushToMachine));
           }
 
-          debug('Script push completed. Online VMs notified, offline VMs will receive scripts on next poll.');
+          log.debug('Script push completed. Online VMs notified, offline VMs will receive scripts on next poll.');
         }
       } catch (error) {
-        debug('Error during script push phase: %s', (error as Error).message);
+        log.debug('Error during script push phase: %s', (error as Error).message);
         // Don't fail the operation - polling mechanism serves as fallback
       }
 
@@ -245,11 +246,11 @@ export class ScriptScheduler {
           config.userId
         );
       } catch (error) {
-        debug('Failed to emit schedule_created event: %s', (error as Error).message);
+        log.debug('Failed to emit schedule_created event: %s', (error as Error).message);
         // Don't fail the operation if event emission fails
       }
 
-      debug('Successfully scheduled script with %d executions', executionIds.length);
+      log.debug('Successfully scheduled script with %d executions', executionIds.length);
 
       return {
         success: true,
@@ -257,7 +258,7 @@ export class ScriptScheduler {
         warnings: warnings.length > 0 ? warnings : undefined
       };
     } catch (error) {
-      debug('Error scheduling script: %s', (error as Error).message);
+      log.debug('Error scheduling script: %s', (error as Error).message);
 
       // Provide user-friendly error messages
       let userFriendlyError = (error as Error).message;
@@ -299,7 +300,7 @@ export class ScriptScheduler {
     userId: string
   ): Promise<ScheduleScriptResult> {
     try {
-      debug('Updating scheduled script execution: %s', executionId);
+      log.debug('Updating scheduled script execution: %s', executionId);
 
       // Find existing execution
       const execution = await this.prisma.scriptExecution.findUnique({
@@ -355,7 +356,7 @@ export class ScriptScheduler {
         data: updateData,
       });
 
-      debug('Successfully updated scheduled script execution: %s', executionId);
+      log.debug('Successfully updated scheduled script execution: %s', executionId);
 
       // Emit event with standardized payload
       try {
@@ -375,7 +376,7 @@ export class ScriptScheduler {
           userId
         );
       } catch (error) {
-        debug('Failed to emit schedule_updated event: %s', (error as Error).message);
+        log.debug('Failed to emit schedule_updated event: %s', (error as Error).message);
       }
 
       return {
@@ -383,7 +384,7 @@ export class ScriptScheduler {
         executionIds: [executionId],
       };
     } catch (error) {
-      debug('Error updating scheduled script: %s', (error as Error).message);
+      log.debug('Error updating scheduled script: %s', (error as Error).message);
       return {
         success: false,
         executionIds: [],
@@ -397,7 +398,7 @@ export class ScriptScheduler {
    */
   async cancelScheduledScript(executionId: string, userId: string): Promise<boolean> {
     try {
-      debug('Cancelling scheduled script execution: %s', executionId);
+      log.debug('Cancelling scheduled script execution: %s', executionId);
 
       const execution = await this.prisma.scriptExecution.findUnique({
         where: { id: executionId },
@@ -420,7 +421,7 @@ export class ScriptScheduler {
         },
       });
 
-      debug('Successfully cancelled scheduled script execution: %s', executionId);
+      log.debug('Successfully cancelled scheduled script execution: %s', executionId);
 
       // Emit event with standardized payload
       try {
@@ -440,12 +441,12 @@ export class ScriptScheduler {
           userId
         );
       } catch (error) {
-        debug('Failed to emit schedule_cancelled event: %s', (error as Error).message);
+        log.debug('Failed to emit schedule_cancelled event: %s', (error as Error).message);
       }
 
       return true;
     } catch (error) {
-      debug('Error cancelling scheduled script: %s', (error as Error).message);
+      log.debug('Error cancelling scheduled script: %s', (error as Error).message);
       throw error;
     }
   }
@@ -599,7 +600,7 @@ export class ScriptScheduler {
         );
       }
 
-      if (!script.os.includes(genericMachineOS as any)) {
+      if (!script.os.includes(genericMachineOS as OS)) {
         throw new Error(
           `Script "${script.name}" is not compatible with machine "${machine.name}" (OS: ${machine.os}). Compatible OS: ${script.os.join(', ')}`
         );
@@ -724,7 +725,7 @@ export class ScriptScheduler {
         },
       });
     } catch (error) {
-      console.error('Failed to create schedule audit log:', error);
+      logger.error('Failed to create schedule audit log:', error);
     }
   }
 }

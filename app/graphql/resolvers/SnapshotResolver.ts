@@ -1,3 +1,4 @@
+import logger from '@main/logger'
 import { Resolver, Query, Mutation, Arg, Authorized, Ctx } from 'type-graphql'
 import {
   Snapshot,
@@ -10,22 +11,12 @@ import {
 import { SuccessType } from './machine/type'
 import { SnapshotServiceV2, getSnapshotServiceV2 } from '@services/SnapshotServiceV2'
 import { VMOperationsService } from '@services/VMOperationsService'
-import { Debugger } from '@utils/debug'
 import { UserInputError } from 'apollo-server-express'
 import { getSocketService } from '@services/SocketService'
 import { InfinibayContext } from '@utils/context'
-import Debug from 'debug'
-
-const debug = Debug('infinibay:snapshot-resolver')
 
 @Resolver()
 export class SnapshotResolver {
-  private debug: Debugger
-
-  constructor () {
-    this.debug = new Debugger('snapshot-resolver')
-  }
-
   @Mutation(() => SnapshotResult, { description: 'Create a snapshot of a virtual machine' })
   @Authorized()
   async createSnapshot (
@@ -88,7 +79,7 @@ export class SnapshotResolver {
         state: result.snapshot?.state || 'shutoff'
       }
 
-      this.debug.log('info', `Snapshot '${input.name}' created successfully for VM ${input.machineId}`)
+      logger.info( `Snapshot '${input.name}' created successfully for VM ${input.machineId}`)
 
       // Emit WebSocket event
       if (ctx?.user && machine?.userId) {
@@ -100,9 +91,9 @@ export class SnapshotResolver {
               snapshot
             }
           })
-          debug(`📡 Emitted vm:snapshot:created event for machine ${input.machineId}`)
+          logger.debug(`📡 Emitted vm:snapshot:created event for machine ${input.machineId}`)
         } catch (eventError) {
-          debug(`Failed to emit WebSocket event: ${eventError}`)
+          logger.debug(`Failed to emit WebSocket event: ${eventError}`)
         }
       }
 
@@ -112,7 +103,7 @@ export class SnapshotResolver {
         snapshot
       }
     } catch (error) {
-      this.debug.log('error', `Failed to create snapshot: ${error}`)
+      logger.error( `Failed to create snapshot: ${error}`)
       throw new UserInputError(`Failed to create snapshot: ${error}`)
     }
   }
@@ -158,7 +149,7 @@ export class SnapshotResolver {
         input.snapshotName
       )
 
-      this.debug.log('info', `VM ${input.machineId} restored to snapshot '${input.snapshotName}'`)
+      logger.info( `VM ${input.machineId} restored to snapshot '${input.snapshotName}'`)
 
       // Emit WebSocket event if successful
       if (result.success && ctx?.user && machine?.userId) {
@@ -170,9 +161,9 @@ export class SnapshotResolver {
               snapshotName: input.snapshotName
             }
           })
-          debug(`📡 Emitted vm:snapshot:restored event for machine ${input.machineId}`)
+          logger.debug(`📡 Emitted vm:snapshot:restored event for machine ${input.machineId}`)
         } catch (eventError) {
-          debug(`Failed to emit WebSocket event: ${eventError}`)
+          logger.debug(`Failed to emit WebSocket event: ${eventError}`)
         }
       }
 
@@ -181,7 +172,7 @@ export class SnapshotResolver {
         message: result.message
       }
     } catch (error) {
-      this.debug.log('error', `Failed to restore snapshot: ${error}`)
+      logger.error( `Failed to restore snapshot: ${error}`)
       throw new UserInputError(`Failed to restore snapshot: ${error}`)
     }
   }
@@ -227,7 +218,7 @@ export class SnapshotResolver {
         input.snapshotName
       )
 
-      this.debug.log('info', `Snapshot '${input.snapshotName}' deleted from VM ${input.machineId}`)
+      logger.info( `Snapshot '${input.snapshotName}' deleted from VM ${input.machineId}`)
 
       // Emit WebSocket event if successful
       if (result.success && ctx?.user && machine?.userId) {
@@ -239,9 +230,9 @@ export class SnapshotResolver {
               snapshotName: input.snapshotName
             }
           })
-          debug(`📡 Emitted vm:snapshot:deleted event for machine ${input.machineId}`)
+          logger.debug(`📡 Emitted vm:snapshot:deleted event for machine ${input.machineId}`)
         } catch (eventError) {
-          debug(`Failed to emit WebSocket event: ${eventError}`)
+          logger.debug(`Failed to emit WebSocket event: ${eventError}`)
         }
       }
 
@@ -250,7 +241,7 @@ export class SnapshotResolver {
         message: result.message
       }
     } catch (error) {
-      this.debug.log('error', `Failed to delete snapshot: ${error}`)
+      logger.error( `Failed to delete snapshot: ${error}`)
       throw new UserInputError(`Failed to delete snapshot: ${error}`)
     }
   }
@@ -310,7 +301,7 @@ export class SnapshotResolver {
       // Sort by creation date (newest first)
       snapshots.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
 
-      this.debug.log('info', `Retrieved ${snapshots.length} snapshots for VM ${machineId}`)
+      logger.info( `Retrieved ${snapshots.length} snapshots for VM ${machineId}`)
 
       return {
         success: true,
@@ -318,7 +309,7 @@ export class SnapshotResolver {
         snapshots
       }
     } catch (error) {
-      this.debug.log('error', `Failed to list snapshots: ${error}`)
+      logger.error( `Failed to list snapshots: ${error}`)
       throw new UserInputError(`Failed to list snapshots: ${error}`)
     }
   }
@@ -366,11 +357,11 @@ export class SnapshotResolver {
         state: currentSnap.state
       }
 
-      this.debug.log('info', `Retrieved current snapshot '${currentSnap.name}' for VM ${machineId}`)
+      logger.info( `Retrieved current snapshot '${currentSnap.name}' for VM ${machineId}`)
 
       return result
     } catch (error) {
-      this.debug.log('error', `Failed to get current snapshot: ${error}`)
+      logger.error( `Failed to get current snapshot: ${error}`)
       throw new UserInputError(`Failed to get current snapshot: ${error}`)
     }
   }
@@ -404,7 +395,7 @@ export class SnapshotResolver {
 
       // Force stop the VM if it's running
       if (machine.status === 'running') {
-        this.debug.log('info', `Force stopping VM ${input.machineId} before restore`)
+        logger.info( `Force stopping VM ${input.machineId} before restore`)
         const stopResult = await vmOpsService.forcePowerOff(input.machineId)
 
         if (!stopResult.success) {
@@ -433,14 +424,14 @@ export class SnapshotResolver {
         input.snapshotName
       )
 
-      this.debug.log('info', `VM ${input.machineId} force-restored to snapshot '${input.snapshotName}'`)
+      logger.info( `VM ${input.machineId} force-restored to snapshot '${input.snapshotName}'`)
 
       return {
         success: result.success,
         message: `Virtual machine force-restored to snapshot '${input.snapshotName}' successfully`
       }
     } catch (error) {
-      this.debug.log('error', `Failed to force restore snapshot: ${error}`)
+      logger.error( `Failed to force restore snapshot: ${error}`)
       throw new UserInputError(`Failed to force restore snapshot: ${error}`)
     }
   }

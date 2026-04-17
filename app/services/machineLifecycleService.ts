@@ -1,7 +1,8 @@
+import { Logger } from 'winston'
+import logger from '@main/logger'
 import { PrismaClient, Department, Machine, User, Prisma } from '@prisma/client'
 import { SafeUser } from '../utils/context'
 import { v4 as uuidv4 } from 'uuid'
-import { Debugger } from '../utils/debug'
 import { ApolloError, UserInputError } from 'apollo-server-express'
 import si from 'systeminformation'
 import { MachineCleanupServiceV2 } from './cleanup/machineCleanupServiceV2'
@@ -27,12 +28,12 @@ function normalizePciAddress (address: string | null): string | null {
 export class MachineLifecycleService {
   private prisma: PrismaClient
   private user: SafeUser | null
-  private debug: Debugger
+  private debug: Logger
 
   constructor (prisma: PrismaClient, user: SafeUser | null) {
     this.prisma = prisma
     this.user = user
-    this.debug = new Debugger('machine-lifecycle-service')
+    this.debug = logger.child({ module: 'machine-lifecycle-service' })
   }
 
   async createMachine (input: CreateMachineInputType): Promise<Machine> {
@@ -162,7 +163,7 @@ export class MachineLifecycleService {
         localeSettings.keyboard,
         localeSettings.timezone
       ).catch(err => {
-        console.error(`[backgroundCode] Unhandled error for machine ${machine.id}:`, err)
+        logger.error(`[backgroundCode] Unhandled error for machine ${machine.id}:`, err)
       })
     })
 
@@ -188,7 +189,7 @@ export class MachineLifecycleService {
       await cleanup.cleanupVM(machine.id)
       return { success: true, message: 'Machine destroyed' }
     } catch (error: unknown) {
-      this.debug.log(`Error destroying machine: ${String(error)}`)
+      this.debug.debug(`Error destroying machine: ${String(error)}`)
       const message = error instanceof Error ? error.message : String(error)
       return { success: false, message: `Error destroying machine: ${message}` }
     }
@@ -233,14 +234,14 @@ export class MachineLifecycleService {
           }
           updateData.gpuPciAddress = gpuPciAddress
         } catch (error) {
-          this.debug.log(`Error validating GPU PCI address ${gpuPciAddress}: ${String(error)}`)
+          this.debug.debug(`Error validating GPU PCI address ${gpuPciAddress}: ${String(error)}`)
           throw new Error(`Failed to validate GPU PCI address: ${gpuPciAddress}.`)
         }
       }
     }
 
     if (Object.keys(updateData).length === 0) {
-      this.debug.log(`No hardware changes provided for machine ${id}.`)
+      this.debug.debug(`No hardware changes provided for machine ${id}.`)
       return machine
     }
 
@@ -255,13 +256,13 @@ export class MachineLifecycleService {
       }
     })
 
-    this.debug.log(
+    this.debug.debug(
       `Machine ${id} hardware updated in DB: ${JSON.stringify(updateData)}. VM update required.`
     )
 
     // Use the new dedicated hardware update service
     this.backgroundUpdateHardware(updatedMachine.id).catch(err => {
-      this.debug.log(`Error in backgroundUpdateHardware for machine ${updatedMachine.id}: ${String(err)}`)
+      this.debug.debug(`Error in backgroundUpdateHardware for machine ${updatedMachine.id}: ${String(err)}`)
     })
 
     return updatedMachine
@@ -307,7 +308,7 @@ export class MachineLifecycleService {
       }
     })
 
-    this.debug.log(`Machine ${id} name updated to "${name.trim()}"`)
+    this.debug.debug(`Machine ${id} name updated to "${name.trim()}"`)
 
     return updatedMachine
   }
@@ -346,15 +347,15 @@ export class MachineLifecycleService {
       }
     })
 
-    this.debug.log(`Machine ${id} user assignment updated: ${userId ? `assigned to user ${userId}` : 'unassigned'}`)
+    this.debug.debug(`Machine ${id} user assignment updated: ${userId ? `assigned to user ${userId}` : 'unassigned'}`)
 
     // Emit real-time event for machine update
     try {
       const eventManager = getEventManager()
       await eventManager.dispatchEvent('vms', 'update', updatedMachine)
-      this.debug.log(`🎯 VM user assignment updated: ${updatedMachine.name} (${id})`)
+      this.debug.debug(`🎯 VM user assignment updated: ${updatedMachine.name} (${id})`)
     } catch (eventError) {
-      this.debug.log(`Failed to emit update event for VM ${id}: ${String(eventError)}`)
+      this.debug.debug(`Failed to emit update event for VM ${id}: ${String(eventError)}`)
     }
 
     return updatedMachine
@@ -370,18 +371,18 @@ export class MachineLifecycleService {
     keyboard: string,
     timezone: string
   ) {
-    console.log(`[backgroundCode] Starting VM creation for ${id}`)
+    logger.info(`[backgroundCode] Starting VM creation for ${id}`)
     try {
       const machine = await this.prisma.machine.findUnique({
         where: { id }
       })
 
       if (!machine) {
-        console.error(`[backgroundCode] Machine with ID ${id} not found in background process`)
+        logger.error(`[backgroundCode] Machine with ID ${id} not found in background process`)
         return
       }
 
-      console.log(`[backgroundCode] Found machine: ${machine.name}, using CreateMachineServiceV2 (infinization)`)
+      logger.info(`[backgroundCode] Found machine: ${machine.name}, using CreateMachineServiceV2 (infinization)`)
 
       // Use infinization-based CreateMachineServiceV2
       const createService = new CreateMachineServiceV2(this.prisma)
@@ -396,7 +397,7 @@ export class MachineLifecycleService {
         timezone
       )
 
-      console.log(`[backgroundCode] CreateMachineServiceV2.create() completed for ${machine.name}`)
+      logger.info(`[backgroundCode] CreateMachineServiceV2.create() completed for ${machine.name}`)
 
       // Fetch updated machine for event emission
       const updatedMachine = await this.prisma.machine.findUnique({
@@ -417,14 +418,14 @@ export class MachineLifecycleService {
         try {
           const eventManager = getEventManager()
           await eventManager.dispatchEvent('vms', 'update', updatedMachine)
-          this.debug.log(`🎯 VM created (status: ${updatedMachine.status}): ${updatedMachine.name} (${id}) - awaiting InfiniService connection`)
+          this.debug.debug(`🎯 VM created (status: ${updatedMachine.status}): ${updatedMachine.name} (${id}) - awaiting InfiniService connection`)
         } catch (eventError) {
-          this.debug.log(`Failed to emit update event for VM ${id}: ${String(eventError)}`)
+          this.debug.debug(`Failed to emit update event for VM ${id}: ${String(eventError)}`)
         }
       }
     } catch (error: any) {
-      console.error(`[backgroundCode] Error creating machine ${id}:`, error?.message || error)
-      console.error(`[backgroundCode] Stack:`, error?.stack)
+      logger.error(`[backgroundCode] Error creating machine ${id}:`, error?.message || error)
+      logger.error(`[backgroundCode] Stack:`, error?.stack)
       // Update status to error
       try {
         await this.prisma.machine.update({
@@ -441,13 +442,13 @@ export class MachineLifecycleService {
    * Delegate hardware update to the dedicated HardwareUpdateService
    */
   private async backgroundUpdateHardware (machineId: string): Promise<void> {
-    this.debug.log(`Starting background hardware update for machine ${machineId}`)
+    this.debug.debug(`Starting background hardware update for machine ${machineId}`)
 
     // We don't await this so it runs in the background
     new HardwareUpdateService(this.prisma, machineId)
       .updateHardware()
       .catch(error => {
-        this.debug.log(`Background hardware update for machine ${machineId} failed: ${error.message}`)
+        this.debug.debug(`Background hardware update for machine ${machineId} failed: ${error.message}`)
       })
   }
 
@@ -502,7 +503,7 @@ export class MachineLifecycleService {
     // Detect timezone from environment variable
     const timezone = input.timezone || process.env.TZ || 'America/New_York'
 
-    this.debug.log(`Detected locale settings: locale=${locale}, keyboard=${keyboard}, timezone=${timezone}`)
+    this.debug.debug(`Detected locale settings: locale=${locale}, keyboard=${keyboard}, timezone=${timezone}`)
 
     return { locale, keyboard, timezone }
   }

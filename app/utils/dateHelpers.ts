@@ -1,3 +1,4 @@
+import logger from '@main/logger'
 /**
  * Date Helper Utilities
  *
@@ -17,7 +18,7 @@ export function safeCreateDate (dateString?: string | null, context?: string): D
   const date = new Date(dateString)
   if (isNaN(date.getTime())) {
     if (context && process.env.NODE_ENV !== 'production') {
-      console.warn(`Invalid date string in ${context}: ${dateString}`)
+      logger.warn(`Invalid date string in ${context}: ${dateString}`)
     }
     return undefined
   }
@@ -50,7 +51,7 @@ export function safeCreateDateFromEpoch (epoch?: number | null, context?: string
   const date = new Date(epoch * 1000)
   if (isNaN(date.getTime())) {
     if (context && process.env.NODE_ENV !== 'production') {
-      console.warn(`Invalid epoch timestamp in ${context}: ${epoch}`)
+      logger.warn(`Invalid epoch timestamp in ${context}: ${epoch}`)
     }
     return undefined
   }
@@ -70,7 +71,7 @@ export function safeCreateDateFromMilliseconds (milliseconds?: number | null, co
   const date = new Date(milliseconds)
   if (isNaN(date.getTime())) {
     if (context && process.env.NODE_ENV !== 'production') {
-      console.warn(`Invalid millisecond timestamp in ${context}: ${milliseconds}`)
+      logger.warn(`Invalid millisecond timestamp in ${context}: ${milliseconds}`)
     }
     return undefined
   }
@@ -120,7 +121,7 @@ export function parseInfiniServiceTimestamp (
 
   // Invalid format
   if (context && process.env.NODE_ENV !== 'production') {
-    console.warn(`Invalid timestamp format in ${context}:`, timestamp)
+    logger.warn(`Invalid timestamp format in ${context}:`, timestamp)
   }
 
   return undefined

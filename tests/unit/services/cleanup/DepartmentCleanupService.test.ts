@@ -11,6 +11,34 @@ jest.mock('@services/InfinizationService', () => ({
   getInfinization: jest.fn()
 }))
 
+jest.mock('@main/logger', () => {
+  const mockChild = {
+    debug: jest.fn(),
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+    log: jest.fn()
+  }
+  return {
+    __esModule: true,
+    default: {
+      ...mockChild,
+      child: () => mockChild
+    }
+  }
+})
+
+jest.mock('@services/network/DepartmentNetworkService', () => ({
+  DepartmentNetworkService: jest.fn().mockImplementation(() => ({
+    forceDestroyNetworkForDepartment: jest.fn().mockResolvedValue({
+      success: true,
+      tapDevicesRemoved: [],
+      errors: []
+    })
+  })),
+  ForceDestroyResult: undefined
+}))
+
 jest.mock('@infinibay/infinization', () => ({
   TapDeviceManager: jest.fn().mockImplementation(() => ({
     exists: jest.fn()
@@ -33,14 +61,6 @@ describe('DepartmentCleanupService', () => {
   beforeEach(() => {
     jest.clearAllMocks()
     ;(getInfinization as jest.Mock).mockResolvedValue(mockInfinization)
-
-    // Mock TAP device manager before creating service
-    jest.mock('@infinibay/infinization', () => ({
-      TapDeviceManager: jest.fn().mockImplementation(() => ({
-        exists: jest.fn().mockResolvedValue(false)
-      })),
-      generateVMChainName: jest.fn().mockReturnValue('chain-test')
-    }))
 
     // Create mock Prisma with proper mock returns
     mockPrisma = {
@@ -73,7 +93,6 @@ describe('DepartmentCleanupService', () => {
 
   afterEach(() => {
     jest.resetAllMocks()
-    jest.resetModules()
   })
 
   describe('cleanupDepartment', () => {

@@ -11,11 +11,11 @@
 import { PrismaClient } from '@prisma/client'
 import { TapDeviceManager } from '@infinibay/infinization'
 
-import { Debugger } from '@utils/debug'
+import logger from '@main/logger'
 import { getInfinization } from './InfinizationService'
 import { FirewallOrchestrationService } from './firewall/FirewallOrchestrationService'
 
-const debug = new Debugger('infinibay:service:vm-move')
+const debug = logger.child({ module: 'infinibay:service:vm-move' })
 
 export interface MoveResult {
   success: boolean
@@ -117,9 +117,7 @@ export class VMMoveService {
       const vmStatus = await infinization.getVMStatus(vmId)
       state.wasRunning = vmStatus.processAlive
 
-      debug.log(
-        'info',
-        `Moving VM ${vmId}: running=${state.wasRunning}, ` +
+      debug.info(`Moving VM ${vmId}: running=${state.wasRunning}, ` +
         `oldBridge=${state.oldBridge}, newBridge=${state.newBridge}, ` +
         `tapDevice=${state.tapDevice}`
       )
@@ -130,7 +128,7 @@ export class VMMoveService {
         data: { departmentId: newDepartmentId }
       })
       state.dbUpdated = true
-      debug.log('info', `Updated machine.departmentId to ${newDepartmentId}`)
+      debug.info(`Updated machine.departmentId to ${newDepartmentId}`)
 
       // 5. Update configuration.bridge if configuration exists
       if (vm.configuration) {
@@ -139,20 +137,20 @@ export class VMMoveService {
           data: { bridge: state.newBridge }
         })
         state.configUpdated = true
-        debug.log('info', `Updated machineConfiguration.bridge to ${state.newBridge}`)
+        debug.info(`Updated machineConfiguration.bridge to ${state.newBridge}`)
       }
 
       // 6. If VM is running, perform hot-swap
       if (state.wasRunning && state.tapDevice) {
         // 6a. Change TAP device to new bridge if bridges are different
         if (state.oldBridge && state.oldBridge !== state.newBridge) {
-          debug.log('info', `Hot-swapping TAP ${state.tapDevice} from ${state.oldBridge} to ${state.newBridge}`)
+          debug.info(`Hot-swapping TAP ${state.tapDevice} from ${state.oldBridge} to ${state.newBridge}`)
 
           await this.tapManager.detachFromBridge(state.tapDevice)
           await this.tapManager.attachToBridge(state.tapDevice, state.newBridge)
 
           state.networkChanged = true
-          debug.log('info', `TAP ${state.tapDevice} successfully moved to ${state.newBridge}`)
+          debug.info(`TAP ${state.tapDevice} successfully moved to ${state.newBridge}`)
         }
 
         // 6b. Apply firewall rules from new department
@@ -160,13 +158,13 @@ export class VMMoveService {
         try {
           await this.firewallOrchestration.applyVMRules(vmId)
           state.firewallChanged = true
-          debug.log('info', `Firewall rules from new department applied to VM ${vmId}`)
+          debug.info(`Firewall rules from new department applied to VM ${vmId}`)
         } catch (fwError) {
           // Firewall failure should not block the move, but log warning
-          debug.log('warn', `Failed to apply firewall rules: ${fwError}`)
+          debug.warn(`Failed to apply firewall rules: ${fwError}`)
         }
       } else {
-        debug.log('info', `VM ${vmId} is not running, network/firewall changes will apply on next start`)
+        debug.info(`VM ${vmId} is not running, network/firewall changes will apply on next start`)
       }
 
       return {
@@ -177,7 +175,7 @@ export class VMMoveService {
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error)
-      debug.log('error', `Move failed for VM ${vmId}: ${errorMessage}`)
+      debug.error(`Move failed for VM ${vmId}: ${errorMessage}`)
 
       // Attempt rollback
       await this.rollback(state)
@@ -196,16 +194,16 @@ export class VMMoveService {
    * Rolls back changes in reverse order.
    */
   private async rollback (state: MoveState): Promise<void> {
-    debug.log('info', `Attempting rollback for VM ${state.vmId}...`)
+    debug.info(`Attempting rollback for VM ${state.vmId}...`)
 
     // 1. Rollback network changes
     if (state.networkChanged && state.tapDevice && state.oldBridge) {
       try {
         await this.tapManager.detachFromBridge(state.tapDevice)
         await this.tapManager.attachToBridge(state.tapDevice, state.oldBridge)
-        debug.log('info', `Rolled back TAP ${state.tapDevice} to ${state.oldBridge}`)
+        debug.info(`Rolled back TAP ${state.tapDevice} to ${state.oldBridge}`)
       } catch (e) {
-        debug.log('error', `Failed to rollback network: ${e}`)
+        debug.error(`Failed to rollback network: ${e}`)
       }
     }
 
@@ -220,10 +218,10 @@ export class VMMoveService {
             where: { id: config.id },
             data: { bridge: state.oldBridge }
           })
-          debug.log('info', 'Rolled back machineConfiguration.bridge')
+          debug.info('Rolled back machineConfiguration.bridge')
         }
       } catch (e) {
-        debug.log('error', `Failed to rollback configuration: ${e}`)
+        debug.error(`Failed to rollback configuration: ${e}`)
       }
     }
 
@@ -234,9 +232,9 @@ export class VMMoveService {
           where: { id: state.vmId },
           data: { departmentId: state.oldDepartmentId }
         })
-        debug.log('info', 'Rolled back machine.departmentId')
+        debug.info('Rolled back machine.departmentId')
       } catch (e) {
-        debug.log('error', `Failed to rollback database: ${e}`)
+        debug.error(`Failed to rollback database: ${e}`)
       }
     }
 
@@ -245,12 +243,12 @@ export class VMMoveService {
       try {
         // After rolling back departmentId, applyVMRules will use the old department
         await this.firewallOrchestration.applyVMRules(state.vmId)
-        debug.log('info', 'Rolled back firewall rules')
+        debug.info('Rolled back firewall rules')
       } catch (e) {
-        debug.log('error', `Failed to rollback firewall: ${e}`)
+        debug.error(`Failed to rollback firewall: ${e}`)
       }
     }
 
-    debug.log('info', `Rollback completed for VM ${state.vmId}`)
+    debug.info(`Rollback completed for VM ${state.vmId}`)
   }
 }

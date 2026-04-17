@@ -1,3 +1,4 @@
+import logger from '@main/logger'
 import { Resolver, Query, Mutation, Arg, Authorized } from 'type-graphql'
 import { ISO, ISOStatus, SystemReadiness, ISOAvailabilityMap } from '../types/ISOType'
 import ISOService from '@services/ISOService'
@@ -29,7 +30,7 @@ export class ISOResolver {
         lastVerified: iso.lastVerified || undefined
       }))
     } catch (error) {
-      console.error('Error fetching available ISOs:', error)
+      logger.error('Error fetching available ISOs:', error)
       throw new Error('Failed to fetch available ISOs')
     }
   }
@@ -62,7 +63,7 @@ export class ISOResolver {
         iso: undefined
       }
     } catch (error) {
-      console.error('Error checking ISO status:', error)
+      logger.error('Error checking ISO status:', error)
       throw new Error('Failed to check ISO status')
     }
   }
@@ -75,7 +76,7 @@ export class ISOResolver {
 
       return await this.isoService.getSystemReadiness()
     } catch (error) {
-      console.error('Error checking system readiness:', error)
+      logger.error('Error checking system readiness:', error)
       throw new Error('Failed to check system readiness')
     }
   }
@@ -94,7 +95,7 @@ export class ISOResolver {
 
       return result
     } catch (error) {
-      console.error('Error checking OS availability:', error)
+      logger.error('Error checking OS availability:', error)
       throw new Error('Failed to check OS availability')
     }
   }
@@ -117,7 +118,7 @@ export class ISOResolver {
         lastVerified: iso.lastVerified || undefined
       }))
     } catch (error) {
-      console.error('Error fetching all ISOs:', error)
+      logger.error('Error fetching all ISOs:', error)
       throw new Error('Failed to fetch all ISOs')
     }
   }
@@ -135,7 +136,7 @@ export class ISOResolver {
     try {
       return await this.isoService.validateISO(isoId)
     } catch (error) {
-      console.error('Error validating ISO:', error)
+      logger.error('Error validating ISO:', error)
       throw new UserInputError('Failed to validate ISO')
     }
   }
@@ -148,7 +149,7 @@ export class ISOResolver {
     try {
       return await this.isoService.calculateChecksum(isoId)
     } catch (error) {
-      console.error('Error calculating checksum:', error)
+      logger.error('Error calculating checksum:', error)
       throw new UserInputError('Failed to calculate checksum')
     }
   }
@@ -162,7 +163,7 @@ export class ISOResolver {
       await this.isoService.removeISO(isoId)
       return true
     } catch (error) {
-      console.error('Error removing ISO:', error)
+      logger.error('Error removing ISO:', error)
       throw new UserInputError('Failed to remove ISO')
     }
   }
@@ -174,7 +175,7 @@ export class ISOResolver {
       await this.isoService.syncISOsWithFileSystem()
       return true
     } catch (error) {
-      console.error('Error syncing ISOs:', error)
+      logger.error('Error syncing ISOs:', error)
       throw new Error('Failed to sync ISOs')
     }
   }
@@ -199,7 +200,7 @@ export class ISOResolver {
         lastVerified: iso.lastVerified || undefined
       }
     } catch (error) {
-      console.error('Error registering ISO:', error)
+      logger.error('Error registering ISO:', error)
       throw new UserInputError('Failed to register ISO')
     }
   }

@@ -1,6 +1,6 @@
 import 'reflect-metadata'
 import { describe, it, expect, beforeEach, jest } from '@jest/globals'
-import { DirectPackageManager, PackageAction } from '../../../app/services/vm/DirectPackageManager'
+import { DirectPackageManager, PackageAction } from '../../../app/services/DirectPackageManager'
 import { PrismaClient } from '@prisma/client'
 
 // Mock dependencies
@@ -16,13 +16,23 @@ class MockPrismaClient {
   }
 }
 
-// Mock the Debugger to prevent import issues
-jest.mock('../../../app/utils/debug', () => ({
-  Debugger: jest.fn().mockImplementation(() => ({
-    log: jest.fn(),
-    debug: jest.fn()
-  }))
-}))
+// Mock the logger to prevent import issues
+jest.mock('@main/logger', () => {
+  const mockChild = {
+    debug: jest.fn(),
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+    log: jest.fn()
+  }
+  return {
+    __esModule: true,
+    default: {
+      ...mockChild,
+      child: jest.fn(() => mockChild)
+    }
+  }
+})
 
 describe('DirectPackageManager', () => {
   let service: DirectPackageManager

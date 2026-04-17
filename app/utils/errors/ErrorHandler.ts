@@ -1,3 +1,4 @@
+import logger from '@main/logger'
 import { PrismaClient } from '@prisma/client'
 import { EventManager } from '../../services/EventManager'
 
@@ -115,7 +116,7 @@ export class ErrorHandler {
       }
     } else {
       // Unknown error - log and investigate
-      console.error('Unhandled error type:', error)
+      logger.error('Unhandled error type:', error)
     }
   }
 
@@ -131,7 +132,7 @@ export class ErrorHandler {
   }
 
   private handleCriticalError (error: AppError): void {
-    console.error('CRITICAL ERROR - System may be unstable:', error)
+    logger.error('CRITICAL ERROR - System may be unstable:', error)
     // Could trigger graceful shutdown here if needed
   }
 
@@ -186,7 +187,7 @@ export class ErrorLogger {
         severity: this.determineSeverity(error)
       }
 
-      console.error('[ERROR_LOG]', logEntry)
+      logger.error('[ERROR_LOG]', logEntry)
 
       // TODO: Once errorLog table is created, uncomment this:
       // await this.prisma.errorLog.create({
@@ -194,8 +195,8 @@ export class ErrorLogger {
       // })
     } catch (logError) {
       // Fallback to console if database logging fails
-      console.error('Failed to log error to database:', logError)
-      console.error('Original error:', error)
+      logger.error('Failed to log error to database:', logError)
+      logger.error('Original error:', error)
     }
   }
 

@@ -1,6 +1,6 @@
 import 'reflect-metadata'
 import { describe, it, expect, beforeEach, jest } from '@jest/globals'
-import { DataLoaderService } from '../../../app/services/vm/DataLoaderService'
+import { DataLoaderService } from '../../../app/services/DataLoaderService'
 import { PrismaClient, User, MachineTemplate, Department, Application, ProcessSnapshot, SystemMetrics, MachineConfiguration, Machine } from '@prisma/client'
 
 // Create a mock PrismaClient structure

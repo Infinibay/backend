@@ -1,3 +1,4 @@
+import logger from '@main/logger'
 import express from 'express'
 import { PrismaClient } from '@prisma/client'
 import fs from 'fs/promises'
@@ -80,7 +81,7 @@ router.get('/:scriptId/content', async (req, res) => {
     // Send interpolated script
     res.send(interpolated)
   } catch (error) {
-    console.error('Error serving script content:', error)
+    logger.error('Error serving script content:', error)
     res.status(500).json({
       error: 'Internal server error',
       details: error instanceof Error ? error.message : String(error)

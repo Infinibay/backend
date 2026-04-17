@@ -1,7 +1,7 @@
 import 'reflect-metadata'
 import { describe, it, expect, beforeEach, jest } from '@jest/globals'
 import { PrismaClient } from '@prisma/client'
-import { SnapshotServiceV2, SnapshotInfo, SnapshotResult, SnapshotListResult } from '../../../app/services/vm/SnapshotServiceV2'
+import { SnapshotServiceV2, SnapshotInfo, SnapshotResult, SnapshotListResult } from '../../../app/services/SnapshotServiceV2'
 import { SnapshotManager, SnapshotInfo as InfinizationSnapshotInfo, StorageError, StorageErrorCode } from '@infinibay/infinization'
 
 // Mock PrismaClient

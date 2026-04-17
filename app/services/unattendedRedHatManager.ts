@@ -1,3 +1,4 @@
+import { Logger } from 'winston'
 import { Application } from '@prisma/client'
 import * as fs from 'fs'
 import * as path from 'path'
@@ -33,7 +34,7 @@ export class UnattendedRedHatManager extends UnattendedManagerBase {
   private locale: string
   private keyboard: string
   private timezone: string
-  // protected debug: Debugger = new Debugger('unattended-redhat-manager');
+  // protected debug: Logger = logger.child({ module: 'unattended-redhat-manager' });
 
   constructor (
     username: string,
@@ -45,9 +46,9 @@ export class UnattendedRedHatManager extends UnattendedManagerBase {
     timezone?: string
   ) {
     super()
-    this.debug.log('Initializing UnattendedRedHatManager')
+    this.debug.debug('Initializing UnattendedRedHatManager')
     if (!username || !password) {
-      this.debug.log('error', 'Username and password are required')
+      this.debug.error('Username and password are required')
       throw new Error('Username and password are required')
     }
     this.isoPath = path.join(path.join(process.env.INFINIBAY_BASE_DIR ?? '/opt/infinibay', 'iso'), 'fedora.iso')
@@ -62,36 +63,36 @@ export class UnattendedRedHatManager extends UnattendedManagerBase {
     this.keyboard = keyboard || 'us'
     this.timezone = timezone || 'America/New_York'
     this.configFileName = 'ks.cfg'
-    this.debug.log(`UnattendedRedHatManager initialized with locale=${this.locale}, keyboard=${this.keyboard}, timezone=${this.timezone}`)
+    this.debug.debug(`UnattendedRedHatManager initialized with locale=${this.locale}, keyboard=${this.keyboard}, timezone=${this.timezone}`)
   }
 
   async generateConfig (): Promise<string> {
-    this.debug.log('Generating RedHat kickstart configuration')
+    this.debug.debug('Generating RedHat kickstart configuration')
 
     // Validate locale format (xx_XX with optional encoding suffix like .UTF-8)
     if (!/^[a-z]{2}_[A-Z]{2}(\.[A-Za-z0-9-]+)?$/.test(this.locale)) {
-      this.debug.log('warn', `Invalid locale format: ${this.locale}, using default: en_US.UTF-8`)
+      this.debug.warn(`Invalid locale format: ${this.locale}, using default: en_US.UTF-8`)
       this.locale = 'en_US.UTF-8'
     }
 
     // Validate keyboard layout (2-3 lowercase characters)
     if (!/^[a-z]{2,3}$/.test(this.keyboard)) {
-      this.debug.log('warn', `Invalid keyboard layout: ${this.keyboard}, using default: us`)
+      this.debug.warn(`Invalid keyboard layout: ${this.keyboard}, using default: us`)
       this.keyboard = 'us'
     }
 
     // Validate timezone is not empty
     if (!this.timezone || this.timezone.trim() === '') {
-      this.debug.log('warn', 'Empty timezone, using default: America/New_York')
+      this.debug.warn('Empty timezone, using default: America/New_York')
       this.timezone = 'America/New_York'
     }
 
-    this.debug.log(`Validated configuration: locale=${this.locale}, keyboard=${this.keyboard}, timezone=${this.timezone}`)
+    this.debug.debug(`Validated configuration: locale=${this.locale}, keyboard=${this.keyboard}, timezone=${this.timezone}`)
 
     const applicationsPostCommands = await this.generateApplicationsConfig()
     const infiniServicePostCommands = this.generateInfiniServiceConfig()
     const fedoraVersion = await this.extractFedoraVersionFromISO()
-    this.debug.log(`Applications and InfiniService post commands generated (Fedora ${fedoraVersion})`)
+    this.debug.debug(`Applications and InfiniService post commands generated (Fedora ${fedoraVersion})`)
 
     // Initialize Eta template engine
     // IMPORTANT: autoEscape must be false for shell scripts (we don't want HTML escaping)
@@ -117,10 +118,10 @@ export class UnattendedRedHatManager extends UnattendedManagerBase {
         infiniServicePostCommands
       })
 
-      this.debug.log('RedHat kickstart configuration generated successfully')
+      this.debug.debug('RedHat kickstart configuration generated successfully')
       return renderedConfig
     } catch (error) {
-      this.debug.log('error', `Failed to render RedHat kickstart template: ${error}`)
+      this.debug.error(`Failed to render RedHat kickstart template: ${error}`)
       throw error
     }
   }
@@ -299,7 +300,7 @@ echo "=== InfiniService Installation Completed ==="
    */
   private async extractFedoraVersionFromISO (): Promise<string> {
     try {
-      this.debug.log(`[ISO] Extracting Fedora version from: ${this.isoPath}`)
+      this.debug.debug(`[ISO] Extracting Fedora version from: ${this.isoPath}`)
       const volIdOutput = await this.executeCommand(['isoinfo', '-d', '-i', this.isoPath as string]) as string
 
       // Match 'Volume id: ...' and extract the version number at the end
@@ -307,22 +308,22 @@ echo "=== InfiniService Installation Completed ==="
       const volIdMatch = volIdOutput.match(/Volume id:\s*(.*)/m)
       if (volIdMatch && volIdMatch[1]) {
         const volumeId = volIdMatch[1].trim()
-        this.debug.log(`[ISO] Volume ID: ${volumeId}`)
+        this.debug.debug(`[ISO] Volume ID: ${volumeId}`)
 
         // Extract version number (last number in the Volume ID)
         const versionMatch = volumeId.match(/-(\d+)$/)
         if (versionMatch && versionMatch[1]) {
           const version = versionMatch[1]
-          this.debug.log(`[ISO] Detected Fedora version: ${version}`)
+          this.debug.debug(`[ISO] Detected Fedora version: ${version}`)
           return version
         }
       }
 
-      this.debug.log('warning', '[ISO] Could not detect Fedora version, assuming latest (99)')
+      this.debug.debug('warning', '[ISO] Could not detect Fedora version, assuming latest (99)')
       return '99'
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error)
-      this.debug.log('warning', `[ISO] Failed to extract Fedora version: ${errorMsg}. Assuming latest (99)`)
+      this.debug.debug('warning', `[ISO] Failed to extract Fedora version: ${errorMsg}. Assuming latest (99)`)
       return '99'
     }
   }
@@ -334,7 +335,7 @@ echo "=== InfiniService Installation Completed ==="
    * @param grubCfgPath - Path to the grub.cfg file.
    */
   private async modifyGrubConfigForKickstart (grubCfgPath: string): Promise<void> {
-    this.debug.log(`Attempting to modify GRUB config for Kickstart: ${grubCfgPath}`)
+    this.debug.debug(`Attempting to modify GRUB config for Kickstart: ${grubCfgPath}`)
     try {
       let content = await fs.promises.readFile(grubCfgPath, 'utf-8')
 
@@ -357,7 +358,7 @@ echo "=== InfiniService Installation Completed ==="
         // - inst.ks=cdrom:/ks.cfg tells Anaconda where to find the kickstart file
         // - inst.stage2=cdrom tells Anaconda to use the CDROM as installation source
         const modifiedLine = `${indent}${command}${cleanedArgs} inst.ks=cdrom:/ks.cfg inst.stage2=cdrom`
-        this.debug.log(`[GRUB] Modifying line: ${match.trim()} -> ${modifiedLine.trim()}`)
+        this.debug.debug(`[GRUB] Modifying line: ${match.trim()} -> ${modifiedLine.trim()}`)
         modified = true
         return modifiedLine
       })
@@ -368,7 +369,7 @@ echo "=== InfiniService Installation Completed ==="
         // Replace existing timeout setting
         content = content.replace(timeoutRegex, (match) => {
           const indent = match.match(/^\s*/)?.[0] || ''
-          this.debug.log(`Changing GRUB timeout: ${match.trim()} -> ${indent}set timeout=3`)
+          this.debug.debug(`Changing GRUB timeout: ${match.trim()} -> ${indent}set timeout=3`)
           modified = true
           return `${indent}set timeout=3`
         })
@@ -387,27 +388,27 @@ echo "=== InfiniService Installation Completed ==="
 
         lines.splice(insertIndex, 0, 'set timeout=3')
         content = lines.join('\n')
-        this.debug.log(`Added GRUB timeout setting at line ${insertIndex + 1}: set timeout=3`)
+        this.debug.debug(`Added GRUB timeout setting at line ${insertIndex + 1}: set timeout=3`)
         modified = true
       }
 
       if (modified) {
         await fs.promises.writeFile(grubCfgPath, content, 'utf-8')
-        this.debug.log(`Successfully modified GRUB config: ${grubCfgPath}`)
+        this.debug.debug(`Successfully modified GRUB config: ${grubCfgPath}`)
 
         // Log modified lines for debugging
         const modifiedLines = content.split('\n').filter(line =>
           line.includes('inst.ks=cdrom:/ks.cfg') || line.includes('inst.stage2=cdrom')
         )
-        this.debug.log(`[GRUB] Modified ${modifiedLines.length} boot entries with kickstart parameters`)
+        this.debug.debug(`[GRUB] Modified ${modifiedLines.length} boot entries with kickstart parameters`)
         modifiedLines.forEach((line, idx) => {
-          this.debug.log(`[GRUB] Entry ${idx + 1}: ${line.trim()}`)
+          this.debug.debug(`[GRUB] Entry ${idx + 1}: ${line.trim()}`)
         })
       } else {
-        this.debug.log('warning', `No suitable linux/linuxefi lines found or modified in ${grubCfgPath}`)
+        this.debug.debug('warning', `No suitable linux/linuxefi lines found or modified in ${grubCfgPath}`)
       }
     } catch (error) {
-      this.debug.log('error', `Failed to modify GRUB config ${grubCfgPath}: ${error}`)
+      this.debug.error(`Failed to modify GRUB config ${grubCfgPath}: ${error}`)
       // Decide if this should be a fatal error or just a warning
       // For now, log as error but don't throw, ISO creation might still work if user manually specifies ks
     }
@@ -420,7 +421,7 @@ echo "=== InfiniService Installation Completed ==="
    * @param isolinuxCfgPath - Path to the isolinux.cfg file.
    */
   private async modifyIsolinuxConfigForKickstart (isolinuxCfgPath: string): Promise<void> {
-    this.debug.log(`[ISOLINUX] Attempting to modify isolinux config: ${isolinuxCfgPath}`)
+    this.debug.debug(`[ISOLINUX] Attempting to modify isolinux config: ${isolinuxCfgPath}`)
     try {
       let content = await fs.promises.readFile(isolinuxCfgPath, 'utf-8')
 
@@ -444,28 +445,28 @@ echo "=== InfiniService Installation Completed ==="
         // - inst.ks=cdrom:/ks.cfg tells Anaconda where to find the kickstart file
         // - inst.stage2=cdrom tells Anaconda to use the CDROM as installation source
         const modifiedLine = `${indent}${command}${cleanedArgs} inst.ks=cdrom:/ks.cfg inst.stage2=cdrom`
-        this.debug.log(`[ISOLINUX] Modifying line: ${match.trim()} -> ${modifiedLine.trim()}`)
+        this.debug.debug(`[ISOLINUX] Modifying line: ${match.trim()} -> ${modifiedLine.trim()}`)
         modified = true
         return modifiedLine
       })
 
       if (modified) {
         await fs.promises.writeFile(isolinuxCfgPath, content, 'utf-8')
-        this.debug.log(`[ISOLINUX] Successfully modified isolinux config: ${isolinuxCfgPath}`)
+        this.debug.debug(`[ISOLINUX] Successfully modified isolinux config: ${isolinuxCfgPath}`)
 
         // Log modified lines for debugging
         const modifiedLines = content.split('\n').filter(line =>
           line.includes('inst.ks=cdrom:/ks.cfg') || line.includes('inst.stage2=cdrom')
         )
-        this.debug.log(`[ISOLINUX] Modified ${modifiedLines.length} boot entries with kickstart parameters`)
+        this.debug.debug(`[ISOLINUX] Modified ${modifiedLines.length} boot entries with kickstart parameters`)
         modifiedLines.forEach((line, idx) => {
-          this.debug.log(`[ISOLINUX] Entry ${idx + 1}: ${line.trim()}`)
+          this.debug.debug(`[ISOLINUX] Entry ${idx + 1}: ${line.trim()}`)
         })
       } else {
-        this.debug.log('warning', `[ISOLINUX] No suitable append lines found or modified in ${isolinuxCfgPath}`)
+        this.debug.debug('warning', `[ISOLINUX] No suitable append lines found or modified in ${isolinuxCfgPath}`)
       }
     } catch (error) {
-      this.debug.log('error', `[ISOLINUX] Failed to modify isolinux config ${isolinuxCfgPath}: ${error}`)
+      this.debug.error(`[ISOLINUX] Failed to modify isolinux config ${isolinuxCfgPath}: ${error}`)
     }
   }
 
@@ -478,14 +479,14 @@ echo "=== InfiniService Installation Completed ==="
    */
   private async getXorrisoParamsFromISO (isoPath: string): Promise<string[]> {
     try {
-      this.debug.log(`[XORRISO] Extracting boot parameters from: ${isoPath}`)
+      this.debug.debug(`[XORRISO] Extracting boot parameters from: ${isoPath}`)
 
       // Run xorriso to get the mkisofs-compatible parameters
       const output = await this.executeCommand([
         'xorriso', '-indev', isoPath, '-report_el_torito', 'as_mkisofs'
       ])
 
-      this.debug.log(`[XORRISO] Raw report_el_torito output:\n${output}`)
+      this.debug.debug(`[XORRISO] Raw report_el_torito output:\n${output}`)
 
       // Parse the output to extract useful parameters
       // The output contains mkisofs-style arguments that we can use
@@ -508,10 +509,10 @@ echo "=== InfiniService Installation Completed ==="
         }
       }
 
-      this.debug.log(`[XORRISO] Extracted ${params.length} parameters: ${params.join(' ')}`)
+      this.debug.debug(`[XORRISO] Extracted ${params.length} parameters: ${params.join(' ')}`)
       return params
     } catch (error) {
-      this.debug.log('error', `[XORRISO] Failed to extract parameters from ISO: ${error}`)
+      this.debug.error(`[XORRISO] Failed to extract parameters from ISO: ${error}`)
       // Return empty array, caller will use default parameters
       return []
     }
@@ -571,7 +572,7 @@ echo "=== InfiniService Installation Completed ==="
       throw new Error(`Extraction directory does not exist: ${extractDir}`)
     }
 
-    this.debug.log('[ISO] Creating Kickstart configuration file...')
+    this.debug.debug('[ISO] Creating Kickstart configuration file...')
 
     // Generate the configuration
     const config = await this.generateConfig()
@@ -579,15 +580,15 @@ echo "=== InfiniService Installation Completed ==="
     // Write ks.cfg to the root of the extracted directory
     const kickstartPath = path.join(extractDir, 'ks.cfg')
     await fs.promises.writeFile(kickstartPath, config)
-    this.debug.log(`[KICKSTART] Configuration written to ${kickstartPath}`)
+    this.debug.debug(`[KICKSTART] Configuration written to ${kickstartPath}`)
 
     // Verify kickstart file was written
     const kickstartStats = await fs.promises.stat(kickstartPath)
-    this.debug.log(`[KICKSTART] File size: ${kickstartStats.size} bytes`)
+    this.debug.debug(`[KICKSTART] File size: ${kickstartStats.size} bytes`)
 
     // Log first few lines for debugging
     const kickstartPreview = config.split('\n').slice(0, 10).join('\n')
-    this.debug.log(`[KICKSTART] Preview:\n${kickstartPreview}`)
+    this.debug.debug(`[KICKSTART] Preview:\n${kickstartPreview}`)
 
     // Find and modify GRUB configurations
     // Common paths for GRUB config in Fedora/RHEL ISOs
@@ -599,14 +600,14 @@ echo "=== InfiniService Installation Completed ==="
     let grubModified = false
     for (const grubPath of potentialGrubPaths) {
       if (fs.existsSync(grubPath)) {
-        this.debug.log(`[GRUB] Modifying GRUB configuration at ${grubPath}`)
+        this.debug.debug(`[GRUB] Modifying GRUB configuration at ${grubPath}`)
         await this.modifyGrubConfigForKickstart(grubPath)
         grubModified = true
       }
     }
 
     if (!grubModified) {
-      this.debug.log('warning', '[GRUB] Could not find any GRUB configuration files at expected paths to modify for Kickstart.')
+      this.debug.debug('warning', '[GRUB] Could not find any GRUB configuration files at expected paths to modify for Kickstart.')
     }
 
     // Find and modify isolinux configuration for BIOS boot
@@ -618,45 +619,45 @@ echo "=== InfiniService Installation Completed ==="
     let isolinuxModified = false
     for (const isolinuxPath of potentialIsolinuxPaths) {
       if (fs.existsSync(isolinuxPath)) {
-        this.debug.log(`[ISOLINUX] Modifying isolinux configuration at ${isolinuxPath}`)
+        this.debug.debug(`[ISOLINUX] Modifying isolinux configuration at ${isolinuxPath}`)
         await this.modifyIsolinuxConfigForKickstart(isolinuxPath)
         isolinuxModified = true
       }
     }
 
     if (!isolinuxModified) {
-      this.debug.log('warning', '[ISOLINUX] Could not find isolinux.cfg (BIOS boot may not work)')
+      this.debug.debug('warning', '[ISOLINUX] Could not find isolinux.cfg (BIOS boot may not work)')
     }
 
     // Extract the original Volume ID from the source ISO (used for xorriso)
     let volumeId = 'INFINIBAY-FEDORA' // Default fallback
     try {
-      this.debug.log(`[ISO] Extracting Volume ID using isoinfo from: ${this.isoPath}`)
+      this.debug.debug(`[ISO] Extracting Volume ID using isoinfo from: ${this.isoPath}`)
       const volIdOutput = await this.executeCommand(['isoinfo', '-d', '-i', this.isoPath as string]) as string
 
       // Match 'Volume id: VALUE' from isoinfo output
       const match = volIdOutput.match(/^Volume id:\s*(.*)$/m)
       if (match && match[1]) {
         volumeId = match[1].trim()
-        this.debug.log(`[ISO] Extracted original volume ID: ${volumeId}`)
+        this.debug.debug(`[ISO] Extracted original volume ID: ${volumeId}`)
       } else {
-        this.debug.log('warning', `[ISO] Could not parse volume ID from isoinfo output. Using default: ${volumeId}`)
+        this.debug.debug('warning', `[ISO] Could not parse volume ID from isoinfo output. Using default: ${volumeId}`)
       }
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error)
-      this.debug.log('warning', `[ISO] Failed to extract volume ID from ${this.isoPath}: ${errorMsg}. Using default: ${volumeId}`)
+      this.debug.debug('warning', `[ISO] Failed to extract volume ID from ${this.isoPath}: ${errorMsg}. Using default: ${volumeId}`)
     }
 
-    this.debug.log('[ISO] Checking necessary files for ISO recreation...')
+    this.debug.debug('[ISO] Checking necessary files for ISO recreation...')
     // Paths derived from xorriso report for Fedora
     const biosBootImg = path.join(extractDir, 'images/eltorito.img')
     const efiBootPath = path.join(extractDir, 'EFI/BOOT')
 
     if (!fs.existsSync(biosBootImg)) {
-      this.debug.log('warning', `[ISO] BIOS boot image not found at: ${biosBootImg}`)
+      this.debug.debug('warning', `[ISO] BIOS boot image not found at: ${biosBootImg}`)
     }
     if (!fs.existsSync(efiBootPath)) {
-      this.debug.log('warning', `[ISO] EFI boot directory not found at: ${efiBootPath}`)
+      this.debug.debug('warning', `[ISO] EFI boot directory not found at: ${efiBootPath}`)
     }
 
     // Get dynamic xorriso parameters from the original ISO
@@ -666,7 +667,7 @@ echo "=== InfiniService Installation Completed ==="
 
     if (dynamicParams.length > 0) {
       // Use dynamic parameters from the original ISO
-      this.debug.log('[XORRISO] Using dynamic parameters extracted from original ISO')
+      this.debug.debug('[XORRISO] Using dynamic parameters extracted from original ISO')
 
       isoCreationCommandParts = [
         'xorriso',
@@ -683,7 +684,7 @@ echo "=== InfiniService Installation Completed ==="
       ]
     } else {
       // Fallback to default parameters if extraction failed
-      this.debug.log('[XORRISO] Using fallback parameters (extraction failed)')
+      this.debug.debug('[XORRISO] Using fallback parameters (extraction failed)')
 
       isoCreationCommandParts = [
         'xorriso',
@@ -715,27 +716,27 @@ echo "=== InfiniService Installation Completed ==="
 
     // Execute the command
     try {
-      this.debug.log(`[XORRISO] Creating Kickstart ISO with command:\n${isoCreationCommandParts.join(' ')}`)
+      this.debug.debug(`[XORRISO] Creating Kickstart ISO with command:\n${isoCreationCommandParts.join(' ')}`)
       await this.executeCommand(isoCreationCommandParts)
-      this.debug.log(`[ISO] Successfully created Kickstart ISO at ${newIsoPath}`)
+      this.debug.debug(`[ISO] Successfully created Kickstart ISO at ${newIsoPath}`)
 
       // Diagnose the generated ISO for debugging
       await this.diagnoseGeneratedISO(newIsoPath)
 
       // Clean up the extracted directory
-      this.debug.log(`[ISO] Removing temporary directory: ${extractDir}`)
+      this.debug.debug(`[ISO] Removing temporary directory: ${extractDir}`)
       await this.executeCommand(['rm', '-rf', extractDir])
-      this.debug.log(`[ISO] Removed temporary directory ${extractDir}`)
+      this.debug.debug(`[ISO] Removed temporary directory ${extractDir}`)
     } catch (error) {
-      this.debug.log('error', `[ISO] Failed to create Kickstart ISO: ${error}`)
+      this.debug.error(`[ISO] Failed to create Kickstart ISO: ${error}`)
       // Attempt cleanup even on failure
       try {
         if (fs.existsSync(extractDir)) {
-          this.debug.log(`[ISO] Attempting cleanup of failed build directory: ${extractDir}`)
+          this.debug.debug(`[ISO] Attempting cleanup of failed build directory: ${extractDir}`)
           await this.executeCommand(['rm', '-rf', extractDir])
         }
       } catch (cleanupError) {
-        this.debug.log('error', `[ISO] Failed to cleanup temporary directory ${extractDir} after error: ${cleanupError}`)
+        this.debug.error(`[ISO] Failed to cleanup temporary directory ${extractDir} after error: ${cleanupError}`)
       }
       throw error
     }
@@ -749,44 +750,44 @@ echo "=== InfiniService Installation Completed ==="
    */
   private async diagnoseGeneratedISO (isoPath: string): Promise<void> {
     try {
-      this.debug.log(`[DIAGNOSE] Analyzing generated ISO: ${isoPath}`)
+      this.debug.debug(`[DIAGNOSE] Analyzing generated ISO: ${isoPath}`)
 
       // Check ISO exists and get size
       const stats = await fs.promises.stat(isoPath)
-      this.debug.log(`[DIAGNOSE] ISO size: ${(stats.size / (1024 * 1024)).toFixed(2)} MB`)
+      this.debug.debug(`[DIAGNOSE] ISO size: ${(stats.size / (1024 * 1024)).toFixed(2)} MB`)
 
       // List root files to verify ks.cfg is present
       try {
         const listOutput = await this.executeCommand(['isoinfo', '-l', '-i', isoPath])
         const hasKickstart = listOutput.includes('ks.cfg') || listOutput.includes('KS.CFG')
-        this.debug.log(`[DIAGNOSE] ks.cfg present in ISO root: ${hasKickstart}`)
+        this.debug.debug(`[DIAGNOSE] ks.cfg present in ISO root: ${hasKickstart}`)
 
         if (!hasKickstart) {
-          this.debug.log('warning', '[DIAGNOSE] WARNING: ks.cfg not found in ISO root! Kickstart may fail.')
+          this.debug.debug('warning', '[DIAGNOSE] WARNING: ks.cfg not found in ISO root! Kickstart may fail.')
         }
       } catch (listError) {
-        this.debug.log('warning', `[DIAGNOSE] Could not list ISO contents: ${listError}`)
+        this.debug.debug('warning', `[DIAGNOSE] Could not list ISO contents: ${listError}`)
       }
 
       // Get ISO info for Volume ID and boot flags
       try {
         const infoOutput = await this.executeCommand(['isoinfo', '-d', '-i', isoPath])
-        this.debug.log(`[DIAGNOSE] ISO info:\n${infoOutput}`)
+        this.debug.debug(`[DIAGNOSE] ISO info:\n${infoOutput}`)
 
         // Extract Volume ID for verification
         const volIdMatch = infoOutput.match(/^Volume id:\s*(.*)$/m)
         if (volIdMatch && volIdMatch[1]) {
-          this.debug.log(`[DIAGNOSE] Generated ISO Volume ID: ${volIdMatch[1].trim()}`)
+          this.debug.debug(`[DIAGNOSE] Generated ISO Volume ID: ${volIdMatch[1].trim()}`)
         }
 
         // Check for bootable flag
         const isBootable = infoOutput.includes('Bootable') || infoOutput.includes('El Torito')
-        this.debug.log(`[DIAGNOSE] ISO appears bootable: ${isBootable}`)
+        this.debug.debug(`[DIAGNOSE] ISO appears bootable: ${isBootable}`)
       } catch (infoError) {
-        this.debug.log('warning', `[DIAGNOSE] Could not get ISO info: ${infoError}`)
+        this.debug.debug('warning', `[DIAGNOSE] Could not get ISO info: ${infoError}`)
       }
     } catch (error) {
-      this.debug.log('warning', `[DIAGNOSE] ISO diagnosis failed: ${error}`)
+      this.debug.debug('warning', `[DIAGNOSE] ISO diagnosis failed: ${error}`)
       // Don't throw - diagnosis is optional and shouldn't block ISO creation
     }
   }
@@ -836,7 +837,7 @@ echo "=== InfiniService Installation Completed ==="
         return { valid: false, errors }
       }
 
-      this.debug.log('Kickstart configuration validation passed')
+      this.debug.debug('Kickstart configuration validation passed')
       return { valid: true, errors: [] }
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error)

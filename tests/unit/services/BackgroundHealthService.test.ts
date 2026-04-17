@@ -4,7 +4,7 @@ import { mockPrisma } from '../../setup/jest.setup'
 import { RUNNING_STATUS, STOPPED_STATUS, PAUSED_STATUS } from '../../../app/constants/machine-status'
 
 // Mock VMRecommendationService before importing BackgroundHealthService
-jest.mock('@services/health/VMRecommendationService', () => {
+jest.mock('@services/VMRecommendationService', () => {
   return {
     VMRecommendationService: jest.fn().mockImplementation(() => {
       return {
@@ -39,12 +39,12 @@ jest.mock('cron', () => ({
 }))
 
 // Unmock EventManager so we can properly mock it ourselves
-jest.unmock('@services/events/EventManager')
+jest.unmock('@services/EventManager')
 
-import { BackgroundHealthService } from '@services/health/BackgroundHealthService'
-import { EventManager } from '@services/events/EventManager'
-import { VMHealthQueueManager } from '@services/health/VMHealthQueueManager'
-import { BackgroundTaskService } from '@services/maintenance/BackgroundTaskService'
+import { BackgroundHealthService } from '@services/BackgroundHealthService'
+import { EventManager } from '@services/EventManager'
+import { VMHealthQueueManager } from '@services/VMHealthQueueManager'
+import { BackgroundTaskService } from '@services/BackgroundTaskService'
 
 describe('BackgroundHealthService', () => {
   let service: BackgroundHealthService

@@ -1,7 +1,9 @@
+import logger from '@main/logger'
 import { Server as SocketIOServer } from 'socket.io'
 import { Server as HTTPServer } from 'http'
 import jwt from 'jsonwebtoken'
 import { PrismaClient } from '@prisma/client'
+import { getJWTSecret } from '../utils/jwtAuth'
 
 // Interface for authenticated socket
 export interface AuthenticatedSocket {
@@ -42,24 +44,24 @@ export class SocketService {
     this.setupAuthentication()
     this.setupConnectionHandlers()
 
-    console.log('🔌 Socket.io service initialized')
-    console.log('🔌 Socket.io CORS origin:', process.env.FRONTEND_URL || 'http://localhost:3000')
+    logger.info('🔌 Socket.io service initialized')
+    logger.info('🔌 Socket.io CORS origin:', process.env.FRONTEND_URL || 'http://localhost:3000')
   }
 
   // Setup JWT authentication middleware
   private setupAuthentication (): void {
     this.io?.use(async (socket: any, next) => {
-      console.log('🔐 Socket.io authentication attempt from:', socket.handshake.address)
+      logger.info('🔐 Socket.io authentication attempt from:', socket.handshake.address)
       try {
         const token = socket.handshake.auth.token || socket.handshake.headers.authorization
 
         if (!token) {
-          console.log('🔐 No token provided in Socket.io handshake')
+          logger.info('🔐 No token provided in Socket.io handshake')
           return next(new Error('Authentication token required'))
         }
 
-        // Verify JWT token
-        const decoded = jwt.verify(token, process.env.TOKENKEY || 'secret') as any
+        // Verify JWT token (throws in production if TOKENKEY missing)
+        const decoded = jwt.verify(token, getJWTSecret()) as jwt.JwtPayload
 
         if (!decoded.userId) {
           return next(new Error('Invalid token payload'))
@@ -83,17 +85,17 @@ export class SocketService {
 
         // Generate a namespace for this user session
         // Since namespace field doesn't exist in the database, we generate it per session
-        const userNamespace = this.generateUserNamespace((user as any).id)
+        const userNamespace = this.generateUserNamespace(user.id)
 
         // Attach user info to socket
-        socket.userId = (user as any).id
-        socket.userRole = (user as any).role
+        socket.userId = user.id
+        socket.userRole = user.role
         socket.userNamespace = userNamespace
         socket.user = user
 
         next()
       } catch (error) {
-        console.error('🔐 Socket authentication error:', error)
+        logger.error('🔐 Socket authentication error:', error)
         next(new Error('Authentication failed'))
       }
     })
@@ -104,7 +106,7 @@ export class SocketService {
     this.io?.on('connection', (socket: any) => {
       const authSocket = socket as AuthenticatedSocket
 
-      console.log(`🔌 User connected: ${authSocket.user.email} (${authSocket.id})`)
+      logger.info(`🔌 User connected: ${authSocket.user.email} (${authSocket.id})`)
 
       // Store connected user
       this.connectedUsers.set(authSocket.userId, authSocket)
@@ -119,7 +121,7 @@ export class SocketService {
 
       // Handle disconnection
       socket.on('disconnect', (reason: string) => {
-        console.log(`🔌 User disconnected: ${authSocket.user.email} (${reason})`)
+        logger.info(`🔌 User disconnected: ${authSocket.user.email} (${reason})`)
         this.connectedUsers.delete(authSocket.userId)
       })
 
@@ -143,7 +145,7 @@ export class SocketService {
   // Send event to specific user namespace
   sendToUserNamespace (namespace: string, resource: string, action: string, payload: any): void {
     if (!this.io) {
-      console.warn('⚠️ Socket.io not initialized, cannot send event')
+      logger.warn('⚠️ Socket.io not initialized, cannot send event')
       return
     }
 
@@ -156,7 +158,7 @@ export class SocketService {
       timestamp: new Date().toISOString()
     })
 
-    console.log(`📡 Sent event ${eventName} to namespace ${namespace}`)
+    logger.info(`📡 Sent event ${eventName} to namespace ${namespace}`)
   }
 
   // Send event to specific user by userId
@@ -187,18 +189,18 @@ export class SocketService {
       timestamp: new Date().toISOString()
     })
 
-    console.log(`👑 Sent admin event ${eventName}`)
+    logger.info(`👑 Sent admin event ${eventName}`)
   }
 
   // Emit event to a specific room
   emitToRoom (room: string, eventName: string, payload: any): void {
     if (!this.io) {
-      console.warn(`⚠️ Cannot emit to room ${room}: Socket.io not initialized`)
+      logger.warn(`⚠️ Cannot emit to room ${room}: Socket.io not initialized`)
       return
     }
 
     this.io.to(room).emit(eventName, payload)
-    console.log(`📡 Sent event ${eventName} to room ${room}`)
+    logger.info(`📡 Sent event ${eventName} to room ${room}`)
   }
 
   // Get connection statistics

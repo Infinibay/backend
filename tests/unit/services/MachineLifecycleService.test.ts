@@ -1,11 +1,11 @@
 import 'reflect-metadata'
 import { describe, it, expect, beforeEach, jest } from '@jest/globals'
-import { MachineLifecycleService } from '../../../app/services/vm/machineLifecycleService'
+import { MachineLifecycleService } from '../../../app/services/machineLifecycleService'
 import { mockPrisma } from '../../setup/jest.setup'
 import { UserInputError, ApolloError } from 'apollo-server-express'
 import { MachineCleanupServiceV2 } from '../../../app/services/cleanup/machineCleanupServiceV2'
 import { HardwareUpdateService } from '../../../app/services/vm/hardwareUpdateService'
-import { getEventManager } from '../../../app/services/events/EventManager'
+import { getEventManager } from '../../../app/services/EventManager'
 import si from 'systeminformation'
 import {
   createMockMachine,
@@ -19,8 +19,8 @@ import { User } from '@prisma/client'
 // Mock dependencies
 jest.mock('../../../app/services/cleanup/machineCleanupServiceV2')
 jest.mock('../../../app/services/vm/hardwareUpdateService')
-jest.mock('../../../app/services/vm/CreateMachineServiceV2')
-jest.mock('../../../app/services/events/EventManager', () => ({
+jest.mock('../../../app/services/CreateMachineServiceV2')
+jest.mock('../../../app/services/EventManager', () => ({
   getEventManager: jest.fn()
 }))
 jest.mock('systeminformation')

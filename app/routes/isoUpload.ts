@@ -1,4 +1,5 @@
 // External Libraries
+import logger from '@main/logger'
 import express from 'express'
 import path from 'node:path'
 import cors from 'cors'
@@ -76,7 +77,7 @@ async function validateFedoraNetinstallISO (isoPath: string): Promise<{ valid: b
     })
 
     const volumeId = stdout.trim().replace(/^Volume id:\s*/i, '')
-    console.log(`Fedora ISO Volume ID: ${volumeId}`)
+    logger.info(`Fedora ISO Volume ID: ${volumeId}`)
 
     // Check if this is a Live ISO (Live ISOs don't support kickstart)
     if (volumeId.toLowerCase().includes('live')) {
@@ -92,7 +93,7 @@ async function validateFedoraNetinstallISO (isoPath: string): Promise<{ valid: b
     return { valid: true }
   } catch (error) {
     // If isoinfo fails, we can't validate - allow it but log warning
-    console.warn('Could not validate Fedora ISO type via isoinfo:', error)
+    logger.warn('Could not validate Fedora ISO type via isoinfo:', error)
     return { valid: true } // Allow for backwards compatibility
   }
 }
@@ -119,7 +120,7 @@ async function validateUbuntuDesktopISO (isoPath: string): Promise<{ valid: bool
     } catch (extractError) {
       // If casper/install-sources.yaml doesn't exist, it's likely not a valid Ubuntu ISO
       // or it's an older format - we'll allow it but log a warning
-      console.warn('Could not extract install-sources.yaml from ISO - may be an older Ubuntu format')
+      logger.warn('Could not extract install-sources.yaml from ISO - may be an older Ubuntu format')
       return { valid: true } // Allow for backwards compatibility
     }
 
@@ -130,7 +131,7 @@ async function validateUbuntuDesktopISO (isoPath: string): Promise<{ valid: bool
       await fs.access(installSourcesPath)
     } catch {
       // File wasn't extracted - likely not a standard Ubuntu ISO
-      console.warn('install-sources.yaml not found in ISO')
+      logger.warn('install-sources.yaml not found in ISO')
       return { valid: true } // Allow for backwards compatibility
     }
 
@@ -138,7 +139,7 @@ async function validateUbuntuDesktopISO (isoPath: string): Promise<{ valid: bool
     const sources = yaml.load(content) as Array<{ id: string; [key: string]: unknown }>
 
     if (!Array.isArray(sources)) {
-      console.warn('install-sources.yaml has unexpected format')
+      logger.warn('install-sources.yaml has unexpected format')
       return { valid: true } // Allow for backwards compatibility
     }
 
@@ -163,7 +164,7 @@ async function validateUbuntuDesktopISO (isoPath: string): Promise<{ valid: bool
 
     if (!hasDesktopSource && !hasServerSource) {
       // Unknown ISO type - allow it but log
-      console.warn('ISO does not contain recognized ubuntu-desktop or ubuntu-server sources')
+      logger.warn('ISO does not contain recognized ubuntu-desktop or ubuntu-server sources')
       return { valid: true }
     }
 
@@ -184,29 +185,73 @@ const router = express.Router()
 // Configure multer for file upload
 const storage = multer.diskStorage({
   destination: async (req, file, cb) => {
-    const baseDir = process.env.INFINIBAY_BASE_DIR
-    if (!baseDir) {
-      return cb(new Error('INFINIBAY_BASE_DIR not configured'), '')
+    try {
+      const baseDir = process.env.INFINIBAY_BASE_DIR
+      if (!baseDir) {
+        return cb(new Error('INFINIBAY_BASE_DIR not configured'), '/tmp')
+      }
+      const tempDir = path.join(baseDir, 'temp')
+      await ensureDirectoryExists(tempDir)
+      cb(null, tempDir)
+    } catch (error) {
+      cb(error instanceof Error ? error : new Error('Failed to create temp directory'), '/tmp')
     }
-    const tempDir = path.join(baseDir, 'temp')
-    await ensureDirectoryExists(tempDir)
-    cb(null, tempDir)
   },
   filename: (req, file, cb) => {
-    cb(null, `${Date.now()}-${file.originalname}`)
+    // Use crypto-random suffix to avoid collisions
+    const suffix = Math.random().toString(36).substring(2, 10)
+    cb(null, `${Date.now()}-${suffix}-${file.originalname}`)
   }
 })
+
+// Allowed MIME types for ISO files
+const ALLOWED_MIME_TYPES = [
+  'application/x-iso9660-image',
+  'application/x-cd-image',
+  'application/x-dvd-image',
+  'application/iso',
+  'application/octet-stream', // Many browsers send this for .iso files
+  'binary/octet-stream'
+]
 
 const upload = multer({
   storage,
   limits: {
     fileSize: 1024 * 1024 * 1024 * 100 // 100GB
+  },
+  fileFilter: (_req, file, cb) => {
+    // Validate file extension
+    const ext = file.originalname.toLowerCase()
+    if (!ext.endsWith('.iso')) {
+      return cb(new Error('Invalid file type. Only ISO files are allowed'))
+    }
+
+    // Validate MIME type if provided (some clients don't send a useful MIME type)
+    if (file.mimetype && file.mimetype !== 'application/octet-stream') {
+      if (!ALLOWED_MIME_TYPES.includes(file.mimetype)) {
+        return cb(new Error(`Invalid MIME type: ${file.mimetype}. Only ISO files are allowed`))
+      }
+    }
+
+    cb(null, true)
   }
 })
 
+/**
+ * Safely delete a temporary file, ignoring errors if file doesn't exist
+ */
+async function cleanupTempFile (filePath: string | undefined): Promise<void> {
+  if (!filePath) return
+  try {
+    await fs.unlink(filePath)
+  } catch {
+    // File may already be deleted or never existed — ignore
+  }
+}
+
 router.post('/',
   cors({
-    origin: process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : '*',
+    origin: process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : 'http://localhost:3000',
     methods: ['POST'],
     allowedHeaders: ['Content-Type', 'Authorization'],
     maxAge: 3600
@@ -220,6 +265,8 @@ router.post('/',
   adminAuthMiddleware,
   upload.single('file'),
   async (req, res) => {
+    const tempFilePath = req.file?.path
+
     try {
       if (!req.file) {
         throw new Error('No file uploaded')
@@ -236,8 +283,7 @@ router.post('/',
       if (uploadMetadata.os === 'ubuntu') {
         const validation = await validateUbuntuDesktopISO(req.file.path)
         if (!validation.valid) {
-          // Delete the uploaded temp file
-          await fs.unlink(req.file.path).catch(() => {})
+          await cleanupTempFile(tempFilePath)
           throw new Error(validation.error || 'Invalid Ubuntu ISO')
         }
       }
@@ -246,8 +292,7 @@ router.post('/',
       if (uploadMetadata.os === 'fedora') {
         const validation = await validateFedoraNetinstallISO(req.file.path)
         if (!validation.valid) {
-          // Delete the uploaded temp file
-          await fs.unlink(req.file.path).catch(() => {})
+          await cleanupTempFile(tempFilePath)
           throw new Error(validation.error || 'Invalid Fedora ISO')
         }
       }
@@ -281,6 +326,9 @@ router.post('/',
         isoId: iso.id
       })
     } catch (error) {
+      // Clean up temp file on any error (if it wasn't already moved)
+      await cleanupTempFile(tempFilePath)
+
       if (error instanceof Error) {
         if (error.message.includes('limit')) {
           res.status(413).json({ error: 'File size exceeds limit (100GB)' })

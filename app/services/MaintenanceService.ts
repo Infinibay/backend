@@ -1,3 +1,4 @@
+import logger from '@main/logger'
 import { PrismaClient, MaintenanceTaskType, MaintenanceStatus, MaintenanceTrigger, Prisma } from '@prisma/client'
 import { VirtioSocketWatcherService, getVirtioSocketWatcherService } from './VirtioSocketWatcherService'
 import { CronParser } from '@utils/cronParser'
@@ -46,7 +47,7 @@ export class MaintenanceService {
    * Schedule a new maintenance task
    */
   async scheduleTask (config: MaintenanceTaskConfig) {
-    console.log(`Scheduling maintenance task: ${config.taskType} for VM ${config.vmId}`)
+    logger.info(`Scheduling maintenance task: ${config.taskType} for VM ${config.vmId}`)
 
     // Validate the VM exists
     const machine = await this.prisma.machine.findUnique({
@@ -88,7 +89,7 @@ export class MaintenanceService {
       }
     })
 
-    console.log(`Maintenance task scheduled: ${task.id}`)
+    logger.info(`Maintenance task scheduled: ${task.id}`)
     return task
   }
 
@@ -100,7 +101,7 @@ export class MaintenanceService {
     triggeredBy: MaintenanceTrigger = MaintenanceTrigger.MANUAL,
     executedByUserId?: string
   ): Promise<MaintenanceExecutionResult> {
-    console.log(`Executing maintenance task: ${taskId} (${triggeredBy})`)
+    logger.info(`Executing maintenance task: ${taskId} (${triggeredBy})`)
 
     // Use database transaction to atomically claim the task
     const task = await this.prisma.$transaction(async (tx) => {
@@ -224,11 +225,11 @@ export class MaintenanceService {
           data: { executionStatus: 'IDLE' }
         })
       } catch (lockReleaseError) {
-        console.error(`Failed to release lock for task ${taskId}:`, lockReleaseError)
+        logger.error(`Failed to release lock for task ${taskId}:`, lockReleaseError)
       }
     }
 
-    console.log(`Maintenance task completed: ${taskId} (${result.success ? 'SUCCESS' : 'FAILED'})`)
+    logger.info(`Maintenance task completed: ${taskId} (${result.success ? 'SUCCESS' : 'FAILED'})`)
     return { ...result, duration }
   }
 
@@ -241,7 +242,7 @@ export class MaintenanceService {
     parameters: Record<string, unknown>,
     userId: string
   ): Promise<MaintenanceExecutionResult> {
-    console.log(`Executing immediate maintenance: ${taskType} for VM ${vmId}`)
+    logger.info(`Executing immediate maintenance: ${taskType} for VM ${vmId}`)
 
     // Validate the VM exists
     const machine = await this.prisma.machine.findUnique({
@@ -298,7 +299,7 @@ export class MaintenanceService {
       }
     })
 
-    console.log(`Immediate maintenance completed: ${taskType} (${result.success ? 'SUCCESS' : 'FAILED'})`)
+    logger.info(`Immediate maintenance completed: ${taskType} (${result.success ? 'SUCCESS' : 'FAILED'})`)
     return { ...result, duration }
   }
 
@@ -605,7 +606,7 @@ export class MaintenanceService {
    * Update task configuration
    */
   async updateTask (taskId: string, updates: Partial<MaintenanceTaskConfig>) {
-    console.log(`Updating maintenance task: ${taskId}`)
+    logger.info(`Updating maintenance task: ${taskId}`)
 
     const task = await this.prisma.maintenanceTask.findUnique({
       where: { id: taskId }
@@ -653,7 +654,7 @@ export class MaintenanceService {
    * Delete a maintenance task
    */
   async deleteTask (taskId: string) {
-    console.log(`Deleting maintenance task: ${taskId}`)
+    logger.info(`Deleting maintenance task: ${taskId}`)
 
     const task = await this.prisma.maintenanceTask.findUnique({
       where: { id: taskId }

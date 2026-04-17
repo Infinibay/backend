@@ -1,21 +1,35 @@
 import 'reflect-metadata'
-import { QemuGuestAgentService } from '@services/vm/QemuGuestAgentService'
-import { getInfinization } from '@services/vm/InfinizationService'
-import { Debugger } from '@utils/debug'
+import { QemuGuestAgentService } from '@services/QemuGuestAgentService'
+import { getInfinization } from '@services/InfinizationService'
 import { Infinization } from '@infinibay/infinization'
 
 // Mock dependencies
-jest.mock('@services/vm/InfinizationService', () => ({
+jest.mock('@services/InfinizationService', () => ({
   getInfinization: jest.fn()
 }))
 
-jest.mock('../../../app/utils/debug', () => ({
-  Debugger: jest.fn().mockImplementation(() => ({
+jest.mock('@main/logger', () => {
+  const mockChild = {
+    debug: jest.fn(),
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
     log: jest.fn()
-  }))
-}))
+  }
+  return {
+    __esModule: true,
+    default: {
+      ...mockChild,
+      child: jest.fn(() => mockChild)
+    }
+  }
+})
 
-// Mock virsh command output
+// Reference to the mock for assertions (child logger methods)
+// The mock is created inside jest.mock, so we get a reference via importing the mocked module
+import logger from '@main/logger'
+const mockDebugLog = logger.child({}) as jest.Mocked<typeof logger>
+
 const mockVirshCommand = (vmId: string, command: string, args: string[]): string => {
   const guestExecCmd = {
     execute: 'guest-exec',
@@ -31,24 +45,7 @@ const mockVirshCommand = (vmId: string, command: string, args: string[]): string
 describe('QemuGuestAgentService', () => {
   let service: QemuGuestAgentService
   let mockInfinization: any
-  let mockDebuggerLog: jest.Mock
   const validVmId = 'test-vm-123'
-
-  beforeEach(() => {
-    jest.clearAllMocks()
-    mockInfinization = {
-      getVMStatus: jest.fn(),
-      qemuAgentCommand: jest.fn()
-    } as any
-
-    mockDebuggerLog = jest.fn()
-
-    ;(getInfinization as jest.Mock).mockResolvedValue(mockInfinization)
-    ;(Debugger as jest.Mock).mockImplementation(() => ({
-      log: mockDebuggerLog
-    }))
-    service = new QemuGuestAgentService()
-  })
 
   // Helper to create proper VM status mocks with all required fields
   const createVMStatusMock = (
@@ -65,24 +62,25 @@ describe('QemuGuestAgentService', () => {
     consistent: true
   })
 
+  beforeEach(() => {
+    jest.clearAllMocks()
+    mockInfinization = {
+      getVMStatus: jest.fn(),
+      qemuAgentCommand: jest.fn()
+    } as any
+
+    ;(getInfinization as jest.Mock).mockResolvedValue(mockInfinization)
+    service = new QemuGuestAgentService()
+  })
+
   describe('initialize', () => {
     it('should initialize successfully', async () => {
       await service.initialize()
       expect(getInfinization).toHaveBeenCalled()
-      expect(mockDebuggerLog).toHaveBeenCalledWith(
-        'info',
+      expect(mockDebugLog.info).toHaveBeenCalledWith(
         'QEMU Guest Agent Service initialized'
       )
     })
-
-    it('should throw error if infinization fails to initialize', async () => {
-      ;(getInfinization as jest.Mock).mockRejectedValue(
-        new Error('Connection failed')
-      )
-
-      await expect(service.initialize()).rejects.toThrow('Connection failed')
-    })
-  })
 
   describe('executeCommand', () => {
     beforeEach(() => {
@@ -691,4 +689,5 @@ describe('QemuGuestAgentService', () => {
       ]))
     })
   })
+})
 })

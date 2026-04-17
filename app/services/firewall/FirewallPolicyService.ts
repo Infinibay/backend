@@ -1,10 +1,9 @@
 import { FirewallPolicy, PrismaClient, RuleAction, RuleDirection, RuleSetType } from '@prisma/client'
 
-import { Debugger } from '@utils/debug'
-
+import logger from '@main/logger'
 import { CreateRuleData, FirewallRuleService } from './FirewallRuleService'
 
-const debug = new Debugger('infinibay:service:firewall:policy')
+const debug = logger.child({ module: 'infinibay:service:firewall:policy' })
 
 /**
  * Extended CreateRuleData that includes the isSystemGenerated flag.
@@ -159,11 +158,11 @@ export class FirewallPolicyService {
       case 'block_all':
         // No auto-generated rules - complete isolation
         // User must manually configure any allowed traffic
-        debug.log('info', 'BLOCK_ALL with block_all preset: No auto-generated rules (complete isolation)')
+        debug.info('BLOCK_ALL with block_all preset: No auto-generated rules (complete isolation)')
         break
 
       default:
-        debug.log('warn', `Unknown BLOCK_ALL config: ${defaultConfig}, defaulting to allow_outbound`)
+        debug.warn(`Unknown BLOCK_ALL config: ${defaultConfig}, defaulting to allow_outbound`)
         rules.push({
           name: 'Allow All Outbound (System)',
           description: 'Allow all outbound connections',
@@ -322,11 +321,11 @@ export class FirewallPolicyService {
 
       case 'none':
         // No restrictions - full open access
-        debug.log('info', 'ALLOW_ALL with none preset: No auto-generated blocking rules')
+        debug.info('ALLOW_ALL with none preset: No auto-generated blocking rules')
         break
 
       default:
-        debug.log('warn', `Unknown ALLOW_ALL config: ${defaultConfig}, defaulting to none`)
+        debug.warn(`Unknown ALLOW_ALL config: ${defaultConfig}, defaulting to none`)
     }
 
     return rules
@@ -345,22 +344,22 @@ export class FirewallPolicyService {
     policy: FirewallPolicy,
     defaultConfig: string
   ): Promise<void> {
-    debug.log('info', `Applying policy ${policy}/${defaultConfig} to rule set ${ruleSetId}`)
+    debug.info(`Applying policy ${policy}/${defaultConfig} to rule set ${ruleSetId}`)
 
     // 1. Delete existing system-generated rules
     const deletedCount = await this.ruleService.deleteSystemGeneratedRules(ruleSetId)
-    debug.log('info', `Deleted ${deletedCount} existing system-generated rules`)
+    debug.info(`Deleted ${deletedCount} existing system-generated rules`)
 
     // 2. Generate new rules based on policy
     const newRules = this.generateDefaultRules(policy, defaultConfig)
-    debug.log('info', `Generated ${newRules.length} new rules for policy ${policy}/${defaultConfig}`)
+    debug.info(`Generated ${newRules.length} new rules for policy ${policy}/${defaultConfig}`)
 
     // 3. Create the new rules
     for (const ruleData of newRules) {
       await this.ruleService.createRule(ruleSetId, ruleData)
     }
 
-    debug.log('info', `Successfully applied ${newRules.length} rules to rule set ${ruleSetId}`)
+    debug.info(`Successfully applied ${newRules.length} rules to rule set ${ruleSetId}`)
   }
 
   /**
@@ -404,7 +403,7 @@ export class FirewallPolicyService {
         data: { firewallRuleSetId: ruleSetId }
       })
 
-      debug.log('info', `Created new rule set ${ruleSetId} for department ${departmentId}`)
+      debug.info(`Created new rule set ${ruleSetId} for department ${departmentId}`)
     }
 
     // Apply the policy

@@ -8,9 +8,8 @@ import {
   type NftablesError,
   VM_CHAIN_PREFIX
 } from '@infinibay/infinization'
-import { Debugger } from '@utils/debug'
-
-const debug = new Debugger('service:firewall:infinization')
+import logger from '@main/logger'
+const debug = logger.child({ module: 'service:firewall:infinization' })
 
 /**
  * Service that adapts infinization's NftablesService for use in the backend.
@@ -47,21 +46,21 @@ export class InfinizationFirewallService {
    * @throws Error if initialization fails
    */
   async initialize (): Promise<void> {
-    debug.log('Initializing InfinizationFirewallService')
+    debug.debug('Initializing InfinizationFirewallService')
 
     try {
       await this.nftablesService.initialize()
-      debug.log('info', 'InfinizationFirewallService initialized successfully')
+      debug.info('InfinizationFirewallService initialized successfully')
     } catch (error) {
       const nftError = error as NftablesError | Error | unknown
       const message = `Failed to initialize InfinizationFirewallService: ${nftError instanceof Error ? nftError.message : String(nftError)}`
-      debug.log('error', message)
+      debug.error(message)
 
       // Log structured error details if available
       if (this.isNftablesError(nftError)) {
-        debug.log('error', `NftablesError code: ${nftError.code}`)
+        debug.error(`NftablesError code: ${nftError.code}`)
         if (nftError.context) {
-          debug.log('error', `Context: ${JSON.stringify(nftError.context)}`)
+          debug.error(`Context: ${JSON.stringify(nftError.context)}`)
         }
       }
 
@@ -91,8 +90,8 @@ export class InfinizationFirewallService {
 
     const tapDeviceName = await this.getTapDeviceName(vmId)
 
-    debug.log(`Applying firewall rules for VM ${vmId} (TAP: ${tapDeviceName})`)
-    debug.log(`Department rules: ${departmentRules.length}, VM rules: ${vmRules.length}`)
+    debug.debug(`Applying firewall rules for VM ${vmId} (TAP: ${tapDeviceName})`)
+    debug.debug(`Department rules: ${departmentRules.length}, VM rules: ${vmRules.length}`)
 
     try {
       const result = await this.nftablesService.applyRules(
@@ -102,11 +101,11 @@ export class InfinizationFirewallService {
         vmRules
       )
 
-      debug.log('info', `Applied ${result.appliedRules}/${result.totalRules} rules to VM ${vmId}`)
+      debug.info(`Applied ${result.appliedRules}/${result.totalRules} rules to VM ${vmId}`)
 
       if (result.failures.length > 0) {
         for (const failure of result.failures) {
-          debug.log('warn', `Failed to apply rule ${failure.ruleName}: ${failure.error}`)
+          debug.warn(`Failed to apply rule ${failure.ruleName}: ${failure.error}`)
         }
       }
 
@@ -114,13 +113,13 @@ export class InfinizationFirewallService {
     } catch (error) {
       const nftError = error as NftablesError | Error | unknown
       const message = `Failed to apply VM rules for ${vmId} (TAP: ${tapDeviceName}): ${nftError instanceof Error ? nftError.message : String(nftError)}`
-      debug.log('error', message)
+      debug.error(message)
 
       // Log structured error details if available
       if (this.isNftablesError(nftError)) {
-        debug.log('error', `NftablesError code: ${nftError.code}`)
+        debug.error(`NftablesError code: ${nftError.code}`)
         if (nftError.context) {
-          debug.log('error', `Context: ${JSON.stringify(nftError.context)}`)
+          debug.error(`Context: ${JSON.stringify(nftError.context)}`)
         }
       }
 
@@ -155,7 +154,7 @@ export class InfinizationFirewallService {
       }
     })
 
-    debug.log(`Applying department rules to ${machines.length} VMs in department ${departmentId}`)
+    debug.debug(`Applying department rules to ${machines.length} VMs in department ${departmentId}`)
 
     let vmsUpdated = 0
     const errors: string[] = []
@@ -164,7 +163,7 @@ export class InfinizationFirewallService {
       // Skip VMs without TAP device configured
       if (!machine.configuration?.tapDeviceName) {
         const errorMsg = `VM ${machine.id} (${machine.name}) has no TAP device configured, skipping`
-        debug.log('warn', errorMsg)
+        debug.warn(errorMsg)
         errors.push(errorMsg)
         continue
       }
@@ -187,10 +186,10 @@ export class InfinizationFirewallService {
 
         // Log and track partial failures
         if (result.failedRules > 0) {
-          debug.log('warn', `VM ${machine.id} (${machine.name}): ${result.failedRules}/${result.totalRules} rules failed to apply`)
+          debug.warn(`VM ${machine.id} (${machine.name}): ${result.failedRules}/${result.totalRules} rules failed to apply`)
 
           for (const failure of result.failures) {
-            debug.log('warn', `  Rule "${failure.ruleName}": ${failure.error}`)
+            debug.warn(`  Rule "${failure.ruleName}": ${failure.error}`)
           }
 
           // Add summarized message to errors for caller visibility
@@ -199,15 +198,15 @@ export class InfinizationFirewallService {
       } catch (error) {
         // Hard failure - the entire operation for this VM failed
         const errorMsg = `Failed to apply rules to VM ${machine.id} (${machine.name}): ${error instanceof Error ? error.message : String(error)}`
-        debug.log('error', errorMsg)
+        debug.error(errorMsg)
         errors.push(errorMsg)
       }
     }
 
-    debug.log('info', `Department rules applied to ${vmsUpdated}/${machines.length} VMs`)
+    debug.info(`Department rules applied to ${vmsUpdated}/${machines.length} VMs`)
 
     if (errors.length > 0) {
-      debug.log('warn', `${errors.length} VMs failed to update`)
+      debug.warn(`${errors.length} VMs failed to update`)
     }
 
     return { totalVms: machines.length, vmsUpdated, errors }
@@ -228,11 +227,11 @@ export class InfinizationFirewallService {
       throw new Error('VM ID is required')
     }
 
-    debug.log(`Removing firewall for VM ${vmId}`)
+    debug.debug(`Removing firewall for VM ${vmId}`)
 
     await this.nftablesService.removeVMChain(vmId)
 
-    debug.log('info', `Firewall removed for VM ${vmId}`)
+    debug.info(`Firewall removed for VM ${vmId}`)
   }
 
   /**
@@ -242,7 +241,7 @@ export class InfinizationFirewallService {
    * @returns Array of objects containing chain name and extracted VM ID
    */
   async listVMChains (): Promise<Array<{ chainName: string; vmId: string }>> {
-    debug.log('Listing VM firewall chains')
+    debug.debug('Listing VM firewall chains')
 
     try {
       const allChains = await this.nftablesService.listChains()
@@ -257,12 +256,12 @@ export class InfinizationFirewallService {
           vmId: chainName.substring(VM_CHAIN_PREFIX.length)
         }))
 
-      debug.log('info', `Found ${vmChains.length} VM firewall chains`)
+      debug.info(`Found ${vmChains.length} VM firewall chains`)
 
       return vmChains
     } catch (error) {
       const message = `Failed to list VM chains: ${error instanceof Error ? error.message : String(error)}`
-      debug.log('error', message)
+      debug.error(message)
       throw new Error(message)
     }
   }
@@ -339,7 +338,7 @@ export class InfinizationFirewallService {
       throw new Error(`TAP device name not found for VM: ${vmId}. The VM may not be running or network is not configured.`)
     }
 
-    debug.log(`Retrieved TAP device name for VM ${vmId}: ${machine.configuration.tapDeviceName}`)
+    debug.debug(`Retrieved TAP device name for VM ${vmId}: ${machine.configuration.tapDeviceName}`)
 
     return machine.configuration.tapDeviceName
   }

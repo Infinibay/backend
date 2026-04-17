@@ -1,14 +1,14 @@
-import { BackgroundHealthService } from '../../app/services/health/BackgroundHealthService'
-import { VMHealthQueueManager } from '../../app/services/health/VMHealthQueueManager'
-import { BackgroundTaskService } from '../../app/services/maintenance/BackgroundTaskService'
-import { EventManager } from '../../app/services/events/EventManager'
+import { BackgroundHealthService } from '../../app/services/BackgroundHealthService'
+import { VMHealthQueueManager } from '../../app/services/VMHealthQueueManager'
+import { BackgroundTaskService } from '../../app/services/BackgroundTaskService'
+import { EventManager } from '../../app/services/EventManager'
 import { PrismaClient } from '@prisma/client'
 import { RUNNING_STATUS, STOPPED_STATUS } from '../../app/constants/machine-status'
 
 // Mock dependencies
-jest.mock('../../app/services/health/VMHealthQueueManager')
-jest.mock('../../app/services/maintenance/BackgroundTaskService')
-jest.mock('../../app/services/events/EventManager')
+jest.mock('../../app/services/VMHealthQueueManager')
+jest.mock('../../app/services/BackgroundTaskService')
+jest.mock('../../app/services/EventManager')
 
 /**
  * BackgroundHealthService Tests

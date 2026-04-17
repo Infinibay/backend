@@ -1,9 +1,9 @@
+import logger from '@main/logger'
 import { Arg, Authorized, Ctx, ID, Mutation, Query, Resolver } from 'type-graphql'
 import { UserInputError } from 'apollo-server-errors'
 
 import { getEventManager } from '@services/EventManager'
 import { InfinibayContext } from '@utils/context'
-import { Debugger } from '@utils/debug'
 
 import { FirewallOrchestrationService } from '@services/firewall/FirewallOrchestrationService'
 import { FirewallRuleService } from '@services/firewall/FirewallRuleService'
@@ -25,7 +25,7 @@ import {
   ValidationResultType
 } from './types'
 
-const debug = new Debugger('infinibay:resolver:firewall')
+const debug = logger.child({ module: 'resolver:firewall' })
 
 @Resolver()
 export class FirewallResolver {
@@ -295,7 +295,7 @@ export class FirewallResolver {
     // Create the rule
     const rule = await ruleService.createRule(ruleSet.id, input)
 
-    debug.log('info', `Created department rule ${rule.id} for department ${departmentId}`)
+    debug.info(`Created department rule ${rule.id} for department ${departmentId}`)
 
     // Emit real-time event
     try {
@@ -305,15 +305,15 @@ export class FirewallResolver {
         ruleSet: { entityType: ruleSet.entityType, entityId: ruleSet.entityId }
       }, ctx.user?.id)
     } catch (err) {
-      debug.log('error', `Failed to emit firewall event: ${err}`)
+      debug.error(`Failed to emit firewall event: ${err}`)
     }
 
     // Apply rules to all VMs in the department
     try {
       await orchestrationService.applyDepartmentRules(departmentId)
-      debug.log('info', `Applied department rules to all VMs in department ${departmentId}`)
+      debug.info(`Applied department rules to all VMs in department ${departmentId}`)
     } catch (err) {
-      debug.log('error', `Failed to apply department rules: ${err}`)
+      debug.error(`Failed to apply department rules: ${err}`)
       // Don't fail the mutation, just log the error
     }
 
@@ -398,7 +398,7 @@ export class FirewallResolver {
     // Create the rule
     const rule = await ruleService.createRule(ruleSet.id, input)
 
-    debug.log('info', `Created VM rule ${rule.id} for VM ${vmId}`)
+    debug.info(`Created VM rule ${rule.id} for VM ${vmId}`)
 
     // Emit real-time event
     try {
@@ -408,15 +408,15 @@ export class FirewallResolver {
         ruleSet: { entityType: ruleSet.entityType, entityId: ruleSet.entityId }
       }, ctx.user?.id)
     } catch (err) {
-      debug.log('error', `Failed to emit firewall event: ${err}`)
+      debug.error(`Failed to emit firewall event: ${err}`)
     }
 
     // Apply rules to the VM
     try {
       await orchestrationService.applyVMRules(vmId)
-      debug.log('info', `Applied rules to VM ${vmId}`)
+      debug.info(`Applied rules to VM ${vmId}`)
     } catch (err) {
-      debug.log('error', `Failed to apply VM rules: ${err}`)
+      debug.error(`Failed to apply VM rules: ${err}`)
       // Don't fail the mutation, just log the error
     }
 
@@ -447,7 +447,7 @@ export class FirewallResolver {
     // Update the rule
     const rule = await ruleService.updateRule(ruleId, input)
 
-    debug.log('info', `Updated rule ${ruleId}`)
+    debug.info(`Updated rule ${ruleId}`)
 
     // Emit real-time event
     try {
@@ -457,7 +457,7 @@ export class FirewallResolver {
         ruleSet: { entityType: existingRule.ruleSet.entityType, entityId: existingRule.ruleSet.entityId }
       }, ctx.user?.id)
     } catch (err) {
-      debug.log('error', `Failed to emit firewall event: ${err}`)
+      debug.error(`Failed to emit firewall event: ${err}`)
     }
 
     // Re-apply rules to affected entities
@@ -467,9 +467,9 @@ export class FirewallResolver {
       } else {
         await orchestrationService.applyVMRules(existingRule.ruleSet.entityId)
       }
-      debug.log('info', 'Re-applied rules after update')
+      debug.info('Re-applied rules after update')
     } catch (err) {
-      debug.log('error', 'Failed to re-apply rules:', String(err))
+      debug.error('Failed to re-apply rules:', String(err))
     }
 
     return rule as FirewallRuleType
@@ -498,7 +498,7 @@ export class FirewallResolver {
     // Delete the rule
     await ruleService.deleteRule(ruleId)
 
-    debug.log('info', `Deleted rule ${ruleId}`)
+    debug.info(`Deleted rule ${ruleId}`)
 
     // Emit real-time event
     try {
@@ -508,7 +508,7 @@ export class FirewallResolver {
         ruleSet: { entityType: existingRule.ruleSet.entityType, entityId: existingRule.ruleSet.entityId }
       }, ctx.user?.id)
     } catch (err) {
-      debug.log('error', `Failed to emit firewall event: ${err}`)
+      debug.error(`Failed to emit firewall event: ${err}`)
     }
 
     // Re-apply rules to affected entities
@@ -518,9 +518,9 @@ export class FirewallResolver {
       } else {
         await orchestrationService.applyVMRules(existingRule.ruleSet.entityId)
       }
-      debug.log('info', 'Re-applied rules after deletion')
+      debug.info('Re-applied rules after deletion')
     } catch (err) {
-      debug.log('error', 'Failed to re-apply rules:', String(err))
+      debug.error('Failed to re-apply rules:', String(err))
     }
 
     return true
@@ -584,7 +584,7 @@ export class FirewallResolver {
         removed.push(chain.chainName)
       } catch (error) {
         hadErrors = true
-        debug.log('error', `Failed to remove chain ${chain.chainName}: ${error}`)
+        debug.error(`Failed to remove chain ${chain.chainName}: ${error}`)
       }
     }
 

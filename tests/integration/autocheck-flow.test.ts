@@ -1,11 +1,11 @@
 import 'reflect-metadata'
-import { VirtioSocketWatcherService } from '../../app/services/vm/VirtioSocketWatcherService'
-import { VmEventManager } from '../../app/services/events/VmEventManager'
-import { EventManager, createEventManager } from '../../app/services/events/EventManager'
-import { SocketService, createSocketService } from '../../app/services/events/SocketService'
-import { BackgroundHealthService } from '../../app/services/health/BackgroundHealthService'
-import { BackgroundTaskService } from '../../app/services/maintenance/BackgroundTaskService'
-import { VMHealthQueueManager } from '../../app/services/health/VMHealthQueueManager'
+import { VirtioSocketWatcherService } from '../../app/services/VirtioSocketWatcherService'
+import { VmEventManager } from '../../app/services/VmEventManager'
+import { EventManager, createEventManager } from '../../app/services/EventManager'
+import { SocketService, createSocketService } from '../../app/services/SocketService'
+import { BackgroundHealthService } from '../../app/services/BackgroundHealthService'
+import { BackgroundTaskService } from '../../app/services/BackgroundTaskService'
+import { VMHealthQueueManager } from '../../app/services/VMHealthQueueManager'
 import { RUNNING_STATUS, STOPPED_STATUS, PAUSED_STATUS } from '../../app/constants/machine-status'
 import { mockPrisma } from '../setup/jest.setup'
 import { PrismaClient } from '@prisma/client'
@@ -13,6 +13,7 @@ import { Server } from 'socket.io'
 import { createServer, Server as HTTPServer } from 'http'
 import { AddressInfo } from 'net'
 import { createMockUser, createMockMachine, createMockDepartment } from '../setup/mock-factories'
+import logger from '@main/logger'
 
 /**
  * Auto-Check End-to-End Integration Tests
@@ -66,7 +67,8 @@ describe('Auto-Check End-to-End Integration', () => {
     // Create services
     eventManager = createEventManager(socketService, mockPrisma as unknown as PrismaClient)
     vmEventManager = new VmEventManager(socketService, mockPrisma as unknown as PrismaClient)
-    virtioService = new VirtioSocketWatcherService(mockPrisma as unknown as PrismaClient)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    virtioService = new VirtioSocketWatcherService(mockPrisma as any)
 
     // Register VM event manager
     eventManager.registerResourceManager('vms', vmEventManager)
@@ -669,8 +671,8 @@ describe('Auto-Check End-to-End Integration', () => {
 
       mockPrisma.machine.findUnique.mockResolvedValue(stoppedVM)
 
-      // Spy on console.log to verify skip logging
-      const consoleSpy = jest.spyOn(console, 'log').mockImplementation()
+      // Spy on logger to verify skip logging
+      const consoleSpy = jest.spyOn(logger, 'info').mockImplementation()
 
       // Call queueHealthChecks for stopped VM
       await expect(queueManager.queueHealthChecks('stopped-vm-id')).resolves.toBeUndefined()

@@ -1,3 +1,4 @@
+import logger from '@main/logger'
 import { Resolver, Query, Mutation, Arg, Ctx, Authorized, ID } from 'type-graphql'
 import { InfinibayContext } from '@utils/context'
 import {
@@ -14,9 +15,7 @@ import {
   CommandResult
 } from '../types/PackageType'
 import { getSocketService } from '@services/SocketService'
-import Debug from 'debug'
 
-const debug = Debug('infinibay:package-resolver')
 
 @Resolver()
 export class PackageResolver {
@@ -88,7 +87,7 @@ export class PackageResolver {
       // Map internal types to GraphQL types
       return internalPackages.map(pkg => this.mapToGraphQLPackageInfo(pkg))
     } catch (error) {
-      console.error('Error listing packages:', error)
+      logger.error('Error listing packages:', error)
 
       // Provide more informative error messages
       if (String(error).includes('timeout')) {
@@ -138,7 +137,7 @@ export class PackageResolver {
       // Map internal types to GraphQL types
       return internalPackages.map(pkg => this.mapToGraphQLPackageInfo(pkg))
     } catch (error) {
-      console.error('Error searching packages:', error)
+      logger.error('Error searching packages:', error)
 
       // Provide more informative error messages
       if (String(error).includes('timeout')) {
@@ -191,7 +190,7 @@ export class PackageResolver {
       }
 
       // Log the action for audit purposes
-      console.log(`User ${ctx.user?.email} is performing ${input.action} on package ${input.packageName} for machine ${machine.name}`)
+      logger.info(`User ${ctx.user?.email} is performing ${input.action} on package ${input.packageName} for machine ${machine.name}`)
 
       const packageManager = this.getPackageManager(ctx)
 
@@ -210,9 +209,9 @@ export class PackageResolver {
               action: input.action
             }
           })
-          debug(`📡 Emitted vm:package:${eventAction} event for machine ${input.machineId}`)
+          logger.debug(`📡 Emitted vm:package:${eventAction} event for machine ${input.machineId}`)
         } catch (eventError) {
-          debug(`Failed to emit WebSocket event: ${eventError}`)
+          logger.debug(`Failed to emit WebSocket event: ${eventError}`)
         }
       }
 
@@ -238,16 +237,16 @@ export class PackageResolver {
               success: true
             }
           })
-          debug(`📡 Emitted vm:package:${eventAction} event for machine ${input.machineId}`)
+          logger.debug(`📡 Emitted vm:package:${eventAction} event for machine ${input.machineId}`)
         } catch (eventError) {
-          debug(`Failed to emit WebSocket event: ${eventError}`)
+          logger.debug(`Failed to emit WebSocket event: ${eventError}`)
         }
       }
 
       // Map internal type to GraphQL type
       return this.mapToGraphQLResult(internalResult)
     } catch (error) {
-      console.error('Error managing package:', error)
+      logger.error('Error managing package:', error)
       return {
         success: false,
         message: 'Failed to manage package',
@@ -299,9 +298,9 @@ export class PackageResolver {
           socketService.sendToUser(machine.userId || ctx.user.id, 'vm', 'package:installing', {
             data: { machineId, packageName }
           })
-          debug(`📡 Emitted vm:package:installing event for machine ${machineId}`)
+          logger.debug(`📡 Emitted vm:package:installing event for machine ${machineId}`)
         } catch (eventError) {
-          debug(`Failed to emit WebSocket event: ${eventError}`)
+          logger.debug(`Failed to emit WebSocket event: ${eventError}`)
         }
       }
 
@@ -314,9 +313,9 @@ export class PackageResolver {
           socketService.sendToUser(machine.userId || ctx.user.id, 'vm', 'package:installed', {
             data: { machineId, packageName, success: true }
           })
-          debug(`📡 Emitted vm:package:installed event for machine ${machineId}`)
+          logger.debug(`📡 Emitted vm:package:installed event for machine ${machineId}`)
         } catch (eventError) {
-          debug(`Failed to emit WebSocket event: ${eventError}`)
+          logger.debug(`Failed to emit WebSocket event: ${eventError}`)
         }
       }
 
@@ -329,7 +328,7 @@ export class PackageResolver {
       result.error = internalResult.error
       return result
     } catch (error) {
-      console.error('Error installing package:', error)
+      logger.error('Error installing package:', error)
       return {
         success: false,
         error: String(error)
@@ -380,9 +379,9 @@ export class PackageResolver {
           socketService.sendToUser(machine.userId || ctx.user.id, 'vm', 'package:removing', {
             data: { machineId, packageName }
           })
-          debug(`📡 Emitted vm:package:removing event for machine ${machineId}`)
+          logger.debug(`📡 Emitted vm:package:removing event for machine ${machineId}`)
         } catch (eventError) {
-          debug(`Failed to emit WebSocket event: ${eventError}`)
+          logger.debug(`Failed to emit WebSocket event: ${eventError}`)
         }
       }
 
@@ -395,9 +394,9 @@ export class PackageResolver {
           socketService.sendToUser(machine.userId || ctx.user.id, 'vm', 'package:removed', {
             data: { machineId, packageName, success: true }
           })
-          debug(`📡 Emitted vm:package:removed event for machine ${machineId}`)
+          logger.debug(`📡 Emitted vm:package:removed event for machine ${machineId}`)
         } catch (eventError) {
-          debug(`Failed to emit WebSocket event: ${eventError}`)
+          logger.debug(`Failed to emit WebSocket event: ${eventError}`)
         }
       }
 
@@ -410,7 +409,7 @@ export class PackageResolver {
       result.error = internalResult.error
       return result
     } catch (error) {
-      console.error('Error removing package:', error)
+      logger.error('Error removing package:', error)
       return {
         success: false,
         error: String(error)
@@ -461,9 +460,9 @@ export class PackageResolver {
           socketService.sendToUser(machine.userId || ctx.user.id, 'vm', 'package:updating', {
             data: { machineId, packageName }
           })
-          debug(`📡 Emitted vm:package:updating event for machine ${machineId}`)
+          logger.debug(`📡 Emitted vm:package:updating event for machine ${machineId}`)
         } catch (eventError) {
-          debug(`Failed to emit WebSocket event: ${eventError}`)
+          logger.debug(`Failed to emit WebSocket event: ${eventError}`)
         }
       }
 
@@ -476,9 +475,9 @@ export class PackageResolver {
           socketService.sendToUser(machine.userId || ctx.user.id, 'vm', 'package:updated', {
             data: { machineId, packageName, success: true }
           })
-          debug(`📡 Emitted vm:package:updated event for machine ${machineId}`)
+          logger.debug(`📡 Emitted vm:package:updated event for machine ${machineId}`)
         } catch (eventError) {
-          debug(`Failed to emit WebSocket event: ${eventError}`)
+          logger.debug(`Failed to emit WebSocket event: ${eventError}`)
         }
       }
 
@@ -491,7 +490,7 @@ export class PackageResolver {
       result.error = internalResult.error
       return result
     } catch (error) {
-      console.error('Error updating package:', error)
+      logger.error('Error updating package:', error)
       return {
         success: false,
         error: String(error)

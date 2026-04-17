@@ -1,9 +1,7 @@
+import logger from '@main/logger'
 import { PrismaClient, Machine } from '@prisma/client'
 import { VirtioSocketWatcherService, SafeCommandType, CommandResponse } from './VirtioSocketWatcherService'
 import { getInfinization } from './InfinizationService'
-import Debug from 'debug'
-
-const debug = Debug('infinibay:process-manager')
 
 // Internal types (not exposed to GraphQL)
 interface InternalProcessInfo {
@@ -55,7 +53,7 @@ export class ProcessManager {
       })
 
       if (!machine) {
-        debug(`Machine ${machineId} not found`)
+        logger.debug(`Machine ${machineId} not found`)
         return null
       }
 
@@ -64,13 +62,13 @@ export class ProcessManager {
       const status = await infinization.getVMStatus(machineId)
 
       if (!status.processAlive) {
-        debug(`Machine ${machine.internalName} is not running (processAlive: false)`)
+        logger.debug(`Machine ${machine.internalName} is not running (processAlive: false)`)
         return null
       }
 
       // Update machine status in DB if it's different
       if (machine.status !== 'running') {
-        debug(`Updating machine ${machineId} status from '${machine.status}' to 'running' based on infinization state`)
+        logger.debug(`Updating machine ${machineId} status from '${machine.status}' to 'running' based on infinization state`)
         await this.prisma.machine.update({
           where: { id: machineId },
           data: { status: 'running' }
@@ -80,7 +78,7 @@ export class ProcessManager {
 
       return { machine }
     } catch (error) {
-      debug(`Failed to verify machine ${machineId} is running: ${error}`)
+      logger.debug(`Failed to verify machine ${machineId} is running: ${error}`)
       return null
     }
   }
@@ -95,7 +93,7 @@ export class ProcessManager {
         throw new Error(`Machine ${machineId} is not available`)
       }
 
-      debug(`Listing processes for machine ${machineId} (limit: ${limit || 'none'})`)
+      logger.debug(`Listing processes for machine ${machineId} (limit: ${limit || 'none'})`)
 
       // Use VirtIO socket (InfiniService)
       const command: SafeCommandType = {
@@ -114,14 +112,14 @@ export class ProcessManager {
           ? response.data
           : (response.data.processes || [])
 
-        debug(`Retrieved ${processes.length} processes via VirtIO`)
-        debug(`Sample process data: ${JSON.stringify(processes[0], null, 2)}`)
+        logger.debug(`Retrieved ${processes.length} processes via VirtIO`)
+        logger.debug(`Sample process data: ${JSON.stringify(processes[0], null, 2)}`)
         return this.mapProcesses(processes)
       } else {
         throw new Error(`Failed to get process list: ${response.error || 'InfiniService not available'}`)
       }
     } catch (error) {
-      debug(`Failed to list processes for machine ${machineId}: ${error}`)
+      logger.debug(`Failed to list processes for machine ${machineId}: ${error}`)
       throw error
     }
   }
@@ -140,7 +138,7 @@ export class ProcessManager {
         throw new Error(`Machine ${machineId} is not available`)
       }
 
-      debug(`Getting top ${limit} processes for machine ${machineId} sorted by ${sortBy}`)
+      logger.debug(`Getting top ${limit} processes for machine ${machineId} sorted by ${sortBy}`)
 
       // Use VirtIO socket (InfiniService)
       const command: SafeCommandType = {
@@ -162,13 +160,13 @@ export class ProcessManager {
           ? response.data
           : (response.data.processes || [])
 
-        debug(`Retrieved top ${processes.length} processes via VirtIO`)
+        logger.debug(`Retrieved top ${processes.length} processes via VirtIO`)
         return this.mapProcesses(processes)
       } else {
         throw new Error(`Failed to get top processes: ${response.error || 'InfiniService not available'}`)
       }
     } catch (error) {
-      debug(`Failed to get top processes for machine ${machineId}: ${error}`)
+      logger.debug(`Failed to get top processes for machine ${machineId}: ${error}`)
       throw error
     }
   }
@@ -187,7 +185,7 @@ export class ProcessManager {
         throw new Error(`Machine ${machineId} is not available`)
       }
 
-      debug(`Killing process ${pid} on machine ${machineId} (force: ${force})`)
+      logger.debug(`Killing process ${pid} on machine ${machineId} (force: ${force})`)
 
       // Use VirtIO socket (InfiniService)
       const command: SafeCommandType = {
@@ -202,7 +200,7 @@ export class ProcessManager {
       )
 
       if (response.success) {
-        debug(`Successfully killed process ${pid} via VirtIO`)
+        logger.debug(`Successfully killed process ${pid} via VirtIO`)
         return {
           success: true,
           message: `Process ${pid} terminated successfully`,
@@ -217,7 +215,7 @@ export class ProcessManager {
         }
       }
     } catch (error) {
-      debug(`Failed to kill process ${pid} on machine ${machineId}: ${error}`)
+      logger.debug(`Failed to kill process ${pid} on machine ${machineId}: ${error}`)
       return {
         success: false,
         message: `Failed to kill process: ${error}`,
@@ -253,7 +251,7 @@ export class ProcessManager {
   private mapProcesses (rawProcesses: any[]): InternalProcessInfo[] {
     // Log the first process to see the actual field names
     if (rawProcesses.length > 0) {
-      debug(`Raw process fields: ${Object.keys(rawProcesses[0]).join(', ')}`)
+      logger.debug(`Raw process fields: ${Object.keys(rawProcesses[0]).join(', ')}`)
     }
 
     return rawProcesses.map(p => ({

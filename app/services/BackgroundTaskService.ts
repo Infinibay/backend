@@ -1,3 +1,4 @@
+import logger from '@main/logger'
 import { PrismaClient } from '@prisma/client'
 import { EventManager } from './EventManager'
 import { ErrorHandler, AppError, ErrorCode } from '../utils/errors/ErrorHandler'
@@ -83,7 +84,7 @@ export class BackgroundTaskService {
         if (attempt > 0) {
           const backoff = this.calculateBackoff(attempt, policy)
           await this.delay(backoff)
-          console.log(`Retrying task ${task.name} (attempt ${attempt + 1}/${policy.maxRetries + 1}) after ${backoff}ms backoff`)
+          logger.info(`Retrying task ${task.name} (attempt ${attempt + 1}/${policy.maxRetries + 1}) after ${backoff}ms backoff`)
         }
 
         await task.execute()
@@ -116,7 +117,7 @@ export class BackgroundTaskService {
       try {
         await task.onError(error)
       } catch (handlerError) {
-        console.error(`Error handler failed for task ${task.id}:`, handlerError)
+        logger.error(`Error handler failed for task ${task.id}:`, handlerError)
       }
     }
 
@@ -158,7 +159,7 @@ export class BackgroundTaskService {
   }
 
   private async logRetry (task: BackgroundTask, attempt: number, error: Error): Promise<void> {
-    console.log(`Retrying task ${task.name} (attempt ${attempt + 1}):`, error.message)
+    logger.info(`Retrying task ${task.name} (attempt ${attempt + 1}):`, error.message)
 
     await this.eventManager.dispatchEvent('background_task', 'status_changed', {
       taskId: task.id,
@@ -197,7 +198,7 @@ export class BackgroundTaskService {
     // Execute in background
     setImmediate(() => {
       this.executeTask(task).catch(error => {
-        console.error(`Failed to execute background task ${task.id}:`, error)
+        logger.error(`Failed to execute background task ${task.id}:`, error)
       })
     })
 

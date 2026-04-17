@@ -1,3 +1,4 @@
+import logger from '@main/logger'
 import * as chokidar from 'chokidar'
 import * as path from 'path'
 import { ScriptManager } from './ScriptManager'
@@ -17,11 +18,11 @@ export class ScriptFileWatcher {
 
   public start(): void {
     if (this.isRunning) {
-      console.warn('ScriptFileWatcher is already running')
+      logger.warn('ScriptFileWatcher is already running')
       return
     }
 
-    console.log(`Starting ScriptFileWatcher for directory: ${LIBRARY_DIR}`)
+    logger.info(`Starting ScriptFileWatcher for directory: ${LIBRARY_DIR}`)
 
     this.watcher = chokidar.watch(LIBRARY_DIR, {
       persistent: true,
@@ -33,21 +34,21 @@ export class ScriptFileWatcher {
     })
 
     this.watcher.on('change', (filePath: string) => {
-      console.log(`Script file changed: ${filePath}`)
+      logger.info(`Script file changed: ${filePath}`)
       this.handleFileChange(filePath)
     })
 
     this.watcher.on('unlink', (filePath: string) => {
-      console.log(`Script file deleted: ${filePath}`)
+      logger.info(`Script file deleted: ${filePath}`)
       this.handleFileChange(filePath)
     })
 
     this.watcher.on('error', (err: unknown) => {
-      console.error('ScriptFileWatcher error:', err)
+      logger.error('ScriptFileWatcher error:', err)
     })
 
     this.isRunning = true
-    console.log('ScriptFileWatcher started successfully')
+    logger.info('ScriptFileWatcher started successfully')
   }
 
   public stop(): void {
@@ -59,7 +60,7 @@ export class ScriptFileWatcher {
     }
 
     this.isRunning = false
-    console.log('ScriptFileWatcher stopped')
+    logger.info('ScriptFileWatcher stopped')
   }
 
   private handleFileChange(filePath: string): void {
@@ -70,7 +71,7 @@ export class ScriptFileWatcher {
     // Could be optimized to only invalidate specific script by querying DB for scriptId by fileName
     ScriptManager.invalidateCache()
 
-    console.log(`Cache invalidated due to file change: ${fileName}`)
+    logger.info(`Cache invalidated due to file change: ${fileName}`)
   }
 }
 

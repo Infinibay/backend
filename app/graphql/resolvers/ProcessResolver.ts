@@ -1,3 +1,4 @@
+import logger from '@main/logger'
 import { Resolver, Mutation, Arg, Int, Ctx } from 'type-graphql'
 import { PrismaClient } from '@prisma/client'
 import { ProcessManager, InternalProcessControlResult } from '@services/ProcessManager'
@@ -5,9 +6,6 @@ import { ProcessControlResult } from '../types/ProcessType'
 import { VirtioSocketWatcherService } from '@services/VirtioSocketWatcherService'
 import { getEventManager } from '@services/EventManager'
 import { getSocketService } from '@services/SocketService'
-import Debug from 'debug'
-
-const debug = Debug('infinibay:process-resolver')
 
 interface Context {
   prisma: PrismaClient
@@ -48,7 +46,7 @@ export class ProcessResolver {
         throw new Error('Context not available')
       }
 
-      debug(`Killing process ${pid} on machine ${machineId} (force: ${force})`)
+      logger.debug(`Killing process ${pid} on machine ${machineId} (force: ${force})`)
 
       const manager = this.getProcessManager(ctx)
       const internalResult = await manager.killProcess(machineId, pid, force)
@@ -71,17 +69,17 @@ export class ProcessResolver {
                 force
               }
             })
-            debug(`📡 Emitted vm:process:killed event for machine ${machineId}`)
+            logger.debug(`📡 Emitted vm:process:killed event for machine ${machineId}`)
           }
         } catch (eventError) {
-          debug(`Failed to emit WebSocket event: ${eventError}`)
+          logger.debug(`Failed to emit WebSocket event: ${eventError}`)
         }
       }
 
       // Map internal type to GraphQL type
       return this.mapToGraphQLControlResult(internalResult)
     } catch (error) {
-      debug(`Failed to kill process: ${error}`)
+      logger.debug(`Failed to kill process: ${error}`)
       return {
         success: false,
         message: `Failed to kill process: ${error}`,
@@ -106,7 +104,7 @@ export class ProcessResolver {
         throw new Error('Context not available')
       }
 
-      debug(`Killing ${pids.length} processes on machine ${machineId} (force: ${force})`)
+      logger.debug(`Killing ${pids.length} processes on machine ${machineId} (force: ${force})`)
 
       const manager = this.getProcessManager(ctx)
       const internalResults = await manager.killProcesses(machineId, pids, force)
@@ -132,17 +130,17 @@ export class ProcessResolver {
                 force
               }
             })
-            debug(`📡 Emitted vm:processes:killed event for ${successfulKills.length} processes on machine ${machineId}`)
+            logger.debug(`📡 Emitted vm:processes:killed event for ${successfulKills.length} processes on machine ${machineId}`)
           }
         } catch (eventError) {
-          debug(`Failed to emit WebSocket event: ${eventError}`)
+          logger.debug(`Failed to emit WebSocket event: ${eventError}`)
         }
       }
 
       // Map internal types to GraphQL types
       return internalResults.map(result => this.mapToGraphQLControlResult(result))
     } catch (error) {
-      debug(`Failed to kill processes: ${error}`)
+      logger.debug(`Failed to kill processes: ${error}`)
       // Return error results for all PIDs
       return pids.map(pid => ({
         success: false,

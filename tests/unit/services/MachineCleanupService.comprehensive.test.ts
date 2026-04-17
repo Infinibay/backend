@@ -18,7 +18,7 @@ const mockVirtioService = {
   isVmConnected: jest.fn().mockReturnValue(false)
 }
 
-jest.mock('../../../app/services/vm/VirtioSocketWatcherService', () => ({
+jest.mock('../../../app/services/VirtioSocketWatcherService', () => ({
   getVirtioSocketWatcherService: jest.fn(() => mockVirtioService)
 }))
 

@@ -1,3 +1,4 @@
+import logger from '@main/logger'
 import { BaseCpuPinningStrategy, CpuPinningConfig } from './BasePinningStrategy'
 import {
   calculateHybridPinning,
@@ -34,7 +35,7 @@ export class HybridRandomStrategy extends BaseCpuPinningStrategy {
     const numaTopology = this.getNumaTopology()
 
     // Log the NUMA topology for debugging purposes
-    console.log(`Setting CPU pinning for ${vcpuCount} vCPUs with HybridRandom strategy. NUMA topology:`,
+    logger.info(`Setting CPU pinning for ${vcpuCount} vCPUs with HybridRandom strategy. NUMA topology:`,
       Object.entries(numaTopology).map(([node, cpus]) => `${node}: ${cpus.join(',')}`).join(' | '))
 
     // Use shared algorithm for hybrid pinning
@@ -42,13 +43,13 @@ export class HybridRandomStrategy extends BaseCpuPinningStrategy {
     const options: HybridPinningOptions = {}
     if (this.seed !== undefined) {
       options.seed = this.seed
-      console.log(`Using deterministic hybrid pinning with seed: ${this.seed}`)
+      logger.info(`Using deterministic hybrid pinning with seed: ${this.seed}`)
     }
 
     const allocation = calculateHybridPinning(vcpuCount, normalized, options)
 
     // Log the pinning result for reproducibility tracking
-    console.log(`Hybrid pinning result: cores [${allocation.selectedCores.join(',')}], NUMA nodes [${allocation.usedNodes.join(',')}]`)
+    logger.info(`Hybrid pinning result: cores [${allocation.selectedCores.join(',')}], NUMA nodes [${allocation.usedNodes.join(',')}]`)
 
     // Convert allocation to vcpupin format
     const vcpuPins = this.allocationToVcpuPins(allocation)

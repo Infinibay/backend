@@ -1,8 +1,9 @@
+import logger from '@main/logger'
 import { Resolver, Query, Mutation, Arg, Ctx, ID, Int, Authorized } from 'type-graphql';
 import { UserInputError } from 'apollo-server-errors';
 import { ScriptManager } from '../../../services/scripts/ScriptManager';
 import { ScriptExecutor } from '../../../services/scripts/ScriptExecutor';
-import { ScriptScheduler } from '../../../services/scripts/ScriptScheduler';
+import { ScriptScheduler, ScheduleScriptConfig } from '../../../services/scripts/ScriptScheduler';
 import { getEventManager } from '../../../services/EventManager';
 import {
   ScriptType,
@@ -31,6 +32,23 @@ function extractRequestMetadata(ctx: InfinibayContext): { ipAddress?: string; us
     ipAddress: ctx.req.ip || ctx.req.socket?.remoteAddress || undefined,
     userAgent: ctx.req.headers['user-agent'] || undefined
   }
+}
+
+// Interface for scripts returned with _count from Prisma
+interface ScriptWithCount {
+  _count?: {
+    executions?: number;
+    departmentAssignments?: number;
+  };
+  [key: string]: unknown;
+}
+
+// Helper to extract count fields from a script that includes _count
+function getScriptCounts(script: ScriptWithCount): { executionCount: number; departmentCount: number } {
+  return {
+    executionCount: script._count?.executions || 0,
+    departmentCount: script._count?.departmentAssignments || 0
+  };
 }
 
 // Helper function to normalize execution inputValues (ensure never null)
@@ -76,8 +94,7 @@ export class ScriptResolver {
       hasInputs: false, // Will be computed when content is loaded
       inputCount: 0,    // Will be computed when content is loaded
       parsedInputs: [],
-      executionCount: (script as any)._count?.executions || 0,
-      departmentCount: (script as any)._count?.departmentAssignments || 0
+      ...getScriptCounts(script as unknown as ScriptWithCount)
     }));
   }
 
@@ -96,8 +113,7 @@ export class ScriptResolver {
 
       return {
         ...script,
-        executionCount: (script as any)._count?.executions || 0,
-        departmentCount: (script as any)._count?.departmentAssignments || 0
+        ...getScriptCounts(script as unknown as ScriptWithCount)
       };
     } catch (error) {
       if ((error as Error).message.includes('not found')) {
@@ -124,8 +140,7 @@ export class ScriptResolver {
       hasInputs: false,
       inputCount: 0,
       parsedInputs: [],
-      executionCount: (script as any)._count?.executions || 0,
-      departmentCount: (script as any)._count?.departmentAssignments || 0
+      ...getScriptCounts(script as unknown as ScriptWithCount)
     }));
   }
 
@@ -491,7 +506,7 @@ export class ScriptResolver {
       const userSet = new Set([...defaultUsers, ...users])
       return Array.from(userSet)
     } catch (error) {
-      console.error('Error fetching VM users:', error)
+      logger.error('Error fetching VM users:', error)
       // Return OS-aware defaults on error
       return defaultUsers
     }
@@ -522,7 +537,7 @@ export class ScriptResolver {
           hasInputs: false,
           inputCount: 0,
           parsedInputs: []
-        } as any
+        } as unknown as ScriptType
       };
     } catch (error) {
       return {
@@ -558,8 +573,7 @@ export class ScriptResolver {
         message: 'Script updated successfully',
         script: normalizeScript({
           ...updatedScript,
-          executionCount: (updatedScript as any)._count?.executions || 0,
-          departmentCount: (updatedScript as any)._count?.departmentAssignments || 0
+          ...getScriptCounts(updatedScript as unknown as ScriptWithCount)
         })
       };
     } catch (error) {
@@ -997,8 +1011,8 @@ export class ScriptResolver {
 
     // Check permissions: triggeredBy, machine owner, or admin
     const isTriggeredBy = execution.triggeredById === ctx.user!.id;
-    const isOwner = execution.machine && (execution.machine as any).userId === ctx.user!.id;
-    const isAdmin = ctx.user!.role === 'ADMIN';
+    const isOwner = execution.machine && execution.machine.userId === ctx.user!.id;
+    const isAdmin = ctx.user!.role === 'ADMIN' || ctx.user!.role === 'SUPER_ADMIN';
 
     if (!isTriggeredBy && !isOwner && !isAdmin) {
       return null;
@@ -1089,25 +1103,29 @@ export class ScriptResolver {
         }
       }
 
-      // If machineIds provided, verify user has access to all machines
+      // If machineIds provided, verify user has access to all machines (batch query to avoid N+1)
       let hasAccessToAllMachines = false;
       if (input.machineIds && input.machineIds.length > 0) {
         hasAccessToAllMachines = true;
-        for (const machineId of input.machineIds) {
-          const machine = await ctx.prisma.machine.findUnique({
-            where: { id: machineId },
-            select: { userId: true }
-          });
+        const machines = await ctx.prisma.machine.findMany({
+          where: { id: { in: input.machineIds } },
+          select: { id: true, userId: true }
+        });
 
-          if (!machine) {
-            return {
-              success: false,
-              error: `Machine ${machineId} not found`
-            };
-          }
+        // Verify all requested machines exist
+        if (machines.length !== input.machineIds.length) {
+          const foundIds = new Set(machines.map(m => m.id));
+          const missingId = input.machineIds.find(id => !foundIds.has(id));
+          return {
+            success: false,
+            error: `Machine ${missingId} not found`
+          };
+        }
 
-          const isOwner = machine.userId === ctx.user!.id;
-          if (!isOwner && !isAdmin) {
+        // Verify user owns all machines (unless admin)
+        if (!isAdmin) {
+          const unauthorized = machines.some(m => m.userId !== ctx.user!.id);
+          if (unauthorized) {
             hasAccessToAllMachines = false;
             return {
               success: false,
@@ -1128,14 +1146,14 @@ export class ScriptResolver {
       // Create scheduler instance
       const scheduler = new ScriptScheduler(ctx.prisma);
 
-      // Build config
-      const config: any = {
+      // Build config (scheduleType set below based on input)
+      const config: ScheduleScriptConfig = {
         scriptId: input.scriptId,
+        scheduleType: 'immediate', // default, overridden below
         inputValues: input.inputValues || {},
         userId: ctx.user!.id,
         runAs: input.runAs
       };
-
       // Map ScheduleType enum to scheduleType string
       if (input.scheduleType === ScheduleType.IMMEDIATE) {
         config.scheduleType = 'immediate';

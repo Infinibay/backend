@@ -1,8 +1,8 @@
+import logger from '@main/logger'
 import { CronJob } from 'cron'
 import { PrismaClient, ExecutionStatus } from '@prisma/client'
-import { Debugger } from '@utils/debug'
 
-const debug = new Debugger('CleanupStuckScripts')
+const debug = logger.child({ module: 'CleanupStuckScripts' })
 
 /**
  * Cron job to cleanup stuck script executions
@@ -23,8 +23,8 @@ export class CleanupStuckScripts {
     // Run every 5 minutes
     this.job = new CronJob('*/5 * * * *', () => {
       this.cleanupStuckExecutions().catch(error => {
-        debug.log('error', `Failed to cleanup stuck scripts: ${error.message}`)
-        console.error('CleanupStuckScripts error:', error)
+        debug.error(`Failed to cleanup stuck scripts: ${error.message}`)
+        logger.error('CleanupStuckScripts error:', error)
       })
     })
   }
@@ -34,7 +34,7 @@ export class CleanupStuckScripts {
    */
   start (): void {
     if (!this.job.running) {
-      debug.log('Starting CleanupStuckScripts cron job')
+      debug.debug('Starting CleanupStuckScripts cron job')
       this.job.start()
     }
   }
@@ -44,7 +44,7 @@ export class CleanupStuckScripts {
    */
   stop (): void {
     if (this.job.running) {
-      debug.log('Stopping CleanupStuckScripts cron job')
+      debug.debug('Stopping CleanupStuckScripts cron job')
       this.job.stop()
     }
   }
@@ -62,7 +62,7 @@ export class CleanupStuckScripts {
   private async cleanupStuckExecutions (): Promise<void> {
     // Prevent overlapping executions
     if (this.isRunning) {
-      debug.log('warn', 'CleanupStuckScripts already running, skipping this cycle')
+      debug.warn('CleanupStuckScripts already running, skipping this cycle')
       return
     }
 
@@ -91,11 +91,11 @@ export class CleanupStuckScripts {
       })
 
       if (runningExecutions.length === 0) {
-        debug.log('No running script executions found')
+        debug.debug('No running script executions found')
         return
       }
 
-      debug.log(`Found ${runningExecutions.length} running script executions, checking for stuck scripts`)
+      debug.debug(`Found ${runningExecutions.length} running script executions, checking for stuck scripts`)
 
       const stuckExecutions = []
 
@@ -108,11 +108,11 @@ export class CleanupStuckScripts {
       }
 
       if (stuckExecutions.length === 0) {
-        debug.log('No stuck script executions found')
+        debug.debug('No stuck script executions found')
         return
       }
 
-      debug.log(`Found ${stuckExecutions.length} stuck script executions, marking as TIMEOUT`)
+      debug.debug(`Found ${stuckExecutions.length} stuck script executions, marking as TIMEOUT`)
 
       // Update stuck executions
       const results = await Promise.allSettled(
@@ -133,7 +133,7 @@ export class CleanupStuckScripts {
               }
             })
 
-            debug.log(`Marked script execution as TIMEOUT: ${execution.script.name} on ${execution.machine.name} (runtime: ${runtimeSeconds}s)`)
+            debug.debug(`Marked script execution as TIMEOUT: ${execution.script.name} on ${execution.machine.name} (runtime: ${runtimeSeconds}s)`)
 
             return {
               executionId: execution.id,
@@ -143,7 +143,7 @@ export class CleanupStuckScripts {
             }
           } catch (error) {
             const errorMessage = error instanceof Error ? error.message : 'Unknown error'
-            debug.log('error', `Failed to mark execution ${execution.id} as TIMEOUT: ${errorMessage}`)
+            debug.error(`Failed to mark execution ${execution.id} as TIMEOUT: ${errorMessage}`)
             return {
               executionId: execution.id,
               scriptName: execution.script.name,
@@ -159,20 +159,20 @@ export class CleanupStuckScripts {
       const successful = results.filter(r => r.status === 'fulfilled' && r.value.success).length
       const failed = results.length - successful
 
-      debug.log(`Cleanup complete: ${successful} scripts marked as TIMEOUT, ${failed} failed`)
+      debug.debug(`Cleanup complete: ${successful} scripts marked as TIMEOUT, ${failed} failed`)
 
       // Log details for failed updates
       results.forEach(result => {
         if (result.status === 'fulfilled' && !result.value.success) {
-          debug.log('error', `Failed to cleanup execution ${result.value.executionId}: ${result.value.error}`)
+          debug.error(`Failed to cleanup execution ${result.value.executionId}: ${result.value.error}`)
         } else if (result.status === 'rejected') {
-          debug.log('error', `Update rejected: ${result.reason}`)
+          debug.error(`Update rejected: ${result.reason}`)
         }
       })
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error'
-      debug.log('error', `Critical error in cleanupStuckExecutions: ${errorMessage}`)
-      console.error('CleanupStuckScripts critical error:', error)
+      debug.error(`Critical error in cleanupStuckExecutions: ${errorMessage}`)
+      logger.error('CleanupStuckScripts critical error:', error)
     } finally {
       this.isRunning = false
     }
@@ -209,7 +209,7 @@ export class CleanupStuckScripts {
    * Manually trigger cleanup (for testing/debugging)
    */
   async triggerManualRun (): Promise<void> {
-    debug.log('Manual trigger of stuck scripts cleanup')
+    debug.debug('Manual trigger of stuck scripts cleanup')
     await this.cleanupStuckExecutions()
   }
 

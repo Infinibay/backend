@@ -1,3 +1,4 @@
+import logger from '@main/logger'
 import fs from 'fs'
 import path from 'path'
 
@@ -164,7 +165,7 @@ export abstract class BaseCpuPinningStrategy {
         features: flagsMatch ? flagsMatch[1].trim().split(' ') : []
       }
     } catch (error) {
-      console.error('Failed to get CPU info:', error)
+      logger.error('Failed to get CPU info:', error)
       return { model: 'unknown', vendor: 'unknown', features: [] }
     }
   }

@@ -1,3 +1,4 @@
+import logger from '@main/logger'
 import { Resolver, Query, Ctx } from 'type-graphql'
 import * as si from 'systeminformation'
 import { SystemResources, GPU } from './type'
@@ -62,7 +63,7 @@ export class SystemResolver {
         }
       }
     } catch (error) {
-      console.error('Error getting system resources:', error)
+      logger.error('Error getting system resources:', error)
 
       // Return default values if there's an error
       return {
@@ -110,7 +111,7 @@ export class SystemResolver {
         memory: (controller.vram || 0) / 1024 // Convert MB to GB
       }))
     } catch (error) {
-      console.error('Error getting graphics cards:', error)
+      logger.error('Error getting graphics cards:', error)
       return []
     }
   }

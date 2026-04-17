@@ -21,7 +21,8 @@ import {
 import path from 'path'
 import fs from 'fs'
 
-import { Debugger } from '@utils/debug'
+import { Logger } from 'winston'
+import logger from '@main/logger'
 import { getInfinization } from '@services/InfinizationService'
 
 /**
@@ -64,12 +65,12 @@ export interface SnapshotListResult {
  */
 export class SnapshotServiceV2 {
   private prisma: PrismaClient
-  private debug: Debugger
+  private debug: Logger
   private snapshotManager: SnapshotManager
 
   constructor (prisma: PrismaClient) {
     this.prisma = prisma
-    this.debug = new Debugger('snapshot-service-v2')
+    this.debug = logger.child({ module: 'snapshot-service-v2' })
     this.snapshotManager = new SnapshotManager()
   }
 
@@ -86,7 +87,7 @@ export class SnapshotServiceV2 {
     name: string,
     description?: string
   ): Promise<SnapshotResult> {
-    this.debug.log(`Creating snapshot '${name}' for VM ${vmId}`)
+    this.debug.debug(`Creating snapshot '${name}' for VM ${vmId}`)
 
     try {
       // Get VM and validate status
@@ -118,7 +119,7 @@ export class SnapshotServiceV2 {
 
       await this.snapshotManager.createSnapshot(options)
 
-      this.debug.log(`Snapshot '${name}' created successfully`)
+      this.debug.debug(`Snapshot '${name}' created successfully`)
 
       // Store snapshot metadata in database (optional, for description tracking)
       await this.storeSnapshotMetadata(vmId, name, description)
@@ -135,7 +136,7 @@ export class SnapshotServiceV2 {
         }
       }
     } catch (error: any) {
-      this.debug.log('error', `Failed to create snapshot: ${error.message}`)
+      this.debug.error(`Failed to create snapshot: ${error.message}`)
 
       if (error instanceof StorageError) {
         return { success: false, message: error.message }
@@ -152,7 +153,7 @@ export class SnapshotServiceV2 {
    * @returns SnapshotListResult
    */
   async listSnapshots (vmId: string): Promise<SnapshotListResult> {
-    this.debug.log(`Listing snapshots for VM ${vmId}`)
+    this.debug.debug(`Listing snapshots for VM ${vmId}`)
 
     try {
       const vm = await this.getVM(vmId)
@@ -184,10 +185,10 @@ export class SnapshotServiceV2 {
         }
       })
 
-      this.debug.log(`Found ${snapshots.length} snapshots for VM ${vmId}`)
+      this.debug.debug(`Found ${snapshots.length} snapshots for VM ${vmId}`)
       return { success: true, snapshots }
     } catch (error: any) {
-      this.debug.log('error', `Failed to list snapshots: ${error.message}`)
+      this.debug.error(`Failed to list snapshots: ${error.message}`)
       return { success: false, snapshots: [], message: error.message }
     }
   }
@@ -203,7 +204,7 @@ export class SnapshotServiceV2 {
     vmId: string,
     snapshotName: string
   ): Promise<SnapshotResult> {
-    this.debug.log(`Restoring VM ${vmId} to snapshot '${snapshotName}'`)
+    this.debug.debug(`Restoring VM ${vmId} to snapshot '${snapshotName}'`)
 
     try {
       // Get VM and validate status
@@ -234,13 +235,13 @@ export class SnapshotServiceV2 {
       // Revert to snapshot
       await this.snapshotManager.revertSnapshot(diskPath, snapshotName)
 
-      this.debug.log(`VM ${vmId} restored to snapshot '${snapshotName}'`)
+      this.debug.debug(`VM ${vmId} restored to snapshot '${snapshotName}'`)
       return {
         success: true,
         message: `Restored to snapshot '${snapshotName}' successfully`
       }
     } catch (error: any) {
-      this.debug.log('error', `Failed to restore snapshot: ${error.message}`)
+      this.debug.error(`Failed to restore snapshot: ${error.message}`)
 
       if (error instanceof StorageError) {
         return { success: false, message: error.message }
@@ -261,7 +262,7 @@ export class SnapshotServiceV2 {
     vmId: string,
     snapshotName: string
   ): Promise<SnapshotResult> {
-    this.debug.log(`Deleting snapshot '${snapshotName}' from VM ${vmId}`)
+    this.debug.debug(`Deleting snapshot '${snapshotName}' from VM ${vmId}`)
 
     try {
       const vm = await this.getVM(vmId)
@@ -280,13 +281,13 @@ export class SnapshotServiceV2 {
       // Remove metadata from database
       await this.deleteSnapshotMetadata(vmId, snapshotName)
 
-      this.debug.log(`Snapshot '${snapshotName}' deleted from VM ${vmId}`)
+      this.debug.debug(`Snapshot '${snapshotName}' deleted from VM ${vmId}`)
       return {
         success: true,
         message: `Snapshot '${snapshotName}' deleted successfully`
       }
     } catch (error: any) {
-      this.debug.log('error', `Failed to delete snapshot: ${error.message}`)
+      this.debug.error(`Failed to delete snapshot: ${error.message}`)
 
       if (error instanceof StorageError) {
         return { success: false, message: error.message }
@@ -303,7 +304,7 @@ export class SnapshotServiceV2 {
    * @returns SnapshotInfo or null
    */
   async getCurrentSnapshot (vmId: string): Promise<SnapshotInfo | null> {
-    this.debug.log(`Getting current snapshot for VM ${vmId}`)
+    this.debug.debug(`Getting current snapshot for VM ${vmId}`)
 
     try {
       const result = await this.listSnapshots(vmId)
@@ -314,7 +315,7 @@ export class SnapshotServiceV2 {
       // Return the last snapshot (most recent)
       return result.snapshots[result.snapshots.length - 1]
     } catch (error: any) {
-      this.debug.log('error', `Failed to get current snapshot: ${error.message}`)
+      this.debug.error(`Failed to get current snapshot: ${error.message}`)
       return null
     }
   }
@@ -364,7 +365,7 @@ export class SnapshotServiceV2 {
   private async getVMWithValidation (vmId: string) {
     const vm = await this.getVM(vmId)
     if (!vm) {
-      this.debug.log('warn', `VM ${vmId} not found in database`)
+      this.debug.warn(`VM ${vmId} not found in database`)
     }
     return vm
   }
@@ -405,7 +406,7 @@ export class SnapshotServiceV2 {
     // Check if SnapshotMetadata table exists (optional feature)
     // For now, log only - can be extended to use a dedicated table
     if (description) {
-      this.debug.log(`Snapshot metadata: VM=${vmId}, name=${name}, desc=${description}`)
+      this.debug.debug(`Snapshot metadata: VM=${vmId}, name=${name}, desc=${description}`)
     }
   }
 
@@ -427,7 +428,7 @@ export class SnapshotServiceV2 {
     snapshotName: string
   ): Promise<void> {
     // Placeholder - can be extended to use a dedicated table
-    this.debug.log(`Removed metadata for snapshot '${snapshotName}' of VM ${vmId}`)
+    this.debug.debug(`Removed metadata for snapshot '${snapshotName}' of VM ${vmId}`)
   }
 }
 

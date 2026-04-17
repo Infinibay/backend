@@ -20,9 +20,9 @@ export class UnattendedUbuntuManager extends UnattendedManagerBase {
 
   constructor (username: string, password: string, applications: Application[], vmId?: string, scripts: any[] = []) {
     super()
-    this.debug.log('Initializing UnattendedUbuntuManager')
+    this.debug.debug('Initializing UnattendedUbuntuManager')
     if (!username || !password) {
-      this.debug.log('error', 'Username and password are required')
+      this.debug.error('Username and password are required')
       throw new Error('Username and password are required')
     }
     this.isoPath = path.join(path.join(process.env.INFINIBAY_BASE_DIR ?? '/opt/infinibay', 'iso'), 'ubuntu.iso')
@@ -32,7 +32,7 @@ export class UnattendedUbuntuManager extends UnattendedManagerBase {
     this.vmId = vmId || ''
     this.scripts = scripts
     this.configFileName = 'user-data'
-    this.debug.log('UnattendedUbuntuManager initialized')
+    this.debug.debug('UnattendedUbuntuManager initialized')
   }
 
   /**
@@ -520,7 +520,7 @@ chmod +x /target/var/lib/cloud/scripts/per-instance/${scriptName}`
       // Render the template with our data
       return eta.renderString(templateContent, { appScripts })
     } catch (error) {
-      this.debug.log('error', `Failed to render post_install template: ${error}`)
+      this.debug.error(`Failed to render post_install template: ${error}`)
       throw error
     }
   }
@@ -603,14 +603,14 @@ LOG_FILE="/var/log/app_install_${app.name.replace(/\s+/g, '_')}.log"
   ): Promise<void> {
     try {
       let content = await fsPromises.readFile(grubCfgPath, 'utf8')
-      this.debug.log(`[GRUB] Original config (first 500 chars):\n${content.substring(0, 500)}...`)
+      this.debug.debug(`[GRUB] Original config (first 500 chars):\n${content.substring(0, 500)}...`)
 
       // Set timeout for automatic boot (like Fedora does)
       const timeoutRegex = /^\s*set\s+timeout\s*=\s*\d+\s*$/gm
       if (timeoutRegex.test(content)) {
         content = content.replace(timeoutRegex, (match) => {
           const indent = match.match(/^\s*/)?.[0] || ''
-          this.debug.log(`[GRUB] Changing timeout: ${match.trim()} -> ${indent}set timeout=3`)
+          this.debug.debug(`[GRUB] Changing timeout: ${match.trim()} -> ${indent}set timeout=3`)
           return `${indent}set timeout=3`
         })
       } else {
@@ -627,7 +627,7 @@ LOG_FILE="/var/log/app_install_${app.name.replace(/\s+/g, '_')}.log"
 
         lines.splice(insertIndex, 0, 'set timeout=3')
         content = lines.join('\n')
-        this.debug.log(`[GRUB] Added timeout setting at line ${insertIndex + 1}: set timeout=3`)
+        this.debug.debug(`[GRUB] Added timeout setting at line ${insertIndex + 1}: set timeout=3`)
       }
 
       // Create a new autoinstall entry with set default=0 to auto-select it
@@ -645,10 +645,10 @@ menuentry "Automatic Install Ubuntu" {
 
       const newContent = newEntry + content
       await fsPromises.writeFile(grubCfgPath, newContent, 'utf8')
-      this.debug.log(`[GRUB] Modified config (first 500 chars):\n${newContent.substring(0, 500)}...`)
-      this.debug.log(`[GRUB] Added autoinstall entry with auto-boot (default=0, timeout=3) to ${grubCfgPath}`)
+      this.debug.debug(`[GRUB] Modified config (first 500 chars):\n${newContent.substring(0, 500)}...`)
+      this.debug.debug(`[GRUB] Added autoinstall entry with auto-boot (default=0, timeout=3) to ${grubCfgPath}`)
     } catch (error) {
-      this.debug.log('error', `[GRUB] Failed to modify GRUB configuration: ${error}`)
+      this.debug.error(`[GRUB] Failed to modify GRUB configuration: ${error}`)
       throw error
     }
   }
@@ -666,7 +666,7 @@ menuentry "Automatic Install Ubuntu" {
       const match = files.find(file => pattern.test(file))
       return match || null
     } catch (error) {
-      this.debug.log('error', `Error finding file in ${dir}: ${error}`)
+      this.debug.error(`Error finding file in ${dir}: ${error}`)
       return null
     }
   }
@@ -692,13 +692,13 @@ menuentry "Automatic Install Ubuntu" {
       const initrdPath = path.join(extractDir, paths.initrd.substring(1))
 
       if (fs.existsSync(vmlinuzPath) && fs.existsSync(initrdPath)) {
-        this.debug.log(`[KERNEL] Found kernel at ${paths.vmlinuz} and initrd at ${paths.initrd}`)
+        this.debug.debug(`[KERNEL] Found kernel at ${paths.vmlinuz} and initrd at ${paths.initrd}`)
         return paths
       }
     }
 
     // If standard paths not found, search for files
-    this.debug.log('[KERNEL] Standard paths not found, searching for kernel files...')
+    this.debug.debug('[KERNEL] Standard paths not found, searching for kernel files...')
 
     // Check casper directory first (most common for Ubuntu)
     const casperDir = path.join(extractDir, 'casper')
@@ -713,13 +713,13 @@ menuentry "Automatic Install Ubuntu" {
           vmlinuz: `/casper/${vmlinuzFile}`,
           initrd: `/casper/${initrdFile}`
         }
-        this.debug.log(`[KERNEL] Found kernel: ${result.vmlinuz}, initrd: ${result.initrd}`)
+        this.debug.debug(`[KERNEL] Found kernel: ${result.vmlinuz}, initrd: ${result.initrd}`)
         return result
       }
     }
 
     // Default fallback
-    this.debug.log('[KERNEL] Using default paths: /casper/vmlinuz, /casper/initrd')
+    this.debug.debug('[KERNEL] Using default paths: /casper/vmlinuz, /casper/initrd')
     return { vmlinuz: '/casper/vmlinuz', initrd: '/casper/initrd' }
   }
 
@@ -773,14 +773,14 @@ menuentry "Automatic Install Ubuntu" {
    */
   private async getXorrisoParamsFromISO (isoPath: string): Promise<string[]> {
     try {
-      this.debug.log(`[XORRISO] Extracting boot parameters from: ${isoPath}`)
+      this.debug.debug(`[XORRISO] Extracting boot parameters from: ${isoPath}`)
 
       // Run xorriso to get the mkisofs-compatible parameters
       const output = await this.executeCommand([
         'xorriso', '-indev', isoPath, '-report_el_torito', 'as_mkisofs'
       ])
 
-      this.debug.log(`[XORRISO] Raw report_el_torito output:\n${output}`)
+      this.debug.debug(`[XORRISO] Raw report_el_torito output:\n${output}`)
 
       // Parse the output to extract useful parameters
       // The output contains mkisofs-style arguments that we can use
@@ -803,10 +803,10 @@ menuentry "Automatic Install Ubuntu" {
         }
       }
 
-      this.debug.log(`[XORRISO] Extracted ${params.length} parameters: ${params.join(' ')}`)
+      this.debug.debug(`[XORRISO] Extracted ${params.length} parameters: ${params.join(' ')}`)
       return params
     } catch (error) {
-      this.debug.log('error', `[XORRISO] Failed to extract parameters from ISO: ${error}`)
+      this.debug.error(`[XORRISO] Failed to extract parameters from ISO: ${error}`)
       // Return empty array, caller will use default parameters
       return []
     }
@@ -825,7 +825,7 @@ menuentry "Automatic Install Ubuntu" {
       throw new Error('Extraction directory does not exist.')
     }
 
-    this.debug.log('[ISO] Creating autoinstall configuration files...')
+    this.debug.debug('[ISO] Creating autoinstall configuration files...')
 
     // Create nocloud directory for autoinstall files as per Ubuntu documentation
     const noCloudDir = path.join(extractDir, 'nocloud')
@@ -838,13 +838,13 @@ menuentry "Automatic Install Ubuntu" {
     await fsPromises.writeFile(path.join(noCloudDir, 'meta-data'), '')
     await fsPromises.writeFile(path.join(noCloudDir, 'user-data'), config)
     await fsPromises.writeFile(path.join(noCloudDir, 'vendor-data'), '')
-    this.debug.log('[NOCLOUD] Files created: user-data, meta-data, vendor-data in /nocloud/')
+    this.debug.debug('[NOCLOUD] Files created: user-data, meta-data, vendor-data in /nocloud/')
 
     // Also place copies in the root directory for compatibility
     await fsPromises.writeFile(path.join(extractDir, 'meta-data'), '')
     await fsPromises.writeFile(path.join(extractDir, 'user-data'), config)
     await fsPromises.writeFile(path.join(extractDir, 'vendor-data'), '')
-    this.debug.log('[NOCLOUD] Files also created at root for compatibility')
+    this.debug.debug('[NOCLOUD] Files also created at root for compatibility')
 
     // Find kernel paths dynamically
     const kernelPaths = await this.findKernelPaths(extractDir)
@@ -853,20 +853,20 @@ menuentry "Automatic Install Ubuntu" {
     const grubCfgPath = path.join(extractDir, 'boot/grub/grub.cfg')
     if (fs.existsSync(grubCfgPath)) {
       await this.modifyGrubConfig(grubCfgPath, kernelPaths.vmlinuz, kernelPaths.initrd)
-      this.debug.log(`[GRUB] Modified GRUB configuration at ${grubCfgPath}`)
+      this.debug.debug(`[GRUB] Modified GRUB configuration at ${grubCfgPath}`)
     } else {
-      this.debug.log('warning', '[GRUB] Could not find GRUB configuration file at expected path')
+      this.debug.warn('[GRUB] Could not find GRUB configuration file at expected path')
     }
 
-    this.debug.log('[ISO] Examining ISO structure...')
+    this.debug.debug('[ISO] Examining ISO structure...')
 
     // Check for crucial paths and files
     if (!fs.existsSync(path.join(extractDir, 'boot/grub/i386-pc/eltorito.img'))) {
-      this.debug.log('warning', '[ISO] BIOS boot image not found at boot/grub/i386-pc/eltorito.img')
+      this.debug.warn('[ISO] BIOS boot image not found at boot/grub/i386-pc/eltorito.img')
     }
 
     if (!fs.existsSync(path.join(extractDir, 'EFI/boot/bootx64.efi'))) {
-      this.debug.log('warning', '[ISO] EFI boot image not found at EFI/boot/bootx64.efi')
+      this.debug.warn('[ISO] EFI boot image not found at EFI/boot/bootx64.efi')
     }
 
     // Get dynamic xorriso parameters from the original ISO
@@ -879,7 +879,7 @@ menuentry "Automatic Install Ubuntu" {
       // We need to:
       // 1. Replace the source ISO references with extractDir
       // 2. Add our output path
-      this.debug.log('[XORRISO] Using dynamic parameters extracted from original ISO')
+      this.debug.debug('[XORRISO] Using dynamic parameters extracted from original ISO')
 
       isoCreationCommandParts = [
         'xorriso',
@@ -896,7 +896,7 @@ menuentry "Automatic Install Ubuntu" {
       ]
     } else {
       // Fallback to default parameters if extraction failed
-      this.debug.log('[XORRISO] Using fallback parameters (extraction failed)')
+      this.debug.debug('[XORRISO] Using fallback parameters (extraction failed)')
 
       isoCreationCommandParts = [
         'xorriso',
@@ -927,15 +927,15 @@ menuentry "Automatic Install Ubuntu" {
 
     // Use the executeCommand method from the parent class
     try {
-      this.debug.log(`[XORRISO] Creating ISO with command:\n${isoCreationCommandParts.join(' ')}`)
+      this.debug.debug(`[XORRISO] Creating ISO with command:\n${isoCreationCommandParts.join(' ')}`)
       await this.executeCommand(isoCreationCommandParts)
-      this.debug.log(`[ISO] Created ISO successfully at ${newIsoPath}`)
+      this.debug.debug(`[ISO] Created ISO successfully at ${newIsoPath}`)
 
       // Remove the extracted directory
       await this.executeCommand(['rm', '-rf', extractDir])
-      this.debug.log(`[ISO] Removed extracted directory ${extractDir}`)
+      this.debug.debug(`[ISO] Removed extracted directory ${extractDir}`)
     } catch (error) {
-      this.debug.log('error', `[ISO] Failed to create ISO: ${error}`)
+      this.debug.error(`[ISO] Failed to create ISO: ${error}`)
       throw error
     }
   }
@@ -955,7 +955,7 @@ menuentry "Automatic Install Ubuntu" {
     try {
       files = await fsPromises.readdir(dir, { withFileTypes: true })
     } catch (error) {
-      this.debug.log('error', `Failed to read directory ${dir}: ${error}`)
+      this.debug.error(`Failed to read directory ${dir}: ${error}`)
       return results
     }
 
@@ -974,10 +974,10 @@ menuentry "Automatic Install Ubuntu" {
             : file.name
 
           results.push(relativePath)
-          this.debug.log(`Found boot file: ${relativePath}`)
+          this.debug.debug(`Found boot file: ${relativePath}`)
         }
       } catch (error) {
-        this.debug.log('warning', `Error processing ${fullPath}: ${error}`)
+        this.debug.warn(`Error processing ${fullPath}: ${error}`)
       }
     }
 
@@ -995,7 +995,7 @@ menuentry "Automatic Install Ubuntu" {
 
     try {
       // Parse YAML to check syntax
-      const parsed = yaml.load(configContent) as any
+      const parsed = yaml.load(configContent) as Record<string, any> | null
 
       // Check required structure
       if (!parsed) {
@@ -1027,7 +1027,7 @@ menuentry "Automatic Install Ubuntu" {
         return { valid: false, errors }
       }
 
-      this.debug.log('Cloud-init YAML validation passed')
+      this.debug.debug('Cloud-init YAML validation passed')
       return { valid: true, errors: [] }
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error)

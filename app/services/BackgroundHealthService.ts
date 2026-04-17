@@ -1,3 +1,4 @@
+import logger from '@main/logger'
 import { PrismaClient } from '@prisma/client'
 import { CronJob } from 'cron'
 import { EventManager } from './EventManager'
@@ -28,7 +29,7 @@ export class BackgroundHealthService {
    */
   public start(): void {
     if (this.cronJob) {
-      console.log('BackgroundHealthService is already running')
+      logger.info('BackgroundHealthService is already running')
       return
     }
 
@@ -45,7 +46,7 @@ export class BackgroundHealthService {
 
     this.cronJob.start()
     this.weeklyMaintenanceJob.start()
-    console.log('🩺 BackgroundHealthService started - daily health checks scheduled at 2 AM, weekly maintenance at 3 AM on Sundays')
+    logger.info('🩺 BackgroundHealthService started - daily health checks scheduled at 2 AM, weekly maintenance at 3 AM on Sundays')
   }
 
   /**
@@ -60,7 +61,7 @@ export class BackgroundHealthService {
       this.weeklyMaintenanceJob.stop()
       this.weeklyMaintenanceJob = null
     }
-    console.log('🩺 BackgroundHealthService stopped')
+    logger.info('🩺 BackgroundHealthService stopped')
   }
 
   /**
@@ -68,7 +69,7 @@ export class BackgroundHealthService {
    */
   public async executeHealthCheckRound(): Promise<void> {
     if (this.isRunning) {
-      console.log('🩺 Health check round already in progress, skipping')
+      logger.info('🩺 Health check round already in progress, skipping')
       return
     }
 
@@ -89,7 +90,7 @@ export class BackgroundHealthService {
             maxBackoffMs: 30000
           },
           onError: async (error: Error) => {
-            console.error('🩺 Daily health check round failed:', error)
+            logger.error('🩺 Daily health check round failed:', error)
             await this.eventManager.dispatchEvent('health', 'round_failed', {
               error: error.message,
               timestamp: new Date().toISOString()
@@ -98,9 +99,9 @@ export class BackgroundHealthService {
         }
       )
 
-      console.log('🩺 Daily health check round completed')
+      logger.info('🩺 Daily health check round completed')
     } catch (error) {
-      console.error('🩺 Failed to execute daily health check round:', error)
+      logger.error('🩺 Failed to execute daily health check round:', error)
     } finally {
       this.isRunning = false
     }
@@ -128,7 +129,7 @@ export class BackgroundHealthService {
         }
       })
 
-      console.log(`🩺 Starting health check round for ${runningVMs.length} running VMs`)
+      logger.info(`🩺 Starting health check round for ${runningVMs.length} running VMs`)
 
       // Skip round_started event when no running VMs exist to reduce noise
       if (runningVMs.length === 0) {
@@ -158,10 +159,10 @@ export class BackgroundHealthService {
         try {
           await this.queueManager.queueHealthChecks(vm.id)
           successCount++
-          console.log(`🩺 Queued health checks for running VM: ${vm.name} (${vm.id})`)
+          logger.info(`🩺 Queued health checks for running VM: ${vm.name} (${vm.id})`)
         } catch (error) {
           failureCount++
-          console.error(`🩺 Failed to queue health checks for VM ${vm.name}:`, error)
+          logger.error(`🩺 Failed to queue health checks for VM ${vm.name}:`, error)
         }
       }
 
@@ -177,13 +178,13 @@ export class BackgroundHealthService {
         roundId
       })
 
-      console.log(`🩺 Health check round completed for running VMs: ${successCount} success, ${failureCount} failures (${executionTime}ms)`)
+      logger.info(`🩺 Health check round completed for running VMs: ${successCount} success, ${failureCount} failures (${executionTime}ms)`)
 
       // Perform recommendation cleanup after health checks complete
       await this.cleanupOldRecommendations()
     } catch (error) {
       const executionTime = Date.now() - startTime
-      console.error('🩺 Health check round failed:', error)
+      logger.error('🩺 Health check round failed:', error)
 
       await this.eventManager.dispatchEvent('health', 'round_failed', {
         error: (error as Error).message,
@@ -201,14 +202,14 @@ export class BackgroundHealthService {
   public async triggerHealthCheckRound(): Promise<string> {
     const taskId = uuidv4()
 
-    console.log(`🩺 Manually triggering health check round (task: ${taskId})`)
+    logger.info(`🩺 Manually triggering health check round (task: ${taskId})`)
 
     // Execute immediately without cron
     setImmediate(async () => {
       try {
         await this.executeHealthCheckRound()
       } catch (error) {
-        console.error('🩺 Manually triggered health check round failed:', error)
+        logger.error('🩺 Manually triggered health check round failed:', error)
       }
     })
 
@@ -243,7 +244,7 @@ export class BackgroundHealthService {
     })
 
     this.cronJob.start()
-    console.log(`🩺 BackgroundHealthService schedule updated to: ${cronExpression}`)
+    logger.info(`🩺 BackgroundHealthService schedule updated to: ${cronExpression}`)
   }
 
   /**
@@ -254,9 +255,9 @@ export class BackgroundHealthService {
       if (!this.recommendationService) {
         throw new Error('VMRecommendationService initialization failed')
       }
-      console.log('✅ VMRecommendationService initialized successfully in BackgroundHealthService')
+      logger.info('✅ VMRecommendationService initialized successfully in BackgroundHealthService')
     } catch (error) {
-      console.error('❌ Failed to initialize VMRecommendationService in BackgroundHealthService:', error)
+      logger.error('❌ Failed to initialize VMRecommendationService in BackgroundHealthService:', error)
       throw error
     }
   }
@@ -266,14 +267,14 @@ export class BackgroundHealthService {
    */
   private async executeWeeklyMaintenance(): Promise<void> {
     const startTime = Date.now()
-    console.log('🔧 Starting weekly maintenance tasks')
+    logger.info('🔧 Starting weekly maintenance tasks')
 
     try {
       await this.validateRecommendationIntegrity()
       await this.generateMissingRecommendations()
 
       const executionTime = Date.now() - startTime
-      console.log(`✅ Weekly maintenance completed (${executionTime}ms)`)
+      logger.info(`✅ Weekly maintenance completed (${executionTime}ms)`)
 
       await this.eventManager.dispatchEvent('health', 'maintenance_completed', {
         executionTimeMs: executionTime,
@@ -281,7 +282,7 @@ export class BackgroundHealthService {
       })
     } catch (error) {
       const executionTime = Date.now() - startTime
-      console.error('❌ Weekly maintenance failed:', error)
+      logger.error('❌ Weekly maintenance failed:', error)
 
       await this.eventManager.dispatchEvent('health', 'maintenance_failed', {
         error: (error as Error).message,
@@ -310,10 +311,10 @@ export class BackgroundHealthService {
       })
 
       if (deletedCount.count > 0) {
-        console.log(`🧹 Cleaned up ${deletedCount.count} old recommendations (older than ${cleanupThresholdDays} days)`)
+        logger.info(`🧹 Cleaned up ${deletedCount.count} old recommendations (older than ${cleanupThresholdDays} days)`)
       }
     } catch (error) {
-      console.error('❌ Failed to cleanup old recommendations:', error)
+      logger.error('❌ Failed to cleanup old recommendations:', error)
       // Don't throw to avoid breaking health check workflow
     }
   }
@@ -344,7 +345,7 @@ export class BackgroundHealthService {
           }
         })
 
-        console.log(`🧹 Removed ${deletedCount.count} orphaned recommendations without valid snapshots`)
+        logger.info(`🧹 Removed ${deletedCount.count} orphaned recommendations without valid snapshots`)
       }
 
       // Clean up recommendations where the machine no longer exists
@@ -368,10 +369,10 @@ export class BackgroundHealthService {
           }
         })
 
-        console.log(`🧹 Removed ${deletedCount.count} recommendations with invalid VM references`)
+        logger.info(`🧹 Removed ${deletedCount.count} recommendations with invalid VM references`)
       }
     } catch (error) {
-      console.error('❌ Failed to validate recommendation integrity:', error)
+      logger.error('❌ Failed to validate recommendation integrity:', error)
       throw error
     }
   }
@@ -405,20 +406,20 @@ export class BackgroundHealthService {
       })
 
       if (snapshotsWithoutRecommendations.length > 0) {
-        console.log(`💡 Found ${snapshotsWithoutRecommendations.length} recent snapshots without recommendations, generating...`)
+        logger.info(`💡 Found ${snapshotsWithoutRecommendations.length} recent snapshots without recommendations, generating...`)
 
         for (const snapshot of snapshotsWithoutRecommendations) {
           try {
             await this.recommendationService.generateRecommendations(snapshot.machineId, snapshot.id)
-            console.log(`💡 Generated recommendations for snapshot ${snapshot.id} (${snapshot.overallStatus})`)
+            logger.info(`💡 Generated recommendations for snapshot ${snapshot.id} (${snapshot.overallStatus})`)
           } catch (error) {
-            console.error(`❌ Failed to generate recommendations for snapshot ${snapshot.id}:`, error)
+            logger.error(`❌ Failed to generate recommendations for snapshot ${snapshot.id}:`, error)
             // Continue with next snapshot
           }
         }
       }
     } catch (error) {
-      console.error('❌ Failed to generate missing recommendations:', error)
+      logger.error('❌ Failed to generate missing recommendations:', error)
       throw error
     }
   }
@@ -457,9 +458,9 @@ export class BackgroundHealthService {
 
       // Generate new recommendations
       await this.recommendationService.generateRecommendations(machineId, latestSnapshot.id)
-      console.log(`💡 Regenerated recommendations for VM ${machineId} snapshot ${latestSnapshot.id}`)
+      logger.info(`💡 Regenerated recommendations for VM ${machineId} snapshot ${latestSnapshot.id}`)
     } catch (error) {
-      console.error(`❌ Failed to regenerate recommendations for VM ${machineId}:`, error)
+      logger.error(`❌ Failed to regenerate recommendations for VM ${machineId}:`, error)
       throw error
     }
   }
@@ -479,20 +480,20 @@ export class BackgroundHealthService {
         }
       })
 
-      console.log(`💡 Starting recommendation regeneration for ${runningVMs.length} running VMs`)
+      logger.info(`💡 Starting recommendation regeneration for ${runningVMs.length} running VMs`)
 
       for (const vm of runningVMs) {
         try {
           await this.regenerateRecommendationsForVM(vm.id)
         } catch (error) {
-          console.error(`❌ Failed to regenerate recommendations for VM ${vm.name} (${vm.id}):`, error)
+          logger.error(`❌ Failed to regenerate recommendations for VM ${vm.name} (${vm.id}):`, error)
           // Continue with next VM
         }
       }
 
-      console.log('✅ Completed recommendation regeneration for all VMs')
+      logger.info('✅ Completed recommendation regeneration for all VMs')
     } catch (error) {
-      console.error('❌ Failed to regenerate all recommendations:', error)
+      logger.error('❌ Failed to regenerate all recommendations:', error)
       throw error
     }
   }
@@ -547,7 +548,7 @@ export class BackgroundHealthService {
         averageRecommendationsPerSnapshot: Math.round(averageRecommendationsPerSnapshot * 100) / 100
       }
     } catch (error) {
-      console.error('❌ Failed to get recommendation stats:', error)
+      logger.error('❌ Failed to get recommendation stats:', error)
       throw error
     }
   }

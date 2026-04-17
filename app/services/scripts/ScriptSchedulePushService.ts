@@ -1,7 +1,8 @@
 import { PrismaClient } from '@prisma/client';
 import { getVirtioSocketWatcherService } from '../VirtioSocketWatcherService';
+import logger from '@main/logger';
 
-const debug = require('debug')('infinibay:service:script-schedule-push');
+const log = logger.child({ module: 'infinibay:service:script-schedule-push' });
 
 /**
  * ScriptSchedulePushService
@@ -26,25 +27,25 @@ export class ScriptSchedulePushService {
    */
   public start(): void {
     if (this.intervalTimer) {
-      debug('ScriptSchedulePushService is already running');
+      log.debug('ScriptSchedulePushService is already running');
       return;
     }
 
-    debug('Starting ScriptSchedulePushService (check interval: %dms)', this.CHECK_INTERVAL_MS);
+    log.debug('Starting ScriptSchedulePushService (check interval: %dms)', this.CHECK_INTERVAL_MS);
 
     // Run immediately on start
     this.checkAndPushDueScripts().catch(error => {
-      debug('Error in initial script push check: %s', error.message);
+      log.debug('Error in initial script push check: %s', error.message);
     });
 
     // Schedule periodic checks
     this.intervalTimer = setInterval(() => {
       this.checkAndPushDueScripts().catch(error => {
-        debug('Error in periodic script push check: %s', error.message);
+        log.debug('Error in periodic script push check: %s', error.message);
       });
     }, this.CHECK_INTERVAL_MS);
 
-    debug('✅ ScriptSchedulePushService started');
+    log.debug('✅ ScriptSchedulePushService started');
   }
 
   /**
@@ -54,7 +55,7 @@ export class ScriptSchedulePushService {
     if (this.intervalTimer) {
       clearInterval(this.intervalTimer);
       this.intervalTimer = undefined;
-      debug('ScriptSchedulePushService stopped');
+      log.debug('ScriptSchedulePushService stopped');
     }
   }
 
@@ -63,7 +64,7 @@ export class ScriptSchedulePushService {
    */
   private async checkAndPushDueScripts(): Promise<void> {
     if (this.isRunning) {
-      debug('Script push check already in progress, skipping');
+      log.debug('Script push check already in progress, skipping');
       return;
     }
 
@@ -103,11 +104,11 @@ export class ScriptSchedulePushService {
       });
 
       if (dueExecutions.length === 0) {
-        debug('No due scheduled scripts found');
+        log.debug('No due scheduled scripts found');
         return;
       }
 
-      debug('Found %d due scheduled script executions', dueExecutions.length);
+      log.debug('Found %d due scheduled script executions', dueExecutions.length);
 
       // Group executions by machine ID
       const executionsByMachine = new Map<string, typeof dueExecutions>();
@@ -119,7 +120,7 @@ export class ScriptSchedulePushService {
         executionsByMachine.get(machineId)!.push(execution);
       }
 
-      debug('Grouped executions across %d VMs', executionsByMachine.size);
+      log.debug('Grouped executions across %d VMs', executionsByMachine.size);
 
       // Get VirtioSocketWatcherService instance
       const virtioService = getVirtioSocketWatcherService();
@@ -135,7 +136,7 @@ export class ScriptSchedulePushService {
           const machine = executions[0].machine;
 
           if (machine.status !== 'running') {
-            debug('VM %s (%s) is offline (status: %s), skipping %d executions',
+            log.debug('VM %s (%s) is offline (status: %s), skipping %d executions',
               machine.name, machineId, machine.status, executions.length);
             offlineCount++;
             continue;
@@ -145,24 +146,24 @@ export class ScriptSchedulePushService {
           const result = await virtioService.pushPendingScriptsToVM(machineId);
 
           if (result.success) {
-            debug('✅ Pushed %d scripts to VM %s (%s)',
+            log.debug('✅ Pushed %d scripts to VM %s (%s)',
               result.scriptCount, machine.name, machineId);
             successCount++;
           } else {
-            debug('⚠️ Failed to push scripts to VM %s (%s): %s',
+            log.debug('⚠️ Failed to push scripts to VM %s (%s): %s',
               machine.name, machineId, result.error);
             failureCount++;
           }
         } catch (error) {
-          debug('Error pushing scripts to VM %s: %s', machineId, (error as Error).message);
+          log.debug('Error pushing scripts to VM %s: %s', machineId, (error as Error).message);
           failureCount++;
         }
       }
 
-      debug('Script push cycle complete: %d successful, %d failed, %d offline',
+      log.debug('Script push cycle complete: %d successful, %d failed, %d offline',
         successCount, failureCount, offlineCount);
     } catch (error) {
-      debug('Error in checkAndPushDueScripts: %s', (error as Error).message);
+      log.debug('Error in checkAndPushDueScripts: %s', (error as Error).message);
     } finally {
       this.isRunning = false;
     }
@@ -172,7 +173,7 @@ export class ScriptSchedulePushService {
    * Manually trigger a check and push cycle (useful for testing or on-demand triggers)
    */
   public async triggerPush(): Promise<void> {
-    debug('Manual push trigger requested');
+    log.debug('Manual push trigger requested');
     await this.checkAndPushDueScripts();
   }
 }
@@ -185,7 +186,7 @@ let instance: ScriptSchedulePushService | null = null;
  */
 export function createScriptSchedulePushService(prisma: PrismaClient): ScriptSchedulePushService {
   if (instance) {
-    debug('ScriptSchedulePushService instance already exists');
+    log.debug('ScriptSchedulePushService instance already exists');
     return instance;
   }
 

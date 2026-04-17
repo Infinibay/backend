@@ -1,13 +1,12 @@
 import { FirewallRule, PrismaClient } from '@prisma/client'
 
 import { type FirewallApplyResult } from '@infinibay/infinization'
-import { Debugger } from '@utils/debug'
-
+import logger from '@main/logger'
 import { FirewallRuleService } from './FirewallRuleService'
 import { FirewallValidationService } from './FirewallValidationService'
 import { InfinizationFirewallService } from './InfinizationFirewallService'
 
-const debug = new Debugger('infinibay:service:firewall:orchestration')
+const debug = logger.child({ module: 'infinibay:service:firewall:orchestration' })
 
 export interface ApplyRulesResult {
   rulesApplied: number;
@@ -101,9 +100,7 @@ export class FirewallOrchestrationService {
     const effectiveRules = [...effectiveDeptRules, ...vmRules]
     effectiveRules.sort((a, b) => a.priority - b.priority)
 
-    debug.log(
-      'info',
-      `Effective rules for VM ${vmId}: ${effectiveRules.length} (${deptRules.length} dept + ${vmRules.length} vm - ${deptRules.length - effectiveDeptRules.length} overridden)`
+    debug.info(`Effective rules for VM ${vmId}: ${effectiveRules.length} (${deptRules.length} dept + ${vmRules.length} vm - ${deptRules.length - effectiveDeptRules.length} overridden)`
     )
 
     return effectiveRules
@@ -117,7 +114,7 @@ export class FirewallOrchestrationService {
    * The VM must have a TAP device configured (typically happens when the VM is running).
    */
   async applyVMRules (vmId: string): Promise<ApplyRulesResult> {
-    debug.log('info', `Applying VM rules for ${vmId}`)
+    debug.info(`Applying VM rules for ${vmId}`)
 
     // Get VM details
     const vm = await this.prisma.machine.findUnique({
@@ -152,7 +149,7 @@ export class FirewallOrchestrationService {
     const validation = await this.validationService.validateRuleConflicts(vmRules)
     if (!validation.isValid) {
       const errorMsg = `VM rule conflicts: ${validation.conflicts.map(c => c.message).join(', ')}`
-      debug.log('error', errorMsg)
+      debug.error(errorMsg)
       throw new Error(errorMsg)
     }
 
@@ -172,9 +169,7 @@ export class FirewallOrchestrationService {
       await this.ruleService.updateRuleSetSyncTimestamp(vm.firewallRuleSet.id)
     }
 
-    debug.log(
-      'info',
-      `Successfully applied firewall rules to VM ${vmId}: ${result.appliedRules}/${result.totalRules} rules (${deptRules.length} dept + ${vmRules.length} vm)`
+    debug.info(`Successfully applied firewall rules to VM ${vmId}: ${result.appliedRules}/${result.totalRules} rules (${deptRules.length} dept + ${vmRules.length} vm)`
     )
 
     return {
@@ -191,7 +186,7 @@ export class FirewallOrchestrationService {
    * This is O(N) where N = number of VMs in the department.
    */
   async applyDepartmentRules (deptId: string): Promise<SyncResult> {
-    debug.log('info', `Applying department rules for ${deptId}`)
+    debug.info(`Applying department rules for ${deptId}`)
 
     const department = await this.prisma.department.findUnique({
       where: { id: deptId },
@@ -212,7 +207,7 @@ export class FirewallOrchestrationService {
     const validation = await this.validationService.validateRuleConflicts(deptRules)
     if (!validation.isValid) {
       const errorMsg = `Department rule conflicts: ${validation.conflicts.map(c => c.message).join(', ')}`
-      debug.log('error', errorMsg)
+      debug.error(errorMsg)
       throw new Error(errorMsg)
     }
 
@@ -230,9 +225,7 @@ export class FirewallOrchestrationService {
       await this.ruleService.updateRuleSetSyncTimestamp(department.firewallRuleSet.id)
     }
 
-    debug.log(
-      'info',
-      `Department rules applied: ${vmsUpdated} VMs updated, ${errors.length} errors`
+    debug.info(`Department rules applied: ${vmsUpdated} VMs updated, ${errors.length} errors`
     )
 
     // Consider success if the only errors are VMs without TAP devices (same semantics as syncAllToNftables)
@@ -252,7 +245,7 @@ export class FirewallOrchestrationService {
    * Iterates over all VMs with TAP devices configured and applies their firewall rules.
    */
   async syncAllToNftables (): Promise<SyncResult> {
-    debug.log('info', 'Starting full firewall sync to nftables')
+    debug.info('Starting full firewall sync to nftables')
 
     // Get all VMs with their departments and rules
     const machines = await this.prisma.machine.findMany({
@@ -282,7 +275,7 @@ export class FirewallOrchestrationService {
       // Skip VMs without TAP device configured
       if (!machine.configuration?.tapDeviceName) {
         const msg = `VM ${machine.id} (${machine.name}) has no TAP device configured, skipping`
-        debug.log('warn', msg)
+        debug.warn(msg)
         errors.push(msg)
         vmsSkipped++
         continue
@@ -316,17 +309,17 @@ export class FirewallOrchestrationService {
 
         if (result.failedRules > 0) {
           const msg = `VM ${machine.id} (${machine.name}): ${result.failedRules}/${result.totalRules} rules failed`
-          debug.log('warn', msg)
+          debug.warn(msg)
           errors.push(msg)
         }
       } catch (err) {
         const errorMsg = `Failed to sync VM ${machine.id} (${machine.name}): ${err}`
-        debug.log('error', errorMsg)
+        debug.error(errorMsg)
         errors.push(errorMsg)
       }
     }
 
-    debug.log('info', `Sync complete: ${vmsUpdated} VMs updated, ${vmsSkipped} skipped, ${errors.length} errors`)
+    debug.info(`Sync complete: ${vmsUpdated} VMs updated, ${vmsSkipped} skipped, ${errors.length} errors`)
 
     return {
       success: errors.filter(e => !e.includes('no TAP device')).length === 0,

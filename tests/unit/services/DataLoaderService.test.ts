@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client'
-import { DataLoaderService } from '../../../app/services/vm/DataLoaderService'
+import { DataLoaderService } from '../../../app/services/DataLoaderService'
 import { createMockUser, createMockMachine, createMockDepartment, createMockMachineTemplate, createMockApplication, createMockProcessSnapshot, createMockSystemMetrics, createMockMachineConfiguration } from '../../setup/mock-factories'
 
 // Create a mock PrismaClient for unit testing

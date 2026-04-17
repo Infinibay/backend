@@ -1,13 +1,11 @@
 import { FirewallRule, FirewallRuleSet, Prisma, PrismaClient, RuleSetType, RuleAction, RuleDirection } from '@prisma/client'
 
-import { Debugger } from '@utils/debug'
-
-// Type for FirewallRuleSet with rules included
+import logger from '@main/logger'// Type for FirewallRuleSet with rules included
 export type FirewallRuleSetWithRules = Prisma.FirewallRuleSetGetPayload<{
   include: { rules: true }
 }>
 
-const debug = new Debugger('infinibay:service:firewall:rule')
+const debug = logger.child({ module: 'infinibay:service:firewall:rule' })
 
 export interface CreateRuleData {
   action: RuleAction;
@@ -112,7 +110,7 @@ export class FirewallRuleService {
       }
     })
 
-    debug.log('info', `Ensured rule set: ${ruleSet.id} for ${entityType} ${entityId}`)
+    debug.info(`Ensured rule set: ${ruleSet.id} for ${entityType} ${entityId}`)
     return ruleSet
   }
 
@@ -127,7 +125,7 @@ export class FirewallRuleService {
       }
     })
 
-    debug.log('info', `Created rule: ${rule.id} in rule set ${ruleSetId}`)
+    debug.info(`Created rule: ${rule.id} in rule set ${ruleSetId}`)
     return rule
   }
 
@@ -140,7 +138,7 @@ export class FirewallRuleService {
       data: ruleData
     })
 
-    debug.log('info', `Updated rule: ${ruleId}`)
+    debug.info(`Updated rule: ${ruleId}`)
     return rule
   }
 
@@ -152,7 +150,7 @@ export class FirewallRuleService {
       where: { id: ruleId }
     })
 
-    debug.log('info', `Deleted rule: ${ruleId}`)
+    debug.info(`Deleted rule: ${ruleId}`)
   }
 
   /**
@@ -222,7 +220,7 @@ export class FirewallRuleService {
       }
     })
 
-    debug.log('info', `Updated sync status for rule set: ${ruleSetId}`)
+    debug.info(`Updated sync status for rule set: ${ruleSetId}`)
   }
 
   /**
@@ -237,7 +235,7 @@ export class FirewallRuleService {
       }
     })
 
-    debug.log('info', `Updated sync timestamp for rule set: ${ruleSetId}`)
+    debug.info(`Updated sync timestamp for rule set: ${ruleSetId}`)
   }
 
   /**
@@ -248,7 +246,7 @@ export class FirewallRuleService {
       where: { id: ruleSetId }
     })
 
-    debug.log('info', `Deleted rule set: ${ruleSetId}`)
+    debug.info(`Deleted rule set: ${ruleSetId}`)
   }
 
   /**
@@ -280,7 +278,7 @@ export class FirewallRuleService {
       }
     })
 
-    debug.log('info', `Deleted ${result.count} system-generated rules from rule set ${ruleSetId}`)
+    debug.info(`Deleted ${result.count} system-generated rules from rule set ${ruleSetId}`)
     return result.count
   }
 }

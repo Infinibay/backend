@@ -1,6 +1,6 @@
-import { ProcessManager } from '@services/vm/ProcessManager'
+import { ProcessManager } from '@services/ProcessManager'
 import { PrismaClient } from '@prisma/client'
-import { VirtioSocketWatcherService } from '@services/vm/VirtioSocketWatcherService'
+import { VirtioSocketWatcherService } from '@services/VirtioSocketWatcherService'
 
 // Mock libvirt-node (auto-mocked from __mocks__ directory)
 jest.mock('libvirt-node')
@@ -325,7 +325,7 @@ describe('ProcessManager', () => {
         data: mockProcesses
       })
 
-      const { ProcessSortBy } = require('@services/vm/ProcessManager')
+      const { ProcessSortBy } = require('@services/ProcessManager')
       const result = await processManager.getTopProcesses(machineId, 2, ProcessSortBy.MEMORY)
 
       expect(result).toHaveLength(2)
