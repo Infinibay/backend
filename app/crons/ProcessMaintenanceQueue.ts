@@ -32,7 +32,7 @@ export class ProcessMaintenanceQueue {
    * Start the cron job
    */
   start (): void {
-    if (!this.job.running) {
+    if (!this.job.isActive) {
       debug.debug('Starting ProcessMaintenanceQueue cron job')
       this.job.start()
     }
@@ -42,7 +42,7 @@ export class ProcessMaintenanceQueue {
    * Stop the cron job
    */
   stop (): void {
-    if (this.job.running) {
+    if (this.job.isActive) {
       debug.debug('Stopping ProcessMaintenanceQueue cron job')
       this.job.stop()
     }
@@ -52,7 +52,7 @@ export class ProcessMaintenanceQueue {
    * Check if the cron job is running
    */
   isJobRunning (): boolean {
-    return this.job.running
+    return this.job.isActive
   }
 
   /**

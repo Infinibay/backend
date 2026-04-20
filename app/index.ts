@@ -17,7 +17,7 @@ import prisma from './utils/database'
 import { configureServer } from './config/server'
 import { createApolloServer } from './config/apollo'
 import { configureRoutes } from './config/routes'
-import { expressMiddleware } from '@apollo/server/express4'
+import { expressMiddleware } from '@as-integrations/express5'
 import { InfinibayContext, createUserValidationHelpers, SafeUser } from './utils/context'
 import { verifyRequestAuth } from './utils/jwtAuth'
 
@@ -90,7 +90,7 @@ async function bootstrap (): Promise<void> {
         credentials: true
       }),
       expressMiddleware(apolloServer, {
-        context: async ({ req, res }): Promise<InfinibayContext> => {
+        context: async ({ req, res }: { req: express.Request, res: express.Response }): Promise<InfinibayContext> => {
           const debugAuth = process.env.DEBUG_AUTH === '1' || process.env.NODE_ENV !== 'production'
 
           // Use shared JWT verification utility

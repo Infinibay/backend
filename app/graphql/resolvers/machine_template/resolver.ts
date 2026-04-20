@@ -8,7 +8,7 @@ import {
   , Ctx
 } from 'type-graphql'
 import { InfinibayContext } from '@utils/context'
-import { UserInputError } from 'apollo-server-errors'
+import { UserInputError } from '@utils/errors'
 import { MachineTemplateType, MachineTemplateOrderBy, MachineTemplateInputType } from './type'
 import { PaginationInputType } from '@utils/pagination'
 

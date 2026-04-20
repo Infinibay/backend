@@ -1,6 +1,6 @@
 import logger from '@main/logger'
 import { Arg, Authorized, Ctx, ID, Mutation, Query, Resolver } from 'type-graphql'
-import { UserInputError } from 'apollo-server-errors'
+import { UserInputError } from '@utils/errors'
 
 import { getEventManager } from '@services/EventManager'
 import { InfinibayContext } from '@utils/context'

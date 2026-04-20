@@ -7,7 +7,7 @@ import {
   createMockMachines
 } from '../../setup/mock-factories'
 import { createAdminContext } from '../../setup/test-helpers'
-import { UserInputError } from 'apollo-server-errors'
+import { UserInputError } from '@utils/errors'
 import { MachineTemplateInputType, MachineTemplateOrderBy, MachineTemplateOrderByEnum } from '@graphql/resolvers/machine_template/type'
 import { PaginationInputType, OrderByDirection } from '@utils/pagination'
 

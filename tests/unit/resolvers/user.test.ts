@@ -15,7 +15,7 @@ import {
 } from '../../setup/test-helpers'
 import bcrypt from 'bcrypt'
 import jwt from 'jsonwebtoken'
-import { UserInputError, AuthenticationError } from 'apollo-server-errors'
+import { UserInputError, AuthenticationError } from '@utils/errors'
 import { OrderByDirection } from '@utils/pagination'
 import { UserOrderByField, UserRole } from '@graphql/resolvers/user/type'
 import type { UserOrderByInputType, CreateUserInputType, UpdateUserInputType } from '@graphql/resolvers/user/type'

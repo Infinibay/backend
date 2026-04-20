@@ -8,7 +8,7 @@ import {
   Resolver
 } from 'type-graphql'
 import { InfinibayContext } from '@utils/context'
-import { UserInputError } from 'apollo-server-errors'
+import { UserInputError } from '@utils/errors'
 import { MachineTemplateCategoryType, MachineTemplateCategoryInputType } from './type'
 
 export interface MachineTemplateCategoryResolverInterface {

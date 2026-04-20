@@ -2,7 +2,7 @@ import logger from '@main/logger'
 import { Resolver, Query, Mutation, Arg, Authorized } from 'type-graphql'
 import { ISO, ISOStatus, SystemReadiness, ISOAvailabilityMap } from '../types/ISOType'
 import ISOService from '@services/ISOService'
-import { UserInputError } from 'apollo-server-express'
+import { UserInputError } from '@utils/errors'
 
 @Resolver()
 export class ISOResolver {

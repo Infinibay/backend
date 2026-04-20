@@ -1,6 +1,40 @@
 /**
  * Domain-specific error classes for consistent error handling across services
  */
+import { GraphQLError } from 'graphql'
+
+/**
+ * Shim error classes replacing the removed apollo-server-express / apollo-server-errors
+ * classes. Each maps to a GraphQLError with the appropriate `extensions.code`, matching
+ * the codes Apollo Server used previously.
+ */
+export class UserInputError extends GraphQLError {
+  constructor (message: string, extensions?: Record<string, unknown>) {
+    super(message, { extensions: { code: 'BAD_USER_INPUT', ...(extensions || {}) } })
+    this.name = 'UserInputError'
+  }
+}
+
+export class AuthenticationError extends GraphQLError {
+  constructor (message: string, extensions?: Record<string, unknown>) {
+    super(message, { extensions: { code: 'UNAUTHENTICATED', ...(extensions || {}) } })
+    this.name = 'AuthenticationError'
+  }
+}
+
+export class ForbiddenError extends GraphQLError {
+  constructor (message: string, extensions?: Record<string, unknown>) {
+    super(message, { extensions: { code: 'FORBIDDEN', ...(extensions || {}) } })
+    this.name = 'ForbiddenError'
+  }
+}
+
+export class ApolloError extends GraphQLError {
+  constructor (message: string, code: string = 'INTERNAL_SERVER_ERROR', extensions?: Record<string, unknown>) {
+    super(message, { extensions: { code, ...(extensions || {}) } })
+    this.name = 'ApolloError'
+  }
+}
 
 export class NotFoundError extends Error {
   constructor (message: string) {

@@ -1,89 +1,36 @@
 import 'reflect-metadata'
-import { PrismaClient } from '@prisma/client'
-import { mockDeep, mockReset, DeepMockProxy } from 'jest-mock-extended'
 import logger from '@main/logger'
+import {
+  createTestPrismaClient,
+  resetTestPrismaClient,
+  cleanDatabase,
+  rollbackTransaction,
+  TEST_DATABASE_URL
+} from './prisma-test-client'
 
-const mocks = { prisma: undefined as any }
-// Mock Prisma Client
-jest.mock('@prisma/client', () => ({
-  PrismaClient: jest.fn(() => mocks.prisma),
-  Prisma: {
-    PrismaClientKnownRequestError: class PrismaClientKnownRequestError extends Error {
-      code: string
-      constructor (message: string, code: string) {
-        super(message)
-        this.code = code
-      }
-    }
-  },
-  // Export the enums for tests to use
-  TaskStatus: {
-    PENDING: 'PENDING',
-    RUNNING: 'RUNNING',
-    COMPLETED: 'COMPLETED',
-    FAILED: 'FAILED',
-    CANCELLED: 'CANCELLED',
-    RETRY_SCHEDULED: 'RETRY_SCHEDULED'
-  },
-  TaskPriority: {
-    URGENT: 'URGENT',
-    HIGH: 'HIGH',
-    MEDIUM: 'MEDIUM',
-    LOW: 'LOW'
-  },
-  HealthCheckType: {
-    OVERALL_STATUS: 'OVERALL_STATUS',
-    DISK_SPACE: 'DISK_SPACE',
-    RESOURCE_OPTIMIZATION: 'RESOURCE_OPTIMIZATION',
-    WINDOWS_UPDATES: 'WINDOWS_UPDATES',
-    WINDOWS_DEFENDER: 'WINDOWS_DEFENDER',
-    APPLICATION_INVENTORY: 'APPLICATION_INVENTORY',
-    APPLICATION_UPDATES: 'APPLICATION_UPDATES',
-    SECURITY_CHECK: 'SECURITY_CHECK',
-    PERFORMANCE_CHECK: 'PERFORMANCE_CHECK',
-    SYSTEM_HEALTH: 'SYSTEM_HEALTH',
-    CUSTOM_CHECK: 'CUSTOM_CHECK'
-  },
-  // Firewall enums
-  RuleSetType: {
-    DEPARTMENT: 'DEPARTMENT',
-    VM: 'VM'
-  },
-  RuleAction: {
-    ACCEPT: 'ACCEPT',
-    DROP: 'DROP',
-    REJECT: 'REJECT'
-  },
-  RuleDirection: {
-    IN: 'IN',
-    OUT: 'OUT',
-    INOUT: 'INOUT'
-  }
-  ,
-  FirewallPolicy: { ALLOW_ALL: 'ALLOW_ALL', BLOCK_ALL: 'BLOCK_ALL' },
-  UserRole: { USER: 'USER', ADMIN: 'ADMIN', SUPER_ADMIN: 'SUPER_ADMIN' },
-  RecommendationType: {
-    DISK_SPACE_LOW: 'DISK_SPACE_LOW', HIGH_CPU_APP: 'HIGH_CPU_APP',
-    HIGH_RAM_APP: 'HIGH_RAM_APP', PORT_BLOCKED: 'PORT_BLOCKED',
-    OVER_PROVISIONED: 'OVER_PROVISIONED', UNDER_PROVISIONED: 'UNDER_PROVISIONED',
-    OS_UPDATE_AVAILABLE: 'OS_UPDATE_AVAILABLE', APP_UPDATE_AVAILABLE: 'APP_UPDATE_AVAILABLE',
-    DEFENDER_DISABLED: 'DEFENDER_DISABLED', DEFENDER_THREAT: 'DEFENDER_THREAT', OTHER: 'OTHER'
-  },
-  MaintenanceTaskType: {
-    DISK_CLEANUP: 'DISK_CLEANUP', DEFRAG: 'DEFRAG', DEFENDER_SCAN: 'DEFENDER_SCAN',
-    WINDOWS_UPDATES: 'WINDOWS_UPDATES', SYSTEM_FILE_CHECK: 'SYSTEM_FILE_CHECK',
-    DISK_CHECK: 'DISK_CHECK', REGISTRY_CLEANUP: 'REGISTRY_CLEANUP', CUSTOM_SCRIPT: 'CUSTOM_SCRIPT'
-  },
-  MaintenanceStatus: {
-    IDLE: 'IDLE', RUNNING: 'RUNNING', SUCCESS: 'SUCCESS',
-    FAILED: 'FAILED', CANCELLED: 'CANCELLED'
-  },
-  MaintenanceTrigger: {
-    MANUAL: 'MANUAL', SCHEDULED: 'SCHEDULED', AUTOMATIC: 'AUTOMATIC'
-  }
+// ── Prisma test client singleton ──────────────────────────────────────────────
+
+export const testPrisma = createTestPrismaClient({ verbose: false })
+
+// ── Mock: Replace the real @utils/database singleton with the test client ─────
+//
+// By mocking '@utils/database', every module that does:
+//     import prisma from '@utils/database'
+// will receive the testPrisma instance instead of the real singleton.
+// This means services, resolvers, cron jobs, etc. all hit the test DB transparently.
+
+jest.mock('@utils/database', () => ({
+  __esModule: true,
+  default: testPrisma.prisma
 }))
 
-// Mock EventManager
+// ── Export the enums from @prisma/client (these are plain values, no DB needed) ─
+
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { Prisma, ...enums } = require('@prisma/client')
+
+// ── Mock EventManager ──────────────────────────────────────────────────────────
+
 const MockEventManagerClass = class MockEventManager {
   registerResourceManager = jest.fn()
   dispatchEvent = jest.fn()
@@ -121,7 +68,7 @@ jest.mock('@services/InfinizationService', () => ({
 jest.mock('socket.io', () => ({
   Server: jest.fn(() => ({
     on: jest.fn(),
-    use: jest.fn(), // Add missing use method for middleware
+    use: jest.fn(),
     emit: jest.fn(),
     sockets: {
       emit: jest.fn()
@@ -131,24 +78,22 @@ jest.mock('socket.io', () => ({
 
 // Mock systeminformation
 jest.mock('systeminformation', () => ({
-  graphics: jest.fn(() => ({
-    controllers: []
-  })),
-  cpu: jest.fn(() => ({
-    cores: 8
-  })),
-  mem: jest.fn(() => ({
-    total: 16000000000
-  }))
+  graphics: jest.fn(() => ({ controllers: [] })),
+  cpu: jest.fn(() => ({ cores: 8 })),
+  mem: jest.fn(() => ({ total: 16000000000 }))
 }))
 
-// Create mock Prisma instance
-const _mockPrisma = mockDeep<PrismaClient>() as any
-mocks.prisma = _mockPrisma
-export const mockPrisma = _mockPrisma
+// ── Backward-compatible mockPrisma export ──────────────────────────────────────
+//
+// Existing tests that import { mockPrisma } from '../setup/jest.setup'
+// will receive an auto-mocked PrismaClient that mirrors the real DB.
+// This prevents breaking tests that still use mockPrisma.mockReturnValue etc.
+// NOTE: mockPrisma is UNCONNECTED from testPrisma — prefer using testPrisma directly.
+const mockPrisma = testPrisma.prisma
 
-// Environment variables for testing
-process.env.DATABASE_URL = 'postgresql://test:test@localhost:5432/test'
+// ── Environment variables for testing ─────────────────────────────────────────
+
+process.env.DATABASE_URL = TEST_DATABASE_URL
 process.env.TOKENKEY = 'test-secret-key'
 process.env.BCRYPT_ROUNDS = '10'
 process.env.PORT = '4001'
@@ -158,20 +103,29 @@ process.env.GRAPHIC_HOST = '192.168.1.100'
 process.env.INFINIBAY_BASE_DIR = '/tmp/infinibay-test'
 process.env.VIRTIO_WIN_ISO_PATH = '/tmp/virtio-win.iso'
 
-// Reset mocks before each test
-beforeEach(() => {
-  mockReset(mockPrisma)
-  mockPrisma.$connect = jest.fn().mockResolvedValue(undefined)
-  mockPrisma.$disconnect = jest.fn().mockResolvedValue(undefined)
-  jest.clearAllMocks()
+// ── Lifecycle hooks ────────────────────────────────────────────────────────────
+
+beforeAll(async () => {
+  await testPrisma.connect()
+  await testPrisma.cleanup()
 })
 
-// Clean up after all tests
+beforeEach(async () => {
+  await testPrisma.cleanup()
+})
+
+afterEach(async () => {
+  await rollbackTransaction(testPrisma)
+})
+
 afterAll(async () => {
+  await testPrisma.disconnect()
+  resetTestPrismaClient()
   jest.restoreAllMocks()
 })
 
-// Global test utilities
+// ── Global test utilities ──────────────────────────────────────────────────────
+
 declare global {
   var testTimeout: number
 }
@@ -181,7 +135,6 @@ global.testTimeout = 30000
 if (!process.env.DEBUG) {
   global.console.error = jest.fn()
   global.console.warn = jest.fn()
-  // Suppress winston logger output in tests
   logger.error = jest.fn()
   logger.warn = jest.fn()
   logger.info = jest.fn()

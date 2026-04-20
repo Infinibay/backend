@@ -10,7 +10,7 @@ import {
   Query,
   Resolver
 } from 'type-graphql'
-import { UserInputError, AuthenticationError } from 'apollo-server-errors'
+import { UserInputError, AuthenticationError } from '@utils/errors'
 import { UserType, UserToken, LoginResponse, UserOrderByInputType, CreateUserInputType, UpdateUserInputType, UserRole } from './type'
 import { PaginationInputType } from '@utils/pagination'
 import { InfinibayContext } from '@utils/context'

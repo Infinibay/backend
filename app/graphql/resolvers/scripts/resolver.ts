@@ -1,6 +1,6 @@
 import logger from '@main/logger'
 import { Resolver, Query, Mutation, Arg, Ctx, ID, Int, Authorized } from 'type-graphql';
-import { UserInputError } from 'apollo-server-errors';
+import { UserInputError } from '@utils/errors';
 import { ScriptManager } from '../../../services/scripts/ScriptManager';
 import { ScriptExecutor } from '../../../services/scripts/ScriptExecutor';
 import { ScriptScheduler, ScheduleScriptConfig } from '../../../services/scripts/ScriptScheduler';

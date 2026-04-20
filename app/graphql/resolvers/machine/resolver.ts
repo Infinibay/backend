@@ -1,6 +1,6 @@
 import logger from '@main/logger'
 import { Arg, Authorized, Ctx, Mutation, Query, Resolver } from 'type-graphql'
-import { UserInputError } from 'apollo-server-core'
+import { UserInputError } from '@utils/errors'
 import {
   Machine,
   MachineOrderBy,

@@ -11,7 +11,7 @@ import {
 import { SuccessType } from './machine/type'
 import { SnapshotServiceV2, getSnapshotServiceV2 } from '@services/SnapshotServiceV2'
 import { VMOperationsService } from '@services/VMOperationsService'
-import { UserInputError } from 'apollo-server-express'
+import { UserInputError } from '@utils/errors'
 import { getSocketService } from '@services/SocketService'
 import { InfinibayContext } from '@utils/context'
 

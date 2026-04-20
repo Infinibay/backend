@@ -11,7 +11,7 @@ import {
   createAdminContext,
   createUserContext
 } from '../../setup/test-helpers'
-import { UserInputError } from 'apollo-server-core'
+import { UserInputError } from '@utils/errors'
 
 // Mock the service modules
 jest.mock('@services/VirtioSocketWatcherService')

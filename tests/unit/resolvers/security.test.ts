@@ -8,7 +8,7 @@ import 'reflect-metadata'
 import { mockPrisma } from '../../setup/jest.setup'
 import { createMockContext, createAdminContext } from '../../setup/test-helpers'
 import { createMockMachine, createMockDepartment } from '../../setup/mock-factories'
-import { UserInputError } from 'apollo-server-errors'
+import { UserInputError } from '@utils/errors'
 
 // Stub types/values for skipped tests
 class SecurityResolver { [key: string]: any }

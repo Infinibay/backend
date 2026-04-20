@@ -17,7 +17,7 @@ import {
   createAdminContext,
   setupLibvirtMockState
 } from '../../setup/test-helpers'
-import { UserInputError } from 'apollo-server-errors'
+import { UserInputError } from '@utils/errors'
 
 // Mock VirtManager
 jest.mock('@utils/VirtManager', () => ({

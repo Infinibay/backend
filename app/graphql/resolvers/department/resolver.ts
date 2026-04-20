@@ -1,6 +1,6 @@
 import logger from '@main/logger'
 import { Resolver, Query, Mutation, Arg, Ctx, Authorized, Int } from 'type-graphql'
-import { UserInputError } from 'apollo-server-errors'
+import { UserInputError } from '../../../utils/errors'
 import { DepartmentType, UpdateDepartmentNameInput, UpdateDepartmentNetworkInput, CreateDepartmentFirewallInput, UpdateDepartmentFirewallPolicyInput, DepartmentNetworkDiagnosticsType, DhcpTrafficCaptureType } from './type'
 import { InfinibayContext } from '../../../utils/context'
 import { getEventManager } from '../../../services/EventManager'

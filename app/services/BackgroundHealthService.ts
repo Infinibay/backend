@@ -226,7 +226,7 @@ export class BackgroundHealthService {
   } {
     return {
       isRunning: this.isRunning,
-      cronActive: this.cronJob !== null && this.cronJob.running,
+      cronActive: this.cronJob !== null && this.cronJob.isActive,
       nextRun: this.cronJob ? this.cronJob.nextDate().toJSDate() : null
     }
   }

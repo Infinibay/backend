@@ -16,7 +16,7 @@ import {
   createMockContext
 } from '../../setup/test-helpers'
 import { InfinibayContext } from '../../../app/utils/context'
-import { UserInputError } from 'apollo-server-errors'
+import { UserInputError } from '@utils/errors'
 
 const mockEventManager = {
   dispatchEvent: jest.fn()
