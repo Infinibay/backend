@@ -1,3 +1,12 @@
+/**
+ * Jest configuration.
+ *
+ * DB tests (integration/, e2e/, and unit tests using testPrisma) share a
+ * single real Postgres database. To avoid deadlocks caused by concurrent
+ * TRUNCATE CASCADE across workers, the entire suite runs with maxWorkers=1
+ * (serial execution). The overhead is acceptable because most tests are fast
+ * unit tests (~0.1 s each) and the DB cleanup is cheap (~5 ms).
+ */
 module.exports = {
   testEnvironment: "node",
   globalSetup: '<rootDir>/tests/setup/globalSetup.ts',
@@ -34,6 +43,7 @@ module.exports = {
   coverageReporters: ['text', 'lcov', 'html'],
   testTimeout: 30000,
   clearMocks: true,
-  restoreMocks: true,
-  verbose: true
+  verbose: true,
+  maxWorkers: 1,
+  forceExit: true
 }

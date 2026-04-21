@@ -7,26 +7,28 @@ import {
   resetTestPrismaClient,
 } from './prisma-test-client'
 
-// ── Prisma test client singleton ──────────────────────────────────────────────
+// ── Prisma clients ────────────────────────────────────────────────────────
+//
+// testPrisma — real PrismaClient pointing at the test database.
+// The DB lifecycle hooks (connect / cleanup / disconnect) are at the bottom
+// of this file. They run for every test suite (unit and integration alike)
+// because this setup file is loaded by all projects. The overhead of
+// TRUNCATE is small (~5 ms) and guarantees a clean slate.
+//
+// mockPrisma — jest-mock-extended deep mock (no DB at all).
 
 export const testPrisma = createTestPrismaClient({ verbose: false })
 
-// ── Mock: Replace the real @utils/database singleton with the test client ─────
-//
-// By mocking '@utils/database', every module that does:
-//     import prisma from '@utils/database'
-// will receive the testPrisma instance instead of the real singleton.
-// This means services, resolvers, cron jobs, etc. all hit the test DB transparently.
+export const mockPrisma: DeepMockProxy<PrismaClient> = mockDeep<PrismaClient>()
+
+// ── Mock @utils/database ──────────────────────────────────────────────────
+// Integration tests override this mock to use testPrisma.prisma.
+// Unit tests get mockPrisma automatically.
 
 jest.mock('@utils/database', () => ({
   __esModule: true,
-  default: testPrisma.prisma
+  default: mockPrisma
 }))
-
-// ── Export the enums from @prisma/client (these are plain values, no DB needed) ─
-
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const { Prisma, ...enums } = require('@prisma/client')
 
 // ── Mock EventManager ──────────────────────────────────────────────────────────
 
@@ -81,15 +83,6 @@ jest.mock('systeminformation', () => ({
   cpu: jest.fn(() => ({ cores: 8 })),
   mem: jest.fn(() => ({ total: 16000000000 }))
 }))
-
-// ── Backward-compatible mockPrisma export ──────────────────────────────────
-//
-// mockPrisma is a deep-mocked PrismaClient (via jest-mock-extended).
-// Every method (findUnique, findMany, $transaction, etc.) is a jest.fn()
-// that supports .mockResolvedValue(), .mockImplementation(), etc.
-//
-// For integration tests that need a REAL database, import testPrisma instead.
-export const mockPrisma: DeepMockProxy<PrismaClient> = mockDeep<PrismaClient>()
 
 // ── Environment variables for testing ─────────────────────────────────────────
 
