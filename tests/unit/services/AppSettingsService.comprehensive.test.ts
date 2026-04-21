@@ -1,9 +1,8 @@
 import 'reflect-metadata'
-import { describe, it, expect, beforeEach, jest, afterEach } from '@jest/globals'
 import { AppSettingsService, AppSettingsUpdateInput } from '../../../app/services/AppSettingsService'
 import { PrismaClient, AppSettings } from '@prisma/client'
+import { mockDeep, DeepMockProxy } from 'jest-mock-extended'
 import { promises as fs } from 'fs'
-import path from 'path'
 
 // Mock dependencies
 jest.mock('fs', () => ({
@@ -17,7 +16,7 @@ const mockedFs = fs as jest.Mocked<typeof fs>
 
 describe('AppSettingsService', () => {
   let service: AppSettingsService
-  let mockPrisma: jest.Mocked<PrismaClient>
+  let mockPrisma: DeepMockProxy<PrismaClient>
   let mockAppSettings: AppSettings
 
   beforeEach(() => {
@@ -34,13 +33,7 @@ describe('AppSettingsService', () => {
       updatedAt: new Date()
     } as AppSettings
 
-    // Mock prisma
-    mockPrisma = {
-      appSettings: {
-        upsert: jest.fn(),
-        update: jest.fn()
-      }
-    } as unknown as jest.Mocked<PrismaClient>
+    mockPrisma = mockDeep<PrismaClient>()
 
     service = new AppSettingsService(mockPrisma)
   })

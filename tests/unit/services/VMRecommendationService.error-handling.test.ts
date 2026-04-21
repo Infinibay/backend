@@ -71,7 +71,7 @@ describe('VMRecommendationService Error Handling', () => {
       await expect(service.generateRecommendations(machineId)).rejects.toThrow('VM recommendation service failed')
 
       // Verify that the detailed error is logged but not thrown
-      expect(consoleSpy).toHaveBeenCalledWith(
+      expect(consoleSpy as any).toHaveBeenCalledWith(
         expect.stringContaining('VMRecommendationService error'),
         expect.objectContaining({
           originalError: 'ECONNREFUSED: Connection refused',
@@ -115,7 +115,7 @@ describe('VMRecommendationService Error Handling', () => {
       }
 
       // Verify that the detailed error is logged
-      expect(consoleSpy).toHaveBeenCalledWith(
+      expect(consoleSpy as any).toHaveBeenCalledWith(
         expect.stringContaining('VM Recommendation Service Error'),
         expect.objectContaining({
           vmId: machineId
@@ -161,7 +161,7 @@ describe('VMRecommendationService Error Handling', () => {
       }
 
       // Verify that the detailed error is logged for debugging
-      expect(consoleSpy).toHaveBeenCalledWith(
+      expect(consoleSpy as any).toHaveBeenCalledWith(
         expect.stringContaining('VMRecommendationService error'),
         expect.objectContaining({
           originalError: 'PostgreSQL connection failed: password authentication failed for user "db_admin"',

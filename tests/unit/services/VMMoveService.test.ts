@@ -1,5 +1,6 @@
-import { PrismaClient, Machine, MachineConfiguration, Department } from '@prisma/client'
-import { VMMoveService, MoveResult } from '../../../app/services/VMMoveService'
+import { PrismaClient, Department } from '@prisma/client'
+import { mockDeep, DeepMockProxy } from 'jest-mock-extended'
+import { VMMoveService } from '../../../app/services/VMMoveService'
 import { FirewallOrchestrationService } from '../../../app/services/firewall/FirewallOrchestrationService'
 import { TapDeviceManager } from '@infinibay/infinization'
 import { createMockMachine, createMockMachineConfiguration, createMockDepartment } from '../../setup/mock-factories'
@@ -19,25 +20,10 @@ jest.mock('../../../app/services/InfinizationService', () => ({
 import * as InfinizationService from '../../../app/services/InfinizationService'
 
 describe('VMMoveService', () => {
-  let prisma: PrismaConfig
-  let firewallOrchestration: jest.Mocked<FirewallOrchestrationService>
+  let prisma: DeepMockProxy<PrismaClient>
+  let firewallOrchestration: DeepMockProxy<FirewallOrchestrationService>
   let moveService: VMMoveService
   let debugLogSpy: jest.SpyInstance
-
-  interface PrismaConfig {
-    machine: {
-      findUnique: jest.Mock
-      update: jest.Mock
-      findFirst: jest.Mock
-    }
-    department: {
-      findUnique: jest.Mock
-    }
-    machineConfiguration: {
-      findFirst: jest.Mock
-      update: jest.Mock
-    }
-  }
 
   beforeEach(() => {
     jest.clearAllMocks()
@@ -49,28 +35,10 @@ describe('VMMoveService', () => {
       getVMInfo: jest.fn().mockResolvedValue({}),
     })
 
-    prisma = {
-      machine: {
-        findUnique: jest.fn(),
-        update: jest.fn(),
-        findFirst: jest.fn()
-      },
-      department: {
-        findUnique: jest.fn()
-      },
-      machineConfiguration: {
-        findFirst: jest.fn(),
-        update: jest.fn()
-      }
-    }
+    prisma = mockDeep<PrismaClient>()
+    firewallOrchestration = mockDeep<FirewallOrchestrationService>()
 
-    firewallOrchestration = {
-      applyVMRules: jest.fn(),
-      getEffectiveRules: jest.fn(),
-      syncAllRules: jest.fn()
-    } as unknown as jest.Mocked<FirewallOrchestrationService>
-
-    moveService = new VMMoveService(prisma as unknown as PrismaClient, firewallOrchestration)
+    moveService = new VMMoveService(prisma, firewallOrchestration)
 
     debugLogSpy = jest.spyOn(logger, 'info').mockImplementation(() => undefined as any)
     jest.spyOn(logger, 'warn').mockImplementation(() => undefined as any)
@@ -116,22 +84,22 @@ describe('VMMoveService', () => {
         mockGetVMStatusResult = { processAlive: true }
         jest.spyOn(logger, 'info').mockImplementation(() => undefined as any)
 
-        jest.mocked(prisma.machine.findUnique).mockResolvedValueOnce({
+        prisma.machine.findUnique.mockResolvedValueOnce({
           ...mockVM,
           configuration: mockConfig,
           department: mockOldDept
         } as any)
 
-        jest.mocked(prisma.department.findUnique).mockResolvedValueOnce(mockNewDept)
-        jest.mocked(prisma.machine.findUnique).mockResolvedValueOnce({
+        prisma.department.findUnique.mockResolvedValueOnce(mockNewDept)
+        prisma.machine.findUnique.mockResolvedValueOnce({
           ...mockVM,
           configuration: mockConfig,
           department: mockNewDept
         } as any)
 
-        jest.mocked(prisma.machine.update).mockResolvedValue(mockVM)
-        jest.mocked(prisma.machineConfiguration.update).mockResolvedValue(mockConfig)
-        jest.mocked(firewallOrchestration.applyVMRules).mockResolvedValue({ success: true, rulesApplied: 0, rulesFailed: 0, chainName: 'test' })
+        prisma.machine.update.mockResolvedValue(mockVM)
+        prisma.machineConfiguration.update.mockResolvedValue(mockConfig)
+        firewallOrchestration.applyVMRules.mockResolvedValue({ success: true, rulesApplied: 0, rulesFailed: 0, chainName: 'test' })
 
         const tapDetachSpy = jest.spyOn(TapDeviceManager.prototype, 'detachFromBridge').mockResolvedValue(undefined as any)
         const tapAttachSpy = jest.spyOn(TapDeviceManager.prototype, 'attachToBridge').mockResolvedValue(undefined as any)
@@ -166,21 +134,21 @@ describe('VMMoveService', () => {
         mockGetVMStatusResult = { processAlive: false }
         jest.spyOn(logger, 'info').mockImplementation(() => undefined as any)
 
-        jest.mocked(prisma.machine.findUnique).mockResolvedValueOnce({
+        prisma.machine.findUnique.mockResolvedValueOnce({
           ...mockVM,
           configuration: { ...mockConfig, tapDeviceName: null },
           department: mockOldDept
         } as any)
 
-        jest.mocked(prisma.department.findUnique).mockResolvedValueOnce(mockNewDept)
-        jest.mocked(prisma.machine.findUnique).mockResolvedValueOnce({
+        prisma.department.findUnique.mockResolvedValueOnce(mockNewDept)
+        prisma.machine.findUnique.mockResolvedValueOnce({
           ...mockVM,
           configuration: { ...mockConfig, tapDeviceName: null },
           department: mockNewDept
         } as any)
 
-        jest.mocked(prisma.machine.update).mockResolvedValue(mockVM)
-        jest.mocked(firewallOrchestration.applyVMRules).mockResolvedValue({ success: true, rulesApplied: 0, rulesFailed: 0, chainName: 'test' })
+        prisma.machine.update.mockResolvedValue(mockVM)
+        firewallOrchestration.applyVMRules.mockResolvedValue({ success: true, rulesApplied: 0, rulesFailed: 0, chainName: 'test' })
 
         const result = await moveService.moveVMToDepartment('vm-123', 'dept-new')
 
@@ -199,21 +167,21 @@ describe('VMMoveService', () => {
         mockGetVMStatusResult = { processAlive: false }
         jest.spyOn(logger, 'info').mockImplementation(() => undefined as any)
 
-        jest.mocked(prisma.machine.findUnique).mockResolvedValueOnce({
+        prisma.machine.findUnique.mockResolvedValueOnce({
           ...mockVM,
           configuration: null,
           department: mockOldDept
         } as any)
 
-        jest.mocked(prisma.department.findUnique).mockResolvedValueOnce(mockNewDept)
-        jest.mocked(prisma.machine.findUnique).mockResolvedValueOnce({
+        prisma.department.findUnique.mockResolvedValueOnce(mockNewDept)
+        prisma.machine.findUnique.mockResolvedValueOnce({
           ...mockVM,
           configuration: null,
           department: mockNewDept
         } as any)
 
-        jest.mocked(prisma.machine.update).mockResolvedValue(mockVM)
-        jest.mocked(firewallOrchestration.applyVMRules).mockResolvedValue({ success: true, rulesApplied: 0, rulesFailed: 0, chainName: 'test' })
+        prisma.machine.update.mockResolvedValue(mockVM)
+        firewallOrchestration.applyVMRules.mockResolvedValue({ success: true, rulesApplied: 0, rulesFailed: 0, chainName: 'test' })
 
         const result = await moveService.moveVMToDepartment('vm-123', 'dept-new')
 
@@ -227,25 +195,25 @@ describe('VMMoveService', () => {
         mockGetVMStatusResult = { processAlive: true }
         jest.spyOn(logger, 'info').mockImplementation(() => undefined as any)
 
-        jest.mocked(prisma.machine.findUnique).mockResolvedValueOnce({
+        prisma.machine.findUnique.mockResolvedValueOnce({
           ...mockVM,
           configuration: mockConfig,
           department: { ...mockOldDept, bridgeName: 'br-same' }
         } as any)
 
-        jest.mocked(prisma.department.findUnique).mockResolvedValueOnce({
+        prisma.department.findUnique.mockResolvedValueOnce({
           ...mockNewDept,
           bridgeName: 'br-same'
         })
 
-        jest.mocked(prisma.machine.findUnique).mockResolvedValueOnce({
+        prisma.machine.findUnique.mockResolvedValueOnce({
           ...mockVM,
           configuration: mockConfig,
           department: { ...mockNewDept, bridgeName: 'br-same' }
         } as any)
 
-        jest.mocked(prisma.machine.update).mockResolvedValue(mockVM)
-        jest.mocked(firewallOrchestration.applyVMRules).mockResolvedValue({ success: true, rulesApplied: 0, rulesFailed: 0, chainName: 'test' })
+        prisma.machine.update.mockResolvedValue(mockVM)
+        firewallOrchestration.applyVMRules.mockResolvedValue({ success: true, rulesApplied: 0, rulesFailed: 0, chainName: 'test' })
 
         const tapDetachSpy = jest.spyOn(TapDeviceManager.prototype, 'detachFromBridge').mockImplementation()
         const tapAttachSpy = jest.spyOn(TapDeviceManager.prototype, 'attachToBridge').mockImplementation()
@@ -267,7 +235,7 @@ describe('VMMoveService', () => {
       it('should return error when VM not found', async () => {
         jest.spyOn(logger, 'info').mockImplementation(() => undefined as any)
 
-        jest.mocked(prisma.machine.findUnique).mockResolvedValueOnce(null)
+        prisma.machine.findUnique.mockResolvedValueOnce(null)
 
         const result = await moveService.moveVMToDepartment('non-existent-vm', 'dept-new')
 
@@ -284,13 +252,13 @@ describe('VMMoveService', () => {
       it('should return error when target department not found', async () => {
         jest.spyOn(logger, 'info').mockImplementation(() => undefined as any)
 
-        jest.mocked(prisma.machine.findUnique).mockResolvedValueOnce({
+        prisma.machine.findUnique.mockResolvedValueOnce({
           ...mockVM,
           configuration: mockConfig,
           department: mockOldDept
         } as any)
 
-        jest.mocked(prisma.department.findUnique).mockResolvedValueOnce(null)
+        prisma.department.findUnique.mockResolvedValueOnce(null)
 
         const result = await moveService.moveVMToDepartment('vm-123', 'dept-nonexistent')
 
@@ -308,13 +276,13 @@ describe('VMMoveService', () => {
           bridgeName: null
         }
 
-        jest.mocked(prisma.machine.findUnique).mockResolvedValueOnce({
+        prisma.machine.findUnique.mockResolvedValueOnce({
           ...mockVM,
           configuration: mockConfig,
           department: mockOldDept
         } as any)
 
-        jest.mocked(prisma.department.findUnique).mockResolvedValueOnce(deptWithoutNetwork)
+        prisma.department.findUnique.mockResolvedValueOnce(deptWithoutNetwork)
 
         const result = await moveService.moveVMToDepartment('vm-123', 'dept-new')
 
@@ -327,7 +295,7 @@ describe('VMMoveService', () => {
 
         const vmNoDept = { ...mockVM, departmentId: null }
 
-        jest.mocked(prisma.machine.findUnique).mockResolvedValueOnce({
+        prisma.machine.findUnique.mockResolvedValueOnce({
           ...vmNoDept,
           configuration: mockConfig,
           department: null
@@ -343,20 +311,20 @@ describe('VMMoveService', () => {
         jest.spyOn(logger, 'info').mockImplementation(() => undefined as any)
         jest.spyOn(logger, 'error').mockImplementation(() => undefined as any)
 
-        jest.mocked(prisma.machine.findUnique).mockResolvedValueOnce({
+        prisma.machine.findUnique.mockResolvedValueOnce({
           ...mockVM,
           configuration: mockConfig,
           department: mockOldDept
         } as any)
 
-        jest.mocked(prisma.department.findUnique).mockResolvedValueOnce(mockNewDept)
-        jest.mocked(prisma.machine.findUnique).mockResolvedValueOnce({
+        prisma.department.findUnique.mockResolvedValueOnce(mockNewDept)
+        prisma.machine.findUnique.mockResolvedValueOnce({
           ...mockVM,
           configuration: mockConfig,
           department: mockNewDept
         } as any)
 
-        jest.mocked(prisma.machine.update).mockRejectedValueOnce(new Error('Database error'))
+        prisma.machine.update.mockRejectedValueOnce(new Error('Database error'))
 
         const result = await moveService.moveVMToDepartment('vm-123', 'dept-new')
 
@@ -369,22 +337,22 @@ describe('VMMoveService', () => {
         jest.spyOn(logger, 'info').mockImplementation(() => undefined as any)
         jest.spyOn(logger, 'warn').mockImplementation(() => undefined as any)
 
-        jest.mocked(prisma.machine.findUnique).mockResolvedValueOnce({
+        prisma.machine.findUnique.mockResolvedValueOnce({
           ...mockVM,
           configuration: mockConfig,
           department: mockOldDept
         } as any)
 
-        jest.mocked(prisma.department.findUnique).mockResolvedValueOnce(mockNewDept)
-        jest.mocked(prisma.machine.findUnique).mockResolvedValueOnce({
+        prisma.department.findUnique.mockResolvedValueOnce(mockNewDept)
+        prisma.machine.findUnique.mockResolvedValueOnce({
           ...mockVM,
           configuration: mockConfig,
           department: mockNewDept
         } as any)
 
-        jest.mocked(prisma.machine.update).mockResolvedValue(mockVM)
-        jest.mocked(prisma.machineConfiguration.update).mockResolvedValue(mockConfig)
-        jest.mocked(firewallOrchestration.applyVMRules).mockRejectedValueOnce(new Error('Firewall error'))
+        prisma.machine.update.mockResolvedValue(mockVM)
+        prisma.machineConfiguration.update.mockResolvedValue(mockConfig)
+        firewallOrchestration.applyVMRules.mockRejectedValueOnce(new Error('Firewall error'))
 
         const tapDetachSpy = jest.spyOn(TapDeviceManager.prototype, 'detachFromBridge').mockResolvedValue(undefined as any)
         const tapAttachSpy = jest.spyOn(TapDeviceManager.prototype, 'attachToBridge').mockResolvedValue(undefined as any)
@@ -408,20 +376,20 @@ describe('VMMoveService', () => {
         const originalVM = { ...mockVM, configuration: mockConfig, department: mockOldDept }
         const updatedVM = { ...mockVM, department: mockNewDept }
 
-        jest.mocked(prisma.machine.findUnique).mockResolvedValueOnce(originalVM as any)
-        jest.mocked(prisma.department.findUnique).mockResolvedValueOnce(mockNewDept)
-        jest.mocked(prisma.machine.findUnique).mockResolvedValueOnce({
+        prisma.machine.findUnique.mockResolvedValueOnce(originalVM as any)
+        prisma.department.findUnique.mockResolvedValueOnce(mockNewDept)
+        prisma.machine.findUnique.mockResolvedValueOnce({
           ...originalVM,
           department: mockNewDept
         } as any)
 
-        jest.mocked(prisma.machine.update)
+        prisma.machine.update
           .mockResolvedValueOnce(originalVM as any)
           .mockResolvedValueOnce(updatedVM as any)
 
-        jest.mocked(prisma.machineConfiguration.findFirst).mockResolvedValueOnce(mockConfig)
-        jest.mocked(prisma.machineConfiguration.update).mockResolvedValueOnce(mockConfig)
-        jest.mocked(firewallOrchestration.applyVMRules).mockResolvedValueOnce({ success: true, rulesApplied: 0, rulesFailed: 0, chainName: 'test' })
+        prisma.machineConfiguration.findFirst.mockResolvedValueOnce(mockConfig)
+        prisma.machineConfiguration.update.mockResolvedValueOnce(mockConfig)
+        firewallOrchestration.applyVMRules.mockResolvedValueOnce({ success: true, rulesApplied: 0, rulesFailed: 0, chainName: 'test' })
 
         const tapAttachSpy = jest.spyOn(TapDeviceManager.prototype, 'attachToBridge')
           .mockRejectedValueOnce(new Error('Detach failed'))
@@ -440,21 +408,21 @@ describe('VMMoveService', () => {
         jest.spyOn(logger, 'info').mockImplementation(() => undefined as any)
         jest.spyOn(logger, 'warn').mockImplementation(() => undefined as any)
 
-        jest.mocked(prisma.machine.findUnique).mockResolvedValueOnce({
+        prisma.machine.findUnique.mockResolvedValueOnce({
           ...mockVM,
           configuration: mockConfig,
           department: mockOldDept
         } as any)
 
-        jest.mocked(prisma.department.findUnique).mockResolvedValueOnce(mockNewDept)
-        jest.mocked(prisma.machine.findUnique).mockResolvedValueOnce({
+        prisma.department.findUnique.mockResolvedValueOnce(mockNewDept)
+        prisma.machine.findUnique.mockResolvedValueOnce({
           ...mockVM,
           configuration: mockConfig,
           department: mockNewDept
         } as any)
 
-        jest.mocked(prisma.machine.update).mockResolvedValue(mockVM)
-        jest.mocked(prisma.machineConfiguration.update).mockResolvedValue(mockConfig)
+        prisma.machine.update.mockResolvedValue(mockVM)
+        prisma.machineConfiguration.update.mockResolvedValue(mockConfig)
 
         const tapDetachSpy = jest.spyOn(TapDeviceManager.prototype, 'detachFromBridge')
           .mockRejectedValueOnce(new Error('Detach failed'))

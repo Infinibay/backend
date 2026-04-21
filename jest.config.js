@@ -13,6 +13,8 @@ module.exports = {
     '^@graphql/(.*)$': '<rootDir>/app/graphql/$1',
     '^@resolvers/(.*)$': '<rootDir>/app/graphql/resolvers/$1',
     '^@main/(.*)$': '<rootDir>/app/$1',
+    '^uuid$': '<rootDir>/__mocks__/uuid.ts',
+    '^chokidar$': '<rootDir>/__mocks__/chokidar.ts',
     '^@infinibay/libvirt-node$': '<rootDir>/__mocks__/libvirt-node.js'
   },
   rootDir: '',
@@ -20,6 +22,7 @@ module.exports = {
     '**/tests/**/*.test.ts',
     '**/tests/**/*.spec.ts'
   ],
+  setupFiles: ['<rootDir>/tests/setup/loadEnv.ts'],
   setupFilesAfterEnv: ['<rootDir>/tests/setup/jest.setup.ts'],
   collectCoverageFrom: [
     'app/**/*.ts',
@@ -33,4 +36,4 @@ module.exports = {
   clearMocks: true,
   restoreMocks: true,
   verbose: true
-};
+}

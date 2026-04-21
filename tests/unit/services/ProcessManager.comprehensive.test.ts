@@ -1,11 +1,11 @@
 import 'reflect-metadata'
-import { describe, it, expect, beforeEach, jest } from '@jest/globals'
 import { PrismaClient, Machine } from '@prisma/client'
+import { mockDeep, DeepMockProxy } from 'jest-mock-extended'
 import { ProcessManager, ProcessSortBy } from '../../../app/services/ProcessManager'
 import { VirtioSocketWatcherService } from '../../../app/services/VirtioSocketWatcherService'
 
 const mockInfinization = {
-  getVMStatus: jest.fn() as jest.Mock<() => Promise<{ processAlive: boolean }>>
+  getVMStatus: jest.fn()
 }
 
 jest.mock('@services/InfinizationService', () => ({
@@ -14,25 +14,15 @@ jest.mock('@services/InfinizationService', () => ({
 
 describe('ProcessManager', () => {
   let service: ProcessManager
-  let mockPrisma: jest.Mocked<PrismaClient>
-  let mockVirtioService: jest.Mocked<VirtioSocketWatcherService>
+  let mockPrisma: DeepMockProxy<PrismaClient>
+  let mockVirtioService: DeepMockProxy<VirtioSocketWatcherService>
   const testMachineId = 'vm-process-test'
 
   beforeEach(() => {
     jest.clearAllMocks()
 
-    mockPrisma = {
-      machine: {
-        findUnique: jest.fn(),
-        update: jest.fn()
-      }
-    } as unknown as jest.Mocked<PrismaClient>
-
-    mockVirtioService = {
-      sendSafeCommand: jest.fn(),
-      sendUnsafeCommand: jest.fn(),
-      isVmConnected: jest.fn()
-    } as unknown as jest.Mocked<VirtioSocketWatcherService>
+    mockPrisma = mockDeep<PrismaClient>()
+    mockVirtioService = mockDeep<VirtioSocketWatcherService>()
 
     service = new ProcessManager(mockPrisma, mockVirtioService)
   })

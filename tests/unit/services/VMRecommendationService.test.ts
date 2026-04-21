@@ -855,7 +855,7 @@ describe('VMRecommendationService', () => {
       await expect(service.generateRecommendations(machineId)).rejects.toThrow('VM recommendation service failed')
 
       // Verify that the detailed error is logged but not thrown
-      expect(consoleSpy).toHaveBeenCalledWith(
+      expect(consoleSpy as any).toHaveBeenCalledWith(
         expect.stringContaining('VMRecommendationService error'),
         expect.objectContaining({
           originalError: 'ECONNREFUSED: Connection refused',
@@ -878,7 +878,7 @@ describe('VMRecommendationService', () => {
       await expect(service.getRecommendations(machineId)).rejects.toThrow('VM recommendation service failed')
 
       // Verify that the detailed error is logged but not thrown
-      expect(consoleSpy).toHaveBeenCalledWith(
+      expect(consoleSpy as any).toHaveBeenCalledWith(
         expect.stringContaining('VMRecommendationService error'),
         expect.objectContaining({
           originalError: 'Internal service failure',
@@ -908,7 +908,7 @@ describe('VMRecommendationService', () => {
       }
 
       // Verify that the detailed error is logged
-      expect(consoleSpy).toHaveBeenCalledWith(
+      expect(consoleSpy as any).toHaveBeenCalledWith(
         expect.stringContaining('VM Recommendation Service Error'),
         expect.objectContaining({
           vmId: machineId

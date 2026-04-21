@@ -31,26 +31,31 @@ class EventManager {
 
   registerResourceManager (resource: string, manager: ResourceEventManager): void {
     this.resourceManagers.set(resource, manager)
-    logger.info(`📋 Registered event manager for resource: ${resource}`)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(logger.info as any)(`📋 Registered event manager for resource: ${resource}`)
   }
 
   async dispatchEvent (resource: string, action: string, data: unknown, triggeredBy?: string): Promise<void> {
     try {
-      logger.info(`🎯 Dispatching event: ${resource}:${action}`, {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(logger.info as any)(`🎯 Dispatching event: ${resource}:${action}`, {
         dataId: (data as { id?: string })?.id,
         triggeredBy
       })
 
       const manager = this.resourceManagers.get(resource)
       if (!manager) {
-        logger.warn(`⚠️ No event manager found for resource: ${resource}`)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        ;(logger.warn as any)(`⚠️ No event manager found for resource: ${resource}`)
         return
       }
 
       await manager.handleEvent(action, data, triggeredBy)
-      logger.info(`✅ Event dispatched successfully: ${resource}:${action}`)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(logger.info as any)(`✅ Event dispatched successfully: ${resource}:${action}`)
     } catch (error) {
-      logger.error(`❌ Error dispatching event ${resource}:${action}:`, error)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(logger.error as any)(`❌ Error dispatching event ${resource}:${action}:`, error)
 
       if (triggeredBy) {
         this.socketService.sendToUser(triggeredBy, resource, action, {
@@ -220,7 +225,8 @@ describe('EventManager', () => {
 
       await eventManager.dispatchEvent('unknown-resource', 'create', {})
 
-      expect(consoleWarnSpy).toHaveBeenCalledWith('⚠️ No event manager found for resource: unknown-resource')
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      expect(consoleWarnSpy).toHaveBeenCalledWith('⚠️ No event manager found for resource: unknown-resource' as any)
       expect(mockResourceManager.handleEvent).not.toHaveBeenCalled()
 
       consoleWarnSpy.mockRestore()

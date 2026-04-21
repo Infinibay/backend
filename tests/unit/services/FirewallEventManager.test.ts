@@ -1,49 +1,25 @@
-import { RuleSetType } from '@prisma/client'
+import { PrismaClient, RuleSetType } from '@prisma/client'
+import { mockDeep, DeepMockProxy } from 'jest-mock-extended'
 
 import { FirewallEventManager } from '@services/FirewallEventManager'
 
-// Mock types
 type MockSocketService = {
   sendToUser: jest.Mock
-}
-
-type MockPrismaClient = {
-  firewallRule: {
-    findUnique: jest.Mock
-  }
-  user: {
-    findMany: jest.Mock
-  }
-  machine: {
-    findUnique: jest.Mock
-  }
 }
 
 describe('FirewallEventManager', () => {
   let firewallEventManager: FirewallEventManager
   let mockSocketService: MockSocketService
-  let mockPrisma: MockPrismaClient
+  let mockPrisma: DeepMockProxy<PrismaClient>
 
   beforeEach(() => {
-    // Create mock Socket Service
     mockSocketService = {
       sendToUser: jest.fn()
     }
 
-    // Create mock Prisma client
-    mockPrisma = {
-      firewallRule: {
-        findUnique: jest.fn()
-      },
-      user: {
-        findMany: jest.fn()
-      },
-      machine: {
-        findUnique: jest.fn()
-      }
-    }
+    mockPrisma = mockDeep<PrismaClient>()
 
-    firewallEventManager = new FirewallEventManager(mockSocketService as any, mockPrisma as any)
+    firewallEventManager = new FirewallEventManager(mockSocketService as any, mockPrisma)
   })
 
   afterEach(() => {

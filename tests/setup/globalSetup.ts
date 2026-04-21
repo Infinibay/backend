@@ -9,9 +9,6 @@
  * singleton in prisma-test-client.ts, which is initialised via setupFilesAfterEnv.
  * Doing DB connection here would race with the singleton.
  */
-import { execSync } from 'child_process'
-import * as path from 'path'
-
 export default async function globalSetup() {
   // Ensure test directories exist
   const testDirs = ['/tmp/infinibay-test', '/tmp/infinibay-test/iso', '/tmp/infinibay-test/disks']

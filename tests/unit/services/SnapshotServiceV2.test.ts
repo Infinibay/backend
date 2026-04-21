@@ -1,6 +1,7 @@
 import 'reflect-metadata'
 import { SnapshotServiceV2 } from '../../../app/services/SnapshotServiceV2'
 import { PrismaClient } from '@prisma/client'
+import { mockDeep, DeepMockProxy } from 'jest-mock-extended'
 import fs from 'fs'
 
 // Mock snapshot manager instance
@@ -28,34 +29,29 @@ jest.mock('fs')
 
 describe('SnapshotServiceV2', () => {
   let service: SnapshotServiceV2
-  let mockPrisma: any
+  let mockPrisma: DeepMockProxy<PrismaClient>
 
   const mockVM = {
     id: 'vm-123',
     internalName: 'vm-test-123',
     status: 'off'
-  }
+  } as any
 
   beforeEach(async () => {
     jest.clearAllMocks()
 
-    // Setup mock Prisma
-    mockPrisma = {
-      machine: {
-        findUnique: jest.fn()
-      }
-    }
+    mockPrisma = mockDeep<PrismaClient>()
 
     // Setup mock fs
     ;(fs.existsSync as jest.Mock).mockReturnValue(true)
 
     // Create service
-    service = new SnapshotServiceV2(mockPrisma as PrismaClient)
+    service = new SnapshotServiceV2(mockPrisma)
   })
 
   describe('createSnapshot', () => {
     it('should create a snapshot for a stopped VM', async () => {
-      ;(mockPrisma.machine.findUnique as jest.Mock).mockResolvedValue(mockVM)
+      mockPrisma.machine.findUnique.mockResolvedValue(mockVM)
       mockSnapshotManager.createSnapshot.mockResolvedValue(undefined)
 
       const result = await service.createSnapshot('vm-123', 'test-snapshot', 'Test description')
@@ -73,7 +69,7 @@ describe('SnapshotServiceV2', () => {
     })
 
     it('should fail if VM is running', async () => {
-      ;(mockPrisma.machine.findUnique as jest.Mock).mockResolvedValue({
+      mockPrisma.machine.findUnique.mockResolvedValue({
         ...mockVM,
         status: 'running'
       })
@@ -85,7 +81,7 @@ describe('SnapshotServiceV2', () => {
     })
 
     it('should fail if VM not found', async () => {
-      ;(mockPrisma.machine.findUnique as jest.Mock).mockResolvedValue(null)
+      mockPrisma.machine.findUnique.mockResolvedValue(null)
 
       const result = await service.createSnapshot('vm-123', 'test-snapshot')
 
@@ -94,7 +90,7 @@ describe('SnapshotServiceV2', () => {
     })
 
     it('should fail if disk image not found', async () => {
-      ;(mockPrisma.machine.findUnique as jest.Mock).mockResolvedValue(mockVM)
+      mockPrisma.machine.findUnique.mockResolvedValue(mockVM)
       ;(fs.existsSync as jest.Mock).mockReturnValue(false)
 
       const result = await service.createSnapshot('vm-123', 'test-snapshot')
@@ -106,7 +102,7 @@ describe('SnapshotServiceV2', () => {
 
   describe('listSnapshots', () => {
     it('should list all snapshots for a VM', async () => {
-      ;(mockPrisma.machine.findUnique as jest.Mock).mockResolvedValue(mockVM)
+      mockPrisma.machine.findUnique.mockResolvedValue(mockVM)
       mockSnapshotManager.listSnapshots.mockResolvedValue([
         { name: 'snap-1', date: '2024-01-01', vmSize: 1024 },
         { name: 'snap-2', date: '2024-01-02', vmSize: 2048 }
@@ -122,7 +118,7 @@ describe('SnapshotServiceV2', () => {
     })
 
     it('should return empty array if no snapshots', async () => {
-      ;(mockPrisma.machine.findUnique as jest.Mock).mockResolvedValue(mockVM)
+      mockPrisma.machine.findUnique.mockResolvedValue(mockVM)
       mockSnapshotManager.listSnapshots.mockResolvedValue([])
 
       const result = await service.listSnapshots('vm-123')
@@ -132,7 +128,7 @@ describe('SnapshotServiceV2', () => {
     })
 
     it('should fail if VM not found', async () => {
-      ;(mockPrisma.machine.findUnique as jest.Mock).mockResolvedValue(null)
+      mockPrisma.machine.findUnique.mockResolvedValue(null)
 
       const result = await service.listSnapshots('vm-123')
 
@@ -143,7 +139,7 @@ describe('SnapshotServiceV2', () => {
 
   describe('restoreSnapshot', () => {
     it('should restore a snapshot for a stopped VM', async () => {
-      ;(mockPrisma.machine.findUnique as jest.Mock).mockResolvedValue(mockVM)
+      mockPrisma.machine.findUnique.mockResolvedValue(mockVM)
       mockSnapshotManager.snapshotExists.mockResolvedValue(true)
       mockSnapshotManager.revertSnapshot.mockResolvedValue(undefined)
 
@@ -155,7 +151,7 @@ describe('SnapshotServiceV2', () => {
     })
 
     it('should fail if VM is running', async () => {
-      ;(mockPrisma.machine.findUnique as jest.Mock).mockResolvedValue({
+      mockPrisma.machine.findUnique.mockResolvedValue({
         ...mockVM,
         status: 'running'
       })
@@ -167,7 +163,7 @@ describe('SnapshotServiceV2', () => {
     })
 
     it('should fail if snapshot does not exist', async () => {
-      ;(mockPrisma.machine.findUnique as jest.Mock).mockResolvedValue(mockVM)
+      mockPrisma.machine.findUnique.mockResolvedValue(mockVM)
       mockSnapshotManager.snapshotExists.mockResolvedValue(false)
 
       const result = await service.restoreSnapshot('vm-123', 'nonexistent')
@@ -179,7 +175,7 @@ describe('SnapshotServiceV2', () => {
 
   describe('deleteSnapshot', () => {
     it('should delete a snapshot', async () => {
-      ;(mockPrisma.machine.findUnique as jest.Mock).mockResolvedValue(mockVM)
+      mockPrisma.machine.findUnique.mockResolvedValue(mockVM)
       mockSnapshotManager.deleteSnapshot.mockResolvedValue(undefined)
 
       const result = await service.deleteSnapshot('vm-123', 'test-snapshot')
@@ -190,7 +186,7 @@ describe('SnapshotServiceV2', () => {
     })
 
     it('should fail if VM not found', async () => {
-      ;(mockPrisma.machine.findUnique as jest.Mock).mockResolvedValue(null)
+      mockPrisma.machine.findUnique.mockResolvedValue(null)
 
       const result = await service.deleteSnapshot('vm-123', 'test-snapshot')
 
@@ -200,7 +196,7 @@ describe('SnapshotServiceV2', () => {
 
   describe('getCurrentSnapshot', () => {
     it('should return the most recent snapshot', async () => {
-      ;(mockPrisma.machine.findUnique as jest.Mock).mockResolvedValue(mockVM)
+      mockPrisma.machine.findUnique.mockResolvedValue(mockVM)
       mockSnapshotManager.listSnapshots.mockResolvedValue([
         { name: 'snap-1', date: '2024-01-01', vmSize: 1024 },
         { name: 'snap-2', date: '2024-01-02', vmSize: 2048 }
@@ -214,7 +210,7 @@ describe('SnapshotServiceV2', () => {
     })
 
     it('should return null if no snapshots', async () => {
-      ;(mockPrisma.machine.findUnique as jest.Mock).mockResolvedValue(mockVM)
+      mockPrisma.machine.findUnique.mockResolvedValue(mockVM)
       mockSnapshotManager.listSnapshots.mockResolvedValue([])
 
       const result = await service.getCurrentSnapshot('vm-123')
@@ -225,7 +221,7 @@ describe('SnapshotServiceV2', () => {
 
   describe('snapshotExists', () => {
     it('should return true if snapshot exists', async () => {
-      ;(mockPrisma.machine.findUnique as jest.Mock).mockResolvedValue(mockVM)
+      mockPrisma.machine.findUnique.mockResolvedValue(mockVM)
       mockSnapshotManager.snapshotExists.mockResolvedValue(true)
 
       const result = await service.snapshotExists('vm-123', 'test-snapshot')
@@ -234,7 +230,7 @@ describe('SnapshotServiceV2', () => {
     })
 
     it('should return false if snapshot does not exist', async () => {
-      ;(mockPrisma.machine.findUnique as jest.Mock).mockResolvedValue(mockVM)
+      mockPrisma.machine.findUnique.mockResolvedValue(mockVM)
       mockSnapshotManager.snapshotExists.mockResolvedValue(false)
 
       const result = await service.snapshotExists('vm-123', 'nonexistent')
@@ -243,7 +239,7 @@ describe('SnapshotServiceV2', () => {
     })
 
     it('should return false if VM not found', async () => {
-      ;(mockPrisma.machine.findUnique as jest.Mock).mockResolvedValue(null)
+      mockPrisma.machine.findUnique.mockResolvedValue(null)
 
       const result = await service.snapshotExists('vm-123', 'test-snapshot')
 

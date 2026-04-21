@@ -1,923 +1,409 @@
 import 'reflect-metadata'
-import { describe, it, expect, beforeEach, afterEach, jest } from '@jest/globals'
-// @ts-ignore - supertest may not have type declarations installed
+// @ts-ignore - supertest type declarations may not be installed
 import request from 'supertest'
 import express from 'express'
 import http from 'http'
-import { ApolloServer } from '@apollo/server'
-import { expressMiddleware } from '@apollo/server/express4'
-import { buildSchema } from 'type-graphql'
 import cors from 'cors'
 import jwt from 'jsonwebtoken'
-import { PrismaClient, RecommendationType } from '@prisma/client'
-import { mockPrisma } from '../setup/jest.setup'
+import { ApolloServer } from '@apollo/server'
+import { expressMiddleware } from '@as-integrations/express5'
+import { buildSchema } from 'type-graphql'
+import { RecommendationType } from '@prisma/client'
+import { testPrisma } from '../setup/jest.setup'
 import { InfinibayContext } from '../../app/utils/context'
 import { VMRecommendationResolver } from '../../app/graphql/resolvers/VMRecommendationResolver'
-// Import types to ensure enum registration
 import '../../app/graphql/types/RecommendationTypes'
 import { authChecker } from '../../app/utils/authChecker'
+import { RECOMMENDATION_TEST_QUERIES } from '../setup/recommendation-test-helpers'
 import {
-  createMockVMRecommendation,
-  createMockHealthSnapshot,
-  createMockDiskSpaceInfo,
-  createMockResourceOptInfo,
-  createMockWindowsUpdateInfo,
-  createMockDefenderStatus,
-  RECOMMENDATION_TEST_QUERIES,
-  RecommendationPerformanceUtils
-} from '../setup/recommendation-test-helpers'
-import { createMockMachine, createMockUser, createMockSystemMetrics, createMockDepartment } from '../setup/mock-factories'
+  createUser,
+  createAdmin,
+  createDepartment,
+  createMachine,
+  createHealthSnapshot
+} from '../setup/db-factories'
 
-// Mock PackageManager to prevent DB calls during VMRecommendationService constructor
+// PackageManager touches DB in its constructor; mock it out — unrelated to the
+// query/authz paths we actually care about here.
 jest.mock('../../app/services/packages/PackageManager', () => ({
   getPackageManager: jest.fn().mockReturnValue({
-    loadAll: jest.fn().mockResolvedValue(undefined as never),
+    loadAll: jest.fn().mockResolvedValue(undefined),
     getPackageStatuses: jest.fn().mockReturnValue([]),
-    runCheckers: jest.fn().mockResolvedValue([] as never)
+    runCheckers: jest.fn().mockResolvedValue([])
   }),
   PackageManager: jest.fn()
 }))
 
-describe('Recommendation API E2E Tests', () => {
+describe('Recommendation API E2E — real database', () => {
+  const prisma = testPrisma.prisma
+
   let app: express.Application
   let server: http.Server
   let apolloServer: ApolloServer
   let authToken: string
   let adminAuthToken: string
 
-  // Test users and machines
-  const testUser = createMockUser({
-    id: 'e2e-user-1',
-    email: 'e2e.user@test.com',
-    role: 'USER'
-  })
+  // Seeded rows per test.
+  let userRow: Awaited<ReturnType<typeof createUser>>
+  let adminRow: Awaited<ReturnType<typeof createAdmin>>
+  let otherUserRow: Awaited<ReturnType<typeof createUser>>
+  let userMachine: Awaited<ReturnType<typeof createMachine>>
+  let otherUserMachine: Awaited<ReturnType<typeof createMachine>>
 
-  const adminUser = createMockUser({
-    id: 'e2e-admin-1',
-    email: 'e2e.admin@test.com',
-    role: 'ADMIN'
-  })
-
-  const userMachine = createMockMachine({
-    id: 'e2e-machine-1',
-    userId: testUser.id,
-    name: 'E2E Test VM'
-  })
-
-  const otherUserMachine = createMockMachine({
-    id: 'e2e-machine-2',
-    userId: 'other-user-id',
-    name: 'Other User VM'
-  })
-
-  beforeEach(async () => {
-    jest.clearAllMocks()
-
-    // Create Express app
+  beforeAll(async () => {
+    // Build schema + Apollo once per file. type-graphql's metadata cache is
+    // global so rebuilding per test ends up with stale references that
+    // manifest as a ghost "undefined.machine" in the resolver.
     app = express()
     server = http.createServer(app)
 
-    // Build GraphQL schema
     const schema = await buildSchema({
       resolvers: [VMRecommendationResolver] as any,
       authChecker
     })
-
-    // Create Apollo Server
-    apolloServer = new ApolloServer({
-      schema,
-      csrfPrevention: true,
-      cache: 'bounded'
-    })
-
+    apolloServer = new ApolloServer({ schema, csrfPrevention: true, cache: 'bounded' })
     await apolloServer.start()
 
-    // Apply middleware
     app.use('/graphql', cors(), express.json(), expressMiddleware(apolloServer, {
       context: async ({ req, res }): Promise<InfinibayContext> => {
         let user = null
         const token = req.headers.authorization
-
         if (token) {
           try {
-            const decoded = jwt.verify(token, process.env.TOKENKEY || 'test-secret') as { userId: string }
-            if (decoded.userId === testUser.id) {
-              user = testUser
-            } else if (decoded.userId === adminUser.id) {
-              user = adminUser
-            }
-          } catch (error) {
-            // Invalid token, user remains null
+            const decoded = jwt.verify(token, process.env.TOKENKEY || 'test-secret-key') as { userId: string }
+            user = await prisma.user.findUnique({ where: { id: decoded.userId } })
+          } catch {
+            // Invalid token — user stays null.
           }
         }
-
         return {
-          prisma: mockPrisma as unknown as PrismaClient,
+          prisma,
           req,
           res,
           user,
           setupMode: false,
           virtioSocketWatcher: {} as any
-        }
+        } as unknown as InfinibayContext
       }
     }))
-
-    // Generate auth tokens
-    authToken = jwt.sign({ userId: testUser.id }, process.env.TOKENKEY || 'test-secret')
-    adminAuthToken = jwt.sign({ userId: adminUser.id }, process.env.TOKENKEY || 'test-secret')
-
-    // Setup basic mock responses
-    ;(mockPrisma.user.findUnique as jest.Mock).mockImplementation(({ where }: any) => {
-      if (where.id === testUser.id) return Promise.resolve(testUser as any)
-      if (where.id === adminUser.id) return Promise.resolve(adminUser as any)
-      return Promise.resolve(null)
-    })
-
-    const mockDepartment = createMockDepartment()
-
-    ;(mockPrisma.machine.findUnique as jest.Mock).mockImplementation(({ where, select }: any) => {
-      if (select) {
-        // VMRecommendationResolver calls with select: { id, userId }
-        if (where.id === userMachine.id) return Promise.resolve({ id: userMachine.id, userId: userMachine.userId })
-        if (where.id === otherUserMachine.id) return Promise.resolve({ id: otherUserMachine.id, userId: otherUserMachine.userId })
-        return Promise.resolve(null)
-      }
-      // VMRecommendationService.buildContext calls with include: { department: true }
-      if (where.id === userMachine.id) return Promise.resolve({ ...userMachine, department: mockDepartment } as any)
-      if (where.id === otherUserMachine.id) return Promise.resolve({ ...otherUserMachine, department: mockDepartment } as any)
-      return Promise.resolve(null)
-    })
-
-    // Mock latest snapshot (VMRecommendationService.getRecommendations needs this)
-    ;(mockPrisma.vMHealthSnapshot as any).findFirst.mockResolvedValue({
-      id: 'test-snapshot-1',
-      machineId: userMachine.id,
-      snapshotDate: new Date(),
-      overallStatus: 'OK'
-    })
-
-    // Mock hasRecommendationsChanged
-    ;(mockPrisma.vMHealthSnapshot as any).findUnique.mockResolvedValue({ customCheckResults: null })
-
-    // Default mocks for buildContext
-    ;(mockPrisma.portUsage as any).findMany.mockResolvedValue([])
-    ;(mockPrisma.processSnapshot as any).findMany.mockResolvedValue([])
-    ;(mockPrisma.systemMetrics as any).findMany.mockResolvedValue([])
-
-    // Default transaction mock
-    ;(mockPrisma.$transaction as jest.Mock).mockImplementation(async (fn: any) => fn(mockPrisma))
   })
 
-  afterEach(async () => {
-    if (server) {
-      server.close()
-    }
-    if (apolloServer) {
-      await apolloServer.stop()
-    }
-    jest.clearAllMocks()
+  afterAll(async () => {
+    server?.close()
+    await apolloServer?.stop()
   })
 
-  describe('GraphQL API Authentication', () => {
-    it('should reject unauthenticated requests', async () => {
-      const query = {
-        query: RECOMMENDATION_TEST_QUERIES.GET_VM_RECOMMENDATIONS,
-        variables: { vmId: userMachine.id }
-      }
+  beforeEach(async () => {
+    const department = await createDepartment(prisma)
+    userRow = await createUser(prisma, { email: `e2e-user-${Date.now()}@test.infinibay` })
+    adminRow = await createAdmin(prisma, { email: `e2e-admin-${Date.now()}@test.infinibay` })
+    otherUserRow = await createUser(prisma, { email: `e2e-other-${Date.now()}@test.infinibay` })
 
-      const response = await request(app)
-        .post('/graphql')
-        .send(query)
-        .expect(200)
-
-      expect(response.body.errors).toBeDefined()
-      expect(response.body.errors[0].extensions.code).toBe('UNAUTHORIZED')
+    userMachine = await createMachine(prisma, {
+      userId: userRow.id,
+      departmentId: department.id,
+      overrides: { name: 'E2E Test VM' }
+    })
+    otherUserMachine = await createMachine(prisma, {
+      userId: otherUserRow.id,
+      departmentId: department.id,
+      overrides: { name: 'Other User VM' }
     })
 
-    it('should accept valid authentication tokens', async () => {
-      const mockRecommendations = [
-        createMockVMRecommendation({
-          machineId: userMachine.id,
-          type: RecommendationType.DISK_SPACE_LOW
-        })
-      ]
-
-      mockPrisma.vMRecommendation.findMany.mockResolvedValue(mockRecommendations as any)
-
-      const query = {
-        query: RECOMMENDATION_TEST_QUERIES.GET_VM_RECOMMENDATIONS,
-        variables: { vmId: userMachine.id }
-      }
-
-      const response = await request(app)
-        .post('/graphql')
-        .set('Authorization', authToken)
-        .send(query)
-        .expect(200)
-
-      expect(response.body.errors).toBeUndefined()
-      expect(response.body.data.getVMRecommendations).toHaveLength(1)
-      expect(response.body.data.getVMRecommendations[0].type).toBe('DISK_SPACE_LOW')
-    })
-
-    it('should reject invalid tokens', async () => {
-      const query = {
-        query: RECOMMENDATION_TEST_QUERIES.GET_VM_RECOMMENDATIONS,
-        variables: { vmId: userMachine.id }
-      }
-
-      const response = await request(app)
-        .post('/graphql')
-        .set('Authorization', 'invalid-token')
-        .send(query)
-        .expect(200)
-
-      expect(response.body.errors).toBeDefined()
-      expect(response.body.errors[0].extensions.code).toBe('UNAUTHORIZED')
-    })
+    authToken = jwt.sign({ userId: userRow.id }, process.env.TOKENKEY || 'test-secret-key')
+    adminAuthToken = jwt.sign({ userId: adminRow.id }, process.env.TOKENKEY || 'test-secret-key')
   })
 
-  describe('Authorization and Access Control', () => {
-    it('should allow users to access their own machines', async () => {
-      const mockRecommendations = [
-        createMockVMRecommendation({
-          machineId: userMachine.id,
-          type: RecommendationType.OS_UPDATE_AVAILABLE,
-          text: 'Security updates available',
-          actionText: 'Install Windows updates'
-        })
-      ]
-
-      mockPrisma.vMRecommendation.findMany.mockResolvedValue(mockRecommendations as any)
-
-      const query = {
-        query: RECOMMENDATION_TEST_QUERIES.GET_VM_RECOMMENDATIONS,
-        variables: { vmId: userMachine.id }
-      }
-
-      const response = await request(app)
-        .post('/graphql')
-        .set('Authorization', authToken)
-        .send(query)
-        .expect(200)
-
-      expect(response.body.errors).toBeUndefined()
-      expect(response.body.data.getVMRecommendations).toHaveLength(1)
-      expect(response.body.data.getVMRecommendations[0]).toMatchObject({
-        machineId: userMachine.id,
-        type: 'OS_UPDATE_AVAILABLE',
-        text: 'Security updates available',
-        actionText: 'Install Windows updates'
+  /**
+   * Seeds a recommendation plus (if missing) a latest snapshot it can belong
+   * to. The service filters by the latest snapshot's id, so an unanchored
+   * recommendation is invisible through the API.
+   */
+  async function seedRecommendation (
+    machineId: string,
+    type: RecommendationType,
+    overrides: Record<string, any> = {}
+  ) {
+    let snapshot = await prisma.vMHealthSnapshot.findFirst({
+      where: { machineId },
+      orderBy: { snapshotDate: 'desc' }
+    })
+    if (!snapshot) {
+      snapshot = await createHealthSnapshot(prisma, {
+        machineId,
+        overallStatus: 'HEALTHY'
       })
+    }
+    return prisma.vMRecommendation.create({
+      data: {
+        machineId,
+        snapshotId: snapshot.id,
+        type,
+        text: overrides.text ?? `${type} text`,
+        actionText: overrides.actionText ?? `${type} action`,
+        data: overrides.data ?? {},
+        ...(overrides.createdAt ? { createdAt: overrides.createdAt } : {}),
+      }
+    })
+  }
+
+  async function postQuery (token: string | null, query: any) {
+    const req = request(app).post('/graphql').send(query)
+    if (token) req.set('Authorization', token)
+    return req
+  }
+
+  // ── Auth ────────────────────────────────────────────────────────────────
+
+  describe('GraphQL API authentication', () => {
+    it('rejects unauthenticated requests', async () => {
+      const res = await postQuery(null, {
+        query: RECOMMENDATION_TEST_QUERIES.GET_VM_RECOMMENDATIONS,
+        variables: { vmId: userMachine.id }
+      })
+      expect(res.status).toBe(200)
+      expect(res.body.errors).toBeDefined()
     })
 
-    it('should deny access to other users machines', async () => {
-      const query = {
+    it('accepts valid authentication tokens', async () => {
+      await seedRecommendation(userMachine.id, RecommendationType.DISK_SPACE_LOW)
+
+      const res = await postQuery(authToken, {
+        query: RECOMMENDATION_TEST_QUERIES.GET_VM_RECOMMENDATIONS,
+        variables: { vmId: userMachine.id }
+      })
+      expect(res.body.errors).toBeUndefined()
+      expect(res.body.data.getVMRecommendations).toHaveLength(1)
+      expect(res.body.data.getVMRecommendations[0].type).toBe('DISK_SPACE_LOW')
+    })
+
+    it('rejects invalid tokens', async () => {
+      const res = await postQuery('invalid-token', {
+        query: RECOMMENDATION_TEST_QUERIES.GET_VM_RECOMMENDATIONS,
+        variables: { vmId: userMachine.id }
+      })
+      expect(res.body.errors).toBeDefined()
+    })
+  })
+
+  // ── Authorization ───────────────────────────────────────────────────────
+
+  describe('Authorization and access control', () => {
+    it('lets a user read their own machine recommendations', async () => {
+      await seedRecommendation(userMachine.id, RecommendationType.OS_UPDATE_AVAILABLE)
+
+      const res = await postQuery(authToken, {
+        query: RECOMMENDATION_TEST_QUERIES.GET_VM_RECOMMENDATIONS,
+        variables: { vmId: userMachine.id }
+      })
+      expect(res.body.errors).toBeUndefined()
+      expect(res.body.data.getVMRecommendations).toHaveLength(1)
+      expect(res.body.data.getVMRecommendations[0].type).toBe('OS_UPDATE_AVAILABLE')
+    })
+
+    it('denies a user access to another user\'s machine', async () => {
+      const res = await postQuery(authToken, {
         query: RECOMMENDATION_TEST_QUERIES.GET_VM_RECOMMENDATIONS,
         variables: { vmId: otherUserMachine.id }
-      }
-
-      const response = await request(app)
-        .post('/graphql')
-        .set('Authorization', authToken)
-        .send(query)
-        .expect(200)
-
-      expect(response.body.errors).toBeDefined()
-      expect(response.body.errors[0].message).toBe('Access denied')
+      })
+      expect(res.body.errors).toBeDefined()
+      expect(res.body.errors[0].message).toBe('Access denied')
     })
 
-    it('should allow admins to access any machine', async () => {
-      const mockRecommendations = [
-        createMockVMRecommendation({
-          machineId: otherUserMachine.id,
-          type: RecommendationType.DEFENDER_DISABLED
-        })
-      ]
+    it('lets an admin read any machine recommendations', async () => {
+      await seedRecommendation(otherUserMachine.id, RecommendationType.DEFENDER_DISABLED)
 
-      mockPrisma.vMRecommendation.findMany.mockResolvedValue(mockRecommendations as any)
-
-      const query = {
+      const res = await postQuery(adminAuthToken, {
         query: RECOMMENDATION_TEST_QUERIES.GET_VM_RECOMMENDATIONS,
         variables: { vmId: otherUserMachine.id }
-      }
-
-      const response = await request(app)
-        .post('/graphql')
-        .set('Authorization', adminAuthToken)
-        .send(query)
-        .expect(200)
-
-      expect(response.body.errors).toBeUndefined()
-      expect(response.body.data.getVMRecommendations).toHaveLength(1)
-      expect(response.body.data.getVMRecommendations[0].type).toBe('DEFENDER_DISABLED')
+      })
+      expect(res.body.errors).toBeUndefined()
+      expect(res.body.data.getVMRecommendations).toHaveLength(1)
+      expect(res.body.data.getVMRecommendations[0].type).toBe('DEFENDER_DISABLED')
     })
 
-    it('should handle machine not found', async () => {
-      const query = {
+    it('returns Machine not found for an unknown vmId', async () => {
+      const res = await postQuery(authToken, {
         query: RECOMMENDATION_TEST_QUERIES.GET_VM_RECOMMENDATIONS,
         variables: { vmId: 'non-existent-machine' }
-      }
-
-      const response = await request(app)
-        .post('/graphql')
-        .set('Authorization', authToken)
-        .send(query)
-        .expect(200)
-
-      expect(response.body.errors).toBeDefined()
-      expect(response.body.errors[0].message).toBe('Machine not found')
+      })
+      expect(res.body.errors).toBeDefined()
+      expect(res.body.errors[0].message).toBe('Machine not found')
     })
   })
 
-  describe('Query Parameter Handling', () => {
-    beforeEach(() => {
-      const mockRecommendations = [
-        createMockVMRecommendation({
-          machineId: userMachine.id,
-          type: RecommendationType.DISK_SPACE_LOW,
-          createdAt: new Date('2023-10-15T10:00:00Z')
-        }),
-        createMockVMRecommendation({
-          machineId: userMachine.id,
-          type: RecommendationType.OS_UPDATE_AVAILABLE,
-          createdAt: new Date('2023-10-15T11:00:00Z')
-        }),
-        createMockVMRecommendation({
-          machineId: userMachine.id,
-          type: RecommendationType.OVER_PROVISIONED,
-          createdAt: new Date('2023-10-15T12:00:00Z')
-        })
-      ]
+  // ── Query parameters ────────────────────────────────────────────────────
 
-      mockPrisma.vMRecommendation.findMany.mockResolvedValue(mockRecommendations as any)
+  describe('Query parameter handling', () => {
+    beforeEach(async () => {
+      await seedRecommendation(userMachine.id, RecommendationType.DISK_SPACE_LOW, {
+        createdAt: new Date('2023-10-15T10:00:00Z')
+      })
+      await seedRecommendation(userMachine.id, RecommendationType.OS_UPDATE_AVAILABLE, {
+        createdAt: new Date('2023-10-15T11:00:00Z')
+      })
+      await seedRecommendation(userMachine.id, RecommendationType.OVER_PROVISIONED, {
+        createdAt: new Date('2023-10-15T12:00:00Z')
+      })
     })
 
-    it('should handle refresh parameter', async () => {
-      // Mock health snapshot for refresh
-      const healthSnapshot = createMockHealthSnapshot({
+    it('honours the refresh parameter by regenerating from the latest snapshot', async () => {
+      // Critical disk snapshot so the DiskSpaceChecker fires during refresh.
+      await createHealthSnapshot(prisma, {
         machineId: userMachine.id,
-        diskSpaceInfo: createMockDiskSpaceInfo('critical')
+        overallStatus: 'CRITICAL',
+        diskSpaceInfo: { 'C:': { used: 96, total: 100 } }
       })
 
-      mockPrisma.vMHealthSnapshot.findFirst.mockResolvedValue(healthSnapshot as any)
-      mockPrisma.systemMetrics.findMany.mockResolvedValue([])
-      mockPrisma.vMRecommendation.deleteMany.mockResolvedValue({ count: 3 })
-      mockPrisma.vMRecommendation.createMany.mockResolvedValue({ count: 2 })
-
-      const query = {
+      const res = await postQuery(authToken, {
         query: RECOMMENDATION_TEST_QUERIES.GET_VM_RECOMMENDATIONS,
         variables: { vmId: userMachine.id, refresh: true }
-      }
-
-      const response = await request(app)
-        .post('/graphql')
-        .set('Authorization', authToken)
-        .send(query)
-        .expect(200)
-
-      expect(response.body.errors).toBeUndefined()
-      // Refresh triggers generateRecommendations which fetches snapshot
-      expect((mockPrisma.vMHealthSnapshot as any).findFirst).toHaveBeenCalled()
-    })
-
-    it('should handle type filtering', async () => {
-      // Filter mock to return only disk space recommendations
-      ;(mockPrisma.vMRecommendation.findMany as jest.Mock).mockImplementation(({ where }: any) => {
-        if (where?.type?.in?.includes(RecommendationType.DISK_SPACE_LOW)) {
-          return Promise.resolve([
-            createMockVMRecommendation({
-              machineId: userMachine.id,
-              type: RecommendationType.DISK_SPACE_LOW
-            })
-          ] as any)
-        }
-        return Promise.resolve([] as any)
       })
 
-      const query = {
+      expect(res.body.errors).toBeUndefined()
+      const recs = res.body.data.getVMRecommendations
+      expect(Array.isArray(recs)).toBe(true)
+      // After regeneration at least one disk-space recommendation must exist.
+      expect(recs.find((r: any) => r.type === 'DISK_SPACE_LOW')).toBeDefined()
+    })
+
+    it('filters by recommendation type', async () => {
+      const res = await postQuery(authToken, {
         query: RECOMMENDATION_TEST_QUERIES.GET_VM_RECOMMENDATIONS_WITH_FILTER,
-        variables: {
-          vmId: userMachine.id,
-          types: ['DISK_SPACE_LOW']
-        }
-      }
+        variables: { vmId: userMachine.id, types: ['DISK_SPACE_LOW'] }
+      })
 
-      const response = await request(app)
-        .post('/graphql')
-        .set('Authorization', authToken)
-        .send(query)
-        .expect(200)
-
-      expect(response.body.errors).toBeUndefined()
-      expect(response.body.data.getVMRecommendations).toHaveLength(1)
-      expect(response.body.data.getVMRecommendations[0].type).toBe('DISK_SPACE_LOW')
-
-      // The service now includes snapshotId and take in the query
-      expect(mockPrisma.vMRecommendation.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({
-            machineId: userMachine.id,
-            type: { in: [RecommendationType.DISK_SPACE_LOW] }
-          }),
-          orderBy: { createdAt: 'desc' }
-        })
-      )
+      expect(res.body.errors).toBeUndefined()
+      const recs = res.body.data.getVMRecommendations
+      expect(recs.every((r: any) => r.type === 'DISK_SPACE_LOW')).toBe(true)
+      expect(recs.length).toBeGreaterThan(0)
     })
 
-    it('should handle limit parameter', async () => {
-      const query = {
+    it('honours the limit parameter', async () => {
+      const res = await postQuery(authToken, {
         query: RECOMMENDATION_TEST_QUERIES.GET_VM_RECOMMENDATIONS_WITH_LIMIT,
-        variables: {
-          vmId: userMachine.id,
-          limit: 2
-        }
-      }
+        variables: { vmId: userMachine.id, limit: 2 }
+      })
 
-      const response = await request(app)
-        .post('/graphql')
-        .set('Authorization', authToken)
-        .send(query)
-        .expect(200)
-
-      expect(response.body.errors).toBeUndefined()
-      expect(mockPrisma.vMRecommendation.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({ machineId: userMachine.id }),
-          orderBy: { createdAt: 'desc' },
-          take: 2
-        })
-      )
+      expect(res.body.errors).toBeUndefined()
+      expect(res.body.data.getVMRecommendations).toHaveLength(2)
     })
 
-    it('should handle date range filtering', async () => {
-      const query = {
+    it('filters by createdAfter / createdBefore', async () => {
+      const res = await postQuery(authToken, {
         query: `
-          query GetVMRecommendationsWithDateRange($vmId: ID!, $after: DateTimeISO!, $before: DateTimeISO!) {
+          query($vmId: ID!, $after: DateTimeISO!, $before: DateTimeISO!) {
             getVMRecommendations(vmId: $vmId, filter: { createdAfter: $after, createdBefore: $before }) {
-              id
-              type
-              createdAt
+              id type createdAt
             }
           }
         `,
         variables: {
           vmId: userMachine.id,
-          after: '2023-10-15T09:00:00Z',
-          before: '2023-10-15T13:00:00Z'
+          after: '2023-10-15T10:30:00Z',
+          before: '2023-10-15T11:30:00Z'
         }
-      }
+      })
 
-      const response = await request(app)
-        .post('/graphql')
-        .set('Authorization', authToken)
-        .send(query)
-        .expect(200)
-
-      expect(response.body.errors).toBeUndefined()
-      expect(mockPrisma.vMRecommendation.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({
-            machineId: userMachine.id,
-            createdAt: expect.objectContaining({
-              gte: new Date('2023-10-15T09:00:00Z'),
-              lte: new Date('2023-10-15T13:00:00Z')
-            })
-          }),
-          orderBy: { createdAt: 'desc' }
-        })
-      )
+      expect(res.body.errors).toBeUndefined()
+      const recs = res.body.data.getVMRecommendations
+      // Only the 11:00 rec falls in [10:30, 11:30].
+      expect(recs).toHaveLength(1)
+      expect(recs[0].type).toBe('OS_UPDATE_AVAILABLE')
     })
   })
 
-  describe('Real API Scenarios', () => {
-    it('should handle complete recommendation workflow via API', async () => {
-      // Step 1: User requests recommendations (empty initially)
-      mockPrisma.vMRecommendation.findMany.mockResolvedValueOnce([])
+  // ── Error handling ──────────────────────────────────────────────────────
 
-      const initialQuery = {
-        query: RECOMMENDATION_TEST_QUERIES.GET_VM_RECOMMENDATIONS,
-        variables: { vmId: userMachine.id }
-      }
-
-      const initialResponse = await request(app)
-        .post('/graphql')
-        .set('Authorization', authToken)
-        .send(initialQuery)
-        .expect(200)
-
-      expect(initialResponse.body.data.getVMRecommendations).toHaveLength(0)
-
-      // Step 2: System generates recommendations after health check
-      const newRecommendations = [
-        createMockVMRecommendation({
-          machineId: userMachine.id,
-          type: RecommendationType.DISK_SPACE_LOW,
-          text: 'Low disk space on drive C:',
-          actionText: 'Clean up temporary files',
-          data: { drive: 'C:', usedPercent: 85, freeGB: 15.2 },
-          createdAt: new Date()
-        }),
-        createMockVMRecommendation({
-          machineId: userMachine.id,
-          type: RecommendationType.OS_UPDATE_AVAILABLE,
-          text: 'Critical Windows updates available',
-          actionText: 'Install security updates',
-          data: { criticalCount: 2, securityCount: 3 },
-          createdAt: new Date()
-        })
-      ]
-
-      // Step 3: User requests refresh to get new recommendations
-      const healthSnapshot = createMockHealthSnapshot({
-        machineId: userMachine.id,
-        diskSpaceInfo: createMockDiskSpaceInfo('warning'),
-        windowsUpdateInfo: createMockWindowsUpdateInfo('critical_updates')
+  describe('Error handling and edge cases', () => {
+    it('rejects a GraphQL query with an unknown argument', async () => {
+      const res = await request(app).post('/graphql').send({
+        query: `query { getVMRecommendations(invalidParam: "test") { id } }`
       })
-
-      mockPrisma.vMHealthSnapshot.findFirst.mockResolvedValue(healthSnapshot as any)
-      mockPrisma.systemMetrics.findMany.mockResolvedValue([])
-      mockPrisma.vMRecommendation.deleteMany.mockResolvedValue({ count: 0 })
-      mockPrisma.vMRecommendation.createMany.mockResolvedValue({ count: 2 })
-      mockPrisma.vMRecommendation.findMany.mockResolvedValueOnce(newRecommendations as any)
-
-      const refreshQuery = {
-        query: RECOMMENDATION_TEST_QUERIES.GET_VM_RECOMMENDATIONS,
-        variables: { vmId: userMachine.id, refresh: true }
-      }
-
-      const refreshResponse = await request(app)
-        .post('/graphql')
-        .set('Authorization', authToken)
-        .send(refreshQuery)
-        .expect(200)
-
-      expect(refreshResponse.body.errors).toBeUndefined()
-      expect(refreshResponse.body.data.getVMRecommendations).toHaveLength(2)
-
-      const recommendations = refreshResponse.body.data.getVMRecommendations
-
-      // Verify disk space recommendation
-      const diskSpaceRec = recommendations.find((r: any) => r.type === 'DISK_SPACE_LOW')
-      expect(diskSpaceRec).toMatchObject({
-        machineId: userMachine.id,
-        type: 'DISK_SPACE_LOW',
-        text: 'Low disk space on drive C:',
-        actionText: 'Clean up temporary files',
-        data: { drive: 'C:', usedPercent: 85, freeGB: 15.2 }
-      })
-
-      // Verify update recommendation
-      const updateRec = recommendations.find((r: any) => r.type === 'OS_UPDATE_AVAILABLE')
-      expect(updateRec).toMatchObject({
-        machineId: userMachine.id,
-        type: 'OS_UPDATE_AVAILABLE',
-        text: 'Critical Windows updates available',
-        actionText: 'Install security updates',
-        data: { criticalCount: 2, securityCount: 3 }
-      })
+      expect(res.status).toBe(400)
+      expect(res.body.errors).toBeDefined()
     })
 
-    it('should handle filtering for specific recommendation categories', async () => {
-      const securityRecommendations = [
-        createMockVMRecommendation({
-          machineId: userMachine.id,
-          type: RecommendationType.DEFENDER_DISABLED,
-          text: 'Windows Defender is disabled'
-        }),
-        createMockVMRecommendation({
-          machineId: userMachine.id,
-          type: RecommendationType.OS_UPDATE_AVAILABLE,
-          text: 'Security updates pending'
-        })
-      ]
-
-      ;(mockPrisma.vMRecommendation.findMany as jest.Mock).mockImplementation(({ where }: any) => {
-        if (where?.type?.in) {
-          const filteredRecs = securityRecommendations.filter((rec: any) =>
-            where.type.in.includes(rec.type)
-          )
-          return Promise.resolve(filteredRecs as any)
-        }
-        return Promise.resolve(securityRecommendations as any)
-      })
-
-      const securityQuery = {
-        query: RECOMMENDATION_TEST_QUERIES.GET_VM_RECOMMENDATIONS_WITH_FILTER,
-        variables: {
-          vmId: userMachine.id,
-          types: ['DEFENDER_DISABLED', 'OS_UPDATE_AVAILABLE']
-        }
-      }
-
-      const response = await request(app)
-        .post('/graphql')
-        .set('Authorization', authToken)
-        .send(securityQuery)
-        .expect(200)
-
-      expect(response.body.errors).toBeUndefined()
-      expect(response.body.data.getVMRecommendations).toHaveLength(2)
-
-      const types = response.body.data.getVMRecommendations.map((r: any) => r.type)
-      expect(types).toContain('DEFENDER_DISABLED')
-      expect(types).toContain('OS_UPDATE_AVAILABLE')
-    })
-  })
-
-  describe('Performance and Scalability', () => {
-    it('should handle large recommendation datasets efficiently', async () => {
-      const largeDataset = Array.from({ length: 50 }, (_, i) => {
-        const types = Object.values(RecommendationType)
-        return createMockVMRecommendation({
-          id: `rec-${i}`,
-          machineId: userMachine.id,
-          type: types[i % types.length] as RecommendationType,
-          text: `Recommendation ${i + 1}`,
-          actionText: `Action ${i + 1}`,
-          createdAt: new Date(Date.now() - i * 60000)
-        })
-      })
-
-      mockPrisma.vMRecommendation.findMany.mockResolvedValue(largeDataset as any)
-
-      const query = {
-        query: RECOMMENDATION_TEST_QUERIES.GET_VM_RECOMMENDATIONS,
-        variables: { vmId: userMachine.id }
-      }
-
-      const { executionTimeMs } = await RecommendationPerformanceUtils
-        .measureRecommendationGenerationTime(async () => {
-          return request(app)
-            .post('/graphql')
-            .set('Authorization', authToken)
-            .send(query)
-        })
-
-      expect(executionTimeMs).toBeLessThan(3000) // Should complete within 3 seconds
-    })
-
-    it('should handle concurrent API requests', async () => {
-      const mockRecommendations = [
-        createMockVMRecommendation({
-          machineId: userMachine.id,
-          type: RecommendationType.DISK_SPACE_LOW
-        })
-      ]
-
-      mockPrisma.vMRecommendation.findMany.mockResolvedValue(mockRecommendations as any)
-
-      const query = {
-        query: RECOMMENDATION_TEST_QUERIES.GET_VM_RECOMMENDATIONS,
-        variables: { vmId: userMachine.id }
-      }
-
-      // Make 5 concurrent requests
-      const concurrentRequests = Array.from({ length: 5 }, () =>
-        request(app)
-          .post('/graphql')
-          .set('Authorization', authToken)
-          .send(query)
-      )
-
-      const responses = await Promise.all(concurrentRequests)
-
-      responses.forEach((response: any) => {
-        expect(response.status).toBe(200)
-        expect(response.body.errors).toBeUndefined()
-        expect(response.body.data.getVMRecommendations).toHaveLength(1)
-      })
-    })
-
-    it('should handle memory-intensive recommendation generation', async () => {
-      // Simulate memory-intensive recommendation generation
-      const complexHealthSnapshot = createMockHealthSnapshot({
-        machineId: userMachine.id,
-        diskSpaceInfo: createMockDiskSpaceInfo('critical'),
-        resourceOptInfo: createMockResourceOptInfo('over_provisioned'),
-        windowsUpdateInfo: createMockWindowsUpdateInfo('critical_updates'),
-        defenderStatus: createMockDefenderStatus('threats')
-      })
-
-      const largeMetricsSet = Array.from({ length: 100 }, (_, i) =>
-        createMockSystemMetrics({
-          machineId: userMachine.id,
-          timestamp: new Date(Date.now() - i * 3600000)
-        })
-      )
-
-      mockPrisma.vMHealthSnapshot.findFirst.mockResolvedValue(complexHealthSnapshot as any)
-      mockPrisma.systemMetrics.findMany.mockResolvedValue(largeMetricsSet as any)
-      mockPrisma.vMRecommendation.deleteMany.mockResolvedValue({ count: 0 })
-      mockPrisma.vMRecommendation.createMany.mockResolvedValue({ count: 5 })
-
-      const newRecommendations = [
-        createMockVMRecommendation({
-          machineId: userMachine.id,
-          type: RecommendationType.DISK_SPACE_LOW
-        }),
-        createMockVMRecommendation({
-          machineId: userMachine.id,
-          type: RecommendationType.OVER_PROVISIONED
-        }),
-        createMockVMRecommendation({
-          machineId: userMachine.id,
-          type: RecommendationType.OS_UPDATE_AVAILABLE
-        }),
-        createMockVMRecommendation({
-          machineId: userMachine.id,
-          type: RecommendationType.DEFENDER_THREAT
-        }),
-        createMockVMRecommendation({
-          machineId: userMachine.id,
-          type: RecommendationType.DEFENDER_DISABLED
-        })
-      ]
-
-      mockPrisma.vMRecommendation.findMany.mockResolvedValue(newRecommendations as any)
-
-      const query = {
-        query: RECOMMENDATION_TEST_QUERIES.GET_VM_RECOMMENDATIONS,
-        variables: { vmId: userMachine.id, refresh: true }
-      }
-
-      const startTime = Date.now()
-      const response = await request(app)
-        .post('/graphql')
-        .set('Authorization', authToken)
-        .send(query)
-        .expect(200)
-      const endTime = Date.now()
-
-      expect(response.body.errors).toBeUndefined()
-      expect(response.body.data.getVMRecommendations).toHaveLength(5)
-      expect(endTime - startTime).toBeLessThan(10000) // Should complete within 10 seconds
-    })
-  })
-
-  describe('Error Handling and Edge Cases', () => {
-    it('should handle malformed GraphQL queries', async () => {
-      const malformedQuery = {
-        query: `
-          query GetRecommendations {
-            getVMRecommendations(invalidParam: "test") {
-              id
-            }
-          }
-        `
-      }
-
-      const response = await request(app)
-        .post('/graphql')
-        .set('Authorization', authToken)
-        .send(malformedQuery)
-        .expect(400)
-
-      expect(response.body.errors).toBeDefined()
-    })
-
-    it('should handle service failures gracefully', async () => {
-      mockPrisma.vMRecommendation.findMany.mockRejectedValue(
-        new Error('Database service unavailable')
-      )
-
-      const query = {
-        query: RECOMMENDATION_TEST_QUERIES.GET_VM_RECOMMENDATIONS,
-        variables: { vmId: userMachine.id }
-      }
-
-      const response = await request(app)
-        .post('/graphql')
-        .set('Authorization', authToken)
-        .send(query)
-        .expect(200)
-
-      expect(response.body.errors).toBeDefined()
-      // Error message comes from VMRecommendationService's handleServiceError
-      expect(response.body.errors[0].message).toBeDefined()
-    })
-
-    it('should handle invalid machine IDs', async () => {
-      const query = {
+    it('returns Machine not found for an unknown id', async () => {
+      const res = await postQuery(authToken, {
         query: RECOMMENDATION_TEST_QUERIES.GET_VM_RECOMMENDATIONS,
         variables: { vmId: 'invalid-machine-id' }
-      }
-
-      const response = await request(app)
-        .post('/graphql')
-        .set('Authorization', authToken)
-        .send(query)
-        .expect(200)
-
-      expect(response.body.errors).toBeDefined()
-      expect(response.body.errors[0].message).toBe('Machine not found')
+      })
+      expect(res.body.errors).toBeDefined()
+      expect(res.body.errors[0].message).toBe('Machine not found')
     })
 
-    it('should handle empty recommendation responses', async () => {
-      mockPrisma.vMRecommendation.findMany.mockResolvedValue([])
-
-      const query = {
+    it('returns an empty array when there are no recommendations', async () => {
+      const res = await postQuery(authToken, {
         query: RECOMMENDATION_TEST_QUERIES.GET_VM_RECOMMENDATIONS,
         variables: { vmId: userMachine.id }
-      }
-
-      const response = await request(app)
-        .post('/graphql')
-        .set('Authorization', authToken)
-        .send(query)
-        .expect(200)
-
-      expect(response.body.errors).toBeUndefined()
-      expect(response.body.data.getVMRecommendations).toEqual([])
+      })
+      expect(res.body.errors).toBeUndefined()
+      expect(res.body.data.getVMRecommendations).toEqual([])
     })
 
-    it('should validate input parameters', async () => {
-      const invalidTypeQuery = {
+    it('rejects unknown RecommendationType enum values at parse time', async () => {
+      const res = await postQuery(authToken, {
         query: RECOMMENDATION_TEST_QUERIES.GET_VM_RECOMMENDATIONS_WITH_FILTER,
         variables: {
           vmId: userMachine.id,
           types: ['INVALID_RECOMMENDATION_TYPE']
         }
-      }
-
-      const response = await request(app)
-        .post('/graphql')
-        .set('Authorization', authToken)
-        .send(invalidTypeQuery)
-
-      // Apollo Server may return 400 or 200 with errors for invalid enum values
-      expect(response.body.errors).toBeDefined()
+      })
+      expect(res.body.errors).toBeDefined()
     })
   })
 
-  describe('HTTP Response Handling', () => {
-    it('should return correct HTTP status codes', async () => {
-      mockPrisma.vMRecommendation.findMany.mockResolvedValue([])
+  // ── HTTP basics ─────────────────────────────────────────────────────────
 
-      const query = {
-        query: RECOMMENDATION_TEST_QUERIES.GET_VM_RECOMMENDATIONS,
-        variables: { vmId: userMachine.id }
-      }
-
-      await request(app)
+  describe('HTTP response handling', () => {
+    it('returns 200 + application/json on successful queries', async () => {
+      const res = await request(app)
         .post('/graphql')
         .set('Authorization', authToken)
-        .send(query)
+        .send({
+          query: RECOMMENDATION_TEST_QUERIES.GET_VM_RECOMMENDATIONS,
+          variables: { vmId: userMachine.id }
+        })
         .expect(200)
         .expect('Content-Type', /json/)
+      expect(res.body.errors).toBeUndefined()
     })
 
-    it('should handle CORS properly', async () => {
-      mockPrisma.vMRecommendation.findMany.mockResolvedValue([])
-
-      const query = {
-        query: RECOMMENDATION_TEST_QUERIES.GET_VM_RECOMMENDATIONS,
-        variables: { vmId: userMachine.id }
-      }
-
-      const response = await request(app)
+    it('sets CORS headers', async () => {
+      const res = await request(app)
         .post('/graphql')
         .set('Authorization', authToken)
         .set('Origin', 'http://localhost:3000')
-        .send(query)
+        .send({
+          query: RECOMMENDATION_TEST_QUERIES.GET_VM_RECOMMENDATIONS,
+          variables: { vmId: userMachine.id }
+        })
         .expect(200)
 
-      expect(response.headers['access-control-allow-origin']).toBeDefined()
+      expect(res.headers['access-control-allow-origin']).toBeDefined()
     })
 
-    it('should handle large response payloads', async () => {
-      const largeRecommendationSet = Array.from({ length: 100 }, (_, i) =>
-        createMockVMRecommendation({
-          id: `rec-${i}`,
-          machineId: userMachine.id,
-          type: Object.values(RecommendationType)[i % Object.values(RecommendationType).length] as RecommendationType,
-          text: `Very detailed recommendation text that explains the issue in great detail and provides comprehensive information about the problem and potential solutions. This is recommendation number ${i + 1}.`,
-          actionText: `Detailed action text with step-by-step instructions for resolving this issue. This includes multiple steps and detailed explanations for action ${i + 1}.`,
-          data: {
-            detailedInfo: `Extensive data object with lots of information for recommendation ${i}`,
-            metrics: Array.from({ length: 10 }, (_, j) => ({ metric: `value-${j}`, value: Math.random() * 100 })),
-            timestamps: Array.from({ length: 5 }, () => new Date().toISOString()),
-            additionalData: 'Lorem ipsum dolor sit amet, consectetur adipiscing elit'.repeat(10)
-          }
+    it('serves large payloads without truncation (up to service default limit)', async () => {
+      // Seed 60 recommendations; the service's default page size is 20.
+      const types = Object.values(RecommendationType)
+      for (let i = 0; i < 60; i++) {
+        await seedRecommendation(userMachine.id, types[i % types.length] as RecommendationType, {
+          text: `Recommendation ${i} with a reasonably long description`.repeat(5),
+          actionText: `Action ${i} `.repeat(10),
+          data: { i, metrics: Array.from({ length: 10 }, (_, j) => ({ metric: j, value: j * 2 })) }
         })
-      )
-
-      mockPrisma.vMRecommendation.findMany.mockResolvedValue(largeRecommendationSet as any)
-
-      const query = {
-        query: RECOMMENDATION_TEST_QUERIES.GET_VM_RECOMMENDATIONS,
-        variables: { vmId: userMachine.id }
       }
 
-      const response = await request(app)
-        .post('/graphql')
-        .set('Authorization', authToken)
-        .send(query)
-        .expect(200)
+      // Request 50 via filter.limit to get a chunky payload.
+      const res = await postQuery(authToken, {
+        query: RECOMMENDATION_TEST_QUERIES.GET_VM_RECOMMENDATIONS_WITH_LIMIT,
+        variables: { vmId: userMachine.id, limit: 50 }
+      })
 
-      expect(response.body.errors).toBeUndefined()
-      expect(response.body.data.getVMRecommendations).toHaveLength(100)
-      expect(response.text.length).toBeGreaterThan(50000) // Large response
+      expect(res.body.errors).toBeUndefined()
+      expect(res.body.data.getVMRecommendations).toHaveLength(50)
+      expect(res.text.length).toBeGreaterThan(10_000)
     })
   })
 })

@@ -1,426 +1,285 @@
 import 'reflect-metadata'
-import { UserResolver } from '@graphql/resolvers/user/resolver'
-import { InfinibayContext } from '@utils/context'
-import { mockPrisma } from '../../setup/jest.setup'
-import {
-  createMockUser,
-  createMockAdminUser,
-  createMockUsers,
-  createMockUserInput
-} from '../../setup/mock-factories'
-import {
-  createMockContext,
-  createAdminContext,
-  generateTestToken
-} from '../../setup/test-helpers'
 import bcrypt from 'bcrypt'
 import jwt from 'jsonwebtoken'
-import { UserInputError, AuthenticationError } from '@utils/errors'
+import { UserResolver } from '@graphql/resolvers/user/resolver'
+import { InfinibayContext } from '@utils/context'
+import { UserInputError } from '@utils/errors'
 import { OrderByDirection } from '@utils/pagination'
 import { UserOrderByField, UserRole } from '@graphql/resolvers/user/type'
-import type { UserOrderByInputType, CreateUserInputType, UpdateUserInputType } from '@graphql/resolvers/user/type'
+import type { CreateUserInputType, UpdateUserInputType } from '@graphql/resolvers/user/type'
+import { testPrisma } from '../../setup/jest.setup'
+import { createUser, createAdmin } from '../../setup/db-factories'
 
-describe('UserResolver', () => {
+/**
+ * UserResolver tests — real database.
+ *
+ * UserResolver instantiates `new PrismaClient()` directly per call, which
+ * connects to DATABASE_URL from the env. Under `.env.test` that resolves to
+ * the test DB — the same one `testPrisma.prisma` is talking to. We seed
+ * through testPrisma and read results back through the resolver.
+ */
+describe('UserResolver — real database', () => {
+  const prisma = testPrisma.prisma
   let resolver: UserResolver
+  let adminContext: InfinibayContext
 
-  beforeEach(() => {
+  beforeEach(async () => {
     resolver = new UserResolver()
-    jest.clearAllMocks()
+    const admin = await createAdmin(prisma)
+    adminContext = {
+      prisma,
+      user: admin,
+      req: {} as any,
+      res: {} as any,
+      setupMode: false,
+    } as unknown as InfinibayContext
   })
 
   describe('currentUser', () => {
-    it('should return current user from context', async () => {
-      const mockUser = createMockUser()
-      const context = createMockContext({ user: mockUser, prisma: mockPrisma })
+    it('returns the user from context with a namespace', async () => {
+      const contextUser = await createUser(prisma)
+      const ctx = { ...adminContext, user: contextUser } as InfinibayContext
 
-      const result = await resolver.currentUser(context as unknown as InfinibayContext)
-
-      expect(result).toBeTruthy()
-      expect(result?.id).toBe(mockUser.id)
-      // Should have a namespace
-      expect(result?.namespace).toMatch(/^user_/)
-    })
-
-    it('should generate namespace for user', async () => {
-      const mockUser = createMockUser()
-      const context = createMockContext({ user: mockUser, prisma: mockPrisma })
-
-      const result = await resolver.currentUser(context as unknown as InfinibayContext)
+      const result = await resolver.currentUser(ctx)
 
       expect(result).toBeTruthy()
-      // Namespace should be generated from user ID
-      expect(result?.namespace).toBe(`user_${mockUser.id.substring(0, 8)}`)
+      expect(result?.id).toBe(contextUser.id)
+      expect(result?.namespace).toBe(`user_${contextUser.id.substring(0, 8)}`)
     })
 
-    it('should return null if no user in context', async () => {
-      const context = createMockContext({ user: undefined, prisma: mockPrisma })
-
-      const result = await resolver.currentUser(context as unknown as InfinibayContext)
-
-      expect(result).toBeNull()
+    it('returns null when the context has no user', async () => {
+      const ctx = { ...adminContext, user: null } as InfinibayContext
+      expect(await resolver.currentUser(ctx)).toBeNull()
     })
   })
 
-  describe('user', () => {
-    it('should return user by id for admin', async () => {
-      const mockUser = createMockUser()
-      mockPrisma.user.findUnique.mockResolvedValue(mockUser)
-
-      const result = await resolver.user(mockUser.id)
-
-      expect(mockPrisma.user.findUnique).toHaveBeenCalledWith({
-        where: { id: mockUser.id }
-      })
-      expect(result).toEqual(mockUser)
+  describe('user(id)', () => {
+    it('returns a user by id', async () => {
+      const target = await createUser(prisma)
+      const result = await resolver.user(target.id)
+      expect(result).not.toBeNull()
+      expect(result?.id).toBe(target.id)
+      expect(result?.email).toBe(target.email)
     })
 
-    it('should return null if user not found', async () => {
-      mockPrisma.user.findUnique.mockResolvedValue(null)
-
-      const result = await resolver.user('non-existent-id')
-
-      expect(result).toBeNull()
+    it('returns null when the id is unknown', async () => {
+      expect(await resolver.user('non-existent-id')).toBeNull()
     })
   })
 
-  describe('users', () => {
-    it('should return paginated users list', async () => {
-      const mockUsers = createMockUsers(5)
-      const total = 10
+  describe('users(orderBy, pagination)', () => {
+    it('returns users ordered by createdAt desc with pagination', async () => {
+      const users = [] as Array<Awaited<ReturnType<typeof createUser>>>
+      for (let i = 0; i < 6; i++) {
+        users.push(await createUser(prisma, { email: `paginate-${i}-${Date.now()}@test.infinibay` }))
+      }
 
-      mockPrisma.user.findMany.mockResolvedValue(mockUsers)
-      mockPrisma.user.count.mockResolvedValue(total)
-
-      const orderBy: UserOrderByInputType = { fieldName: UserOrderByField.CREATED_AT, direction: OrderByDirection.DESC }
       const result = await resolver.users(
-        orderBy,
-        { take: 5, skip: 0 }
+        { fieldName: UserOrderByField.CREATED_AT, direction: OrderByDirection.DESC },
+        { take: 3, skip: 0 }
       )
 
-      expect(mockPrisma.user.findMany).toHaveBeenCalledWith({
-        orderBy: { createdAt: 'desc' },
-        take: 5,
-        skip: 0,
-        select: {
-          id: true,
-          email: true,
-          firstName: true,
-          lastName: true,
-          role: true,
-          createdAt: true
-        }
-      })
-      expect(result).toEqual(mockUsers)
+      expect(result).toHaveLength(3)
+      // Most-recently created first — the 6 seeded users + 1 admin from beforeEach.
+      // Just verify the ordering is respected (descending createdAt).
+      for (let i = 0; i < result.length - 1; i++) {
+        expect(result[i].createdAt.getTime())
+          .toBeGreaterThanOrEqual(result[i + 1].createdAt.getTime())
+      }
     })
 
-    it('should handle empty results', async () => {
-      mockPrisma.user.findMany.mockResolvedValue([])
-      mockPrisma.user.count.mockResolvedValue(0)
-
+    it('returns an empty array when pagination skips past all rows', async () => {
       const result = await resolver.users(
         { fieldName: UserOrderByField.EMAIL, direction: OrderByDirection.ASC },
-        { take: 10, skip: 0 }
+        { take: 10, skip: 10_000 }
       )
-
       expect(result).toEqual([])
     })
 
-    it('should apply correct ordering', async () => {
-      const mockUsers = createMockUsers(3)
-      mockPrisma.user.findMany.mockResolvedValue(mockUsers)
-      mockPrisma.user.count.mockResolvedValue(3)
+    it('orders by email ascending when requested', async () => {
+      await createUser(prisma, { email: 'aaa@test.infinibay' })
+      await createUser(prisma, { email: 'zzz@test.infinibay' })
 
-      await resolver.users(
+      const result = await resolver.users(
         { fieldName: UserOrderByField.EMAIL, direction: OrderByDirection.ASC },
-        { take: 10, skip: 0 }
+        { take: 100, skip: 0 }
       )
 
-      expect(mockPrisma.user.findMany).toHaveBeenCalledWith({
-        orderBy: { email: 'asc' },
-        take: 10,
-        skip: 0,
-        select: {
-          id: true,
-          email: true,
-          firstName: true,
-          lastName: true,
-          role: true,
-          createdAt: true
-        }
-      })
+      const emails = result.map(u => u.email)
+      const sorted = [...emails].sort()
+      expect(emails).toEqual(sorted)
     })
   })
 
   describe('login', () => {
-    it('should successfully login with valid credentials', async () => {
+    it('returns a JWT token on correct credentials', async () => {
       const password = 'password123'
-      const hashedPassword = await bcrypt.hash(password, 10)
-      const mockUser = createMockUser({ password: hashedPassword })
+      const user = await createUser(prisma, { password: bcrypt.hashSync(password, 4) })
 
-      mockPrisma.user.findFirst.mockResolvedValue(mockUser)
+      const result = await resolver.login(user.email, password)
+      expect(result).not.toBeNull()
+      expect(result?.token).toMatch(/^[\w-]+\.[\w-]+\.[\w-]+$/)
 
-      const result = await resolver.login(mockUser.email, password)
-
-      expect(mockPrisma.user.findFirst).toHaveBeenCalledWith({
-        where: { email: mockUser.email }
-      })
-      expect(result).toBeTruthy()
-      expect(result?.token).toMatch(/^[\w-]+\.[\w-]+\.[\w-]+$/) // JWT format
+      const decoded = jwt.verify(result!.token, process.env.TOKENKEY ?? 'secret') as any
+      expect(decoded.userId).toBe(user.id)
     })
 
-    it('should fail login with invalid email', async () => {
-      mockPrisma.user.findFirst.mockResolvedValue(null)
-
-      await expect(resolver.login('invalid@example.com', 'password'))
+    it('throws for an unknown email', async () => {
+      await expect(resolver.login('no-such-user@test.infinibay', 'password'))
         .rejects.toThrow('Invalid credentials')
     })
 
-    it('should fail login with invalid password', async () => {
-      const mockUser = createMockUser({ password: await bcrypt.hash('correct', 10) })
-      mockPrisma.user.findFirst.mockResolvedValue(mockUser)
-
-      await expect(resolver.login(mockUser.email, 'wrong-password'))
+    it('throws for an incorrect password', async () => {
+      const user = await createUser(prisma, { password: bcrypt.hashSync('correct', 4) })
+      await expect(resolver.login(user.email, 'wrong-password'))
         .rejects.toThrow('Invalid credentials')
     })
 
-    it('should handle deleted user login', async () => {
-      const mockUser = createMockUser({
+    it('still authenticates a soft-deleted user (resolver does not check the flag)', async () => {
+      const password = 'password'
+      const user = await createUser(prisma, {
         deleted: true,
-        password: await bcrypt.hash('password', 10)
+        password: bcrypt.hashSync(password, 4)
       })
-      mockPrisma.user.findFirst.mockResolvedValue(mockUser)
-
-      const result = await resolver.login(mockUser.email, 'password')
-
-      // Deleted users can still login - the resolver doesn't check deleted flag
-      expect(result).toBeTruthy()
+      const result = await resolver.login(user.email, password)
       expect(result?.token).toBeTruthy()
     })
   })
 
   describe('createUser', () => {
-    it('should create new user with valid input', async () => {
-      const mockInput = createMockUserInput()
+    it('creates a new user with a hashed password', async () => {
       const input: CreateUserInputType = {
-        ...mockInput,
-        role: UserRole.USER
-      }
-      const hashedPassword = await bcrypt.hash(input.password, 10)
-      const createdUser = createMockUser({
-        ...mockInput,
+        email: `new-${Date.now()}@test.infinibay`,
+        password: 'plainpw123',
+        passwordConfirmation: 'plainpw123',
+        firstName: 'New',
+        lastName: 'User',
         role: UserRole.USER,
-        password: hashedPassword
-      })
-
-      mockPrisma.user.findUnique.mockResolvedValue(null) // Email doesn't exist
-      mockPrisma.user.create.mockResolvedValue(createdUser)
-
-      const context = createAdminContext() as unknown as InfinibayContext
-      const result = await resolver.createUser(input, context)
-
-      expect(mockPrisma.user.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({
-          email: input.email,
-          firstName: input.firstName,
-          lastName: input.lastName,
-          role: input.role,
-          password: expect.any(String), // Hashed password
-          deleted: false
-        })
-      })
-      expect(result).toEqual(createdUser)
-    })
-
-    it('should throw error if email already exists', async () => {
-      const mockInput = createMockUserInput()
-      const input: CreateUserInputType = {
-        ...mockInput,
-        role: UserRole.USER
-      }
-      const existingUser = createMockUser({ email: input.email })
-
-      mockPrisma.user.findUnique.mockResolvedValue(existingUser)
-
-      const context = createAdminContext() as unknown as InfinibayContext
-      await expect(resolver.createUser(input, context)).rejects.toThrow(UserInputError)
-      expect(mockPrisma.user.create).not.toHaveBeenCalled()
-    })
-
-    it('should create user even with invalid email format', async () => {
-      const mockInput = createMockUserInput({ email: 'invalid-email' })
-      const input: CreateUserInputType = {
-        ...mockInput,
-        role: UserRole.USER
-      }
-      const mockUser = createMockUser({ email: 'invalid-email' })
-
-      // Email format validation doesn't happen in resolver
-      mockPrisma.user.findUnique.mockResolvedValue(null) // User doesn't exist yet
-      mockPrisma.user.create.mockResolvedValue(mockUser)
-
-      const context = createAdminContext() as unknown as InfinibayContext
-      const result = await resolver.createUser(input, context)
-      // The resolver doesn't validate email format, so it creates the user
-      expect(mockPrisma.user.create).toHaveBeenCalled()
-      expect(result).toEqual(mockUser)
-    })
-
-    it('should validate password confirmation', async () => {
-      const mockInput = createMockUserInput({ password: '123', passwordConfirmation: '456' })
-      const input: CreateUserInputType = {
-        ...mockInput,
-        role: UserRole.USER
       }
 
-      const context = createAdminContext() as unknown as InfinibayContext
-      await expect(resolver.createUser(input, context)).rejects.toThrow(UserInputError)
-      expect(mockPrisma.user.create).not.toHaveBeenCalled()
+      const result = await resolver.createUser(input, adminContext)
+
+      expect(result.email).toBe(input.email)
+      expect(result.firstName).toBe('New')
+
+      const stored = await prisma.user.findUnique({ where: { email: input.email } })
+      expect(stored).not.toBeNull()
+      expect(stored!.password).not.toBe('plainpw123')
+      expect(await bcrypt.compare('plainpw123', stored!.password)).toBe(true)
     })
 
-    it('should create admin user with ADMIN role', async () => {
-      const mockInput = createMockUserInput()
+    it('throws UserInputError if the email is already taken', async () => {
+      const existing = await createUser(prisma)
       const input: CreateUserInputType = {
-        ...mockInput,
-        role: UserRole.ADMIN
+        email: existing.email,
+        password: 'x1x2x3x4',
+        passwordConfirmation: 'x1x2x3x4',
+        firstName: 'Dup',
+        lastName: 'User',
+        role: UserRole.USER,
       }
-      const hashedPassword = await bcrypt.hash(input.password, 10)
-      const createdUser = createMockAdminUser({
-        ...mockInput,
+      await expect(resolver.createUser(input, adminContext)).rejects.toThrow(UserInputError)
+    })
+
+    it('does not validate email format (by design)', async () => {
+      const input: CreateUserInputType = {
+        email: `garbage-${Date.now()}`,
+        password: 'plainpw123',
+        passwordConfirmation: 'plainpw123',
+        firstName: 'Weird',
+        lastName: 'Email',
+        role: UserRole.USER,
+      }
+      const result = await resolver.createUser(input, adminContext)
+      expect(result.email).toBe(input.email)
+    })
+
+    it('rejects mismatched password confirmation', async () => {
+      const input: CreateUserInputType = {
+        email: `mismatch-${Date.now()}@test.infinibay`,
+        password: '123',
+        passwordConfirmation: '456',
+        firstName: 'Mis',
+        lastName: 'Match',
+        role: UserRole.USER,
+      }
+      await expect(resolver.createUser(input, adminContext)).rejects.toThrow(UserInputError)
+    })
+
+    it('creates an admin user when role=ADMIN', async () => {
+      const input: CreateUserInputType = {
+        email: `admin-new-${Date.now()}@test.infinibay`,
+        password: 'plainpw123',
+        passwordConfirmation: 'plainpw123',
+        firstName: 'Admin',
+        lastName: 'New',
         role: UserRole.ADMIN,
-        password: hashedPassword
-      })
-
-      mockPrisma.user.findUnique.mockResolvedValue(null)
-      mockPrisma.user.create.mockResolvedValue(createdUser)
-
-      const context = createAdminContext() as unknown as InfinibayContext
-      const result = await resolver.createUser(input, context)
-      expect(result).toEqual(createdUser)
-    })
-  })
-
-  describe('updateUser', () => {
-    it('should update user with valid input', async () => {
-      const existingUser = createMockUser()
-      const updateInput: UpdateUserInputType = {
-        firstName: 'Updated',
-        lastName: 'Name',
-        password: undefined,
-        passwordConfirmation: undefined,
-        role: undefined
       }
-      const updatedUser = { ...existingUser, firstName: 'Updated', lastName: 'Name' }
-
-      mockPrisma.user.findUnique.mockResolvedValue(existingUser)
-      mockPrisma.user.update.mockResolvedValue(updatedUser)
-
-      const context = createAdminContext() as unknown as InfinibayContext
-      const result = await resolver.updateUser(existingUser.id, updateInput, context)
-
-      // The resolver now only sends fields that are explicitly provided (not undefined)
-      expect(mockPrisma.user.update).toHaveBeenCalledWith({
-        where: { id: existingUser.id },
-        data: {
-          firstName: updateInput.firstName,
-          lastName: updateInput.lastName
-        }
-      })
-      expect(result).toEqual(updatedUser)
-    })
-
-    it('should update password with hashing', async () => {
-      const existingUser = createMockUser()
-      const newPassword = 'NewSecurePass123!'
-      const updateInput: UpdateUserInputType = {
-        firstName: undefined,
-        lastName: undefined,
-        password: newPassword,
-        passwordConfirmation: newPassword,
-        role: undefined
-      }
-
-      mockPrisma.user.findUnique.mockResolvedValue(existingUser)
-      mockPrisma.user.update.mockResolvedValue({
-        ...existingUser,
-        password: await bcrypt.hash(newPassword, 10)
-      })
-
-      const context = createAdminContext() as unknown as InfinibayContext
-      await resolver.updateUser(existingUser.id, updateInput, context)
-
-      // The resolver now only sends fields that are explicitly provided (not undefined)
-      expect(mockPrisma.user.update).toHaveBeenCalledWith({
-        where: { id: existingUser.id },
-        data: {
-          password: expect.any(String) // Should be hashed
-        }
-      })
-    })
-
-    it('should throw error if user not found', async () => {
-      mockPrisma.user.findUnique.mockResolvedValue(null)
-
-      const updateInput: UpdateUserInputType = {
-        firstName: 'Test',
-        lastName: undefined,
-        password: undefined,
-        passwordConfirmation: undefined,
-        role: undefined
-      }
-
-      const context = createAdminContext() as unknown as InfinibayContext
-      await expect(
-        resolver.updateUser('non-existent', updateInput, context)
-      ).rejects.toThrow(UserInputError)
-    })
-
-    it('should handle password mismatch', async () => {
-      const existingUser = createMockUser()
-
-      const updateInput: UpdateUserInputType = {
-        firstName: undefined,
-        lastName: undefined,
-        password: 'NewPass123',
-        passwordConfirmation: 'DifferentPass456',
-        role: undefined
-      }
-
-      mockPrisma.user.findUnique.mockResolvedValue(existingUser)
-
-      const context = createAdminContext() as unknown as InfinibayContext
-      await expect(
-        resolver.updateUser(existingUser.id, updateInput, context)
-      ).rejects.toThrow(UserInputError)
-    })
-
-    it('should allow updating role for admin users', async () => {
-      const existingUser = createMockUser({ role: UserRole.USER })
-      const updateInput: UpdateUserInputType = {
-        firstName: undefined,
-        lastName: undefined,
-        password: undefined,
-        passwordConfirmation: undefined,
-        role: UserRole.ADMIN
-      }
-      const updatedUser = { ...existingUser, role: UserRole.ADMIN as string }
-
-      mockPrisma.user.findUnique.mockResolvedValue(existingUser)
-      mockPrisma.user.update.mockResolvedValue(updatedUser as any)
-
-      const context = createAdminContext() as unknown as InfinibayContext
-      const result = await resolver.updateUser(existingUser.id, updateInput, context)
-
+      const result = await resolver.createUser(input, adminContext)
       expect(result.role).toBe('ADMIN')
     })
   })
 
-  describe('Authorization Tests', () => {
-    it('should require ADMIN role for users query', async () => {
-      const userContext = createMockContext() // Regular user
+  describe('updateUser', () => {
+    it('updates first/last name', async () => {
+      const target = await createUser(prisma, { firstName: 'Old', lastName: 'Name' })
 
-      // This test would typically use authorization decorators
-      // but we're testing the resolver directly
-      expect(resolver.users).toBeDefined()
+      await resolver.updateUser(
+        target.id,
+        { firstName: 'Updated', lastName: 'Name', password: undefined, passwordConfirmation: undefined, role: undefined },
+        adminContext
+      )
+
+      const reloaded = await prisma.user.findUnique({ where: { id: target.id } })
+      expect(reloaded?.firstName).toBe('Updated')
+    })
+
+    it('hashes the new password when provided', async () => {
+      const target = await createUser(prisma)
+      const newPassword = 'NewSecurePass123!'
+
+      await resolver.updateUser(
+        target.id,
+        { firstName: undefined, lastName: undefined, password: newPassword, passwordConfirmation: newPassword, role: undefined },
+        adminContext
+      )
+
+      const reloaded = await prisma.user.findUnique({ where: { id: target.id } })
+      expect(reloaded?.password).not.toBe(newPassword)
+      expect(await bcrypt.compare(newPassword, reloaded!.password)).toBe(true)
+    })
+
+    it('throws if the user does not exist', async () => {
+      await expect(
+        resolver.updateUser(
+          'non-existent',
+          { firstName: 'X', lastName: undefined, password: undefined, passwordConfirmation: undefined, role: undefined },
+          adminContext
+        )
+      ).rejects.toThrow(UserInputError)
+    })
+
+    it('rejects mismatched password confirmation', async () => {
+      const target = await createUser(prisma)
+      await expect(
+        resolver.updateUser(
+          target.id,
+          { firstName: undefined, lastName: undefined, password: 'A', passwordConfirmation: 'B', role: undefined },
+          adminContext
+        )
+      ).rejects.toThrow(UserInputError)
+    })
+
+    it('allows an admin to promote a user to ADMIN', async () => {
+      const target = await createUser(prisma, { role: 'USER' })
+
+      const result = await resolver.updateUser(
+        target.id,
+        { firstName: undefined, lastName: undefined, password: undefined, passwordConfirmation: undefined, role: UserRole.ADMIN },
+        adminContext
+      )
+
+      expect(result.role).toBe('ADMIN')
     })
   })
 })

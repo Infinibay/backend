@@ -1,21 +1,10 @@
 import 'reflect-metadata'
-import { describe, it, expect, beforeEach, jest } from '@jest/globals'
 import { PrismaClient } from '@prisma/client'
+import { mockDeep, DeepMockProxy } from 'jest-mock-extended'
 import { SnapshotServiceV2, SnapshotInfo, SnapshotResult, SnapshotListResult } from '../../../app/services/SnapshotServiceV2'
 import { SnapshotManager, SnapshotInfo as InfinizationSnapshotInfo, StorageError, StorageErrorCode } from '@infinibay/infinization'
 
-// Mock PrismaClient
-const mockPrisma: any = {
-  machine: {
-    findUnique: jest.fn(),
-    update: jest.fn()
-  },
-  snapshot: {
-    findMany: jest.fn(),
-    create: jest.fn(),
-    delete: jest.fn()
-  }
-}
+const mockPrisma: DeepMockProxy<PrismaClient> = mockDeep<PrismaClient>()
 
 // Mock Infinization SnapshotManager
 const mockSnapshotManager = {
@@ -45,7 +34,7 @@ describe('SnapshotServiceV2', () => {
 
   beforeEach(() => {
     jest.clearAllMocks()
-    service = new SnapshotServiceV2(mockPrisma as PrismaClient)
+    service = new SnapshotServiceV2(mockPrisma)
   })
 
   describe('createSnapshot', () => {
@@ -53,7 +42,7 @@ describe('SnapshotServiceV2', () => {
 
     it('should successfully create a snapshot for a stopped VM', async () => {
       // Mock VM info - stopped VM
-      const mockMachine = { id: mockVMId, internalName: 'vm-test', status: 'off' }
+      const mockMachine = { id: mockVMId, internalName: 'vm-test', status: 'off' } as any
       mockPrisma.machine.findUnique.mockResolvedValue(mockMachine)
 
       // Mock snapshot creation
@@ -79,7 +68,7 @@ describe('SnapshotServiceV2', () => {
 
     it('should return error when VM is running (qemu-img limitation)', async () => {
       // Mock VM info - running VM
-      const mockMachine = { id: mockVMId, internalName: 'vm-test', status: 'running' }
+      const mockMachine = { id: mockVMId, internalName: 'vm-test', status: 'running' } as any
       mockPrisma.machine.findUnique.mockResolvedValue(mockMachine)
 
       const result: SnapshotResult = await service.createSnapshot(mockVMId, 'test-snapshot')
@@ -89,7 +78,7 @@ describe('SnapshotServiceV2', () => {
     })
 
     it('should handle SnapshotManager creation failure', async () => {
-      const mockMachine = { id: mockVMId, internalName: 'vm-test', status: 'off' }
+      const mockMachine = { id: mockVMId, internalName: 'vm-test', status: 'off' } as any
       mockPrisma.machine.findUnique.mockResolvedValue(mockMachine)
 
       const error = new StorageError(StorageErrorCode.COMMAND_FAILED, 'Storage error')
@@ -102,7 +91,7 @@ describe('SnapshotServiceV2', () => {
     })
 
     it('should create snapshot with description', async () => {
-      const mockMachine = { id: mockVMId, internalName: 'vm-test', status: 'off' }
+      const mockMachine = { id: mockVMId, internalName: 'vm-test', status: 'off' } as any
       mockPrisma.machine.findUnique.mockResolvedValue(mockMachine)
 
       mockSnapshotManager.createSnapshot.mockResolvedValue(undefined)
@@ -118,7 +107,7 @@ describe('SnapshotServiceV2', () => {
     })
 
     it('should handle empty snapshot name', async () => {
-      const mockMachine = { id: mockVMId, internalName: 'vm-test', status: 'off' }
+      const mockMachine = { id: mockVMId, internalName: 'vm-test', status: 'off' } as any
       mockPrisma.machine.findUnique.mockResolvedValue(mockMachine)
 
       const result: SnapshotResult = await service.createSnapshot(mockVMId, '')
@@ -132,7 +121,7 @@ describe('SnapshotServiceV2', () => {
     const mockVMId = 'vm-123-456'
 
     it('should return list of snapshots for VM', async () => {
-      const mockMachine = { id: mockVMId, internalName: 'vm-test', status: 'off' }
+      const mockMachine = { id: mockVMId, internalName: 'vm-test', status: 'off' } as any
       mockPrisma.machine.findUnique.mockResolvedValue(mockMachine)
 
       const mockSnapshots: InfinizationSnapshotInfo[] = [
@@ -162,7 +151,7 @@ describe('SnapshotServiceV2', () => {
     })
 
     it('should handle empty snapshot list', async () => {
-      const mockMachine = { id: mockVMId, internalName: 'vm-test', status: 'off' }
+      const mockMachine = { id: mockVMId, internalName: 'vm-test', status: 'off' } as any
       mockPrisma.machine.findUnique.mockResolvedValue(mockMachine)
 
       mockSnapshotManager.listSnapshots.mockResolvedValue([])
@@ -183,7 +172,7 @@ describe('SnapshotServiceV2', () => {
     })
 
     it('should handle snapshot listing failures', async () => {
-      const mockMachine = { id: mockVMId, internalName: 'vm-test', status: 'off' }
+      const mockMachine = { id: mockVMId, internalName: 'vm-test', status: 'off' } as any
       mockPrisma.machine.findUnique.mockResolvedValue(mockMachine)
 
       const error = new StorageError(StorageErrorCode.COMMAND_FAILED, 'Storage unavailable')
@@ -196,7 +185,7 @@ describe('SnapshotServiceV2', () => {
     })
 
     it('should include VM size metadata in snapshot list', async () => {
-      const mockMachine = { id: mockVMId, internalName: 'vm-test', status: 'off' }
+      const mockMachine = { id: mockVMId, internalName: 'vm-test', status: 'off' } as any
       mockPrisma.machine.findUnique.mockResolvedValue(mockMachine)
 
       const mockSnapshots: InfinizationSnapshotInfo[] = [
@@ -221,7 +210,7 @@ describe('SnapshotServiceV2', () => {
     const mockVMId = 'vm-123-456'
 
     it('should successfully delete a snapshot', async () => {
-      const mockMachine = { id: mockVMId, internalName: 'vm-test', status: 'off' }
+      const mockMachine = { id: mockVMId, internalName: 'vm-test', status: 'off' } as any
       mockPrisma.machine.findUnique.mockResolvedValue(mockMachine)
 
       const result: SnapshotResult = await service.deleteSnapshot(mockVMId, 'snapshot-1')
@@ -240,7 +229,7 @@ describe('SnapshotServiceV2', () => {
     })
 
     it('should handle delete failure', async () => {
-      const mockMachine = { id: mockVMId, internalName: 'vm-test', status: 'off' }
+      const mockMachine = { id: mockVMId, internalName: 'vm-test', status: 'off' } as any
       mockPrisma.machine.findUnique.mockResolvedValue(mockMachine)
 
       const error = new StorageError(StorageErrorCode.COMMAND_FAILED, 'Delete failed')

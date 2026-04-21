@@ -1,34 +1,20 @@
-import { describe, it, expect, beforeEach, jest, afterEach } from '@jest/globals'
 import { PrismaClient, FirewallPolicy, RuleAction, RuleDirection, RuleSetType } from '@prisma/client'
+import { mockDeep, DeepMockProxy } from 'jest-mock-extended'
 import { FirewallPolicyService } from '../../../../app/services/firewall/FirewallPolicyService'
 import { FirewallRuleService } from '../../../../app/services/firewall/FirewallRuleService'
 
 describe('FirewallPolicyService', () => {
   let service: FirewallPolicyService
-  let mockPrisma: any
-  let mockRuleService: any
+  let mockPrisma: DeepMockProxy<PrismaClient>
+  let mockRuleService: DeepMockProxy<FirewallRuleService>
 
   beforeEach(() => {
     jest.clearAllMocks()
 
-    mockPrisma = {
-      department: {
-        findUnique: jest.fn(),
-        update: jest.fn()
-      },
-      firewallRuleSet: {
-        findFirst: jest.fn(),
-        create: jest.fn()
-      }
-    }
+    mockPrisma = mockDeep<PrismaClient>()
+    mockRuleService = mockDeep<FirewallRuleService>()
 
-    mockRuleService = {
-      createRule: jest.fn(),
-      createRuleSet: jest.fn(),
-      deleteSystemGeneratedRules: jest.fn()
-    }
-
-    service = new FirewallPolicyService(mockPrisma as PrismaClient, mockRuleService as FirewallRuleService)
+    service = new FirewallPolicyService(mockPrisma, mockRuleService)
   })
 
   afterEach(() => {
@@ -157,7 +143,7 @@ describe('FirewallPolicyService', () => {
       ]
 
       jest.spyOn(mockRuleService, 'deleteSystemGeneratedRules').mockResolvedValue(2)
-      jest.spyOn(mockRuleService, 'createRule').mockResolvedValue({ id: 'new-rule' })
+      jest.spyOn(mockRuleService, 'createRule').mockResolvedValue({ id: 'new-rule' } as any)
 
       await service.applyPolicyToRuleSet(ruleSetId, FirewallPolicy.BLOCK_ALL, 'allow_internet')
 
@@ -168,7 +154,7 @@ describe('FirewallPolicyService', () => {
     it('should work with empty rule set', async () => {
       const ruleSetId = 'ruleset-456'
       jest.spyOn(mockRuleService, 'deleteSystemGeneratedRules').mockResolvedValue(0)
-      jest.spyOn(mockRuleService, 'createRule').mockResolvedValue({ id: 'new-rule' })
+      jest.spyOn(mockRuleService, 'createRule').mockResolvedValue({ id: 'new-rule' } as any)
 
       await service.applyPolicyToRuleSet(ruleSetId, FirewallPolicy.ALLOW_ALL, 'block_ssh')
 
@@ -190,9 +176,9 @@ describe('FirewallPolicyService', () => {
         internalName: 'ibay-dept-abc123'
       }
 
-      mockPrisma.department.findUnique.mockResolvedValue(mockDepartment)
-      mockRuleService.createRuleSet.mockResolvedValue(mockRuleSet)
-      mockPrisma.department.update.mockResolvedValue({})
+      mockPrisma.department.findUnique.mockResolvedValue(mockDepartment as any)
+      mockRuleService.createRuleSet.mockResolvedValue(mockRuleSet as any)
+      mockPrisma.department.update.mockResolvedValue({} as any)
 
       const result = await service.ensureAndApplyDepartmentPolicy(
         'dept-123',
@@ -221,7 +207,7 @@ describe('FirewallPolicyService', () => {
         firewallRuleSet: { id: 'existing-ruleset' }
       }
 
-      mockPrisma.department.findUnique.mockResolvedValue(mockDepartment)
+      mockPrisma.department.findUnique.mockResolvedValue(mockDepartment as any)
 
       await service.ensureAndApplyDepartmentPolicy(
         'dept-123',

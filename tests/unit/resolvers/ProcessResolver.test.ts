@@ -1,6 +1,7 @@
 import { ProcessResolver } from '@graphql/resolvers/ProcessResolver'
 import { ProcessManager } from '@services/ProcessManager'
 import { PrismaClient } from '@prisma/client'
+import { mockDeep } from 'jest-mock-extended'
 import { VirtioSocketWatcherService } from '@services/VirtioSocketWatcherService'
 
 // Mock ProcessManager
@@ -29,24 +30,15 @@ describe('ProcessResolver', () => {
 
     processResolver = new ProcessResolver()
 
-    // Create mock context
+    const ctxPrisma = mockDeep<PrismaClient>()
+    ctxPrisma.machine.findUnique.mockResolvedValue({ userId: 'user-1' } as any)
     mockContext = {
-      prisma: {
-        machine: {
-          findUnique: jest.fn().mockResolvedValue({ userId: 'user-1' })
-        }
-      } as unknown as PrismaClient,
-      virtioSocketWatcher: {} as VirtioSocketWatcherService,
+      prisma: ctxPrisma,
+      virtioSocketWatcher: mockDeep<VirtioSocketWatcherService>(),
       user: { id: 'user-1', role: 'USER' }
     }
 
-    // Create mock ProcessManager
-    mockProcessManager = {
-      killProcess: jest.fn(),
-      killProcesses: jest.fn()
-    } as any
-
-    // Mock the ProcessManager constructor
+    mockProcessManager = mockDeep<ProcessManager>()
     ;(ProcessManager as jest.Mock).mockImplementation(() => mockProcessManager)
   })
 

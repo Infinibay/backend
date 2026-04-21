@@ -1,6 +1,7 @@
 import 'reflect-metadata'
 import { MachineCleanupServiceV2 } from '@services/cleanup/machineCleanupServiceV2'
 import { PrismaClient } from '@prisma/client'
+import { mockDeep, DeepMockProxy } from 'jest-mock-extended'
 
 // Mock InfinizationService
 const mockInfinization = {
@@ -38,40 +39,27 @@ jest.mock('path', () => ({
 
 describe('MachineCleanupService - Comprehensive Tests', () => {
   let service: MachineCleanupServiceV2
-  let prisma: any
+  let prisma: DeepMockProxy<PrismaClient>
   const mockVMId = 'test-vm-123'
-
-  function createFullPrismaMock () {
-    const txMock: any = {
-      machineConfiguration: { delete: jest.fn().mockResolvedValue(null).mockRejectedValue(undefined) },
-      machineApplication: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
-      pendingCommand: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
-      scriptExecution: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
-      firewallRule: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
-      firewallRuleSet: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }), findFirst: jest.fn().mockResolvedValue(null) },
-      machine: { delete: jest.fn().mockResolvedValue({}) }
-    }
-    // Make delete catch work
-    txMock.machineConfiguration.delete = jest.fn().mockResolvedValue(null)
-
-    return {
-      machine: {
-        findUnique: jest.fn(),
-        delete: jest.fn()
-      },
-      $transaction: jest.fn().mockImplementation(async (fn: any) => {
-        if (typeof fn === 'function') {
-          return fn(txMock)
-        }
-        return fn
-      })
-    }
-  }
 
   beforeEach(() => {
     jest.clearAllMocks()
-    prisma = createFullPrismaMock()
-    service = new MachineCleanupServiceV2(prisma as PrismaClient)
+    prisma = mockDeep<PrismaClient>()
+    prisma.machineConfiguration.delete.mockResolvedValue(null as any)
+    prisma.machineApplication.deleteMany.mockResolvedValue({ count: 0 })
+    prisma.pendingCommand.deleteMany.mockResolvedValue({ count: 0 })
+    prisma.scriptExecution.deleteMany.mockResolvedValue({ count: 0 })
+    prisma.firewallRule.deleteMany.mockResolvedValue({ count: 0 })
+    prisma.firewallRuleSet.deleteMany.mockResolvedValue({ count: 0 })
+    prisma.firewallRuleSet.findFirst.mockResolvedValue(null)
+    prisma.machine.delete.mockResolvedValue({} as any)
+    prisma.$transaction.mockImplementation(async (fn: any) => {
+      if (typeof fn === 'function') {
+        return fn(prisma)
+      }
+      return fn
+    })
+    service = new MachineCleanupServiceV2(prisma)
   })
 
   describe('cleanupVM - Resource Cleanup', () => {
@@ -99,7 +87,7 @@ describe('MachineCleanupService - Comprehensive Tests', () => {
         }
       }
 
-      prisma.machine.findUnique.mockResolvedValue(mockMachine)
+      prisma.machine.findUnique.mockResolvedValue(mockMachine as any)
 
       await expect(service.cleanupVM(mockVMId)).resolves.toBeUndefined()
       expect(prisma.machine.findUnique).toHaveBeenCalledWith(
@@ -126,7 +114,7 @@ describe('MachineCleanupService - Comprehensive Tests', () => {
         }
       }
 
-      prisma.machine.findUnique.mockResolvedValue(mockMachine)
+      prisma.machine.findUnique.mockResolvedValue(mockMachine as any)
       mockInfinization.destroyVM.mockRejectedValueOnce(new Error('Failed to destroy'))
 
       // Cleanup should complete even with infinization failures
@@ -141,7 +129,7 @@ describe('MachineCleanupService - Comprehensive Tests', () => {
         configuration: null
       }
 
-      prisma.machine.findUnique.mockResolvedValue(mockMachine)
+      prisma.machine.findUnique.mockResolvedValue(mockMachine as any)
 
       await expect(service.cleanupVM(mockVMId)).resolves.toBeUndefined()
     })

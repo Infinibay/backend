@@ -11,8 +11,9 @@ import { EventManager, ResourceEventManager, EventAction, EventData } from '../.
 import { SocketService } from '../../../app/services/SocketService'
 
 // Mock SocketService
+// Mock SocketService
 class MockSocketService {
-  public sendToUser = jest.fn<() => void>()
+  public sendToUser = jest.fn()
 }
 
 describe('EventManager', () => {
@@ -248,50 +249,50 @@ describe('EventManager', () => {
 
   describe('console logging', () => {
     it('should log event dispatching', async () => {
-      const consoleSpy = jest.spyOn(logger, 'info').mockImplementation(() => undefined as any)
-      const mockManager = { handleEvent: jest.fn<ResourceEventManager['handleEvent']>().mockResolvedValue(undefined) }
-      eventManager.registerResourceManager('vms', mockManager as any)
+      const logSpy = jest.spyOn(logger, 'info').mockImplementation(() => undefined as any)
+      const mockMgr = { handleEvent: jest.fn<ResourceEventManager['handleEvent']>().mockResolvedValue(undefined) }
+      eventManager.registerResourceManager('vms', mockMgr as any)
 
       await eventManager.dispatchEvent('vms', 'create', { id: 'vm-123' }, 'user-123')
-
-      expect(consoleSpy).toHaveBeenCalledWith(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      expect(logSpy as any).toHaveBeenCalledWith(
         expect.stringContaining('Dispatching event'),
         expect.objectContaining({
           dataId: 'vm-123',
           triggeredBy: 'user-123'
         })
       )
-
-      consoleSpy.mockRestore()
+      logSpy.mockRestore()
     })
 
     it('should log successful dispatch', async () => {
-      const consoleSpy = jest.spyOn(logger, 'info').mockImplementation(() => undefined as any)
-      const mockManager = { handleEvent: jest.fn<ResourceEventManager['handleEvent']>().mockResolvedValue(undefined) }
-      eventManager.registerResourceManager('vms', mockManager as any)
+      const logSpy2 = jest.spyOn(logger, 'info').mockImplementation(() => undefined as any)
+      const mockMgr2 = { handleEvent: jest.fn<ResourceEventManager['handleEvent']>().mockResolvedValue(undefined) }
+      eventManager.registerResourceManager('vms', mockMgr2 as any)
 
       await eventManager.dispatchEvent('vms', 'create', { id: 'vm-123' }, 'user-123')
 
-      expect(consoleSpy).toHaveBeenCalledWith(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      expect(logSpy2 as any).toHaveBeenCalledWith(
         expect.stringContaining('Event dispatched successfully')
       )
 
-      consoleSpy.mockRestore()
+      logSpy2.mockRestore()
     })
 
     it('should log dispatch errors', async () => {
-      const consoleSpy = jest.spyOn(logger, 'error').mockImplementation(() => undefined as any)
-      const mockManager = { handleEvent: jest.fn<ResourceEventManager['handleEvent']>().mockRejectedValue(new Error('Test error')) }
-      eventManager.registerResourceManager('vms', mockManager as any)
+      const errSpy = jest.spyOn(logger, 'error').mockImplementation(() => undefined as any)
+      const mockMgr3 = { handleEvent: jest.fn<ResourceEventManager['handleEvent']>().mockRejectedValue(new Error('Test error')) }
+      eventManager.registerResourceManager('vms', mockMgr3 as any)
 
       await eventManager.dispatchEvent('vms', 'create', { id: 'vm-123' }, 'user-123')
 
-      expect(consoleSpy).toHaveBeenCalledWith(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(expect(errSpy) as any).toHaveBeenCalledWith(
         expect.stringContaining('Error dispatching event'),
         expect.any(Error)
       )
-
-      consoleSpy.mockRestore()
+      errSpy.mockRestore()
     })
   })
 

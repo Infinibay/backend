@@ -1,24 +1,8 @@
 import { FirewallRuleService } from '@services/firewall/FirewallRuleService'
 import { PrismaClient, RuleSetType, RuleAction, RuleDirection } from '@prisma/client'
+import { mockDeep, DeepMockProxy } from 'jest-mock-extended'
 
-// Mock PrismaClient with upsert support
-const mockPrisma = {
-  firewallRuleSet: {
-    create: jest.fn(),
-    findUnique: jest.fn(),
-    findMany: jest.fn(),
-    update: jest.fn(),
-    delete: jest.fn(),
-    upsert: jest.fn()
-  },
-  firewallRule: {
-    create: jest.fn(),
-    findUnique: jest.fn(),
-    findMany: jest.fn(),
-    update: jest.fn(),
-    delete: jest.fn()
-  }
-} as unknown as PrismaClient
+const mockPrisma: DeepMockProxy<PrismaClient> = mockDeep<PrismaClient>()
 
 describe('FirewallRuleService', () => {
   let service: FirewallRuleService
@@ -39,9 +23,9 @@ describe('FirewallRuleService', () => {
         priority: 500,
         isActive: true,
         rules: []
-      };
+      } as any;
 
-      (mockPrisma.firewallRuleSet.upsert as jest.Mock).mockResolvedValue(mockRuleSet)
+      mockPrisma.firewallRuleSet.upsert.mockResolvedValue(mockRuleSet)
 
       const result = await service.createRuleSet(
         RuleSetType.DEPARTMENT,
@@ -80,9 +64,9 @@ describe('FirewallRuleService', () => {
         priority: 100,
         isActive: true,
         rules: []
-      };
+      } as any;
 
-      (mockPrisma.firewallRuleSet.upsert as jest.Mock).mockResolvedValue(mockRuleSet)
+      mockPrisma.firewallRuleSet.upsert.mockResolvedValue(mockRuleSet)
 
       const result = await service.createRuleSet(
         RuleSetType.VM,
@@ -110,9 +94,9 @@ describe('FirewallRuleService', () => {
         dstPortStart: 443,
         dstPortEnd: 443,
         overridesDept: false
-      };
+      } as any;
 
-      (mockPrisma.firewallRule.create as jest.Mock).mockResolvedValue(mockRule)
+      mockPrisma.firewallRule.create.mockResolvedValue(mockRule)
 
       const result = await service.createRule('ruleset-123', {
         name: 'Allow HTTPS',
@@ -139,9 +123,9 @@ describe('FirewallRuleService', () => {
           { id: 'rule-1', name: 'Allow HTTP' },
           { id: 'rule-2', name: 'Allow HTTPS' }
         ]
-      };
+      } as any;
 
-      (mockPrisma.firewallRuleSet.findMany as jest.Mock).mockResolvedValue([mockRuleSet])
+      mockPrisma.firewallRuleSet.findMany.mockResolvedValue([mockRuleSet])
 
       const result = await service.getRulesByEntity(RuleSetType.DEPARTMENT, 'dept-123')
 
@@ -156,7 +140,7 @@ describe('FirewallRuleService', () => {
     })
 
     it('should return empty array when no rules exist', async () => {
-      (mockPrisma.firewallRuleSet.findMany as jest.Mock).mockResolvedValue([])
+      mockPrisma.firewallRuleSet.findMany.mockResolvedValue([])
 
       const result = await service.getRulesByEntity(RuleSetType.VM, 'vm-nonexistent')
 
@@ -171,9 +155,9 @@ describe('FirewallRuleService', () => {
         name: 'Allow HTTPS (Updated)',
         priority: 50,
         action: RuleAction.ACCEPT
-      };
+      } as any;
 
-      (mockPrisma.firewallRule.update as jest.Mock).mockResolvedValue(mockUpdatedRule)
+      mockPrisma.firewallRule.update.mockResolvedValue(mockUpdatedRule)
 
       const result = await service.updateRule('rule-123', {
         name: 'Allow HTTPS (Updated)',
@@ -193,7 +177,7 @@ describe('FirewallRuleService', () => {
 
   describe('deleteRule', () => {
     it('should delete a firewall rule', async () => {
-      (mockPrisma.firewallRule.delete as jest.Mock).mockResolvedValue({ id: 'rule-123' })
+      mockPrisma.firewallRule.delete.mockResolvedValue({ id: 'rule-123' } as any)
 
       await service.deleteRule('rule-123')
 
@@ -210,9 +194,9 @@ describe('FirewallRuleService', () => {
         entityType: RuleSetType.VM,
         entityId: 'vm-123',
         rules: []
-      };
+      } as any;
 
-      (mockPrisma.firewallRuleSet.findMany as jest.Mock).mockResolvedValue([mockRuleSet])
+      mockPrisma.firewallRuleSet.findMany.mockResolvedValue([mockRuleSet])
 
       const result = await service.getRuleSetByEntity(RuleSetType.VM, 'vm-123')
 
@@ -220,7 +204,7 @@ describe('FirewallRuleService', () => {
     })
 
     it('should return null when rule set does not exist', async () => {
-      (mockPrisma.firewallRuleSet.findMany as jest.Mock).mockResolvedValue([])
+      mockPrisma.firewallRuleSet.findMany.mockResolvedValue([])
 
       const result = await service.getRuleSetByEntity(RuleSetType.VM, 'vm-nonexistent')
 

@@ -1,26 +1,69 @@
 /**
- * Prisma Test Client — Real database with transaction isolation per test.
+ * Prisma Test Client — Real database with truncate-per-test isolation.
  *
  * Usage:
- *   // In jest.setup.ts (integration tests):
- *   const testPrisma = createTestPrismaClient({ url: process.env.TEST_DATABASE_URL! })
+ *   // In jest.setup.ts:
+ *   const testPrisma = createTestPrismaClient()
+ *   beforeAll(async () => { await testPrisma.connect() })
  *   beforeEach(async () => { await testPrisma.cleanup() })
- *   afterEach(async () => { await testPrisma.rollback() })
  *   afterAll(async () => { await testPrisma.disconnect() })
  *
- *   // In individual tests, use the client directly:
- *   const user = await testPrisma.user.create({ data: { email: 'test@test.com', ... } })
+ *   // In tests, use the client directly:
+ *   const user = await testPrisma.prisma.user.create({ data: { ... } })
  *
- * For unit tests that still use mocks, the jest.setup.ts mock of @prisma/client
- * is unaffected — only integration tests that import this module get real DB access.
+ * Isolation model:
+ *   Every test starts with a fully-truncated DB. Tests do not share state.
+ *   Do NOT rely on transaction rollback — `cleanup()` via TRUNCATE is the
+ *   single source of truth.
+ *
+ * Configuration:
+ *   TEST_DATABASE_URL is REQUIRED. No fallback is provided, on purpose: running
+ *   tests against an unintended DB (e.g. dev) would wipe real data.
  */
 
-import { PrismaClient, Prisma } from '@prisma/client'
+import { PrismaClient } from '@prisma/client'
 import { randomUUID } from 'crypto'
 
-export const TEST_DATABASE_URL =
-  process.env.TEST_DATABASE_URL ??
-  'postgresql://infinibay:20gGt%21%3FjuKEQAlVzD%29%3DT9.e4%3E%24kkJ5c%3A@localhost:5432/infinibay_test?schema=public'
+/**
+ * Resolve the test database URL from the environment.
+ * Throws if missing, or if it matches DATABASE_URL (to prevent nuking dev data).
+ */
+function resolveTestDatabaseUrl (): string {
+  const url = process.env.TEST_DATABASE_URL
+  if (!url) {
+    throw new Error(
+      'TEST_DATABASE_URL is not set. Tests need a dedicated Postgres database — ' +
+      'the test runner truncates every table between tests. ' +
+      'Copy .env.test.example to .env.test and adjust credentials.'
+    )
+  }
+
+  // Sanity check: DB name should smell like a test DB. This catches obvious
+  // misconfigurations (TEST_DATABASE_URL left pointing at `infinibay`) without
+  // false-positives when DATABASE_URL and TEST_DATABASE_URL are intentionally
+  // identical (e.g. a local .env.test that mirrors both to infinibay_test).
+  const dbName = extractDbName(url)
+  if (dbName && !/_test(\b|$)|test_|^test$/i.test(dbName)) {
+    throw new Error(
+      `TEST_DATABASE_URL database name "${dbName}" does not look like a test DB. ` +
+      'The test runner truncates every table on every test. ' +
+      'Name it something ending in _test (e.g. infinibay_test) to confirm intent, ' +
+      'or adjust the heuristic in prisma-test-client.ts.'
+    )
+  }
+
+  return url
+}
+
+function extractDbName (url: string): string | null {
+  try {
+    // URL() percent-decodes the pathname, so passwords with `?` or `/` don't
+    // confuse the parse. The pathname is e.g. "/infinibay_test".
+    return new URL(url).pathname.replace(/^\//, '') || null
+  } catch {
+    return null
+  }
+}
 
 export interface TestPrismaClientOptions {
   /** PostgreSQL connection string. Defaults to TEST_DATABASE_URL env var. */
@@ -31,71 +74,22 @@ export interface TestPrismaClientOptions {
 
 export interface CleanupResult {
   tables: string[]
-  durations: Record<string, number>
+  durationMs: number
 }
 
 /**
  * A thin wrapper around PrismaClient that provides:
- * - `$transaction()` helper that auto-rolls-back on test cleanup
- * - `cleanup()` — truncates all tables in reverse-FK order
+ * - `cleanup()` — truncates every user table (discovered from the live schema)
  * - `connect()` / `disconnect()` lifecycle
  * - `snapshot()` — captures table row counts for assertion helpers
  */
 export class PrismaTestClient {
   private readonly _client: PrismaClient
   private _connected = false
+  private _tableNames: string[] | null = null
 
-  // Tables in reverse dependency order (child → parent) for truncation.
-  // Add new models here as the schema grows.
-  private readonly TRUNCATE_ORDER = [
-    // Join / junction tables first
-    'ScriptAuditLog',
-    'DepartmentScript',
-    'MachineApplication',
-    'FirewallRuleSet',
-    'FirewallRule',
-    'PackageLicense',
-    'PackageChecker',
-    // Child → parent progression
-    'MaintenanceHistory',
-    'MaintenanceTask',
-    'SystemMetrics',
-    'ProcessSnapshot',
-    'ApplicationUsage',
-    'PortUsage',
-    'BlockedConnection',
-    'WindowsService',
-    'ServiceStateHistory',
-    'VMHealthAlert',
-    'VMHealthSnapshot',
-    'VMHealthConfig',
-    'VMHealthCheckQueue',
-    'VMRecommendation',
-    'PendingCommand',
-    'Machine',
-    'ScriptExecution',
-    'Script',
-    'MachineConfiguration',
-    'MachineTemplate',
-    'MachineTemplateCategory',
-    'Application',
-    'Department',
-    'ISO',
-    'Disk',
-    'Node',
-    'User',
-    'Package',
-    'Notification',
-    'ErrorLog',
-    'PerformanceMetric',
-    'PerformanceAggregate',
-    'HealthCheck',
-    'BackgroundTaskLog',
-    'KnownService',
-    'SystemEvent',
-  ]
   constructor (options: TestPrismaClientOptions = {}) {
-    const url = options.url ?? TEST_DATABASE_URL
+    const url = options.url ?? resolveTestDatabaseUrl()
     const log: ('error' | 'warn' | 'info')[] = options.verbose ? ['error', 'warn', 'info'] : ['error']
 
     this._client = new PrismaClient({
@@ -107,16 +101,6 @@ export class PrismaTestClient {
   /** The raw Prisma client — use this in tests for create/find/update/delete. */
   get prisma (): PrismaClient {
     return this._client
-  }
-
-  /** Expose the $transaction method directly. */
-  $transaction<T> (
-    fn: (prisma: PrismaClient) => Promise<T>,
-  ): Promise<T> {
-    // Use interactive transaction to ensure rollback works in tests
-    return this._client.$transaction(async (tx) => fn(tx as unknown as PrismaClient), {
-      isolationLevel: 'Serializable',
-    })
   }
 
   /** Connect to the test database. Called in beforeAll. */
@@ -136,75 +120,38 @@ export class PrismaTestClient {
   }
 
   /**
-   * Truncate all known tables in reverse FK-dependency order.
-   * Each table is truncated with RESTART IDENTITY to reset auto-increment counters.
-   *
-   * Returns a CleanupResult with the list of affected tables and per-table timing.
+   * Truncate every user table in the public schema, excluding `_prisma_migrations`.
+   * Uses a single `TRUNCATE a, b, c RESTART IDENTITY CASCADE` so FK order is
+   * handled by Postgres — no hand-maintained dependency list required.
    */
   async cleanup (): Promise<CleanupResult> {
-    const durations: Record<string, number> = {}
-    const tables: string[] = []
+    const start = Date.now()
+    const tables = await this.getTableNames()
 
-    for (const modelName of this.TRUNCATE_ORDER) {
-      const start = Date.now()
-      const tableName = this.toSnakeCase(modelName)
-      try {
-        // Use raw query for performance — Prisma doesn't have a bulk truncate API
-        await this._client.$executeRawUnsafe(
-          `TRUNCATE TABLE "${tableName}" RESTART IDENTITY CASCADE;`,
-        )
-        durations[tableName] = Date.now() - start
-        tables.push(tableName)
-      } catch (error) {
-        // Some tables may not exist in test DB (e.g., if migrations haven't run).
-        // Silently skip — the test DB should be fully migrated.
-        if (process.env.NODE_ENV !== 'test') {
-          console.warn(`[PrismaTestClient] Could not truncate "${tableName}": ${error}`)
-        }
-      }
+    if (tables.length === 0) {
+      return { tables: [], durationMs: 0 }
     }
 
-    return { tables, durations }
-  }
+    const quoted = tables.map(t => `"${t}"`).join(', ')
+    await this._client.$executeRawUnsafe(
+      `TRUNCATE TABLE ${quoted} RESTART IDENTITY CASCADE;`,
+    )
 
-  /**
-   * Rollback any uncommitted transaction and reset sequences.
-   * After this the DB should be in the same state as after cleanup().
-   *
-   * Implementation: issues a ROLLBACK on the current connection.
-   * Note: If tests use $transaction(), changes are auto-rolled back when
-   * the transaction scope exits (interactive transaction pattern).
-   */
-  async rollback (): Promise<void> {
-    try {
-      await this._client.$executeRawUnsafe('ROLLBACK;')
-    } catch {
-      // No-op if no transaction is active
-    }
+    return { tables, durationMs: Date.now() - start }
   }
 
   /**
    * Snapshot — capture current row counts for all tables.
    * Useful for asserting that a create/delete modified the right rows.
-   *
-   * @example
-   *   const before = await testPrisma.snapshot()
-   *   await testPrisma.prisma.user.create({ data: { email: 'x@test.com', ... } })
-   *   const after = await testPrisma.snapshot()
-   *   expect(after.User - before.User).toBe(1)
    */
   async snapshot (): Promise<Record<string, number>> {
+    const tables = await this.getTableNames()
     const counts: Record<string, number> = {}
-    for (const modelName of this.TRUNCATE_ORDER) {
-      const tableName = this.toSnakeCase(modelName)
-      try {
-        const result = await this._client.$queryRawUnsafe<[{ count: bigint }]>(
-          `SELECT COUNT(*) as count FROM "${tableName}";`,
-        )
-        counts[modelName] = Number(result[0]?.count ?? 0)
-      } catch {
-        // Skip tables that don't exist
-      }
+    for (const t of tables) {
+      const result = await this._client.$queryRawUnsafe<[{ count: bigint }]>(
+        `SELECT COUNT(*) as count FROM "${t}";`,
+      )
+      counts[t] = Number(result[0]?.count ?? 0)
     }
     return counts
   }
@@ -217,20 +164,31 @@ export class PrismaTestClient {
     return `${prefix}+${randomUUID()}@test.infinibay`
   }
 
-  private toSnakeCase (name: string): string {
-    return name.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`).replace(/^_/, '')
+  /**
+   * Discover user tables from information_schema, cached per instance.
+   * Excludes Prisma's internal migration table.
+   */
+  private async getTableNames (): Promise<string[]> {
+    if (this._tableNames) return this._tableNames
+
+    const rows = await this._client.$queryRawUnsafe<Array<{ tablename: string }>>(`
+      SELECT tablename
+      FROM pg_tables
+      WHERE schemaname = 'public' AND tablename <> '_prisma_migrations'
+      ORDER BY tablename;
+    `)
+    this._tableNames = rows.map(r => r.tablename)
+    return this._tableNames
   }
 }
 
-// ── Module-level singleton (one per test file that imports it) ─────────────────
+// ── Module-level singleton (one per test process) ──────────────────────────
 
 let _singleton: PrismaTestClient | null = null
 
 /**
  * Factory — returns a shared PrismaTestClient instance.
  * Subsequent calls in the same process return the same instance.
- *
- * Call `resetTestPrismaClient()` to clear and reconnect (e.g., in beforeAll).
  */
 export function createTestPrismaClient (options?: TestPrismaClientOptions): PrismaTestClient {
   if (!_singleton) {
@@ -239,7 +197,7 @@ export function createTestPrismaClient (options?: TestPrismaClientOptions): Pris
   return _singleton
 }
 
-/** Reset the singleton — useful in beforeAll to ensure a clean slate. */
+/** Reset the singleton — disconnects and clears the cached instance. */
 export function resetTestPrismaClient (): void {
   if (_singleton) {
     _singleton.disconnect().catch(() => {/* ignore */})
@@ -247,22 +205,7 @@ export function resetTestPrismaClient (): void {
   }
 }
 
-/**
- * Jest afterEach hook helper — resets the DB to a clean state.
- *
- * Usage in jest.setup.ts or at the top of each integration test file:
- *
- *   beforeEach(async () => { await cleanDatabase(testPrisma) })
- *   afterEach(async () => { await rollbackTransaction(testPrisma) })
- *
- * The `cleanDatabase` approach (truncate) is the most reliable because
- * it doesn't require all tests to wrap every write in $transaction().
- * The `rollbackTransaction` approach only works if tests DO use $transaction().
- */
+/** Jest hook helper — truncates every table. Call in beforeEach. */
 export async function cleanDatabase (client: PrismaTestClient): Promise<void> {
   await client.cleanup()
-}
-
-export async function rollbackTransaction (client: PrismaTestClient): Promise<void> {
-  await client.rollback()
 }

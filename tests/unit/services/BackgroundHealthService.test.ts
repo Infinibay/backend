@@ -21,6 +21,7 @@ interface MockedCronJob {
   start: jest.Mock
   stop: jest.Mock
   running: boolean
+  isActive: boolean
   nextDate: jest.Mock
 }
 
@@ -30,6 +31,7 @@ jest.mock('cron', () => ({
       start: jest.fn(),
       stop: jest.fn(),
       running: true,
+      isActive: true,
       nextDate: jest.fn().mockReturnValue({
         toJSDate: () => new Date('2025-01-01T02:00:00Z')
       })
@@ -113,6 +115,7 @@ describe('BackgroundHealthService', () => {
       start: jest.fn(),
       stop: jest.fn(),
       running: true,
+      isActive: true,
       nextDate: jest.fn().mockReturnValue({
         toJSDate: () => new Date('2025-01-01T02:00:00Z')
       })

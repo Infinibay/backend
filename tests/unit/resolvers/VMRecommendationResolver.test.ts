@@ -1,6 +1,5 @@
 import 'reflect-metadata'
-import { describe, it, expect, beforeEach, jest } from '@jest/globals'
-import { PrismaClient, RecommendationType } from '@prisma/client'
+import { RecommendationType } from '@prisma/client'
 import { mockPrisma } from '../../setup/jest.setup'
 import { VMRecommendationResolver } from '../../../app/graphql/resolvers/VMRecommendationResolver'
 import { InfinibayContext } from '../../../app/utils/context'
@@ -33,7 +32,7 @@ describe('VMRecommendationResolver', () => {
 
     // Setup mock context
     mockContext = {
-      prisma: mockPrisma as unknown as PrismaClient,
+      prisma: mockPrisma,
       user: createMockUser({ id: 'user-1', role: 'USER' }),
       req: {} as any,
       res: {} as any,

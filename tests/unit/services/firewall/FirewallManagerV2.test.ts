@@ -1,6 +1,7 @@
 import 'reflect-metadata'
 import { FirewallManagerV2 } from '../../../../app/services/firewall/FirewallManagerV2'
 import { PrismaClient, RuleSetType } from '@prisma/client'
+import { mockDeep, DeepMockProxy } from 'jest-mock-extended'
 
 // Mock nftables
 const mockNftables = {
@@ -19,7 +20,7 @@ jest.mock('@services/InfinizationService', () => ({
 
 describe('FirewallManagerV2', () => {
   let manager: FirewallManagerV2
-  let mockPrisma: any
+  let mockPrisma: DeepMockProxy<PrismaClient>
 
   const mockDepartment = {
     id: 'dept-123',
@@ -47,34 +48,20 @@ describe('FirewallManagerV2', () => {
   beforeEach(() => {
     jest.clearAllMocks()
 
-    // Setup mock Prisma
-    mockPrisma = {
-      machine: {
-        findUnique: jest.fn(),
-        update: jest.fn()
-      },
-      department: {
-        update: jest.fn(),
-        findUnique: jest.fn()
-      },
-      firewallRuleSet: {
-        findFirst: jest.fn(),
-        create: jest.fn()
-      }
-    }
+    mockPrisma = mockDeep<PrismaClient>()
 
-    manager = new FirewallManagerV2(mockPrisma as PrismaClient)
+    manager = new FirewallManagerV2(mockPrisma)
   })
 
   describe('ensureFirewallInfrastructure', () => {
     it('should create ruleset for department if not exists', async () => {
-      ;(mockPrisma.firewallRuleSet.findFirst as jest.Mock).mockResolvedValue(null)
-      ;(mockPrisma.firewallRuleSet.create as jest.Mock).mockResolvedValue({
+      mockPrisma.firewallRuleSet.findFirst.mockResolvedValue(null)
+      mockPrisma.firewallRuleSet.create.mockResolvedValue({
         id: 'ruleset-1',
         name: 'Department Firewall: Engineering',
         internalName: 'ibay-dept-abc12345'
-      })
-      ;(mockPrisma.department.update as jest.Mock).mockResolvedValue({})
+      } as any)
+      mockPrisma.department.update.mockResolvedValue({} as any)
 
       const result = await manager.ensureFirewallInfrastructure(
         RuleSetType.DEPARTMENT,
@@ -93,13 +80,13 @@ describe('FirewallManagerV2', () => {
     })
 
     it('should create ruleset for VM if not exists', async () => {
-      ;(mockPrisma.firewallRuleSet.findFirst as jest.Mock).mockResolvedValue(null)
-      ;(mockPrisma.firewallRuleSet.create as jest.Mock).mockResolvedValue({
+      mockPrisma.firewallRuleSet.findFirst.mockResolvedValue(null)
+      mockPrisma.firewallRuleSet.create.mockResolvedValue({
         id: 'ruleset-1',
         name: 'VM Firewall: Test VM',
         internalName: 'ibay-vm-abc12345'
-      })
-      ;(mockPrisma.machine.update as jest.Mock).mockResolvedValue({})
+      } as any)
+      mockPrisma.machine.update.mockResolvedValue({} as any)
 
       const result = await manager.ensureFirewallInfrastructure(
         RuleSetType.VM,
@@ -118,12 +105,12 @@ describe('FirewallManagerV2', () => {
     })
 
     it('should not create ruleset if already exists', async () => {
-      ;(mockPrisma.firewallRuleSet.findFirst as jest.Mock).mockResolvedValue({
+      mockPrisma.firewallRuleSet.findFirst.mockResolvedValue({
         id: 'existing-ruleset'
-      })
-      ;(mockPrisma.machine.findUnique as jest.Mock).mockResolvedValue({
+      } as any)
+      mockPrisma.machine.findUnique.mockResolvedValue({
         firewallRuleSetId: 'existing-ruleset'
-      })
+      } as any)
 
       const result = await manager.ensureFirewallInfrastructure(
         RuleSetType.VM,
@@ -138,10 +125,10 @@ describe('FirewallManagerV2', () => {
 
   describe('ensureFirewallForVM', () => {
     it('should setup complete firewall for VM', async () => {
-      ;(mockPrisma.machine.findUnique as jest.Mock).mockResolvedValue(mockVM)
-      ;(mockPrisma.firewallRuleSet.findFirst as jest.Mock).mockResolvedValue({
+      mockPrisma.machine.findUnique.mockResolvedValue(mockVM as any)
+      mockPrisma.firewallRuleSet.findFirst.mockResolvedValue({
         rules: []
-      })
+      } as any)
       mockNftables.createVMChain.mockResolvedValue('ibay-vm-123')
       mockNftables.applyRules.mockResolvedValue({
         appliedRules: 2,
@@ -166,7 +153,7 @@ describe('FirewallManagerV2', () => {
     })
 
     it('should throw error if VM not found', async () => {
-      ;(mockPrisma.machine.findUnique as jest.Mock).mockResolvedValue(null)
+      mockPrisma.machine.findUnique.mockResolvedValue(null)
 
       await expect(
         manager.ensureFirewallForVM('vm-123', 'dept-123', 'tap-vm-123')
@@ -174,10 +161,10 @@ describe('FirewallManagerV2', () => {
     })
 
     it('should throw error if department mismatch', async () => {
-      ;(mockPrisma.machine.findUnique as jest.Mock).mockResolvedValue({
+      mockPrisma.machine.findUnique.mockResolvedValue({
         ...mockVM,
         department: { ...mockDepartment, id: 'different-dept' }
-      })
+      } as any)
 
       await expect(
         manager.ensureFirewallForVM('vm-123', 'dept-123', 'tap-vm-123')
@@ -187,10 +174,10 @@ describe('FirewallManagerV2', () => {
 
   describe('resyncVMFirewall', () => {
     it('should resync firewall rules', async () => {
-      ;(mockPrisma.machine.findUnique as jest.Mock).mockResolvedValue(mockVM)
-      ;(mockPrisma.firewallRuleSet.findFirst as jest.Mock).mockResolvedValue({
+      mockPrisma.machine.findUnique.mockResolvedValue(mockVM as any)
+      mockPrisma.firewallRuleSet.findFirst.mockResolvedValue({
         rules: []
-      })
+      } as any)
       mockNftables.applyRules.mockResolvedValue({
         appliedRules: 2,
         failedRules: 0
@@ -204,10 +191,10 @@ describe('FirewallManagerV2', () => {
     })
 
     it('should throw error if VM has no department', async () => {
-      ;(mockPrisma.machine.findUnique as jest.Mock).mockResolvedValue({
+      mockPrisma.machine.findUnique.mockResolvedValue({
         ...mockVM,
         department: null
-      })
+      } as any)
 
       await expect(
         manager.resyncVMFirewall('vm-123', 'tap-vm-123')

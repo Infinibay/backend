@@ -3,6 +3,7 @@
  */
 
 import { PrismaClient, RuleSetType } from '@prisma/client'
+import { mockDeep, DeepMockProxy } from 'jest-mock-extended'
 import { DepartmentCleanupService } from '@services/cleanup/departmentCleanupService'
 import { getInfinization } from '@services/InfinizationService'
 
@@ -56,39 +57,23 @@ const mockInfinization = {
 
 describe('DepartmentCleanupService', () => {
   let service: DepartmentCleanupService
-  let mockPrisma: any
+  let mockPrisma: DeepMockProxy<PrismaClient>
 
   beforeEach(() => {
     jest.clearAllMocks()
     ;(getInfinization as jest.Mock).mockResolvedValue(mockInfinization)
 
-    // Create mock Prisma with proper mock returns
-    mockPrisma = {
-      department: {
-        findUnique: jest.fn().mockResolvedValue(null),
-        delete: jest.fn().mockResolvedValue({ id: 'test' })
-      },
-      firewallRule: {
-        deleteMany: jest.fn().mockResolvedValue({ count: 0 })
-      },
-      firewallRuleSet: {
-        delete: jest.fn().mockResolvedValue({ id: 'test' })
-      },
-      machine: {
-        findMany: jest.fn().mockResolvedValue([])
-      },
-      configuration: {},
-      $transaction: jest.fn(async (callback) => {
-        const mockTx = {
-          department: mockPrisma.department,
-          firewallRule: mockPrisma.firewallRule,
-          firewallRuleSet: mockPrisma.firewallRuleSet
-        }
-        return callback(mockTx)
-      })
-    }
+    mockPrisma = mockDeep<PrismaClient>()
+    mockPrisma.department.findUnique.mockResolvedValue(null)
+    mockPrisma.department.delete.mockResolvedValue({ id: 'test' } as any)
+    mockPrisma.firewallRule.deleteMany.mockResolvedValue({ count: 0 })
+    mockPrisma.firewallRuleSet.delete.mockResolvedValue({ id: 'test' } as any)
+    mockPrisma.machine.findMany.mockResolvedValue([])
+    mockPrisma.$transaction.mockImplementation(async (callback: any) => {
+      return callback(mockPrisma)
+    })
 
-    service = new DepartmentCleanupService(mockPrisma as PrismaClient)
+    service = new DepartmentCleanupService(mockPrisma)
   })
 
   afterEach(() => {
@@ -130,7 +115,7 @@ describe('DepartmentCleanupService', () => {
         firewallRuleSet: null
       }
 
-      mockPrisma.department.findUnique.mockResolvedValue(mockDepartment)
+      mockPrisma.department.findUnique.mockResolvedValue(mockDepartment as any)
 
       // Should throw error
       await expect(service.cleanupDepartment(deptId))
@@ -152,7 +137,7 @@ describe('DepartmentCleanupService', () => {
         firewallRuleSetId: null
       }
 
-      mockPrisma.department.findUnique.mockResolvedValue(mockDepartment)
+      mockPrisma.department.findUnique.mockResolvedValue(mockDepartment as any)
 
       const result = await service.cleanupDepartment(deptId)
 
@@ -181,7 +166,7 @@ describe('DepartmentCleanupService', () => {
         firewallRuleSetId: 'dept-ruleset-order'
       }
 
-      mockPrisma.department.findUnique.mockResolvedValue(mockDepartment)
+      mockPrisma.department.findUnique.mockResolvedValue(mockDepartment as any)
 
       const result = await service.cleanupDepartment(deptId)
 
@@ -223,10 +208,10 @@ describe('DepartmentCleanupService', () => {
         firewallRuleSetId: null
       }
 
-      mockPrisma.department.findUnique.mockResolvedValue(mockDepartment)
+      mockPrisma.department.findUnique.mockResolvedValue(mockDepartment as any)
 
       // Setup mock to find the machine (not empty)
-      mockPrisma.machine.findMany.mockResolvedValue([mockMachine])
+      mockPrisma.machine.findMany.mockResolvedValue([mockMachine] as any)
       mockNftablesService.chainExists.mockResolvedValue(true)
       require('@infinibay/infinization').TapDeviceManager.mockImplementation(() => ({
         exists: jest.fn().mockResolvedValue(true)
@@ -252,7 +237,7 @@ describe('DepartmentCleanupService', () => {
         firewallRuleSetId: null
       }
 
-      mockPrisma.department.findUnique.mockResolvedValue(mockDepartment)
+      mockPrisma.department.findUnique.mockResolvedValue(mockDepartment as any)
 
       // Ensure findMany returns empty array
       mockPrisma.machine.findMany.mockResolvedValue([])

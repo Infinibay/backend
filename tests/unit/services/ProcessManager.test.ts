@@ -1,5 +1,6 @@
 import { ProcessManager } from '@services/ProcessManager'
 import { PrismaClient } from '@prisma/client'
+import { mockDeep } from 'jest-mock-extended'
 import { VirtioSocketWatcherService } from '@services/VirtioSocketWatcherService'
 
 // Mock libvirt-node (auto-mocked from __mocks__ directory)
@@ -13,26 +14,8 @@ jest.mock('@services/InfinizationService', () => ({
   }))
 }))
 
-// Mock Prisma - include all necessary methods
-const mockPrisma = {
-  machine: {
-    findUnique: jest.fn(),
-    findMany: jest.fn(),
-    update: jest.fn(),
-    create: jest.fn(),
-    delete: jest.fn()
-  },
-  $connect: jest.fn().mockResolvedValue(undefined),
-  $disconnect: jest.fn().mockResolvedValue(undefined),
-  $executeRaw: jest.fn(),
-  $queryRaw: jest.fn()
-} as unknown as PrismaClient
-
-// Mock VirtioSocketWatcherService
-const mockVirtioSocketWatcher = {
-  sendSafeCommand: jest.fn(),
-  sendProcessCommand: jest.fn()
-} as unknown as VirtioSocketWatcherService
+const mockPrisma = mockDeep<PrismaClient>()
+const mockVirtioSocketWatcher = mockDeep<VirtioSocketWatcherService>()
 
 describe('ProcessManager', () => {
   let processManager: ProcessManager

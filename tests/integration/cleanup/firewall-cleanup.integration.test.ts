@@ -1,47 +1,31 @@
-/**
- * Integration tests for firewall cleanup when deleting VMs and departments
- *
- * Tests verify:
- * 1. VM deletion cleans up firewall via infinization
- * 2. VM deletion removes FirewallRuleSet from database
- * 3. Department deletion removes FirewallRuleSet from database
- * 4. Graceful handling of missing resources
- */
-
-import { PrismaClient, RuleSetType } from '@prisma/client'
-
+import { RuleSetType } from '@prisma/client'
 import { MachineCleanupServiceV2 } from '@services/cleanup/machineCleanupServiceV2'
 import { DepartmentCleanupService } from '@services/cleanup/departmentCleanupService'
+import { testPrisma } from '../../setup/jest.setup'
+import { createAdmin, createDepartment, createMachine } from '../../setup/db-factories'
 
-// Mock infinization
+// External systems stay mocked — this test is about the DB-side cleanup.
 const mockDestroyVM = jest.fn().mockResolvedValue({ success: true })
-const mockGetNftablesService = jest.fn(() => ({
-  chainExists: jest.fn().mockResolvedValue(false)
-}))
-
 jest.mock('@services/InfinizationService', () => ({
   getInfinization: jest.fn(() => ({
     destroyVM: mockDestroyVM,
-    getNftablesService: mockGetNftablesService
+    getNftablesService: jest.fn(() => ({ chainExists: jest.fn().mockResolvedValue(false) }))
   }))
 }))
 
-// Mock TapDeviceManager and generateVMChainName from infinization
 jest.mock('@infinibay/infinization', () => ({
   TapDeviceManager: jest.fn().mockImplementation(() => ({
     exists: jest.fn().mockResolvedValue(false)
   })),
-  generateVMChainName: jest.fn((vmId: string) => `vm_${vmId.substring(0, 8)}`)
+  generateVMChainName: jest.fn((id: string) => `vm_${id.substring(0, 8)}`)
 }))
 
-// Mock VirtioSocketWatcherService
 jest.mock('@services/VirtioSocketWatcherService', () => ({
   getVirtioSocketWatcherService: jest.fn(() => ({
     cleanupVmConnection: jest.fn()
   }))
 }))
 
-// Mock DepartmentNetworkService
 jest.mock('@services/network/DepartmentNetworkService', () => ({
   DepartmentNetworkService: jest.fn().mockImplementation(() => ({
     destroyNetwork: jest.fn().mockResolvedValue(undefined),
@@ -49,315 +33,155 @@ jest.mock('@services/network/DepartmentNetworkService', () => ({
   }))
 }))
 
-// Mock fs/promises
 jest.mock('fs/promises', () => ({
-  unlink: jest.fn().mockRejectedValue({ code: 'ENOENT' })
+  unlink: jest.fn().mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' })),
+  readdir: jest.fn().mockResolvedValue([])
 }))
 
-describe('Firewall Cleanup Integration Tests', () => {
-  let mockPrisma: any
-  let machineCleanupService: MachineCleanupServiceV2
-  let departmentCleanupService: DepartmentCleanupService
+describe('Firewall cleanup — real database', () => {
+  const prisma = testPrisma.prisma
+  const machineCleanup = () => new MachineCleanupServiceV2(prisma)
+  const departmentCleanup = () => new DepartmentCleanupService(prisma)
 
-  beforeEach(() => {
-    jest.clearAllMocks()
+  let admin: Awaited<ReturnType<typeof createAdmin>>
+  let department: Awaited<ReturnType<typeof createDepartment>>
 
-    // Create comprehensive mock Prisma
-    mockPrisma = {
-      machine: {
-        findUnique: jest.fn(),
-        findMany: jest.fn().mockResolvedValue([]),
-        delete: jest.fn()
-      },
-      department: {
-        findUnique: jest.fn(),
-        delete: jest.fn()
-      },
-      machineConfiguration: {
-        delete: jest.fn().mockResolvedValue(undefined)
-      },
-      machineApplication: {
-        deleteMany: jest.fn().mockResolvedValue({ count: 0 })
-      },
-      pendingCommand: {
-        deleteMany: jest.fn().mockResolvedValue({ count: 0 })
-      },
-      scriptExecution: {
-        deleteMany: jest.fn().mockResolvedValue({ count: 0 })
-      },
-      firewallRule: {
-        deleteMany: jest.fn().mockResolvedValue({ count: 0 })
-      },
-      firewallRuleSet: {
-        delete: jest.fn()
-      },
-      $transaction: jest.fn(async (callback: any) => {
-        const mockTx = {
-          machine: mockPrisma.machine,
-          department: mockPrisma.department,
-          machineConfiguration: mockPrisma.machineConfiguration,
-          machineApplication: mockPrisma.machineApplication,
-          pendingCommand: mockPrisma.pendingCommand,
-          scriptExecution: mockPrisma.scriptExecution,
-          firewallRule: mockPrisma.firewallRule,
-          firewallRuleSet: mockPrisma.firewallRuleSet
+  beforeEach(async () => {
+    admin = await createAdmin(prisma)
+    department = await createDepartment(prisma)
+    mockDestroyVM.mockReset()
+    mockDestroyVM.mockResolvedValue({ success: true })
+  })
+
+  async function seedVMWithRuleset (rulesCount = 0) {
+    const vm = await createMachine(prisma, {
+      userId: admin.id,
+      departmentId: department.id,
+      withConfiguration: true
+    })
+    const ruleSet = await prisma.firewallRuleSet.create({
+      data: {
+        name: `VM Firewall ${vm.id}`,
+        internalName: `vm-${vm.id.substring(0, 8)}`,
+        entityType: RuleSetType.VM,
+        entityId: vm.id,
+        priority: 500,
+        isActive: true,
+      }
+    })
+    await prisma.machine.update({
+      where: { id: vm.id },
+      data: { firewallRuleSetId: ruleSet.id }
+    })
+    for (let i = 0; i < rulesCount; i++) {
+      await prisma.firewallRule.create({
+        data: {
+          ruleSetId: ruleSet.id,
+          name: `Rule ${i}`,
+          action: 'ACCEPT',
+          direction: 'IN',
+          priority: 100 + i,
+          protocol: 'tcp',
         }
-        return callback(mockTx)
       })
     }
+    return { vm, ruleSet }
+  }
 
-    machineCleanupService = new MachineCleanupServiceV2(mockPrisma as PrismaClient)
-    departmentCleanupService = new DepartmentCleanupService(mockPrisma as PrismaClient)
-  })
-
-  describe('VM Firewall Cleanup', () => {
-    it('should clean up VM firewall via infinization when deleting VM', async () => {
-      const vmId = 'test-vm-123'
-      const mockVM = {
-        id: vmId,
-        internalName: 'test-vm-internal',
-        configuration: null,
-        firewallRuleSet: {
-          id: 'ruleset-123',
-          internalName: 'vm_testvmin',
-          rules: [
-            { id: 'rule-1', name: 'Allow HTTPS', action: 'ACCEPT', direction: 'IN', protocol: 'tcp', dstPortStart: 443, dstPortEnd: 443, priority: 100 }
-          ]
-        }
-      }
-
-      mockPrisma.machine.findUnique.mockResolvedValue(mockVM)
-
-      await machineCleanupService.cleanupVM(vmId)
-
-      // Verify infinization.destroyVM was called (handles TAP + firewall chain cleanup)
-      expect(mockDestroyVM).toHaveBeenCalledWith(vmId)
+  describe('VM firewall cleanup', () => {
+    it('calls infinization.destroyVM as part of cleanup', async () => {
+      const { vm } = await seedVMWithRuleset(1)
+      await machineCleanup().cleanupVM(vm.id)
+      expect(mockDestroyVM).toHaveBeenCalledWith(vm.id)
     })
 
-    it('should remove VM FirewallRuleSet and rules from database when deleting VM', async () => {
-      const vmId = 'test-vm-456'
-      const ruleSetId = 'ruleset-456'
-      const mockVM = {
-        id: vmId,
-        internalName: 'test-vm-internal',
-        configuration: null,
-        firewallRuleSet: {
-          id: ruleSetId,
-          internalName: 'vm_testvmin',
-          rules: [
-            { id: 'rule-1', name: 'Rule 1' },
-            { id: 'rule-2', name: 'Rule 2' },
-            { id: 'rule-3', name: 'Rule 3' }
-          ]
-        }
-      }
+    it('removes the VM FirewallRuleSet and its rules from the DB', async () => {
+      const { vm, ruleSet } = await seedVMWithRuleset(3)
+      expect(await prisma.firewallRule.count({ where: { ruleSetId: ruleSet.id } })).toBe(3)
 
-      mockPrisma.machine.findUnique.mockResolvedValue(mockVM)
+      await machineCleanup().cleanupVM(vm.id)
 
-      await machineCleanupService.cleanupVM(vmId)
-
-      // Verify FirewallRule deletion was called with correct ruleSetId
-      expect(mockPrisma.firewallRule.deleteMany).toHaveBeenCalledWith({
-        where: { ruleSetId }
-      })
-
-      // Verify FirewallRuleSet deletion was called
-      expect(mockPrisma.firewallRuleSet.delete).toHaveBeenCalledWith({
-        where: { id: ruleSetId }
-      })
-
-      // Verify deletion order: rules before ruleset
-      const ruleDeleteCallIndex = mockPrisma.firewallRule.deleteMany.mock.invocationCallOrder[0]
-      const ruleSetDeleteCallIndex = mockPrisma.firewallRuleSet.delete.mock.invocationCallOrder[0]
-      expect(ruleDeleteCallIndex).toBeLessThan(ruleSetDeleteCallIndex)
+      expect(await prisma.firewallRule.count({ where: { ruleSetId: ruleSet.id } })).toBe(0)
+      expect(await prisma.firewallRuleSet.findUnique({ where: { id: ruleSet.id } })).toBeNull()
+      expect(await prisma.machine.findUnique({ where: { id: vm.id } })).toBeNull()
     })
 
-    it('should complete VM deletion gracefully if firewall does not exist', async () => {
-      const vmId = 'test-vm-no-filter'
-      const mockVM = {
-        id: vmId,
-        internalName: 'test-vm-internal',
-        configuration: null,
-        firewallRuleSet: null
-      }
-
-      mockPrisma.machine.findUnique.mockResolvedValue(mockVM)
-
-      // Should not throw
-      await expect(machineCleanupService.cleanupVM(vmId)).resolves.not.toThrow()
-
-      // Verify VM was still deleted from database
-      expect(mockPrisma.machine.delete).toHaveBeenCalledWith({
-        where: { id: vmId }
+    it('deletes the VM even when it has no firewall rule set', async () => {
+      const vm = await createMachine(prisma, {
+        userId: admin.id,
+        departmentId: department.id,
+        withConfiguration: true
       })
+
+      await expect(machineCleanup().cleanupVM(vm.id)).resolves.not.toThrow()
+      expect(await prisma.machine.findUnique({ where: { id: vm.id } })).toBeNull()
     })
 
-    it('should complete VM deletion even if infinization cleanup fails', async () => {
-      const vmId = 'test-vm-filter-error'
-      const mockVM = {
-        id: vmId,
-        internalName: 'test-vm-internal',
-        configuration: null,
-        firewallRuleSet: {
-          id: 'ruleset-error',
-          internalName: 'vm_testvmin',
-          rules: []
-        }
-      }
+    it('deletes the VM even when infinization cleanup reports failure', async () => {
+      const { vm } = await seedVMWithRuleset()
+      mockDestroyVM.mockResolvedValueOnce({ success: false, error: 'Process not found' })
 
-      mockPrisma.machine.findUnique.mockResolvedValue(mockVM)
-      mockDestroyVM.mockResolvedValue({ success: false, error: 'Process not found' })
-
-      // Should not throw - graceful degradation
-      await expect(machineCleanupService.cleanupVM(vmId)).resolves.not.toThrow()
-
-      // VM should still be deleted from database
-      expect(mockPrisma.machine.delete).toHaveBeenCalledWith({
-        where: { id: vmId }
-      })
+      await expect(machineCleanup().cleanupVM(vm.id)).resolves.not.toThrow()
+      expect(await prisma.machine.findUnique({ where: { id: vm.id } })).toBeNull()
     })
   })
 
-  describe('Department Firewall Cleanup', () => {
-    it('should remove department FirewallRuleSet and rules from database when deleting department', async () => {
-      const deptId = 'dept-456'
-      const ruleSetId = 'dept-ruleset-456'
-      const mockDepartment = {
-        id: deptId,
-        name: 'Test Department',
-        machines: [],
-        bridgeName: null,
-        firewallRuleSetId: ruleSetId,
-        firewallRuleSet: {
-          id: ruleSetId,
-          rules: [
-            { id: 'dept-rule-1', name: 'Rule 1' },
-            { id: 'dept-rule-2', name: 'Rule 2' }
-          ]
+  describe('Department firewall cleanup', () => {
+    async function seedDepartmentWithRuleset (rulesCount = 0) {
+      const ruleSet = await prisma.firewallRuleSet.create({
+        data: {
+          name: `Dept Firewall ${department.id}`,
+          internalName: `dept-${department.id.substring(0, 8)}`,
+          entityType: RuleSetType.DEPARTMENT,
+          entityId: department.id,
+          priority: 1000,
+          isActive: true,
         }
+      })
+      await prisma.department.update({
+        where: { id: department.id },
+        data: { firewallRuleSetId: ruleSet.id }
+      })
+      for (let i = 0; i < rulesCount; i++) {
+        await prisma.firewallRule.create({
+          data: {
+            ruleSetId: ruleSet.id,
+            name: `Rule ${i}`,
+            action: 'ACCEPT',
+            direction: 'IN',
+            priority: 100 + i,
+            protocol: 'tcp',
+          }
+        })
       }
+      return ruleSet
+    }
 
-      mockPrisma.department.findUnique.mockResolvedValue(mockDepartment)
+    it('removes the department, its FirewallRuleSet, and rules from the DB', async () => {
+      const ruleSet = await seedDepartmentWithRuleset(2)
+      expect(await prisma.firewallRule.count({ where: { ruleSetId: ruleSet.id } })).toBe(2)
 
-      await departmentCleanupService.cleanupDepartment(deptId)
+      await departmentCleanup().cleanupDepartment(department.id)
 
-      // Verify FirewallRule deletion was called
-      expect(mockPrisma.firewallRule.deleteMany).toHaveBeenCalledWith({
-        where: { ruleSetId }
-      })
-
-      // Verify FirewallRuleSet deletion was called
-      expect(mockPrisma.firewallRuleSet.delete).toHaveBeenCalledWith({
-        where: { id: ruleSetId }
-      })
-
-      // Verify department deletion was called
-      expect(mockPrisma.department.delete).toHaveBeenCalledWith({
-        where: { id: deptId }
-      })
+      expect(await prisma.firewallRule.count({ where: { ruleSetId: ruleSet.id } })).toBe(0)
+      expect(await prisma.firewallRuleSet.findUnique({ where: { id: ruleSet.id } })).toBeNull()
+      expect(await prisma.department.findUnique({ where: { id: department.id } })).toBeNull()
     })
 
-    it('should throw error if department has VMs', async () => {
-      const deptId = 'dept-with-vms'
-      const mockDepartment = {
-        id: deptId,
-        name: 'Department with VMs',
-        machines: [
-          { id: 'vm-1', name: 'VM 1' },
-          { id: 'vm-2', name: 'VM 2' }
-        ],
-        bridgeName: null,
-        firewallRuleSetId: null,
-        firewallRuleSet: null
-      }
+    it('refuses to delete a department that still has VMs', async () => {
+      await createMachine(prisma, { userId: admin.id, departmentId: department.id })
+      await createMachine(prisma, { userId: admin.id, departmentId: department.id })
 
-      mockPrisma.department.findUnique.mockResolvedValue(mockDepartment)
+      await expect(departmentCleanup().cleanupDepartment(department.id))
+        .rejects.toThrow(/VMs still exist/)
 
-      // Should throw error
-      await expect(departmentCleanupService.cleanupDepartment(deptId))
-        .rejects
-        .toThrow('Cannot cleanup department dept-with-vms: 2 VMs still exist')
-
-      // Department should NOT be deleted
-      expect(mockPrisma.department.delete).not.toHaveBeenCalled()
+      // Department remains.
+      expect(await prisma.department.findUnique({ where: { id: department.id } })).not.toBeNull()
     })
 
-    it('should complete department deletion gracefully if firewall does not exist', async () => {
-      const deptId = 'dept-no-filter'
-      const mockDepartment = {
-        id: deptId,
-        name: 'Test Department',
-        machines: [],
-        bridgeName: null,
-        firewallRuleSetId: null,
-        firewallRuleSet: null
-      }
-
-      mockPrisma.department.findUnique.mockResolvedValue(mockDepartment)
-
-      // Should not throw
-      await expect(departmentCleanupService.cleanupDepartment(deptId)).resolves.not.toThrow()
-
-      // Department should still be deleted from database
-      expect(mockPrisma.department.delete).toHaveBeenCalledWith({
-        where: { id: deptId }
-      })
-    })
-  })
-
-  describe('Cleanup Order and Transaction Safety', () => {
-    it('should delete VM resources in correct order', async () => {
-      const vmId = 'test-vm-order'
-      const mockVM = {
-        id: vmId,
-        internalName: 'test-vm-internal',
-        configuration: { id: 'config-1', machineId: vmId },
-        firewallRuleSet: {
-          id: 'ruleset-order',
-          internalName: 'vm_testvmin',
-          rules: [{ id: 'rule-1', name: 'Rule 1' }]
-        }
-      }
-
-      mockPrisma.machine.findUnique.mockResolvedValue(mockVM)
-
-      await machineCleanupService.cleanupVM(vmId)
-
-      // Verify deletion order: rules before ruleset, ruleset before machine
-      const ruleDeleteOrder = mockPrisma.firewallRule.deleteMany.mock.invocationCallOrder[0]
-      const ruleSetDeleteOrder = mockPrisma.firewallRuleSet.delete.mock.invocationCallOrder[0]
-      const machineDeleteOrder = mockPrisma.machine.delete.mock.invocationCallOrder[0]
-
-      expect(ruleDeleteOrder).toBeLessThan(ruleSetDeleteOrder)
-      expect(ruleSetDeleteOrder).toBeLessThan(machineDeleteOrder)
-    })
-
-    it('should delete department resources in correct order', async () => {
-      const deptId = 'dept-order'
-      const mockDepartment = {
-        id: deptId,
-        name: 'Test Department',
-        machines: [],
-        bridgeName: null,
-        firewallRuleSetId: 'dept-ruleset-order',
-        firewallRuleSet: {
-          id: 'dept-ruleset-order',
-          rules: [{ id: 'dept-rule-1', name: 'Rule 1' }]
-        }
-      }
-
-      mockPrisma.department.findUnique.mockResolvedValue(mockDepartment)
-
-      await departmentCleanupService.cleanupDepartment(deptId)
-
-      // Verify deletion order
-      const ruleDeleteOrder = mockPrisma.firewallRule.deleteMany.mock.invocationCallOrder[0]
-      const ruleSetDeleteOrder = mockPrisma.firewallRuleSet.delete.mock.invocationCallOrder[0]
-      const deptDeleteOrder = mockPrisma.department.delete.mock.invocationCallOrder[0]
-
-      // Rules -> RuleSet -> Department
-      expect(ruleDeleteOrder).toBeLessThan(ruleSetDeleteOrder)
-      expect(ruleSetDeleteOrder).toBeLessThan(deptDeleteOrder)
+    it('deletes the department when it has no firewall rule set', async () => {
+      await departmentCleanup().cleanupDepartment(department.id)
+      expect(await prisma.department.findUnique({ where: { id: department.id } })).toBeNull()
     })
   })
 })

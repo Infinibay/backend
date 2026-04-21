@@ -1,4 +1,5 @@
 import { PrismaClient, RuleAction, RuleDirection, RuleSetType } from '@prisma/client'
+import { mockDeep, DeepMockProxy } from 'jest-mock-extended'
 
 import { FirewallResolver } from '@main/graphql/resolvers/firewall/resolver'
 import { CreateFirewallRuleInput } from '@main/graphql/resolvers/firewall/inputs'
@@ -43,34 +44,10 @@ jest.mock('@services/firewall/InfinizationFirewallService', () => ({
   }))
 }))
 
-// Mock PrismaClient - properly typed as Jest mocks
-const mockPrisma: any = {
-  machine: {
-    findUnique: jest.fn(),
-    update: jest.fn()
-  },
-  department: {
-    findUnique: jest.fn(),
-    update: jest.fn()
-  },
-  firewallRuleSet: {
-    create: jest.fn(),
-    findUnique: jest.fn(),
-    findMany: jest.fn(),
-    update: jest.fn(),
-    delete: jest.fn()
-  },
-  firewallRule: {
-    create: jest.fn(),
-    findUnique: jest.fn(),
-    findMany: jest.fn(),
-    update: jest.fn(),
-    delete: jest.fn()
-  }
-}
+const mockPrisma: DeepMockProxy<PrismaClient> = mockDeep<PrismaClient>()
 
 const mockContext = {
-  prisma: mockPrisma as PrismaClient,
+  prisma: mockPrisma,
   user: {
     id: 'test-user-id',
     email: 'test@example.com',
@@ -79,7 +56,7 @@ const mockContext = {
   req: {} as any,
   res: {} as any,
   setupMode: false
-} as InfinibayContext
+} as unknown as InfinibayContext
 
 describe('FirewallResolver', () => {
   let resolver: FirewallResolver
@@ -193,7 +170,7 @@ describe('FirewallResolver', () => {
           }
         }
 
-        mockPrisma.machine.findUnique.mockResolvedValue(mockVM)
+        mockPrisma.machine.findUnique.mockResolvedValue(mockVM as any)
 
         const result = await resolver.getEffectiveFirewallRules('vm-123', mockContext)
 
@@ -257,7 +234,7 @@ describe('FirewallResolver', () => {
           }
         }
 
-        mockPrisma.department.findUnique.mockResolvedValue(mockDepartment)
+        mockPrisma.department.findUnique.mockResolvedValue(mockDepartment as any)
 
         const input: CreateFirewallRuleInput = {
           name: 'Test Rule',

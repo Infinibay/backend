@@ -3,23 +3,10 @@ import { describe, it, expect, beforeEach, jest } from '@jest/globals'
 import { DataLoaderService } from '../../../app/services/DataLoaderService'
 import { PrismaClient, User, MachineTemplate, Department, Application, ProcessSnapshot, SystemMetrics, MachineConfiguration, Machine } from '@prisma/client'
 
-// Create a mock PrismaClient structure
-type MockFindMany = jest.MockedFunction<() => Promise<any[]>>
-
-interface MockPrismaTables {
-  user: { findMany: MockFindMany }
-  machineTemplate: { findMany: MockFindMany }
-  department: { findMany: MockFindMany }
-  application: { findMany: MockFindMany }
-  processSnapshot: { findMany: MockFindMany }
-  systemMetrics: { findMany: MockFindMany }
-  machineConfiguration: { findMany: MockFindMany }
-  machine: { findMany: MockFindMany }
-}
-
 describe('DataLoaderService', () => {
   let service: DataLoaderService
-  let mockTables: MockPrismaTables
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let mockTables: any
 
   beforeEach(() => {
     jest.clearAllMocks()
@@ -35,18 +22,8 @@ describe('DataLoaderService', () => {
       machine: { findMany: jest.fn() }
     }
 
-    const mockPrisma = {
-      user: mockTables.user,
-      machineTemplate: mockTables.machineTemplate,
-      department: mockTables.department,
-      application: mockTables.application,
-      processSnapshot: mockTables.processSnapshot,
-      systemMetrics: mockTables.systemMetrics,
-      machineConfiguration: mockTables.machineConfiguration,
-      machine: mockTables.machine
-    }
-
-    service = new DataLoaderService(mockPrisma as unknown as PrismaClient)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    service = new DataLoaderService(mockTables as any)
   })
 
   afterEach(() => {

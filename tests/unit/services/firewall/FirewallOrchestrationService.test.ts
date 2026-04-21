@@ -3,32 +3,20 @@ import { FirewallRuleService } from '@services/firewall/FirewallRuleService'
 import { FirewallValidationService } from '@services/firewall/FirewallValidationService'
 import { InfinizationFirewallService } from '@services/firewall/InfinizationFirewallService'
 import { PrismaClient, RuleSetType, RuleAction, RuleDirection } from '@prisma/client'
+import { mockDeep, DeepMockProxy } from 'jest-mock-extended'
 
-// Mock all dependencies
-jest.mock('@services/firewall/FirewallRuleService')
-jest.mock('@services/firewall/FirewallValidationService')
-jest.mock('@services/firewall/InfinizationFirewallService')
-
-const mockPrisma = {
-  machine: {
-    findUnique: jest.fn(),
-    findMany: jest.fn()
-  },
-  department: {
-    findUnique: jest.fn()
-  }
-} as unknown as PrismaClient
+const mockPrisma: DeepMockProxy<PrismaClient> = mockDeep<PrismaClient>()
 
 describe('FirewallOrchestrationService', () => {
   let service: FirewallOrchestrationService
-  let mockRuleService: jest.Mocked<FirewallRuleService>
-  let mockValidationService: jest.Mocked<FirewallValidationService>
-  let mockInfinizationService: jest.Mocked<InfinizationFirewallService>
+  let mockRuleService: DeepMockProxy<FirewallRuleService>
+  let mockValidationService: DeepMockProxy<FirewallValidationService>
+  let mockInfinizationService: DeepMockProxy<InfinizationFirewallService>
 
   beforeEach(() => {
-    mockRuleService = new FirewallRuleService(mockPrisma) as jest.Mocked<FirewallRuleService>
-    mockValidationService = new FirewallValidationService() as jest.Mocked<FirewallValidationService>
-    mockInfinizationService = new InfinizationFirewallService(mockPrisma) as jest.Mocked<InfinizationFirewallService>
+    mockRuleService = mockDeep<FirewallRuleService>()
+    mockValidationService = mockDeep<FirewallValidationService>()
+    mockInfinizationService = mockDeep<InfinizationFirewallService>()
 
     service = new FirewallOrchestrationService(
       mockPrisma,
@@ -80,7 +68,7 @@ describe('FirewallOrchestrationService', () => {
         }
       };
 
-      (mockPrisma.machine.findUnique as jest.Mock).mockResolvedValue(mockVM)
+      mockPrisma.machine.findUnique.mockResolvedValue(mockVM as any)
 
       const result = await service.getEffectiveRules('vm-123')
 
@@ -128,7 +116,7 @@ describe('FirewallOrchestrationService', () => {
         }
       };
 
-      (mockPrisma.machine.findUnique as jest.Mock).mockResolvedValue(mockVM)
+      mockPrisma.machine.findUnique.mockResolvedValue(mockVM as any)
 
       const result = await service.getEffectiveRules('vm-123')
 
@@ -172,7 +160,7 @@ describe('FirewallOrchestrationService', () => {
         }
       };
 
-      (mockPrisma.machine.findUnique as jest.Mock).mockResolvedValue(mockVM)
+      mockPrisma.machine.findUnique.mockResolvedValue(mockVM as any)
 
       const result = await service.getEffectiveRules('vm-123')
 
@@ -207,21 +195,21 @@ describe('FirewallOrchestrationService', () => {
         }
       };
 
-      (mockPrisma.machine.findUnique as jest.Mock).mockResolvedValue(mockVM);
-      (mockValidationService.validateRuleConflicts as jest.Mock).mockResolvedValue({
+      mockPrisma.machine.findUnique.mockResolvedValue(mockVM as any);
+      mockValidationService.validateRuleConflicts.mockResolvedValue({
         isValid: true,
         conflicts: [],
         warnings: []
-      });
-      (mockInfinizationService.convertPrismaRulesToInput as jest.Mock).mockReturnValue([]);
-      (mockInfinizationService.applyVMRules as jest.Mock).mockResolvedValue({
+      } as any);
+      mockInfinizationService.convertPrismaRulesToInput.mockReturnValue([]);
+      mockInfinizationService.applyVMRules.mockResolvedValue({
         appliedRules: 1,
         totalRules: 1,
         failedRules: 0,
         failures: [],
         chainName: 'vm_abc12345'
-      });
-      (mockRuleService.updateRuleSetSyncTimestamp as jest.Mock).mockResolvedValue(undefined)
+      } as any);
+      mockRuleService.updateRuleSetSyncTimestamp.mockResolvedValue(undefined)
 
       const result = await service.applyVMRules('vm-123')
 
@@ -240,12 +228,12 @@ describe('FirewallOrchestrationService', () => {
         firewallRuleSet: { rules: [] }
       };
 
-      (mockPrisma.machine.findUnique as jest.Mock).mockResolvedValue(mockVM);
-      (mockValidationService.validateRuleConflicts as jest.Mock).mockResolvedValue({
+      mockPrisma.machine.findUnique.mockResolvedValue(mockVM as any);
+      mockValidationService.validateRuleConflicts.mockResolvedValue({
         isValid: false,
         conflicts: [{ type: 'CONTRADICTORY', message: 'Rules conflict' }],
         warnings: []
-      })
+      } as any)
 
       await expect(service.applyVMRules('vm-123')).rejects.toThrow('rule conflicts')
     })
@@ -278,18 +266,18 @@ describe('FirewallOrchestrationService', () => {
         findUnique: jest.fn().mockResolvedValue(mockDepartment)
       };
 
-      (mockValidationService.validateRuleConflicts as jest.Mock).mockResolvedValue({
+      mockValidationService.validateRuleConflicts.mockResolvedValue({
         isValid: true,
         conflicts: [],
         warnings: []
-      });
-      (mockInfinizationService.convertPrismaRulesToInput as jest.Mock).mockReturnValue([]);
-      (mockInfinizationService.applyDepartmentRules as jest.Mock).mockResolvedValue({
+      } as any);
+      mockInfinizationService.convertPrismaRulesToInput.mockReturnValue([]);
+      mockInfinizationService.applyDepartmentRules.mockResolvedValue({
         totalVms: 2,
         vmsUpdated: 2,
         errors: []
-      });
-      (mockRuleService.updateRuleSetSyncTimestamp as jest.Mock).mockResolvedValue(undefined)
+      } as any);
+      mockRuleService.updateRuleSetSyncTimestamp.mockResolvedValue(undefined)
 
       const result = await service.applyDepartmentRules('dept-123')
 
@@ -325,7 +313,7 @@ describe('FirewallOrchestrationService', () => {
         }
       };
 
-      (mockPrisma.machine.findUnique as jest.Mock).mockResolvedValue(mockVM)
+      mockPrisma.machine.findUnique.mockResolvedValue(mockVM as any)
 
       const newRule = {
         name: 'Block 53',
@@ -371,7 +359,7 @@ describe('FirewallOrchestrationService', () => {
         }
       };
 
-      (mockPrisma.machine.findUnique as jest.Mock).mockResolvedValue(mockVM)
+      mockPrisma.machine.findUnique.mockResolvedValue(mockVM as any)
 
       const newRule = {
         name: 'Block SSH',
@@ -415,7 +403,7 @@ describe('FirewallOrchestrationService', () => {
         }
       };
 
-      (mockPrisma.machine.findUnique as jest.Mock).mockResolvedValue(mockVM)
+      mockPrisma.machine.findUnique.mockResolvedValue(mockVM as any)
 
       const newRule = {
         name: 'Block DNS Incoming',
@@ -460,7 +448,7 @@ describe('FirewallOrchestrationService', () => {
         }
       };
 
-      (mockPrisma.machine.findUnique as jest.Mock).mockResolvedValue(mockVM)
+      mockPrisma.machine.findUnique.mockResolvedValue(mockVM as any)
 
       const newRule = {
         name: 'Allow HTTPS',
@@ -504,7 +492,7 @@ describe('FirewallOrchestrationService', () => {
         }
       };
 
-      (mockPrisma.machine.findUnique as jest.Mock).mockResolvedValue(mockVM)
+      mockPrisma.machine.findUnique.mockResolvedValue(mockVM as any)
 
       const newRule = {
         name: 'Also Allow SSH',

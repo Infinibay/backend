@@ -1,11 +1,10 @@
 import 'reflect-metadata'
 import logger from '@main/logger'
+import { mockDeep, DeepMockProxy } from 'jest-mock-extended'
+import { PrismaClient } from '@prisma/client'
 import {
   createTestPrismaClient,
   resetTestPrismaClient,
-  cleanDatabase,
-  rollbackTransaction,
-  TEST_DATABASE_URL
 } from './prisma-test-client'
 
 // ── Prisma test client singleton ──────────────────────────────────────────────
@@ -83,17 +82,17 @@ jest.mock('systeminformation', () => ({
   mem: jest.fn(() => ({ total: 16000000000 }))
 }))
 
-// ── Backward-compatible mockPrisma export ──────────────────────────────────────
+// ── Backward-compatible mockPrisma export ──────────────────────────────────
 //
-// Existing tests that import { mockPrisma } from '../setup/jest.setup'
-// will receive an auto-mocked PrismaClient that mirrors the real DB.
-// This prevents breaking tests that still use mockPrisma.mockReturnValue etc.
-// NOTE: mockPrisma is UNCONNECTED from testPrisma — prefer using testPrisma directly.
-const mockPrisma = testPrisma.prisma
+// mockPrisma is a deep-mocked PrismaClient (via jest-mock-extended).
+// Every method (findUnique, findMany, $transaction, etc.) is a jest.fn()
+// that supports .mockResolvedValue(), .mockImplementation(), etc.
+//
+// For integration tests that need a REAL database, import testPrisma instead.
+export const mockPrisma: DeepMockProxy<PrismaClient> = mockDeep<PrismaClient>()
 
 // ── Environment variables for testing ─────────────────────────────────────────
 
-process.env.DATABASE_URL = TEST_DATABASE_URL
 process.env.TOKENKEY = 'test-secret-key'
 process.env.BCRYPT_ROUNDS = '10'
 process.env.PORT = '4001'
@@ -112,10 +111,6 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   await testPrisma.cleanup()
-})
-
-afterEach(async () => {
-  await rollbackTransaction(testPrisma)
 })
 
 afterAll(async () => {

@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach, jest, afterEach } from '@jest/globals'
 import { PrismaClient } from '@prisma/client'
+import { mockDeep, DeepMockProxy } from 'jest-mock-extended'
 import { InfinizationFirewallService } from '@services/firewall/InfinizationFirewallService'
 import { NftablesService, type NftablesError, VM_CHAIN_PREFIX } from '@infinibay/infinization'
 
@@ -11,12 +11,12 @@ jest.mock('@infinibay/infinization', () => ({
 
 describe('InfinizationFirewallService', () => {
   let service: InfinizationFirewallService
-  let mockPrisma: any
+  let mockPrisma: DeepMockProxy<PrismaClient>
   let mockNftablesService: any
-  let mockInitialize: jest.Mock<any>
-  let mockApplyRules: jest.Mock<any>
-  let mockRemoveVMChain: jest.Mock<any>
-  let mockListChains: jest.Mock<any>
+  let mockInitialize: jest.Mock
+  let mockApplyRules: jest.Mock
+  let mockRemoveVMChain: jest.Mock
+  let mockListChains: jest.Mock
 
   const mockVM = {
     id: 'vm-123',
@@ -35,18 +35,8 @@ describe('InfinizationFirewallService', () => {
     mockRemoveVMChain = jest.fn()
     mockListChains = jest.fn()
 
-    // Setup mock Prisma
-    mockPrisma = {
-      machine: {
-        findUnique: jest.fn(),
-        findMany: jest.fn()
-      },
-      configuration: {
-        findUnique: jest.fn()
-      }
-    }
+    mockPrisma = mockDeep<PrismaClient>()
 
-    // Setup mock NftablesService
     mockNftablesService = {
       initialize: mockInitialize,
       applyRules: mockApplyRules,
@@ -54,10 +44,9 @@ describe('InfinizationFirewallService', () => {
       listChains: mockListChains
     }
 
-    // Mock the class constructor
     ;(NftablesService as jest.Mock).mockImplementation(() => mockNftablesService)
 
-    service = new InfinizationFirewallService(mockPrisma as PrismaClient)
+    service = new InfinizationFirewallService(mockPrisma)
   })
 
   afterEach(() => {
@@ -96,7 +85,7 @@ describe('InfinizationFirewallService', () => {
   describe('applyVMRules', () => {
     beforeEach(() => {
       // Default mock behavior
-      mockPrisma.machine.findUnique.mockResolvedValue(mockVM)
+      mockPrisma.machine.findUnique.mockResolvedValue(mockVM as any)
       mockApplyRules.mockResolvedValue({
         appliedRules: 5,
         totalRules: 5,
@@ -118,7 +107,7 @@ describe('InfinizationFirewallService', () => {
 
     it('should throw error if TAP device not configured', async () => {
       const vmWithoutTap = { ...mockVM, configuration: null }
-      mockPrisma.machine.findUnique.mockResolvedValue(vmWithoutTap)
+      mockPrisma.machine.findUnique.mockResolvedValue(vmWithoutTap as any)
 
       await expect(service.applyVMRules('vm-123', [], []))
         .rejects.toThrow('VM configuration not found for VM: vm-123')
@@ -197,7 +186,7 @@ describe('InfinizationFirewallService', () => {
     ]
 
     beforeEach(() => {
-      mockPrisma.machine.findMany.mockResolvedValue(mockVMs)
+      mockPrisma.machine.findMany.mockResolvedValue(mockVMs as any)
       mockApplyRules.mockResolvedValue({
         appliedRules: 1,
         totalRules: 1,
@@ -229,7 +218,7 @@ describe('InfinizationFirewallService', () => {
 
     it('should skip VMs without TAP device and track in errors', async () => {
       const vmWithoutTap = { ...mockVMs[0], configuration: null }
-      mockPrisma.machine.findMany.mockResolvedValue([vmWithoutTap, mockVMs[1]])
+      mockPrisma.machine.findMany.mockResolvedValue([vmWithoutTap, mockVMs[1]] as any)
 
       const departmentRules = [{ name: 'Dept Rule 1' }] as any[]
       const result = await service.applyDepartmentRules('dept-123', departmentRules)
@@ -417,7 +406,7 @@ describe('InfinizationFirewallService', () => {
         configuration: { tapDeviceName: 'tap-v1' },
         firewallRuleSet: null
       }
-      mockPrisma.machine.findMany.mockResolvedValue([vm])
+      mockPrisma.machine.findMany.mockResolvedValue([vm] as any)
       mockApplyRules.mockResolvedValue({
         appliedRules: 0,
         totalRules: 0,
@@ -437,7 +426,7 @@ describe('InfinizationFirewallService', () => {
         configuration: { tapDeviceName: 'tap-v1' },
         firewallRuleSet: { rules: [] }
       }
-      mockPrisma.machine.findMany.mockResolvedValue([vm])
+      mockPrisma.machine.findMany.mockResolvedValue([vm] as any)
       mockApplyRules.mockResolvedValue({
         appliedRules: 0,
         totalRules: 0,
@@ -453,7 +442,7 @@ describe('InfinizationFirewallService', () => {
     it('should handle multiple VMs with mixed success', async () => {
       const vm1 = { id: 'vm-1', name: 'VM1', configuration: { tapDeviceName: 'tap-v1' }, firewallRuleSet: { rules: [] } }
       const vm2 = { id: 'vm-2', name: 'VM2', configuration: { tapDeviceName: 'tap-v2' }, firewallRuleSet: { rules: [] } }
-      mockPrisma.machine.findMany.mockResolvedValue([vm1, vm2])
+      mockPrisma.machine.findMany.mockResolvedValue([vm1, vm2] as any)
 
       mockApplyRules
         .mockResolvedValueOnce({ appliedRules: 1, totalRules: 1, failedRules: 0, failures: [] })

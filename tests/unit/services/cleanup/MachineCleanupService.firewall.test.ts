@@ -2,7 +2,8 @@
  * Tests for firewall cleanup in MachineCleanupServiceV2
  */
 
-import { PrismaClient, RuleSetType } from '@prisma/client'
+import { PrismaClient } from '@prisma/client'
+import { mockDeep, DeepMockProxy } from 'jest-mock-extended'
 import { MachineCleanupServiceV2 } from '@services/cleanup/machineCleanupServiceV2'
 
 // Mock infinization
@@ -26,51 +27,19 @@ jest.mock('fs/promises', () => ({
 
 describe('MachineCleanupServiceV2 - Firewall Cleanup', () => {
   let service: MachineCleanupServiceV2
-  let mockPrisma: any
+  let mockPrisma: DeepMockProxy<PrismaClient>
 
   beforeEach(() => {
     jest.clearAllMocks()
 
-    // Create mock Prisma
-    mockPrisma = {
-      machine: {
-        findUnique: jest.fn(),
-        delete: jest.fn()
-      },
-      machineConfiguration: {
-        delete: jest.fn()
-      },
-      machineApplication: {
-        deleteMany: jest.fn().mockResolvedValue({ count: 0 })
-      },
-      pendingCommand: {
-        deleteMany: jest.fn().mockResolvedValue({ count: 0 })
-      },
-      scriptExecution: {
-        deleteMany: jest.fn().mockResolvedValue({ count: 0 })
-      },
-      firewallRule: {
-        deleteMany: jest.fn().mockResolvedValue({ count: 0 })
-      },
-      firewallRuleSet: {
-        delete: jest.fn()
-      },
-      $transaction: jest.fn(async (callback: any) => {
-        // Execute transaction callback with mock tx
-        const mockTx = {
-          machine: mockPrisma.machine,
-          machineConfiguration: mockPrisma.machineConfiguration,
-          machineApplication: mockPrisma.machineApplication,
-          pendingCommand: mockPrisma.pendingCommand,
-          scriptExecution: mockPrisma.scriptExecution,
-          firewallRule: mockPrisma.firewallRule,
-          firewallRuleSet: mockPrisma.firewallRuleSet
-        }
-        return callback(mockTx)
-      })
-    }
+    mockPrisma = mockDeep<PrismaClient>()
+    mockPrisma.machineApplication.deleteMany.mockResolvedValue({ count: 0 })
+    mockPrisma.pendingCommand.deleteMany.mockResolvedValue({ count: 0 })
+    mockPrisma.scriptExecution.deleteMany.mockResolvedValue({ count: 0 })
+    mockPrisma.firewallRule.deleteMany.mockResolvedValue({ count: 0 })
+    mockPrisma.$transaction.mockImplementation(async (callback: any) => callback(mockPrisma))
 
-    service = new MachineCleanupServiceV2(mockPrisma as PrismaClient)
+    service = new MachineCleanupServiceV2(mockPrisma)
   })
 
   describe('cleanupVM', () => {
@@ -91,9 +60,9 @@ describe('MachineCleanupServiceV2 - Firewall Cleanup', () => {
 
       // First call for initial lookup, second call inside transaction for firewall cleanup
       mockPrisma.machine.findUnique
-        .mockResolvedValueOnce(mockVM)
-        .mockResolvedValueOnce(mockVM)
-        .mockResolvedValue(mockVM)
+        .mockResolvedValueOnce(mockVM as any)
+        .mockResolvedValueOnce(mockVM as any)
+        .mockResolvedValue(mockVM as any)
 
       const { getInfinization } = require('@services/InfinizationService')
       const mockInfinization = {
@@ -124,7 +93,7 @@ describe('MachineCleanupServiceV2 - Firewall Cleanup', () => {
         }
       }
 
-      mockPrisma.machine.findUnique.mockResolvedValue(mockVM)
+      mockPrisma.machine.findUnique.mockResolvedValue(mockVM as any)
 
       const { getInfinization } = require('@services/InfinizationService')
       getInfinization.mockResolvedValue({
@@ -153,7 +122,7 @@ describe('MachineCleanupServiceV2 - Firewall Cleanup', () => {
         firewallRuleSet: null // No firewall rules
       }
 
-      mockPrisma.machine.findUnique.mockResolvedValue(mockVM)
+      mockPrisma.machine.findUnique.mockResolvedValue(mockVM as any)
 
       const { getInfinization } = require('@services/InfinizationService')
       getInfinization.mockResolvedValue({
@@ -181,7 +150,7 @@ describe('MachineCleanupServiceV2 - Firewall Cleanup', () => {
         }
       }
 
-      mockPrisma.machine.findUnique.mockResolvedValue(mockVM)
+      mockPrisma.machine.findUnique.mockResolvedValue(mockVM as any)
 
       const { getInfinization } = require('@services/InfinizationService')
       getInfinization.mockResolvedValue({
@@ -206,7 +175,7 @@ describe('MachineCleanupServiceV2 - Firewall Cleanup', () => {
         firewallRuleSet: null
       }
 
-      mockPrisma.machine.findUnique.mockResolvedValue(mockVM)
+      mockPrisma.machine.findUnique.mockResolvedValue(mockVM as any)
 
       const { getInfinization } = require('@services/InfinizationService')
       getInfinization.mockResolvedValue({
