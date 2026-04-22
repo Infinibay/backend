@@ -11,6 +11,7 @@ import { NetworkResolver } from './networks/resolver'
 import { VmDiagnosticsResolver } from './vmDiagnostics/resolver'
 import { ISOResolver } from './ISOResolver'
 import { SnapshotResolver } from './SnapshotResolver'
+import { BackupResolver } from './BackupResolver'
 import { PackageResolver } from './PackageResolver'
 import { ProcessResolver } from './ProcessResolver'
 import { MetricsResolver } from './metrics/resolver'
@@ -41,6 +42,7 @@ const resolvers: NonEmptyArray<Function> = [
   VmDiagnosticsResolver,
   ISOResolver,
   SnapshotResolver,
+  BackupResolver,
   PackageResolver,
   ProcessResolver,
   MetricsResolver,

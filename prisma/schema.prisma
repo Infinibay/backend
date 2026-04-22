@@ -108,6 +108,8 @@ model Machine {
   recommendations           VMRecommendation[]
   windowsServices           WindowsService[]
   scriptExecutions          ScriptExecution[]
+ backups               Backup[]
+  backupSchedules       BackupSchedule[]
 }
 
 model MachineConfiguration {
@@ -1136,4 +1138,78 @@ enum ScriptAuditAction {
 enum FirewallPolicy {
   ALLOW_ALL // Lista blanca - Permitir todo por defecto
   BLOCK_ALL // Lista negra - Bloquear todo por defecto
+}
+// ============================================================================
+// Backup Models
+// ============================================================================
+
+enum BackupType {
+  FULL
+  INCREMENTAL
+  SNAPSHOT
+}
+
+enum BackupStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum BackupCompression {
+  NONE
+  QCOW2
+  GZIP
+}
+
+model Backup {
+  id                  String         @id @default(uuid())
+  backupId            String         @unique // UUID from infinization BackupService
+  vmId                String
+  vm                  Machine        @relation(fields: [vmId], references: [id], onDelete: Cascade)
+  type                BackupType
+  status              BackupStatus   @default(PENDING)
+  diskPaths           Json?          // Array of disk info from infinization
+  totalSize           BigInt         @default(0)
+  totalOriginalSize   BigInt         @default(0)
+  compression         BackupCompression @default(NONE)
+  destinationDir      String?
+  parentBackupId      String?
+  errorMessage        String?
+  description         String?
+  tags                Json?          // String array
+ durationMs          Int?
+  scheduleId          String?        // Optional link to the schedule that created this
+  schedule            BackupSchedule? @relation(fields: [scheduleId], references: [id], onDelete: SetNull)
+  createdAt           DateTime       @default(now())
+  completedAt         DateTime?
+
+  @@index([vmId])
+  @@index([scheduleId])
+  @@index([status])
+}
+
+model BackupSchedule {
+  id               String            @id @default(uuid())
+  scheduleId       String            @unique // UUID from infinization BackupScheduleService
+  vmId             String
+  vm               Machine           @relation(fields: [vmId], references: [id], onDelete: Cascade)
+  type             BackupType
+  cronExpression   String
+  retentionCount   Int               @default(7)
+  destinationDir   String?
+  compression      BackupCompression @default(NONE)
+  enabled          Boolean           @default(true)
+  label            String?
+  lastRunAt        DateTime?
+  nextRunAt        DateTime?
+  lastBackupId     String?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  backups          Backup[]
+
+  @@index([vmId])
+  @@index([enabled])
 }

@@ -43,11 +43,16 @@ import { ErrorHandler } from './utils/errors/ErrorHandler'
 // Crons
 import { startCrons, CronHandles } from './crons/all'
 
+// Backups
+import { getBackupService } from './services/BackupService'
+import { getBackupScheduleService, BackupScheduleService } from './services/BackupScheduleService'
+
 // Store services for cleanup
 let virtioSocketWatcherService: ReturnType<typeof createVirtioSocketWatcherService> | null = null
 let httpServerRef: http.Server | null = null
 let cronHandles: CronHandles | null = null
 let backgroundHealthServiceRef: BackgroundHealthService | null = null
+let backupScheduleServiceRef: BackupScheduleService | null = null
 let shuttingDown = false
 
 async function bootstrap (): Promise<void> {
@@ -209,6 +214,16 @@ async function bootstrap (): Promise<void> {
     // Start cron jobs
     cronHandles = await startCrons()
 
+    // Initialize backup scheduler (loads enabled schedules from DB)
+    try {
+      const backupService = getBackupService(prisma)
+      const backupScheduleService = getBackupScheduleService(prisma, backupService)
+      await backupScheduleService.start()
+      backupScheduleServiceRef = backupScheduleService
+    } catch (error) {
+      logger.error('⚠️ Failed to start BackupScheduleService:', error)
+    }
+
     // Start server
     const port = parseInt(process.env.PORT || '4000', 10)
     const host = '0.0.0.0'
@@ -253,6 +268,16 @@ async function shutdown (): Promise<void> {
       logger.info('✅ Cron jobs stopped')
     } catch (error) {
       logger.error('⚠️ Error stopping cron jobs:', error)
+    }
+  }
+
+  // Stop backup schedule service
+  if (backupScheduleServiceRef) {
+    try {
+      backupScheduleServiceRef.stop()
+      logger.info('✅ BackupScheduleService stopped')
+    } catch (error) {
+      logger.error('⚠️ Error stopping BackupScheduleService:', error)
     }
   }
 
