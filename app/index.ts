@@ -149,12 +149,22 @@ async function bootstrap (): Promise<void> {
     const { ScriptsEventManager } = await import('./services/ScriptsEventManager')
     const scriptsEventManager = new ScriptsEventManager(socketService, prisma)
 
+    const { BackupEventManager } = await import('./services/BackupEventManager')
+    const backupsEventManager = new BackupEventManager(socketService, prisma, 'backups')
+    const backupSchedulesEventManager = new BackupEventManager(socketService, prisma, 'backup_schedules')
+
+    const { RecommendationsEventManager } = await import('./services/RecommendationsEventManager')
+    const recommendationsEventManager = new RecommendationsEventManager(socketService, prisma)
+
     eventManager.registerResourceManager('applications', applicationEventManager)
     eventManager.registerResourceManager('departments', departmentEventManager)
     eventManager.registerResourceManager('firewall', firewallEventManager)
     eventManager.registerResourceManager('users', userEventManager)
     eventManager.registerResourceManager('vms', vmEventManager)
     eventManager.registerResourceManager('scripts', scriptsEventManager)
+    eventManager.registerResourceManager('backups', backupsEventManager)
+    eventManager.registerResourceManager('backup_schedules', backupSchedulesEventManager)
+    eventManager.registerResourceManager('recommendations', recommendationsEventManager)
 
     logger.info('🎯 Real-time event system initialized with all resource managers')
 
