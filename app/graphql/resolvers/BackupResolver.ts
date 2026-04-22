@@ -31,7 +31,7 @@ export class BackupResolver {
   // -------------------------------------------------------------------------
 
   @Query(() => BackupListResult, { description: 'List all backups for a VM' })
-  @Authorized()
+  @Authorized(['USER'])
   async backups (
     @Arg('vmId') vmId: string,
     @Ctx() ctx?: InfinibayContext
@@ -48,7 +48,7 @@ export class BackupResolver {
   }
 
   @Query(() => BackupGql, { nullable: true, description: 'Get a single backup by its database ID' })
-  @Authorized()
+  @Authorized(['USER'])
   async backup (
     @Arg('id', () => ID) id: string,
     @Ctx() ctx?: InfinibayContext
@@ -63,7 +63,7 @@ export class BackupResolver {
   // -------------------------------------------------------------------------
 
   @Mutation(() => BackupResult, { description: 'Create a backup of a VM' })
-  @Authorized()
+  @Authorized(['ADMIN'])
   async createBackup (
     @Arg('input') input: CreateBackupInput,
     @Ctx() ctx?: InfinibayContext
@@ -84,14 +84,17 @@ export class BackupResolver {
         triggeredBy: ctx.user?.id
       })
 
+      // Row is returned in IN_PROGRESS state; the actual backup runs in the
+      // background. `success` here means "queued successfully". Poll the
+      // `backups` query for status/progress updates.
       return {
-        success: row.status === BackupStatus.COMPLETED,
+        success: true,
         backupId: row.backupId,
         vmId: row.vmId,
         type: row.type as BackupType,
-        totalSize: Number(row.totalSize),
-        durationMs: row.durationMs ?? undefined,
-        error: row.errorMessage ?? undefined
+        totalSize: 0,
+        durationMs: undefined,
+        error: undefined
       }
     } catch (err) {
       logger.error(`createBackup failed: ${err instanceof Error ? err.message : String(err)}`)
@@ -100,7 +103,7 @@ export class BackupResolver {
   }
 
   @Mutation(() => BackupRestoreResult, { description: 'Restore a VM from a backup' })
-  @Authorized()
+  @Authorized(['ADMIN'])
   async restoreBackup (
     @Arg('input') input: RestoreBackupInput,
     @Ctx() ctx?: InfinibayContext
@@ -131,7 +134,7 @@ export class BackupResolver {
   }
 
   @Mutation(() => SuccessType, { description: 'Delete a backup' })
-  @Authorized()
+  @Authorized(['ADMIN'])
   async deleteBackup (
     @Arg('input') input: DeleteBackupInput,
     @Ctx() ctx?: InfinibayContext
@@ -154,7 +157,7 @@ export class BackupResolver {
   // -------------------------------------------------------------------------
 
   @Query(() => ScheduleListResult, { description: 'List backup schedules for a VM (or all if vmId omitted)' })
-  @Authorized()
+  @Authorized(['USER'])
   async backupSchedules (
     @Arg('vmId', () => String, { nullable: true }) vmId: string | undefined,
     @Ctx() ctx?: InfinibayContext
@@ -176,7 +179,7 @@ export class BackupResolver {
   // -------------------------------------------------------------------------
 
   @Mutation(() => BackupScheduleGql, { description: 'Create a backup schedule' })
-  @Authorized()
+  @Authorized(['ADMIN'])
   async createBackupSchedule (
     @Arg('input') input: CreateScheduleInput,
     @Ctx() ctx?: InfinibayContext
@@ -204,7 +207,7 @@ export class BackupResolver {
   }
 
   @Mutation(() => BackupScheduleGql, { description: 'Update a backup schedule' })
-  @Authorized()
+  @Authorized(['ADMIN'])
   async updateBackupSchedule (
     @Arg('id', () => ID) id: string,
     @Arg('input') input: UpdateScheduleInput,
@@ -232,7 +235,7 @@ export class BackupResolver {
   }
 
   @Mutation(() => SuccessType, { description: 'Delete a backup schedule' })
-  @Authorized()
+  @Authorized(['ADMIN'])
   async deleteBackupSchedule (
     @Arg('id', () => ID) id: string,
     @Ctx() ctx?: InfinibayContext
@@ -273,6 +276,7 @@ function toBackupGql (row: PrismaBackupRow): BackupGql {
     tags: Array.isArray(row.tags) ? row.tags.filter((t: unknown): t is string => typeof t === 'string') : undefined,
     parentBackupId: row.parentBackupId ?? undefined,
     errorMessage: row.errorMessage ?? undefined,
+    progressPercent: row.progressPercent ?? undefined,
     durationMs: row.durationMs ?? undefined,
     createdAt: row.createdAt,
     completedAt: row.completedAt ?? undefined

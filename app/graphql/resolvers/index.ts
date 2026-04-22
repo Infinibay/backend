@@ -20,8 +20,10 @@ import { VMHealthHistoryResolver } from './VMHealthHistoryResolver'
 import { BackgroundHealthResolver } from './health/BackgroundHealthResolver'
 import { MaintenanceResolver } from './MaintenanceResolver'
 import { VMRecommendationResolver } from './VMRecommendationResolver'
+import { RecommendationResolutionResolver } from './RecommendationResolutionResolver'
 // Import recommendation types to ensure they're registered
 import '../types/RecommendationTypes'
+import '../types/RecommendationResolutionTypes'
 import { AppSettingsResolver } from './AppSettingsResolver'
 import { FirewallResolver } from './firewall/resolver'
 import { ScriptResolver } from './scripts/resolver'
@@ -49,6 +51,7 @@ const resolvers: NonEmptyArray<Function> = [
   AutoCheckResolver,
   VMHealthHistoryResolver,
   VMRecommendationResolver,
+  RecommendationResolutionResolver,
   BackgroundHealthResolver,
   MaintenanceResolver,
   AppSettingsResolver,

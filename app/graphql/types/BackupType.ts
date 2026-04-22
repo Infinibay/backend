@@ -99,6 +99,9 @@ export class Backup {
     errorMessage?: string
 
   @Field({ nullable: true })
+    progressPercent?: number
+
+  @Field({ nullable: true })
     durationMs?: number
 
   @Field()

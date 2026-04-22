@@ -217,6 +217,9 @@ async function bootstrap (): Promise<void> {
     // Initialize backup scheduler (loads enabled schedules from DB)
     try {
       const backupService = getBackupService(prisma)
+      // Any IN_PROGRESS rows belong to a previous run — mark them FAILED so
+      // the UI isn't stuck on a forever-spinning progress bar.
+      await backupService.recoverOrphanedBackups()
       const backupScheduleService = getBackupScheduleService(prisma, backupService)
       await backupScheduleService.start()
       backupScheduleServiceRef = backupScheduleService

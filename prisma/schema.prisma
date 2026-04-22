@@ -26,6 +26,7 @@ model User {
   departmentScriptAssignments DepartmentScript[]
   scriptAuditLogs             ScriptAuditLog[]
   approvedScripts             Script[]                   @relation("ScriptApprovals")
+  recommendationResolutions   RecommendationResolution[]
 }
 
 model Node {
@@ -68,48 +69,48 @@ model ISO {
 }
 
 model Machine {
-  id                        String                     @id @default(uuid())
-  name                      String
-  internalName              String
-  status                    String
-  userId                    String?
-  templateId                String?
-  os                        String
-  cpuCores                  Int                        @default(0)
-  ramGB                     Int                        @default(0)
-  diskSizeGB                Int                        @default(0)
-  gpuPciAddress             String?
-  createdAt                 DateTime                   @default(now())
-  updatedAt                 DateTime                   @updatedAt
-  departmentId              String?
-  version                   Int                        @default(1)
-  localIP                   String?
-  publicIP                  String?
-  firewallRuleSetId         String?                    @unique
-  applicationUsage          ApplicationUsage[]
-  department                Department?                @relation(fields: [departmentId], references: [id])
-  firewallRuleSet           FirewallRuleSet?           @relation(fields: [firewallRuleSetId], references: [id], onDelete: SetNull)
-  template                  MachineTemplate?           @relation(fields: [templateId], references: [id])
-  user                      User?                      @relation(fields: [userId], references: [id])
-  applications              MachineApplication[]
-  configuration             MachineConfiguration?
-  maintenanceHistory        MaintenanceHistory[]
-  maintenanceTasks          MaintenanceTask[]
-  pendingCommands           PendingCommand[]
-  portUsage                 PortUsage[]
-  blockedConnections        BlockedConnection[]
-  processSnapshots          ProcessSnapshot[]
-  systemEvents              SystemEvent[]
-  systemMetrics             SystemMetrics[]
-  healthAlerts              VMHealthAlert[]
-  healthCheckQueue          VMHealthCheckQueue[]
-  healthConfig              VMHealthConfig?
-  healthSnapshots           VMHealthSnapshot[]
-  recommendations           VMRecommendation[]
-  windowsServices           WindowsService[]
-  scriptExecutions          ScriptExecution[]
- backups               Backup[]
-  backupSchedules       BackupSchedule[]
+  id                 String                @id @default(uuid())
+  name               String
+  internalName       String
+  status             String
+  userId             String?
+  templateId         String?
+  os                 String
+  cpuCores           Int                   @default(0)
+  ramGB              Int                   @default(0)
+  diskSizeGB         Int                   @default(0)
+  gpuPciAddress      String?
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
+  departmentId       String?
+  version            Int                   @default(1)
+  localIP            String?
+  publicIP           String?
+  firewallRuleSetId  String?               @unique
+  applicationUsage   ApplicationUsage[]
+  department         Department?           @relation(fields: [departmentId], references: [id])
+  firewallRuleSet    FirewallRuleSet?      @relation(fields: [firewallRuleSetId], references: [id], onDelete: SetNull)
+  template           MachineTemplate?      @relation(fields: [templateId], references: [id])
+  user               User?                 @relation(fields: [userId], references: [id])
+  applications       MachineApplication[]
+  configuration      MachineConfiguration?
+  maintenanceHistory MaintenanceHistory[]
+  maintenanceTasks   MaintenanceTask[]
+  pendingCommands    PendingCommand[]
+  portUsage          PortUsage[]
+  blockedConnections BlockedConnection[]
+  processSnapshots   ProcessSnapshot[]
+  systemEvents       SystemEvent[]
+  systemMetrics      SystemMetrics[]
+  healthAlerts       VMHealthAlert[]
+  healthCheckQueue   VMHealthCheckQueue[]
+  healthConfig       VMHealthConfig?
+  healthSnapshots    VMHealthSnapshot[]
+  recommendations    VMRecommendation[]
+  windowsServices    WindowsService[]
+  scriptExecutions   ScriptExecution[]
+  backups            Backup[]
+  backupSchedules    BackupSchedule[]
 }
 
 model MachineConfiguration {
@@ -126,9 +127,9 @@ model MachineConfiguration {
   machine         Machine  @relation(fields: [machineId], references: [id], onDelete: Cascade)
 
   // Infinization QEMU process management fields (nullable for backward compatibility)
-  qmpSocketPath   String?  // Unix socket path for QMP communication
-  qemuPid         Int?     // QEMU process PID for health monitoring
-  tapDeviceName   String?  // TAP network device name for cleanup
+  qmpSocketPath String? // Unix socket path for QMP communication
+  qemuPid       Int? // QEMU process PID for health monitoring
+  tapDeviceName String? // TAP network device name for cleanup
 
   // ============================================================================
   // QEMU CONFIGURATION FIELDS
@@ -149,59 +150,59 @@ model MachineConfiguration {
 
   // Network configuration (HIGH PRIORITY)
   // Network bridge device name (e.g., virbr0, br0) - used by VMLifecycle to create TAP devices
-  bridge          String?  @default("virbr0")
+  bridge        String? @default("virbr0")
   // NIC model for network device (virtio-net-pci provides best performance)
-  networkModel    String?  @default("virtio-net-pci")
+  networkModel  String? @default("virtio-net-pci")
   // Multi-queue networking support - number of queues for parallel packet processing
-  networkQueues   Int?     @default(1)
+  networkQueues Int?    @default(1)
 
   // Machine configuration (HIGH PRIORITY)
   // QEMU machine type (q35 is modern chipset with PCIe support, i440fx for legacy)
-  machineType     String?  @default("q35")
+  machineType String? @default("q35")
   // CPU model for guest (host provides best performance, or specific model for migration compatibility)
-  cpuModel        String?  @default("host")
+  cpuModel    String? @default("host")
 
   // Storage configuration (HIGH PRIORITY)
   // Disk bus type (virtio for performance, scsi/sata for compatibility)
-  diskBus         String?  @default("virtio")
+  diskBus       String?  @default("virtio")
   // Disk cache mode: writeback (performance), writethrough (safety), none (direct I/O)
-  diskCacheMode   String?  @default("writeback")
+  diskCacheMode String?  @default("writeback")
   // Enable I/O threading for disk operations - offloads I/O to dedicated threads
-  ioThreads       Boolean? @default(false)
+  ioThreads     Boolean? @default(false)
   // Multi-disk support - stores array of disk paths as JSON
   // Format: ["path/to/disk1.qcow2", "path/to/disk2.qcow2"]
   // NULL or empty array means use legacy single-disk path computation
-  diskPaths       Json?
+  diskPaths     Json?
 
   // GPU configuration (ADDITIONAL)
   // Path to GPU ROM file for passthrough (needed for some GPUs)
-  gpuRomFile      String?
+  gpuRomFile  String?
   // PCI address for GPU audio device passthrough
-  gpuAudioBus     String?
+  gpuAudioBus String?
 
   // Performance features (MEDIUM PRIORITY)
   // Enable dynamic memory management via balloon device
-  memoryBalloon   Boolean? @default(false)
+  memoryBalloon Boolean? @default(false)
   // Use hugepages for better memory performance (requires host configuration)
-  hugepages       Boolean? @default(false)
+  hugepages     Boolean? @default(false)
 
   // Advanced configuration (LOW PRIORITY)
   // NUMA topology configuration for multi-socket optimization (format: {"nodes": [...]})
-  numaConfig      Json?
+  numaConfig Json?
   // CPU affinity configuration (format: {"cores": [0, 1, 2]}) - uses cgroups v2
-  cpuPinning      Json?
+  cpuPinning Json?
 
   // NUMA-aware CPU pinning via numactl process wrapper
   // When enabled, QEMU is launched with numactl to pin CPUs and memory to NUMA nodes
-  enableNumaCtlPinning  Boolean? @default(false)
+  enableNumaCtlPinning Boolean? @default(false)
   // Strategy for automatic CPU pinning: 'basic' (sequential) or 'hybrid' (randomized)
-  cpuPinningStrategy    String?  @default("basic")
+  cpuPinningStrategy   String?  @default("basic")
 
   // UEFI configuration (LOW PRIORITY)
   // Path to OVMF firmware file for UEFI boot
-  uefiFirmware    String?
+  uefiFirmware String?
   // Enable UEFI Secure Boot
-  secureboot      Boolean? @default(false)
+  secureboot   Boolean? @default(false)
 
   // ============================================================================
   // QEMU DEVICE SOCKET PATHS
@@ -220,18 +221,18 @@ model MachineConfiguration {
   // ADDITIONAL VM CONFIGURATION
   // ============================================================================
   // VirtIO drivers ISO path for Windows VMs
-  virtioDriversIso        String?
+  virtioDriversIso String?
   // Enable Intel HDA audio device
-  enableAudio             Boolean? @default(false)
+  enableAudio      Boolean? @default(false)
   // Enable USB tablet for absolute mouse positioning
-  enableUsbTablet         Boolean? @default(true)
+  enableUsbTablet  Boolean? @default(true)
 
   // ============================================================================
   // INSTALLATION STATE TRACKING
   // ============================================================================
   // true = VM has completed initial setup (infiniservice connected for first time)
   // false/null = VM still in building/installation phase
-  setupComplete           Boolean? @default(false)
+  setupComplete Boolean? @default(false)
 }
 
 model MachineTemplate {
@@ -306,30 +307,30 @@ model Notification {
 }
 
 model Department {
-  id                    String             @id @default(uuid())
-  name                  String
-  createdAt             DateTime           @default(now())
-  internetSpeed         Int?
-  ipSubnet              String?
-  updatedAt             DateTime           @updatedAt
-  firewallRuleSetId     String?            @unique
-  firewallRuleSet       FirewallRuleSet?   @relation(fields: [firewallRuleSetId], references: [id], onDelete: SetNull)
-  machines              Machine[]
-  scriptAssignments     DepartmentScript[]
+  id                String             @id @default(uuid())
+  name              String
+  createdAt         DateTime           @default(now())
+  internetSpeed     Int?
+  ipSubnet          String?
+  updatedAt         DateTime           @updatedAt
+  firewallRuleSetId String?            @unique
+  firewallRuleSet   FirewallRuleSet?   @relation(fields: [firewallRuleSetId], references: [id], onDelete: SetNull)
+  machines          Machine[]
+  scriptAssignments DepartmentScript[]
 
   // Network infrastructure fields
-  bridgeName            String?            // Linux bridge name: "infinibr-{shortId}" (max 15 chars)
-  gatewayIP             String?            // Gateway IP on bridge: "10.10.100.1"
-  dhcpRangeStart        String?            // DHCP pool start: "10.10.100.10"
-  dhcpRangeEnd          String?            // DHCP pool end: "10.10.100.254"
-  dnsmasqPid            Int?               // PID of dnsmasq process for this bridge
-  dnsServers            String[]           @default(["8.8.8.8", "8.8.4.4", "1.1.1.1"]) // DNS servers for DHCP clients
-  ntpServers            String[]           @default(["216.239.35.0", "162.159.200.1"]) // NTP servers for DHCP clients (Google: 216.239.35.0, Cloudflare: 162.159.200.1)
-  mtu                   Int?               @default(1500) // MTU for DHCP clients (default: 1500 for standard Ethernet)
+  bridgeName     String? // Linux bridge name: "infinibr-{shortId}" (max 15 chars)
+  gatewayIP      String? // Gateway IP on bridge: "10.10.100.1"
+  dhcpRangeStart String? // DHCP pool start: "10.10.100.10"
+  dhcpRangeEnd   String? // DHCP pool end: "10.10.100.254"
+  dnsmasqPid     Int? // PID of dnsmasq process for this bridge
+  dnsServers     String[] @default(["8.8.8.8", "8.8.4.4", "1.1.1.1"]) // DNS servers for DHCP clients
+  ntpServers     String[] @default(["216.239.35.0", "162.159.200.1"]) // NTP servers for DHCP clients (Google: 216.239.35.0, Cloudflare: 162.159.200.1)
+  mtu            Int?     @default(1500) // MTU for DHCP clients (default: 1500 for standard Ethernet)
 
   // Firewall policy configuration
-  firewallPolicy        FirewallPolicy     @default(BLOCK_ALL)
-  firewallDefaultConfig String?            @default("allow_outbound")
+  firewallPolicy        FirewallPolicy @default(BLOCK_ALL)
+  firewallDefaultConfig String?        @default("allow_outbound")
   firewallCustomRules   Json?
 
   @@index([bridgeName])
@@ -635,9 +636,9 @@ model SystemEvent {
 }
 
 model VMHealthSnapshot {
-  id                   String                @id @default(uuid())
+  id                   String             @id @default(uuid())
   machineId            String
-  snapshotDate         DateTime              @default(now())
+  snapshotDate         DateTime           @default(now())
   overallStatus        String
   diskSpaceInfo        Json?
   resourceOptInfo      Json?
@@ -647,13 +648,13 @@ model VMHealthSnapshot {
   applicationInventory Json?
   customCheckResults   Json?
   osType               String?
-  checksCompleted      Int                   @default(0)
-  checksFailed         Int                   @default(0)
+  checksCompleted      Int                @default(0)
+  checksFailed         Int                @default(0)
   executionTimeMs      Int?
   errorSummary         String?
-  createdAt            DateTime              @default(now())
-  updatedAt            DateTime              @updatedAt
-  machine              Machine               @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+  machine              Machine            @relation(fields: [machineId], references: [id], onDelete: Cascade)
   recommendations      VMRecommendation[]
 
   @@index([machineId, snapshotDate])
@@ -758,11 +759,42 @@ model VMRecommendation {
   dismissedAt  DateTime? // When the recommendation was dismissed
   snoozedUntil DateTime? // When the snooze period ends (null = not snoozed)
 
+  // Auto-resolve tracking: points to the in-flight resolution (enforces idempotency via unique constraint)
+  activeResolutionId String?                    @unique
+  activeResolution   RecommendationResolution?  @relation("ActiveResolution", fields: [activeResolutionId], references: [id])
+  resolutions        RecommendationResolution[] @relation("RecommendationResolutions")
+
   @@index([machineId, createdAt])
   @@index([machineId, snapshotId])
   @@index([packageId])
   @@index([dismissedAt])
   @@index([snoozedUntil])
+}
+
+model RecommendationResolution {
+  id                String           @id @default(uuid())
+  recommendationId  String
+  machineId         String
+  actionKey         String
+  status            ResolutionStatus @default(PENDING)
+  progress          Int              @default(0)
+  progressMessage   String?
+  params            Json?
+  result            Json?
+  error             String?
+  triggeredByUserId String
+  startedAt         DateTime?
+  completedAt       DateTime?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  recommendation VMRecommendation  @relation("RecommendationResolutions", fields: [recommendationId], references: [id], onDelete: Cascade)
+  activeForRec   VMRecommendation? @relation("ActiveResolution")
+  triggeredBy    User              @relation(fields: [triggeredByUserId], references: [id])
+
+  @@index([recommendationId])
+  @@index([machineId, status])
+  @@index([status, createdAt])
 }
 
 model AppSettings {
@@ -778,29 +810,29 @@ model AppSettings {
 }
 
 model Script {
-  id                        String                     @id @default(uuid())
-  name                      String
-  description               String?
-  fileName                  String                     @unique
-  category                  String?
-  tags                      String[]
-  os                        OS[]
-  shell                     ShellType
+  id                    String             @id @default(uuid())
+  name                  String
+  description           String?
+  fileName              String             @unique
+  category              String?
+  tags                  String[]
+  os                    OS[]
+  shell                 ShellType
   // Approval workflow fields (optional/future enhancement)
   // Default status is APPROVED for backward compatibility
   // To enable: check status === APPROVED before execution in ScriptExecutor
   // Add mutations to approve/reject and set approvedById/approvedAt
-  status                    ScriptStatus               @default(APPROVED)
-  approvedById              String?
-  approvedBy                User?                      @relation("ScriptApprovals", fields: [approvedById], references: [id])
-  approvedAt                DateTime?
-  createdAt                 DateTime                   @default(now())
-  updatedAt                 DateTime                   @updatedAt
-  createdById               String?
-  createdBy                 User?                      @relation(fields: [createdById], references: [id])
-  executions                ScriptExecution[]
-  departmentAssignments     DepartmentScript[]
-  auditLogs                 ScriptAuditLog[]
+  status                ScriptStatus       @default(APPROVED)
+  approvedById          String?
+  approvedBy            User?              @relation("ScriptApprovals", fields: [approvedById], references: [id])
+  approvedAt            DateTime?
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+  createdById           String?
+  createdBy             User?              @relation(fields: [createdById], references: [id])
+  executions            ScriptExecution[]
+  departmentAssignments DepartmentScript[]
+  auditLogs             ScriptAuditLog[]
 
   @@index([fileName])
   @@index([category])
@@ -823,31 +855,31 @@ model DepartmentScript {
 }
 
 model ScriptExecution {
-  id                       String                    @id @default(uuid())
-  scriptId                 String
-  machineId                String
-  executionType            ExecutionType
-  triggeredById            String?
-  inputValues              Json
-  status                   ExecutionStatus
-  startedAt                DateTime?
-  completedAt              DateTime?
-  exitCode                 Int?
-  stdout                   String?                   @db.Text
-  stderr                   String?                   @db.Text
-  error                    String?                   @db.Text
-  executedAs               String?
+  id                    String          @id @default(uuid())
+  scriptId              String
+  machineId             String
+  executionType         ExecutionType
+  triggeredById         String?
+  inputValues           Json
+  status                ExecutionStatus
+  startedAt             DateTime?
+  completedAt           DateTime?
+  exitCode              Int?
+  stdout                String?         @db.Text
+  stderr                String?         @db.Text
+  error                 String?         @db.Text
+  executedAs            String?
   // Scheduling fields for immediate, scheduled, and repeating executions
-  scheduledFor             DateTime?                 // When script should execute (NULL or past = immediate)
-  repeatIntervalMinutes    Int?                      // Interval in minutes for repeating scripts (NULL = one-time)
-  lastExecutedAt           DateTime?                 // Timestamp of last execution attempt
-  executionCount           Int                       @default(0)  // Number of times executed
-  maxExecutions            Int?                      // Maximum executions for repeating scripts (NULL = unlimited)
-  createdAt                DateTime                  @default(now())
-  updatedAt                DateTime                  @updatedAt
-  script                   Script                    @relation(fields: [scriptId], references: [id], onDelete: Cascade)
-  machine                  Machine                   @relation(fields: [machineId], references: [id], onDelete: Cascade)
-  triggeredBy              User?                     @relation(fields: [triggeredById], references: [id])
+  scheduledFor          DateTime? // When script should execute (NULL or past = immediate)
+  repeatIntervalMinutes Int? // Interval in minutes for repeating scripts (NULL = one-time)
+  lastExecutedAt        DateTime? // Timestamp of last execution attempt
+  executionCount        Int             @default(0) // Number of times executed
+  maxExecutions         Int? // Maximum executions for repeating scripts (NULL = unlimited)
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+  script                Script          @relation(fields: [scriptId], references: [id], onDelete: Cascade)
+  machine               Machine         @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  triggeredBy           User?           @relation(fields: [triggeredById], references: [id])
 
   @@index([machineId, createdAt])
   @@index([scriptId, createdAt])
@@ -858,16 +890,16 @@ model ScriptExecution {
 }
 
 model ScriptAuditLog {
-  id         String            @id @default(uuid())
-  scriptId   String
-  userId     String?
-  action     ScriptAuditAction
-  details    Json?
-  ipAddress  String?
-  userAgent  String?
-  createdAt  DateTime          @default(now())
-  script     Script            @relation(fields: [scriptId], references: [id], onDelete: Cascade)
-  user       User?             @relation(fields: [userId], references: [id])
+  id        String            @id @default(uuid())
+  scriptId  String
+  userId    String?
+  action    ScriptAuditAction
+  details   Json?
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime          @default(now())
+  script    Script            @relation(fields: [scriptId], references: [id], onDelete: Cascade)
+  user      User?             @relation(fields: [userId], references: [id])
 
   @@index([scriptId, createdAt])
   @@index([userId, createdAt])
@@ -880,8 +912,8 @@ model ScriptAuditLog {
 
 // Extensible packages/plugins that provide additional functionality
 model Package {
-  id          String   @id @default(uuid())
-  name        String   @unique // "ai-diagnostics"
+  id          String  @id @default(uuid())
+  name        String  @unique // "ai-diagnostics"
   version     String
   displayName String
   description String?
@@ -892,7 +924,7 @@ model Package {
   isEnabled Boolean @default(true)
 
   capabilities Json // { network: [...], storage: true }
-  settings     Json @default("{}") // Values configured by admin
+  settings     Json   @default("{}") // Values configured by admin
   manifestHash String // SHA256 of manifest to detect changes
 
   installedAt DateTime @default(now())
@@ -921,8 +953,8 @@ model PackageLicense {
   maxMachines Int? // null = unlimited
 
   // State tracking
-  isValid          Boolean  @default(true)
-  validationStatus String   @default("valid") // "valid" | "expired" | "invalid" | "revoked" | "grace_period"
+  isValid          Boolean   @default(true)
+  validationStatus String    @default("valid") // "valid" | "expired" | "invalid" | "revoked" | "grace_period"
   lastValidatedAt  DateTime?
   gracePeriodEnds  DateTime? // Allow operation if license server unreachable
 
@@ -944,7 +976,7 @@ model PackageChecker {
   name      String // "predictive-disk-failure"
   type      String // RecommendationType that it generates
   dataNeeds String[] // ["diskMetrics", "historicalMetrics"]
-  isEnabled Boolean @default(true)
+  isEnabled Boolean  @default(true)
 
   @@unique([packageId, name])
   @@index([packageId])
@@ -952,21 +984,21 @@ model PackageChecker {
 }
 
 model FirewallRuleSet {
-  id            String        @id @default(uuid())
-  name          String
-  internalName  String        @unique
-  entityType    RuleSetType
-  entityId      String
-  priority      Int           @default(500)
-  isActive      Boolean       @default(true)
-  libvirtUuid   String?       @unique
-  xmlContent    String?
-  lastSyncedAt  DateTime?
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
-  department    Department?
-  machine       Machine?
-  rules         FirewallRule[]
+  id           String         @id @default(uuid())
+  name         String
+  internalName String         @unique
+  entityType   RuleSetType
+  entityId     String
+  priority     Int            @default(500)
+  isActive     Boolean        @default(true)
+  libvirtUuid  String?        @unique
+  xmlContent   String?
+  lastSyncedAt DateTime?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  department   Department?
+  machine      Machine?
+  rules        FirewallRule[]
 
   @@unique([entityType, entityId])
   @@index([isActive])
@@ -1071,6 +1103,15 @@ enum MaintenanceTrigger {
   MANUAL
 }
 
+enum ResolutionStatus {
+  PENDING
+  RUNNING
+  SUCCEEDED
+  FAILED
+  REQUIRES_REBOOT
+  CANCELLED
+}
+
 enum RecommendationType {
   DISK_SPACE_LOW
   HIGH_CPU_APP
@@ -1139,6 +1180,7 @@ enum FirewallPolicy {
   ALLOW_ALL // Lista blanca - Permitir todo por defecto
   BLOCK_ALL // Lista negra - Bloquear todo por defecto
 }
+
 // ============================================================================
 // Backup Models
 // ============================================================================
@@ -1164,26 +1206,27 @@ enum BackupCompression {
 }
 
 model Backup {
-  id                  String         @id @default(uuid())
-  backupId            String         @unique // UUID from infinization BackupService
-  vmId                String
-  vm                  Machine        @relation(fields: [vmId], references: [id], onDelete: Cascade)
-  type                BackupType
-  status              BackupStatus   @default(PENDING)
-  diskPaths           Json?          // Array of disk info from infinization
-  totalSize           BigInt         @default(0)
-  totalOriginalSize   BigInt         @default(0)
-  compression         BackupCompression @default(NONE)
-  destinationDir      String?
-  parentBackupId      String?
-  errorMessage        String?
-  description         String?
-  tags                Json?          // String array
- durationMs          Int?
-  scheduleId          String?        // Optional link to the schedule that created this
-  schedule            BackupSchedule? @relation(fields: [scheduleId], references: [id], onDelete: SetNull)
-  createdAt           DateTime       @default(now())
-  completedAt         DateTime?
+  id                String            @id @default(uuid())
+  backupId          String            @unique // UUID from infinization BackupService
+  vmId              String
+  vm                Machine           @relation(fields: [vmId], references: [id], onDelete: Cascade)
+  type              BackupType
+  status            BackupStatus      @default(PENDING)
+  diskPaths         Json? // Array of disk info from infinization
+  totalSize         BigInt            @default(0)
+  totalOriginalSize BigInt            @default(0)
+  compression       BackupCompression @default(NONE)
+  destinationDir    String?
+  parentBackupId    String?
+  errorMessage      String?
+  description       String?
+  tags              Json? // String array
+  progressPercent   Int?              @default(0) // 0-100, updated live during IN_PROGRESS
+  durationMs        Int?
+  scheduleId        String? // Optional link to the schedule that created this
+  schedule          BackupSchedule?   @relation(fields: [scheduleId], references: [id], onDelete: SetNull)
+  createdAt         DateTime          @default(now())
+  completedAt       DateTime?
 
   @@index([vmId])
   @@index([scheduleId])
@@ -1191,24 +1234,24 @@ model Backup {
 }
 
 model BackupSchedule {
-  id               String            @id @default(uuid())
-  scheduleId       String            @unique // UUID from infinization BackupScheduleService
-  vmId             String
-  vm               Machine           @relation(fields: [vmId], references: [id], onDelete: Cascade)
-  type             BackupType
-  cronExpression   String
-  retentionCount   Int               @default(7)
-  destinationDir   String?
-  compression      BackupCompression @default(NONE)
-  enabled          Boolean           @default(true)
-  label            String?
-  lastRunAt        DateTime?
-  nextRunAt        DateTime?
-  lastBackupId     String?
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
+  id             String            @id @default(uuid())
+  scheduleId     String            @unique // UUID from infinization BackupScheduleService
+  vmId           String
+  vm             Machine           @relation(fields: [vmId], references: [id], onDelete: Cascade)
+  type           BackupType
+  cronExpression String
+  retentionCount Int               @default(7)
+  destinationDir String?
+  compression    BackupCompression @default(NONE)
+  enabled        Boolean           @default(true)
+  label          String?
+  lastRunAt      DateTime?
+  nextRunAt      DateTime?
+  lastBackupId   String?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
 
-  backups          Backup[]
+  backups Backup[]
 
   @@index([vmId])
   @@index([enabled])

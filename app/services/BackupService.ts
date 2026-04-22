@@ -12,6 +12,7 @@
  */
 
 import path from 'path'
+import { promises as fs } from 'fs'
 
 import {
   BackupService as InfinizationBackupService,
@@ -30,6 +31,7 @@ import type { PrismaClient, Backup as PrismaBackup } from '@prisma/client'
 
 import logger from '@main/logger'
 import { getEventManager } from '@services/EventManager'
+import { VMOperationsService } from '@services/VMOperationsService'
 
 export interface CreateBackupParams {
   vmId: string
@@ -73,21 +75,56 @@ export class BackupService {
   }
 
   /**
+   * Any row left in IN_PROGRESS / PENDING belongs to a previous backend
+   * process that died mid-operation. Mark them FAILED so the UI doesn't
+   * show a forever-spinning bar. Call at boot.
+   */
+  async recoverOrphanedBackups (): Promise<number> {
+    const res = await this.prisma.backup.updateMany({
+      where: { status: { in: [BackupStatus.IN_PROGRESS, BackupStatus.PENDING] } },
+      data: {
+        status: BackupStatus.FAILED,
+        errorMessage: 'Interrupted by backend restart',
+        completedAt: new Date()
+      }
+    })
+    if (res.count > 0) {
+      logger.warn(`Recovered ${res.count} orphaned backup row(s) from previous run`)
+    }
+    return res.count
+  }
+
+  /**
    * Creates a backup and persists it to the database. The record is inserted
    * with `IN_PROGRESS` up-front so the UI can show the in-flight operation.
    */
   async createBackup (params: CreateBackupParams): Promise<PrismaBackup> {
     const vm = await this.prisma.machine.findUnique({
       where: { id: params.vmId },
-      select: { id: true, name: true, userId: true, diskPaths: true }
+      select: {
+        id: true,
+        name: true,
+        userId: true,
+        configuration: { select: { diskPaths: true } }
+      }
     })
     if (!vm) {
       throw new Error(`VM ${params.vmId} not found`)
     }
 
-    const diskPaths = params.diskPaths ?? this.resolveDiskPaths(vm.diskPaths)
+    const diskPaths = params.diskPaths ?? this.resolveDiskPaths(vm.configuration?.diskPaths)
     if (diskPaths.length === 0) {
       throw new Error(`VM ${params.vmId} has no disk paths configured`)
+    }
+
+    // Reject when the VM is running: qemu holds an exclusive write lock on the
+    // qcow2 and qemu-img convert cannot read it. Backups require the VM stopped.
+    const vmOps = new VMOperationsService(this.prisma)
+    const status = await vmOps.getStatus(params.vmId)
+    if (status?.processAlive) {
+      throw new Error(
+        `Cannot back up VM "${vm.name}" while it is running. Stop the VM first and retry.`
+      )
     }
 
     const destinationDir = params.destinationDir ?? path.join(this.backupRootDir, vm.id)
@@ -111,52 +148,164 @@ export class BackupService {
 
     this.dispatch('started', pending, params.triggeredBy).catch(() => {})
 
+    // Kick off the real work in the background so the GraphQL mutation
+    // returns immediately. UI polls the row for progress/status.
+    void this.runBackupInBackground({
+      pendingId: pending.id,
+      vmId: vm.id,
+      diskPaths,
+      destinationDir,
+      type: params.type,
+      compression,
+      description: params.description,
+      parentBackupId: params.parentBackupId,
+      tags: params.tags,
+      triggeredBy: params.triggeredBy
+    })
+
+    return pending
+  }
+
+  /**
+   * Runs the actual infinization backup, updates the row, dispatches events.
+   * Never throws — all failures are persisted as `FAILED`.
+   */
+  private async runBackupInBackground (args: {
+    pendingId: string
+    vmId: string
+    diskPaths: string[]
+    destinationDir: string
+    type: BackupType
+    compression: BackupCompression
+    description?: string
+    parentBackupId?: string
+    tags?: string[]
+    triggeredBy?: string
+  }): Promise<void> {
+    const {
+      pendingId, vmId, diskPaths, destinationDir, type, compression,
+      description, parentBackupId, tags, triggeredBy
+    } = args
+
+    // --- Live progress wiring -------------------------------------------------
+    let lastPersisted = -1
+    const persistIfChanged = (pct: number): void => {
+      const clamped = Math.max(0, Math.min(100, Math.round(pct)))
+      if (clamped === lastPersisted) return
+      lastPersisted = clamped
+      this.prisma.backup.update({
+        where: { id: pendingId },
+        data: { progressPercent: clamped }
+      }).catch(() => {})
+    }
+
+    const onProgress = (p: BackupProgress): void => {
+      if (p.vmId !== vmId) return
+      persistIfChanged(p.overallProgress)
+    }
+    this.infinization.on('progress', onProgress)
+
+    let totalSourceBytes = 0
+    for (const src of diskPaths) {
+      try {
+        const st = await fs.stat(src)
+        totalSourceBytes += st.size
+      } catch { /* ignore — disk might not exist; poller will degrade */ }
+    }
+
+    // infinization creates a per-backup subdir with a UUID we don't know
+    // until the operation finishes. Snapshot existing subdirs now and treat
+    // any new one as ours.
+    const startTime = Date.now()
+    const preExistingSubdirs = await this.listSubdirs(destinationDir)
+    const poller = setInterval(() => {
+      void (async () => {
+        if (totalSourceBytes <= 0) return
+        try {
+          const subdirs = await this.listSubdirs(destinationDir)
+          const newSubdirs = subdirs.filter((d) => !preExistingSubdirs.includes(d))
+          let destBytes = 0
+          for (const sub of newSubdirs) {
+            const subPath = path.join(destinationDir, sub)
+            // Keep only subdirs created after our backup started.
+            try {
+              const st = await fs.stat(subPath)
+              if (st.mtimeMs < startTime - 5_000) continue
+            } catch { continue }
+            try {
+              const files = await fs.readdir(subPath)
+              for (const f of files) {
+                if (!/^disk-\d+\.qcow2(\.gz)?$/.test(f)) continue
+                try {
+                  const fst = await fs.stat(path.join(subPath, f))
+                  destBytes += fst.size
+                } catch { /* file vanished mid-scan */ }
+              }
+            } catch { /* subdir gone */ }
+          }
+          const pct = (destBytes / totalSourceBytes) * 100
+          persistIfChanged(Math.min(95, pct))
+        } catch { /* destinationDir not yet created */ }
+      })()
+    }, 2000)
+
     let result: InfinizationBackupResult
     try {
       result = await this.infinization.createBackup({
-        vmId: vm.id,
+        vmId,
         diskPaths,
         destinationDir,
-        type: params.type,
+        type,
         compression,
-        description: params.description,
-        parentBackupId: params.parentBackupId,
-        tags: params.tags
+        description,
+        parentBackupId,
+        tags
       })
     } catch (err) {
+      clearInterval(poller)
+      this.infinization.off('progress', onProgress)
       const message = err instanceof Error ? err.message : String(err)
-      const updated = await this.prisma.backup.update({
-        where: { id: pending.id },
+      logger.error(`backup ${pendingId} failed: ${message}`)
+      try {
+        const updated = await this.prisma.backup.update({
+          where: { id: pendingId },
+          data: {
+            status: BackupStatus.FAILED,
+            errorMessage: message,
+            completedAt: new Date()
+          }
+        })
+        this.dispatch('failed', updated, triggeredBy).catch(() => {})
+      } catch (dbErr) {
+        logger.error(`failed to mark backup ${pendingId} as FAILED: ${dbErr instanceof Error ? dbErr.message : String(dbErr)}`)
+      }
+      return
+    }
+    clearInterval(poller)
+    this.infinization.off('progress', onProgress)
+
+    const metadata = await this.safeGetMetadata(result.backupId, vmId)
+
+    try {
+      const completed = await this.prisma.backup.update({
+        where: { id: pendingId },
         data: {
-          status: BackupStatus.FAILED,
-          errorMessage: message,
+          backupId: result.backupId,
+          status: result.success ? BackupStatus.COMPLETED : BackupStatus.FAILED,
+          diskPaths: result.disks as unknown as object,
+          totalSize: BigInt(result.totalSize ?? 0),
+          totalOriginalSize: BigInt(metadata?.totalOriginalSize ?? 0),
+          durationMs: result.durationMs,
+          errorMessage: result.error,
+          progressPercent: result.success ? 100 : lastPersisted >= 0 ? lastPersisted : 0,
           completedAt: new Date()
         }
       })
-      this.dispatch('failed', updated, params.triggeredBy).catch(() => {})
-      throw err
+      this.dispatch(result.success ? 'completed' : 'failed', completed, triggeredBy)
+        .catch(() => {})
+    } catch (dbErr) {
+      logger.error(`failed to finalize backup ${pendingId}: ${dbErr instanceof Error ? dbErr.message : String(dbErr)}`)
     }
-
-    const metadata = await this.safeGetMetadata(result.backupId, vm.id)
-
-    const completed = await this.prisma.backup.update({
-      where: { id: pending.id },
-      data: {
-        backupId: result.backupId,
-        status: result.success ? BackupStatus.COMPLETED : BackupStatus.FAILED,
-        diskPaths: result.disks as unknown as object,
-        totalSize: BigInt(result.totalSize ?? 0),
-        totalOriginalSize: BigInt(metadata?.totalOriginalSize ?? 0),
-        durationMs: result.durationMs,
-        errorMessage: result.error,
-        completedAt: new Date()
-      }
-    })
-
-    this.dispatch(result.success ? 'completed' : 'failed', completed, params.triggeredBy)
-      .catch(() => {})
-
-    return completed
   }
 
   /**
@@ -166,11 +315,15 @@ export class BackupService {
   async restoreBackup (params: RestoreBackupParams): Promise<InfinizationRestoreResult> {
     const vm = await this.prisma.machine.findUnique({
       where: { id: params.vmId },
-      select: { id: true, userId: true, diskPaths: true }
+      select: {
+        id: true,
+        userId: true,
+        configuration: { select: { diskPaths: true } }
+      }
     })
     if (!vm) throw new Error(`VM ${params.vmId} not found`)
 
-    const diskPaths = params.diskPaths ?? this.resolveDiskPaths(vm.diskPaths)
+    const diskPaths = params.diskPaths ?? this.resolveDiskPaths(vm.configuration?.diskPaths)
     if (diskPaths.length === 0) {
       throw new Error(`VM ${params.vmId} has no disk paths configured for restore`)
     }
@@ -277,6 +430,16 @@ export class BackupService {
   private resolveDiskPaths (raw: unknown): string[] {
     if (Array.isArray(raw)) return raw.filter((p): p is string => typeof p === 'string')
     return []
+  }
+
+  /** Returns subdirectory names inside `dir`, or [] if it doesn't exist. */
+  private async listSubdirs (dir: string): Promise<string[]> {
+    try {
+      const entries = await fs.readdir(dir, { withFileTypes: true })
+      return entries.filter((e) => e.isDirectory()).map((e) => e.name)
+    } catch {
+      return []
+    }
   }
 }
 

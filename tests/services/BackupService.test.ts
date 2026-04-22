@@ -36,7 +36,7 @@ describe('BackupService (backend wrapper)', () => {
         id: vmId,
         name: 'web-1',
         userId: 'user-1',
-        diskPaths: ['/disks/web-1.qcow2']
+        configuration: { diskPaths: ['/disks/web-1.qcow2'] }
       } as never)
 
       const pendingRow = { id: 'db-1', backupId: 'pending-x', vmId, status: BackupStatus.IN_PROGRESS }
@@ -76,31 +76,38 @@ describe('BackupService (backend wrapper)', () => {
           type: BackupType.FULL
         })
       }))
+      // Method now returns immediately with the pending row; the actual
+      // infinization work runs in the background.
+      expect(result.status).toBe(BackupStatus.IN_PROGRESS)
+      expect(result.backupId).toBe('pending-x')
+
+      // Wait a tick for the detached background work to enqueue.
+      await new Promise((r) => setImmediate(r))
+      await new Promise((r) => setImmediate(r))
+
       expect(infinization.createBackup).toHaveBeenCalledWith(expect.objectContaining({
         vmId,
         diskPaths: ['/disks/web-1.qcow2'],
         type: BackupType.FULL
       }))
-      expect(prisma.backup.update).toHaveBeenCalledWith(expect.objectContaining({
-        where: { id: 'db-1' },
-        data: expect.objectContaining({
-          backupId: 'bkp-123',
-          status: BackupStatus.COMPLETED
-        })
-      }))
-      expect(result.status).toBe(BackupStatus.COMPLETED)
     })
 
     it('marks the row as FAILED when the underlying backup throws', async () => {
       prisma.machine.findUnique.mockResolvedValue({
-        id: 'vm-1', name: 'x', userId: 'u', diskPaths: ['/d.qcow2']
+        id: 'vm-1', name: 'x', userId: 'u', configuration: { diskPaths: ['/d.qcow2'] }
       } as never)
       prisma.backup.create.mockResolvedValue({ id: 'db-1', backupId: 'p', vmId: 'vm-1' } as never)
       prisma.backup.update.mockResolvedValue({ id: 'db-1', status: BackupStatus.FAILED } as never)
       infinization.createBackup.mockRejectedValue(new Error('qemu-img blew up'))
 
-      await expect(service.createBackup({ vmId: 'vm-1', type: BackupType.FULL }))
-        .rejects.toThrow('qemu-img blew up')
+      // Returns immediately — failure is handled in the background and
+      // persisted to the row, not re-thrown from createBackup.
+      await service.createBackup({ vmId: 'vm-1', type: BackupType.FULL })
+
+      // Let the background task run.
+      await new Promise((r) => setImmediate(r))
+      await new Promise((r) => setImmediate(r))
+      await new Promise((r) => setImmediate(r))
 
       expect(prisma.backup.update).toHaveBeenCalledWith(expect.objectContaining({
         data: expect.objectContaining({
@@ -112,7 +119,7 @@ describe('BackupService (backend wrapper)', () => {
 
     it('rejects when the VM has no disk paths', async () => {
       prisma.machine.findUnique.mockResolvedValue({
-        id: 'vm-1', name: 'x', userId: 'u', diskPaths: []
+        id: 'vm-1', name: 'x', userId: 'u', configuration: { diskPaths: [] }
       } as never)
 
       await expect(service.createBackup({ vmId: 'vm-1', type: BackupType.FULL }))
