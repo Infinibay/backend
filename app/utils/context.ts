@@ -116,6 +116,22 @@ export function createUserValidationHelpers (
 }
 
 /**
+ * Defensive guard for resolvers that depend on ctx.user.
+ * Although @Authorized middleware ensures ctx.user is populated before the
+ * resolver executes, a misconfigured middleware or a code-path bypass could
+ * leave it null, causing a cryptic TypeError on `ctx.user!.id`.
+ * Calling `requireUser(ctx)` at the top of every authenticated resolver turns
+ * those silent crashes into clear UNAUTHENTICATED errors.
+ */
+export function requireUser (ctx: InfinibayContext): SafeUser {
+  if (!ctx.user) {
+    const { AuthenticationError } = require('@utils/errors')
+    throw new AuthenticationError('Authentication required')
+  }
+  return ctx.user
+}
+
+/**
  * Creates authentication metadata for tracking authentication state
  */
 export function createAuthenticationMetadata (

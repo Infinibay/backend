@@ -1,6 +1,6 @@
 import { Resolver, Query, Mutation, Arg, Ctx, ID } from 'type-graphql'
 import { MaintenanceTaskType, MaintenanceStatus, MaintenanceTrigger, Prisma } from '@prisma/client'
-import { InfinibayContext } from '@utils/context'
+import { InfinibayContext, requireUser } from '@utils/context'
 import { MaintenanceService } from '@services/MaintenanceService'
 import { assertCanManageVM, assertCanManageMaintenanceTask } from '@graphql/utils/auth'
 import {
@@ -216,6 +216,7 @@ export class MaintenanceResolver {
     @Ctx() ctx: InfinibayContext
   ): Promise<MaintenanceTaskResponse> {
     try {
+      const user = requireUser(ctx)
       // Check authorization
       await assertCanManageVM(ctx, input.machineId)
 
@@ -231,7 +232,7 @@ export class MaintenanceResolver {
         cronSchedule: input.cronSchedule,
         runAt: input.runAt,
         parameters: input.parameters || undefined,
-        userId: ctx.user!.id
+        userId: user.id
       })
 
       return {
@@ -357,6 +358,7 @@ export class MaintenanceResolver {
     @Ctx() ctx: InfinibayContext
   ): Promise<MaintenanceExecutionResponse> {
     try {
+      const user = requireUser(ctx)
       // Check authorization
       await assertCanManageMaintenanceTask(ctx, taskId)
       // Create MaintenanceService instance for this request
@@ -365,7 +367,7 @@ export class MaintenanceResolver {
       const result = await maintenanceService.executeTask(
         taskId,
         MaintenanceTrigger.MANUAL,
-        ctx.user!.id
+        user.id
       )
 
       // Create a mock MaintenanceHistory response for now
@@ -391,6 +393,7 @@ export class MaintenanceResolver {
     @Arg('input') input: ExecuteMaintenanceInput,
     @Ctx() ctx: InfinibayContext
   ): Promise<MaintenanceExecutionResponse> {
+      const user = requireUser(ctx)
     try {
       // Check authorization
       await assertCanManageVM(ctx, input.machineId)
@@ -403,7 +406,7 @@ export class MaintenanceResolver {
         input.machineId,
         input.taskType,
         parameters,
-        ctx.user!.id
+        user.id
       )
 
       // Create a mock MaintenanceHistory response for now

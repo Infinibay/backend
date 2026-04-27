@@ -315,7 +315,7 @@ describe('ApplicationEventManager', () => {
     });
     describe('getResourceName', () => {
         it('returns application', () => {
-            expect(service.getResourceName()).toBe('application');
+            expect(service.getResourceName()).toBe('applications');
         });
     });
     describe('fetchResourceData', () => {

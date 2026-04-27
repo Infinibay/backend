@@ -41,7 +41,7 @@ export class VmEventManager extends BaseEventManager {
   // ============================================
 
   protected getResourceName (): string {
-    return 'vm'
+    return 'vms'
   }
 
   protected async fetchResourceData (vmData: EventData): Promise<VMData | null> {

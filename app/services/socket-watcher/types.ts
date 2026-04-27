@@ -31,7 +31,7 @@ export function redactSensitive(obj: any): any {
 // ────────────────────────────────────────────────────────────────────────────────
 
 export interface BaseMessage {
-  type: 'metrics' | 'error' | 'handshake' | 'command' | 'response' | 'error_report' | 'circuit_breaker_state' | 'keep_alive' | 'keep_alive_request' | 'firewall_event' | 'script_completion' | 'request_pending_scripts'
+  type: 'metrics' | 'error' | 'handshake' | 'command' | 'response' | 'error_report' | 'circuit_breaker_state' | 'keep_alive' | 'keep_alive_request' | 'firewall_event' | 'script_completion' | 'request_pending_scripts' | 'agent_event'
   timestamp: string
 }
 
@@ -39,6 +39,15 @@ export interface ErrorMessage extends BaseMessage {
   type: 'error'
   error: string
   details?: unknown
+}
+
+export interface AgentEventMessage extends BaseMessage {
+  type: 'agent_event'
+  severity: 'debug' | 'info' | 'warn' | 'error'
+  source: string
+  message: string
+  executionId?: string | null
+  context?: unknown
 }
 
 export interface MetricsMessage extends BaseMessage {

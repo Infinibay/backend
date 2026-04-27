@@ -21,6 +21,7 @@ import fs from 'fs'
 import path from 'path'
 import crypto from 'crypto'
 import si from 'systeminformation'
+import portfinder from 'portfinder'
 
 import { PrismaClient, Machine, MachineTemplate, MachineConfiguration, GoldenImage } from '@prisma/client'
 

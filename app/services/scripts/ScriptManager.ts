@@ -373,6 +373,12 @@ export class ScriptManager {
       throw new Error(`Script with id '${id}' not found`);
     }
 
+    // System template scripts (createdById === null) cannot be deleted —
+    // mirrors the same guard in updateScript.
+    if (script.createdById === null) {
+      throw new Error('System template scripts cannot be deleted');
+    }
+
     // Create audit log before deletion
     await this.createAuditLog(
       script.id,

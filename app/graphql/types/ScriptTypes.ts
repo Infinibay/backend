@@ -158,6 +158,9 @@ export class ScriptType {
   @Field(() => UserType, { nullable: true })
   createdBy?: UserType;
 
+  @Field()
+  isSystem!: boolean;
+
   @Field(() => Int, { nullable: true })
   executionCount?: number;
 

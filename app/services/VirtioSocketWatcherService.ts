@@ -18,6 +18,7 @@ import prisma from '@utils/database'
 import { EventEmitter } from 'events'
 import * as path from 'path'
 import { VmEventManager } from './VmEventManager'
+import { getEventManager } from './EventManager'
 import { VMHealthQueueManager } from './VMHealthQueueManager'
 import { Logger } from 'winston'
 import logger from '@main/logger'
@@ -46,6 +47,7 @@ import {
   type FirewallEventMessage,
   type ScriptCompletionMessage,
   type RequestPendingScriptsMessage,
+  type AgentEventMessage,
   type PendingScriptsResponseMessage,
   type PendingScriptInfo,
   type PackageInfo,
@@ -175,6 +177,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
       handleFirewallEvent: (vmId, msg) => this.handleFirewallEvent(vmId, msg),
       handleScriptCompletion: (vmId, msg) => this.handleScriptCompletion(vmId, msg),
       handleRequestPendingScripts: (vmId, msg, conn) => this.handleRequestPendingScripts(vmId, msg, conn),
+      handleAgentEvent: (vmId, msg) => this.handleAgentEvent(vmId, msg),
     })
 
     // 5. Initialize connection manager — owns the filesystem watcher and connection lifecycle
@@ -540,6 +543,71 @@ export class VirtioSocketWatcherService extends EventEmitter {
     } catch (error) {
       // Non-critical error - log but don't throw
       this.debug.error(`Failed to handle firewall event for VM ${vmId}: ${error}`)
+    }
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // Agent event handling
+  // ──────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Persist a structured agent_event from infiniservice and dispatch it on the
+   * realtime bus. ERROR-severity events are also logged so they show up in
+   * the host log without needing the events tab open.
+   */
+  private async handleAgentEvent(vmId: string, message: AgentEventMessage): Promise<void> {
+    try {
+      const severity = (message.severity || 'info').toUpperCase() as
+        'DEBUG' | 'INFO' | 'WARN' | 'ERROR'
+      const validSeverities = new Set(['DEBUG', 'INFO', 'WARN', 'ERROR'])
+      const safeSeverity = validSeverities.has(severity) ? severity : 'INFO'
+
+      const occurredAt = message.timestamp ? new Date(message.timestamp) : new Date()
+      const occurredAtSafe = isNaN(occurredAt.getTime()) ? new Date() : occurredAt
+
+      // executionId is best-effort: if the agent reports one but it doesn't
+      // exist in the DB (e.g. already deleted), persist with null instead of
+      // failing the whole insert.
+      let executionId: string | null = null
+      if (message.executionId) {
+        const exists = await this.prisma.scriptExecution.findUnique({
+          where: { id: message.executionId },
+          select: { id: true },
+        })
+        executionId = exists?.id ?? null
+      }
+
+      const created = await this.prisma.agentEvent.create({
+        data: {
+          machineId: vmId,
+          severity: safeSeverity,
+          source: (message.source || 'agent').slice(0, 64),
+          message: message.message || '',
+          executionId,
+          context: (message.context as any) ?? null,
+          occurredAt: occurredAtSafe,
+        },
+      })
+
+      if (safeSeverity === 'ERROR') {
+        this.debug.error(`🛰️ agent_event[${message.source}] vm=${vmId}: ${message.message}`)
+      } else if (safeSeverity === 'WARN') {
+        this.debug.warn(`🛰️ agent_event[${message.source}] vm=${vmId}: ${message.message}`)
+      } else {
+        this.debug.debug(`🛰️ agent_event[${message.source}] vm=${vmId}: ${message.message}`)
+      }
+
+      getEventManager().dispatchEvent('agentEvents', 'create', {
+        id: created.id,
+        machineId: vmId,
+        severity: safeSeverity,
+        source: created.source,
+        message: created.message,
+        executionId: created.executionId,
+        occurredAt: created.occurredAt.toISOString(),
+      })
+    } catch (err) {
+      this.debug.error(`Failed to persist agent_event from VM ${vmId}: ${(err as Error).message}`)
     }
   }
 

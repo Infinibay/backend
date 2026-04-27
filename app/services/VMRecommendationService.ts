@@ -39,6 +39,8 @@ export class VMRecommendationService {
   private isDisposed: boolean = false
   private packageManager: PackageManager | null = null
   private packageManagerInitialized: boolean = false
+  /** Promise that resolves when the PackageManager has finished loading. */
+  private packageManagerReady: Promise<void>
 
   constructor (private prisma: PrismaClient) {
     this.config = this.loadConfiguration()
@@ -48,8 +50,9 @@ export class VMRecommendationService {
     this.validateConfiguration()
     this.startMaintenanceTimer()
 
-    // Initialize package manager asynchronously
-    this.initializePackageManager()
+    // Initialize package manager asynchronously — store the promise so
+    // public methods can await it before accessing packageManager.
+    this.packageManagerReady = this.initializePackageManager()
 
     // Run initial maintenance on startup
     setTimeout(() => {
@@ -256,7 +259,8 @@ export class VMRecommendationService {
         }
       }
 
-      // Run package checkers (in addition to built-in checkers)
+      // Ensure package manager initialization is complete before checking it
+      await this.packageManagerReady
       if (this.packageManager && this.packageManagerInitialized) {
         const packageCheckerStartTime = Date.now()
         try {

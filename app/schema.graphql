@@ -741,6 +741,7 @@ enum GoldenImageStatus {
   BUILDING
   DEPRECATED
   DRAFT
+  FAILED
   PUBLISHED
 }
 
@@ -1284,6 +1285,11 @@ type Mutation {
 
   """Restore a virtual machine to a snapshot"""
   restoreSnapshot(input: RestoreSnapshotInput!): SuccessType!
+
+  """
+  Retry a failed golden image build. Only works for automated (template-based) builds.
+  """
+  retryBuildGoldenImage(id: ID!): GoldenImageResult!
 
   """Run Windows Defender quick scan on a VM"""
   runDefenderQuickScan(vmId: ID!): DefenderScanResult!
@@ -2122,6 +2128,7 @@ type ScriptType {
   hasInputs: Boolean!
   id: ID!
   inputCount: Int!
+  isSystem: Boolean!
   name: String!
   os: [OS!]!
   parsedInputs: [ScriptInputType!]!

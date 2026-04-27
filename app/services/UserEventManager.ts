@@ -16,7 +16,7 @@ export class UserEventManager extends BaseEventManager {
   // ============================================
 
   protected getResourceName (): string {
-    return 'user'
+    return 'users'
   }
 
   protected async fetchResourceData (userData: any): Promise<any | null> {

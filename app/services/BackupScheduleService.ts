@@ -222,7 +222,7 @@ export class BackupScheduleService {
       await this.prisma.backupSchedule.update({
         where: { id: schedule.id },
         data: { lastRunAt: new Date(), nextRunAt: this.computeNextRun(schedule.id) }
-      }).catch(() => {})
+      }).catch((dbErr: unknown) => logger.error(`Failed to update schedule ${schedule.id} after failed backup: ${dbErr instanceof Error ? dbErr.message : String(dbErr)}`))
     }
   }
 
@@ -264,7 +264,7 @@ export class BackupScheduleService {
       vmId: schedule.vmId,
       enabled: schedule.enabled,
       cronExpression: schedule.cronExpression
-    }, triggeredBy).catch(() => {})
+    }, triggeredBy).catch((err: unknown) => logger.error(`Failed to dispatch '${action}' event for schedule ${schedule.id}: ${err instanceof Error ? err.message : String(err)}`))
   }
 }
 

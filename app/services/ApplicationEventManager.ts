@@ -16,7 +16,7 @@ export class ApplicationEventManager extends BaseEventManager {
   // ============================================
 
   protected getResourceName (): string {
-    return 'application'
+    return 'applications'
   }
 
   protected async fetchResourceData (appData: any): Promise<any | null> {

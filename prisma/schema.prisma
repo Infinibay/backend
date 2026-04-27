@@ -111,8 +111,36 @@ model Machine {
   recommendations    VMRecommendation[]
   windowsServices    WindowsService[]
   scriptExecutions   ScriptExecution[]
+  agentEvents        AgentEvent[]
   backups            Backup[]
   backupSchedules    BackupSchedule[]
+}
+
+/// Structured event/log entry forwarded by the in-VM agent (infiniservice).
+/// Used to surface guest-side errors that previously only existed in agent logs.
+model AgentEvent {
+  id          String           @id @default(uuid())
+  machineId   String
+  severity    AgentEventSeverity
+  source      String
+  message     String           @db.Text
+  executionId String?
+  context     Json?
+  /// Timestamp claimed by the agent (may differ slightly from createdAt due to drift).
+  occurredAt  DateTime
+  createdAt   DateTime         @default(now())
+  machine     Machine          @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  execution   ScriptExecution? @relation(fields: [executionId], references: [id], onDelete: SetNull)
+
+  @@index([machineId, createdAt])
+  @@index([executionId])
+}
+
+enum AgentEventSeverity {
+  DEBUG
+  INFO
+  WARN
+  ERROR
 }
 
 model MachineConfiguration {
@@ -1043,6 +1071,7 @@ model ScriptExecution {
   script                Script          @relation(fields: [scriptId], references: [id], onDelete: Cascade)
   machine               Machine         @relation(fields: [machineId], references: [id], onDelete: Cascade)
   triggeredBy           User?           @relation(fields: [triggeredById], references: [id])
+  agentEvents           AgentEvent[]
 
   @@index([machineId, order])
   @@index([scriptId, createdAt])

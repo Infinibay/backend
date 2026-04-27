@@ -69,18 +69,21 @@ export class BackupService {
     if (infinization) {
       // Caller owns the infinization instance; we just wire events once.
       this.infinization = infinization
-      if (!this._progressWired) {
-        this.wireProgressEvents()
-        BackupService._progressWired = true
-      }
     } else {
       this.infinization = new InfinizationBackupService({ backupRootDir: this.backupRootDir })
+    }
+
+    // Wire progress events exactly once regardless of construction path.
+    // The check-then-set is synchronous within the Node.js event loop, so
+    // no two concurrent `new BackupService()` calls can both pass the guard.
+    if (!BackupService._progressWired) {
       this.wireProgressEvents()
+      BackupService._progressWired = true
     }
   }
 
   /** Prevent duplicate wiring of global progress events. */
-  private static _progressWired = false
+  static _progressWired = false
 
   /** Exposes the underlying infinization service so BackupScheduler can attach. */
   getInfinizationService (): InfinizationBackupService {
@@ -159,7 +162,7 @@ export class BackupService {
       }
     })
 
-    this.dispatch('started', pending, params.triggeredBy).catch(() => {})
+    this.dispatch('started', pending, params.triggeredBy).catch((err: unknown) => logger.error(`Failed to dispatch 'started' event for backup ${pending.id}: ${err instanceof Error ? err.message : String(err)}`))
 
     // Kick off the real work in the background so the GraphQL mutation
     // returns immediately. UI polls the row for progress/status.
@@ -209,7 +212,7 @@ export class BackupService {
       this.prisma.backup.update({
         where: { id: pendingId },
         data: { progressPercent: clamped }
-      }).catch(() => {})
+      }).catch((err: unknown) => logger.debug(`Failed to persist progress ${clamped}% for backup ${pendingId}: ${err instanceof Error ? err.message : String(err)}`))
     }
 
     const onProgress = (p: BackupProgress): void => {
@@ -288,7 +291,7 @@ export class BackupService {
             completedAt: new Date()
           }
         })
-        this.dispatch('failed', updated, triggeredBy).catch(() => {})
+        this.dispatch('failed', updated, triggeredBy).catch((err: unknown) => logger.error(`Failed to dispatch 'failed' event for backup ${pendingId}: ${err instanceof Error ? err.message : String(err)}`))
       } catch (dbErr) {
         logger.error(`failed to mark backup ${pendingId} as FAILED: ${dbErr instanceof Error ? dbErr.message : String(dbErr)}`)
       }
@@ -315,7 +318,7 @@ export class BackupService {
         }
       })
       this.dispatch(result.success ? 'completed' : 'failed', completed, triggeredBy)
-        .catch(() => {})
+        .catch((err: unknown) => logger.error(`Failed to dispatch '${result.success ? 'completed' : 'failed'}' event for backup ${pendingId}: ${err instanceof Error ? err.message : String(err)}`))
     } catch (dbErr) {
       logger.error(`failed to finalize backup ${pendingId}: ${dbErr instanceof Error ? dbErr.message : String(dbErr)}`)
     }
@@ -387,7 +390,7 @@ export class BackupService {
 
     await this.prisma.backup.delete({ where: { id: dbId } })
 
-    this.dispatch('delete', backup, triggeredBy).catch(() => {})
+    this.dispatch('delete', backup, triggeredBy).catch((err: unknown) => logger.error(`Failed to dispatch 'delete' event for backup ${dbId}: ${err instanceof Error ? err.message : String(err)}`))
   }
 
   /**
@@ -406,7 +409,7 @@ export class BackupService {
         diskProgress: progress.diskProgress,
         overallProgress: progress.overallProgress,
         estimatedTimeRemainingMs: progress.estimatedTimeRemainingMs
-      }).catch(() => {})
+      }).catch((err: unknown) => logger.warn(`Failed to dispatch progress event for backup ${progress.backupId}: ${err instanceof Error ? err.message : String(err)}`))
     })
   }
 

@@ -12,6 +12,7 @@ import type {
   FirewallEventMessage,
   ScriptCompletionMessage,
   RequestPendingScriptsMessage,
+  AgentEventMessage,
   CommandResponse,
 } from './types'
 
@@ -49,6 +50,9 @@ export interface MessageRouterDeps {
 
   /** Handle request for pending script executions */
   handleRequestPendingScripts: (vmId: string, msg: RequestPendingScriptsMessage, connection: VmConnection) => Promise<void>
+
+  /** Handle structured agent_event log/error forwarded by infiniservice */
+  handleAgentEvent: (vmId: string, message: AgentEventMessage) => Promise<void>
 }
 
 // ────────────────────────────────────────────────────────────────────────────────
@@ -66,6 +70,7 @@ export class MessageRouter {
   private readonly handleFirewallEvent: (vmId: string, message: FirewallEventMessage) => Promise<void>
   private readonly handleScriptCompletion: (vmId: string, message: ScriptCompletionMessage) => Promise<void>
   private readonly handleRequestPendingScripts: (vmId: string, msg: RequestPendingScriptsMessage, connection: VmConnection) => Promise<void>
+  private readonly handleAgentEvent: (vmId: string, message: AgentEventMessage) => Promise<void>
 
   constructor(deps: MessageRouterDeps) {
     this.debug = deps.debug
@@ -78,6 +83,7 @@ export class MessageRouter {
     this.handleFirewallEvent = deps.handleFirewallEvent
     this.handleScriptCompletion = deps.handleScriptCompletion
     this.handleRequestPendingScripts = deps.handleRequestPendingScripts
+    this.handleAgentEvent = deps.handleAgentEvent
   }
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -282,6 +288,12 @@ export class MessageRouter {
           // Handle request for pending script executions from InfiniService
           const requestMsg = message as RequestPendingScriptsMessage
           await this.handleRequestPendingScripts(connection.vmId, requestMsg, connection)
+          break
+
+        case 'agent_event':
+          // Structured log/error forwarded by infiniservice — persist + dispatch.
+          const agentEventMsg = message as AgentEventMessage
+          await this.handleAgentEvent(connection.vmId, agentEventMsg)
           break
 
         default:

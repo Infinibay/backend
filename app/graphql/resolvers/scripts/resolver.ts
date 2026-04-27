@@ -23,7 +23,7 @@ import {
   ScheduledScriptType,
   ScheduleType
 } from './type';
-import { InfinibayContext } from '../../../utils/context';
+import { InfinibayContext, requireUser } from '../../../utils/context';
 import { ExecutionStatus, ExecutionType } from '@prisma/client';
 
 // Helper function to extract request metadata
@@ -71,6 +71,7 @@ function normalizeScript(script: any): any {
     description: script.description ?? undefined,
     category: script.category ?? undefined,
     createdBy: script.createdBy ?? undefined,
+    isSystem: script.createdById == null,
   };
 }
 
@@ -94,6 +95,7 @@ export class ScriptResolver {
       hasInputs: false, // Will be computed when content is loaded
       inputCount: 0,    // Will be computed when content is loaded
       parsedInputs: [],
+      isSystem: (script as any).createdById == null,
       ...getScriptCounts(script as unknown as ScriptWithCount)
     }));
   }
@@ -113,6 +115,7 @@ export class ScriptResolver {
 
       return {
         ...script,
+        isSystem: (script as any).createdById == null,
         ...getScriptCounts(script as unknown as ScriptWithCount)
       };
     } catch (error) {
@@ -140,6 +143,7 @@ export class ScriptResolver {
       hasInputs: false,
       inputCount: 0,
       parsedInputs: [],
+      isSystem: (script as any).createdById == null,
       ...getScriptCounts(script as unknown as ScriptWithCount)
     }));
   }
@@ -454,6 +458,7 @@ export class ScriptResolver {
     @Ctx() ctx: InfinibayContext
   ): Promise<string[]> {
     // Initialize with Windows defaults (fallback)
+    const user = requireUser(ctx)
     let defaultUsers: string[] = ['administrator', 'system']
 
     try {
@@ -467,8 +472,8 @@ export class ScriptResolver {
         throw new Error('Machine not found')
       }
 
-      const isOwner = machine.userId === ctx.user!.id
-      const isAdmin = ctx.user!.role === 'ADMIN'
+      const isOwner = machine.userId === user.id
+      const isAdmin = user.role === 'ADMIN'
 
       if (!isOwner && !isAdmin) {
         throw new Error('Access denied')
@@ -523,11 +528,12 @@ export class ScriptResolver {
   ): Promise<ScriptResponseType> {
     try {
       const { ipAddress, userAgent } = extractRequestMetadata(ctx)
+      const user = requireUser(ctx)
       const scriptManager = new ScriptManager(ctx.prisma);
-      const script = await scriptManager.createScript(input, ctx.user!.id, ipAddress, userAgent);
+      const script = await scriptManager.createScript(input, user.id, ipAddress, userAgent);
 
       // Dispatch event for real-time updates
-      getEventManager().dispatchEvent('scripts', 'create', { id: script.id }, ctx.user!.id);
+      getEventManager().dispatchEvent('scripts', 'create', { id: script.id }, user.id);
 
       return {
         success: true,
@@ -536,7 +542,8 @@ export class ScriptResolver {
           ...script,
           hasInputs: false,
           inputCount: 0,
-          parsedInputs: []
+          parsedInputs: [],
+          isSystem: (script as any).createdById == null
         } as unknown as ScriptType
       };
     } catch (error) {
@@ -558,15 +565,16 @@ export class ScriptResolver {
   ): Promise<ScriptResponseType> {
     try {
       const { ipAddress, userAgent } = extractRequestMetadata(ctx)
+      const user = requireUser(ctx)
       const scriptManager = new ScriptManager(ctx.prisma);
       const { id, ...updateData } = input;
-      await scriptManager.updateScript(id, updateData, ctx.user!.id, ipAddress, userAgent);
+      await scriptManager.updateScript(id, updateData, user.id, ipAddress, userAgent);
 
       // Fetch the complete updated script with parsed inputs
       const updatedScript = await scriptManager.getScript(id);
 
       // Dispatch event for real-time updates
-      getEventManager().dispatchEvent('scripts', 'update', { id: updatedScript.id }, ctx.user!.id);
+      getEventManager().dispatchEvent('scripts', 'update', { id: updatedScript.id }, user.id);
 
       return {
         success: true,
@@ -596,6 +604,7 @@ export class ScriptResolver {
   ): Promise<ScriptResponseType> {
     try {
       // Check for active schedules before deletion
+      const user = requireUser(ctx)
       const scheduler = new ScriptScheduler(ctx.prisma);
       const activeSchedules = await scheduler.hasActiveSchedules(id);
 
@@ -623,7 +632,7 @@ export class ScriptResolver {
 
         // Cancel all active schedules
         for (const exec of executions) {
-          await scheduler.cancelScheduledScript(exec.id, ctx.user!.id);
+          await scheduler.cancelScheduledScript(exec.id, user.id);
         }
       }
 
@@ -632,7 +641,7 @@ export class ScriptResolver {
       await scriptManager.deleteScript(id, ipAddress, userAgent);
 
       // Dispatch event for real-time updates
-      getEventManager().dispatchEvent('scripts', 'delete', { id }, ctx.user!.id);
+      getEventManager().dispatchEvent('scripts', 'delete', { id }, user.id);
 
       return {
         success: true,
@@ -659,7 +668,8 @@ export class ScriptResolver {
     @Ctx() ctx: InfinibayContext
   ): Promise<boolean> {
     const scriptManager = new ScriptManager(ctx.prisma);
-    await scriptManager.assignScriptToDepartment(scriptId, departmentId, ctx.user!.id);
+    const user = requireUser(ctx)
+    await scriptManager.assignScriptToDepartment(scriptId, departmentId, user.id);
     return true;
   }
 
@@ -689,6 +699,7 @@ export class ScriptResolver {
   ): Promise<ScriptExecutionResponseType> {
     try {
       // Check user access to machine (owner or admin)
+      const user = requireUser(ctx)
       const machine = await ctx.prisma.machine.findUnique({
         where: { id: input.machineId },
         select: { userId: true, departmentId: true }
@@ -701,8 +712,8 @@ export class ScriptResolver {
         };
       }
 
-      const isOwner = machine.userId === ctx.user!.id;
-      const isAdmin = ctx.user!.role === 'ADMIN';
+      const isOwner = machine.userId === user.id;
+      const isAdmin = user.role === 'ADMIN';
 
       if (!isOwner && !isAdmin) {
         return {
@@ -742,7 +753,7 @@ export class ScriptResolver {
         machineId: input.machineId,
         inputValues: input.inputValues || {},
         executionType: ExecutionType.ON_DEMAND,
-        triggeredById: ctx.user!.id,
+        triggeredById: user.id,
         runAs: input.runAs,
         ipAddress,
         userAgent
@@ -814,6 +825,7 @@ export class ScriptResolver {
   ): Promise<ScriptExecutionResponseType> {
     try {
       // Query execution to check ownership
+      const user = requireUser(ctx)
       const execution = await ctx.prisma.scriptExecution.findUnique({
         where: { id },
         include: {
@@ -831,9 +843,9 @@ export class ScriptResolver {
       }
 
       // Check permissions: triggeredBy, machine owner, or admin
-      const isTriggeredBy = execution.triggeredById === ctx.user!.id;
-      const isOwner = execution.machine.userId === ctx.user!.id;
-      const isAdmin = ctx.user!.role === 'ADMIN';
+      const isTriggeredBy = execution.triggeredById === user.id;
+      const isOwner = execution.machine.userId === user.id;
+      const isAdmin = user.role === 'ADMIN';
 
       if (!isTriggeredBy && !isOwner && !isAdmin) {
         return {
@@ -970,6 +982,7 @@ export class ScriptResolver {
     @Arg('id', () => ID) id: string,
     @Ctx() ctx: InfinibayContext
   ): Promise<any | null> {
+    const user = requireUser(ctx)
     const execution = await ctx.prisma.scriptExecution.findUnique({
       where: { id },
       include: {
@@ -1010,9 +1023,9 @@ export class ScriptResolver {
     }
 
     // Check permissions: triggeredBy, machine owner, or admin
-    const isTriggeredBy = execution.triggeredById === ctx.user!.id;
-    const isOwner = execution.machine && execution.machine.userId === ctx.user!.id;
-    const isAdmin = ctx.user!.role === 'ADMIN' || ctx.user!.role === 'SUPER_ADMIN';
+    const isTriggeredBy = execution.triggeredById === user.id;
+    const isOwner = execution.machine && execution.machine.userId === user.id;
+    const isAdmin = user.role === 'ADMIN' || user.role === 'SUPER_ADMIN';
 
     if (!isTriggeredBy && !isOwner && !isAdmin) {
       return null;
@@ -1037,6 +1050,7 @@ export class ScriptResolver {
   ): Promise<ScheduleScriptResponseType> {
     try {
       // Validate input
+      const user = requireUser(ctx)
       if (!input.machineIds && !input.departmentId) {
         return {
           success: false,
@@ -1078,8 +1092,8 @@ export class ScriptResolver {
         };
       }
 
-      const isScriptCreator = script.createdById === ctx.user!.id;
-      const isAdmin = ctx.user!.role === 'ADMIN';
+      const isScriptCreator = script.createdById === user.id;
+      const isAdmin = user.role === 'ADMIN';
 
       // If departmentId provided, verify user has access to department
       if (input.departmentId) {
@@ -1124,7 +1138,7 @@ export class ScriptResolver {
 
         // Verify user owns all machines (unless admin)
         if (!isAdmin) {
-          const unauthorized = machines.some(m => m.userId !== ctx.user!.id);
+          const unauthorized = machines.some(m => m.userId !== user.id);
           if (unauthorized) {
             hasAccessToAllMachines = false;
             return {
@@ -1151,7 +1165,7 @@ export class ScriptResolver {
         scriptId: input.scriptId,
         scheduleType: 'immediate', // default, overridden below
         inputValues: input.inputValues || {},
-        userId: ctx.user!.id,
+        userId: user.id,
         runAs: input.runAs
       };
       // Map ScheduleType enum to scheduleType string
@@ -1255,6 +1269,7 @@ export class ScriptResolver {
   ): Promise<ScheduleScriptResponseType> {
     try {
       // Query existing execution to verify it exists and is PENDING
+      const user = requireUser(ctx)
       const execution = await ctx.prisma.scriptExecution.findUnique({
         where: { id: input.executionId },
         include: {
@@ -1279,9 +1294,9 @@ export class ScriptResolver {
       }
 
       // Verify user has permission (triggeredBy, machine owner, or admin)
-      const isTriggeredBy = execution.triggeredById === ctx.user!.id;
-      const isOwner = execution.machine.userId === ctx.user!.id;
-      const isAdmin = ctx.user!.role === 'ADMIN';
+      const isTriggeredBy = execution.triggeredById === user.id;
+      const isOwner = execution.machine.userId === user.id;
+      const isAdmin = user.role === 'ADMIN';
 
       if (!isTriggeredBy && !isOwner && !isAdmin) {
         return {
@@ -1294,7 +1309,7 @@ export class ScriptResolver {
       const scheduler = new ScriptScheduler(ctx.prisma);
 
       // Update the schedule
-      const result = await scheduler.updateScheduledScript(input.executionId, input, ctx.user!.id);
+      const result = await scheduler.updateScheduledScript(input.executionId, input, user.id);
 
       if (!result.success) {
         return {
@@ -1370,6 +1385,7 @@ export class ScriptResolver {
   ): Promise<ScheduleScriptResponseType> {
     try {
       // Query execution to verify exists and check permissions
+      const user = requireUser(ctx)
       const execution = await ctx.prisma.scriptExecution.findUnique({
         where: { id: executionId },
         include: {
@@ -1394,9 +1410,9 @@ export class ScriptResolver {
       }
 
       // Verify user has permission
-      const isTriggeredBy = execution.triggeredById === ctx.user!.id;
-      const isOwner = execution.machine.userId === ctx.user!.id;
-      const isAdmin = ctx.user!.role === 'ADMIN';
+      const isTriggeredBy = execution.triggeredById === user.id;
+      const isOwner = execution.machine.userId === user.id;
+      const isAdmin = user.role === 'ADMIN';
 
       if (!isTriggeredBy && !isOwner && !isAdmin) {
         return {
@@ -1409,7 +1425,7 @@ export class ScriptResolver {
       const scheduler = new ScriptScheduler(ctx.prisma);
 
       // Cancel the schedule
-      await scheduler.cancelScheduledScript(executionId, ctx.user!.id);
+      await scheduler.cancelScheduledScript(executionId, user.id);
 
       return {
         success: true,

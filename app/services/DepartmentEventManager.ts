@@ -16,7 +16,7 @@ export class DepartmentEventManager extends BaseEventManager {
   // ============================================
 
   protected getResourceName (): string {
-    return 'department'
+    return 'departments'
   }
 
   protected async fetchResourceData (deptData: any): Promise<any | null> {
