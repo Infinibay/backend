@@ -65,9 +65,22 @@ export class BackupService {
   constructor (prisma: PrismaClient, infinization?: InfinizationBackupService) {
     this.prisma = prisma
     this.backupRootDir = process.env.INFINIZATION_BACKUP_DIR ?? DEFAULT_BACKUP_DIR
-    this.infinization = infinization ?? new InfinizationBackupService({ backupRootDir: this.backupRootDir })
-    this.wireProgressEvents()
+
+    if (infinization) {
+      // Caller owns the infinization instance; we just wire events once.
+      this.infinization = infinization
+      if (!this._progressWired) {
+        this.wireProgressEvents()
+        BackupService._progressWired = true
+      }
+    } else {
+      this.infinization = new InfinizationBackupService({ backupRootDir: this.backupRootDir })
+      this.wireProgressEvents()
+    }
   }
+
+  /** Prevent duplicate wiring of global progress events. */
+  private static _progressWired = false
 
   /** Exposes the underlying infinization service so BackupScheduler can attach. */
   getInfinizationService (): InfinizationBackupService {
@@ -443,23 +456,32 @@ export class BackupService {
   }
 }
 
-function isNotFound (err: unknown): boolean {
-  if (err instanceof BackupError) return err.code === 'BACKUP_NOT_FOUND'
-  return false
-}
-
 // ---------------------------------------------------------------------------
 // Singleton accessor
 // ---------------------------------------------------------------------------
 
 let instance: BackupService | null = null
+let instancePrisma: PrismaClient | null = null
 
 export function getBackupService (prisma: PrismaClient): BackupService {
-  if (instance === null) instance = new BackupService(prisma)
+  // Return existing singleton only when the same PrismaClient is requested.
+  // This prevents accidentally sharing service state across different DB connections.
+  if (instance !== null && instancePrisma === prisma) {
+    return instance
+  }
+  instance = new BackupService(prisma)
+  instancePrisma = prisma
   return instance
 }
 
-/** For tests only. */
-export function setBackupServiceForTesting (svc: BackupService | null): void {
-  instance = svc
+/** For tests only. Resets the singleton so a fresh instance is created next call. */
+export function resetBackupService (): void {
+  instance = null
+  instancePrisma = null
+  BackupService._progressWired = false
+}
+
+function isNotFound (err: unknown): boolean {
+  if (err instanceof BackupError) return err.code === 'BACKUP_NOT_FOUND'
+  return false
 }

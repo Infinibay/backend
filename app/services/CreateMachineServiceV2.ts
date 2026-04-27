@@ -19,8 +19,8 @@
 
 import fs from 'fs'
 import path from 'path'
+import crypto from 'crypto'
 import si from 'systeminformation'
-import portfinder from 'portfinder'
 
 import { PrismaClient, Machine, MachineTemplate, MachineConfiguration, GoldenImage } from '@prisma/client'
 
@@ -597,9 +597,10 @@ export class CreateMachineServiceV2 {
 
   private generatePassword (length: number = 16): string {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
+    const randomBytes = crypto.randomBytes(length)
     let password = ''
     for (let i = 0; i < length; i++) {
-      password += chars.charAt(Math.floor(Math.random() * chars.length))
+      password += chars.charAt(randomBytes[i] % chars.length)
     }
     return password
   }
@@ -633,6 +634,51 @@ export class CreateMachineServiceV2 {
       await this.updateMachineStatus(machine.id, 'error')
     } catch {
       // Ignore status update errors during rollback
+    }
+
+    // Clean up disk files from the filesystem
+    try {
+      const config = await this.prisma.machineConfiguration.findUnique({
+        where: { machineId: machine.id }
+      })
+      if (config?.diskPaths) {
+        const diskPaths = config.diskPaths as string[]
+        for (const diskPath of diskPaths) {
+          try {
+            await fs.promises.unlink(diskPath)
+            this.debug.debug(`Rollback: deleted disk file ${diskPath}`)
+          } catch (err: any) {
+            if (err.code !== 'ENOENT') {
+              this.debug.warn(`Rollback: failed to delete disk file ${diskPath}: ${err.message}`)
+            }
+          }
+        }
+      }
+    } catch (err: any) {
+      this.debug.warn(`Rollback: failed to fetch machine configuration for disk cleanup: ${err.message}`)
+    }
+
+    // Clean up temporary unattended ISO files
+    try {
+      const tempIsoDir = process.env.INFINIBAY_ISO_TEMP_DIR ?? path.join('/opt', 'infinibay', 'iso', 'temp')
+      if (fs.existsSync(tempIsoDir)) {
+        const files = await fs.promises.readdir(tempIsoDir)
+        for (const file of files) {
+          if (file.startsWith(`unattended_${machine.id}_`) && file.endsWith('.iso')) {
+            const isoPath = path.join(tempIsoDir, file)
+            try {
+              await fs.promises.unlink(isoPath)
+              this.debug.debug(`Rollback: deleted temporary ISO ${isoPath}`)
+            } catch (err: any) {
+              if (err.code !== 'ENOENT') {
+                this.debug.warn(`Rollback: failed to delete ISO file ${isoPath}: ${err.message}`)
+              }
+            }
+          }
+        }
+      }
+    } catch (err: any) {
+      this.debug.warn(`Rollback: failed to clean up temporary ISO directory: ${err.message}`)
     }
 
     this.debug.debug('Rollback completed')
