@@ -2,6 +2,12 @@
 import logger from '@main/logger'
 import 'module-alias/register'
 
+// Global BigInt → JSON serialization. ISO.size and other Prisma BigInt fields
+// otherwise crash any logger / GraphQL response that hits JSON.stringify.
+;(BigInt.prototype as unknown as { toJSON(): string }).toJSON = function () {
+  return this.toString()
+}
+
 // External Libraries
 import express from 'express'
 import http from 'node:http'
@@ -156,6 +162,9 @@ async function bootstrap (): Promise<void> {
     const { RecommendationsEventManager } = await import('./services/RecommendationsEventManager')
     const recommendationsEventManager = new RecommendationsEventManager(socketService, prisma)
 
+    const { GoldenImageEventManager } = await import('./services/GoldenImageEventManager')
+    const goldenImageEventManager = new GoldenImageEventManager(socketService, prisma)
+
     eventManager.registerResourceManager('applications', applicationEventManager)
     eventManager.registerResourceManager('departments', departmentEventManager)
     eventManager.registerResourceManager('firewall', firewallEventManager)
@@ -165,6 +174,7 @@ async function bootstrap (): Promise<void> {
     eventManager.registerResourceManager('backups', backupsEventManager)
     eventManager.registerResourceManager('backup_schedules', backupSchedulesEventManager)
     eventManager.registerResourceManager('recommendations', recommendationsEventManager)
+    eventManager.registerResourceManager('golden_images', goldenImageEventManager)
 
     logger.info('🎯 Real-time event system initialized with all resource managers')
 

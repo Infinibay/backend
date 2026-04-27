@@ -1,0 +1,91 @@
+name: Apply Wallpaper and Power Plan (Linux)
+description: Applies the blueprint's wallpaper URL and power plan token on first boot. Reads WALLPAPER_URL and POWER_PLAN from inputValues. GNOME-based distros.
+author: Infinibay
+version: 1.0.0
+category: Golden Image
+tags:
+  - golden-image
+  - first-boot
+  - wallpaper
+  - power
+  - linux
+
+os:
+  - linux
+
+shell: bash
+
+inputs:
+  - name: WALLPAPER_URL
+    label: Wallpaper path or URL
+    type: string
+    required: false
+    default: ""
+  - name: POWER_PLAN
+    label: Power plan token
+    type: string
+    required: false
+    default: ""
+
+script: |
+  #!/usr/bin/env bash
+  set -u
+  WALLPAPER='${{ inputs.WALLPAPER_URL }}'
+  PLAN='${{ inputs.POWER_PLAN }}'
+
+  if [ -n "$WALLPAPER" ]; then
+    echo "[wallpaper] applying $WALLPAPER"
+    DEST=/var/lib/infinibay/wallpaper
+    sudo mkdir -p "$(dirname $DEST)"
+    if printf '%s' "$WALLPAPER" | grep -qE '^https?://'; then
+      sudo curl -fsSL -o "$DEST" "$WALLPAPER" || echo "[wallpaper] download failed"
+    else
+      sudo cp "$WALLPAPER" "$DEST" || echo "[wallpaper] copy failed"
+    fi
+
+    # Apply to every real user via gsettings (GNOME). Silent no-op on
+    # distros without gsettings.
+    if command -v gsettings >/dev/null 2>&1; then
+      for u in $(awk -F: '$3>=1000 && $1!="nobody" {print $1}' /etc/passwd); do
+        UID_NUM=$(id -u "$u")
+        sudo -u "$u" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${UID_NUM}/bus" \
+          gsettings set org.gnome.desktop.background picture-uri "file://${DEST}" 2>/dev/null || true
+        sudo -u "$u" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${UID_NUM}/bus" \
+          gsettings set org.gnome.desktop.background picture-uri-dark "file://${DEST}" 2>/dev/null || true
+        sudo -u "$u" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${UID_NUM}/bus" \
+          gsettings set org.gnome.desktop.background picture-options 'zoom' 2>/dev/null || true
+      done
+    fi
+  else
+    echo "[wallpaper] not set (WALLPAPER_URL empty)"
+  fi
+
+  case "$PLAN" in
+    high-performance) TARGET=performance ;;
+    power-saver)      TARGET=power-saver ;;
+    balanced)         TARGET=balanced ;;
+    *)                TARGET='' ;;
+  esac
+  if [ -n "$TARGET" ]; then
+    # Prefer power-profiles-daemon (Fedora/Ubuntu default since ~22.04).
+    if command -v powerprofilesctl >/dev/null 2>&1; then
+      echo "[power] setting power-profile to $TARGET"
+      sudo powerprofilesctl set "$TARGET" || true
+    elif command -v tuned-adm >/dev/null 2>&1; then
+      case "$TARGET" in
+        performance) T=throughput-performance ;;
+        power-saver) T=powersave ;;
+        *)           T=balanced ;;
+      esac
+      echo "[power] setting tuned profile to $T"
+      sudo tuned-adm profile "$T" || true
+    else
+      echo "[power] no known power daemon present; skipping"
+    fi
+  else
+    echo "[power] not set (POWER_PLAN empty or unknown)"
+  fi
+
+execution:
+  timeout: 180
+  run_as: system

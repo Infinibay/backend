@@ -28,6 +28,8 @@ import { AppSettingsResolver } from './AppSettingsResolver'
 import { FirewallResolver } from './firewall/resolver'
 import { ScriptResolver } from './scripts/resolver'
 import { PluginPackageResolver } from './plugin-package'
+import { GoldenImageResolver } from './goldenImage/resolver'
+import { PoolResolver } from './pool/resolver'
 
 const resolvers: NonEmptyArray<Function> = [
   UserResolver,
@@ -57,7 +59,9 @@ const resolvers: NonEmptyArray<Function> = [
   AppSettingsResolver,
   FirewallResolver,
   ScriptResolver,
-  PluginPackageResolver
+  PluginPackageResolver,
+  GoldenImageResolver,
+  PoolResolver
 ]
 
 export default resolvers as NonEmptyArray<Function>

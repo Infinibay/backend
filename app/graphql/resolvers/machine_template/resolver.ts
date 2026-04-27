@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client'
+import { PrismaClient, Prisma } from '@prisma/client'
 import {
   Arg,
   Authorized,
@@ -45,7 +45,11 @@ export class MachineTemplateResolver implements MachineTemplateResolverInterface
   ): Promise<MachineTemplateType | null> {
     const machineTemplate = await ctx.prisma.machineTemplate.findUnique({
       where: { id },
-      include: { category: true }
+      include: {
+        category: true,
+        applications: { include: { application: true } },
+        scripts: { include: { script: true }, orderBy: { order: 'asc' } }
+      }
     })
     // we need to count the number of machines using this template
     const totalMachines = await ctx.prisma.machine.count({
@@ -54,7 +58,18 @@ export class MachineTemplateResolver implements MachineTemplateResolverInterface
     if (!machineTemplate) return null
     const response : MachineTemplateType = {
       ...machineTemplate,
-      totalMachines
+      totalMachines,
+      applications: machineTemplate.applications.map((link) => ({
+        applicationId: link.applicationId,
+        name: link.application.name,
+        parameters: (link.parameters as Record<string, unknown> | null) ?? undefined
+      })),
+      scripts: machineTemplate.scripts.map((link) => ({
+        scriptId: link.scriptId,
+        name: link.script.name,
+        order: link.order,
+        inputValues: (link.inputValues as Record<string, unknown> | null) ?? undefined
+      }))
     }
     return response
   }
@@ -83,7 +98,11 @@ export class MachineTemplateResolver implements MachineTemplateResolverInterface
       orderBy: order,
       skip,
       take,
-      include: { category: true }
+      include: {
+        category: true,
+        applications: { include: { application: true } },
+        scripts: { include: { script: true }, orderBy: { order: 'asc' } }
+      }
     })
 
     // Get the count of machines for each template
@@ -94,7 +113,18 @@ export class MachineTemplateResolver implements MachineTemplateResolverInterface
         })
         return {
           ...template,
-          totalMachines
+          totalMachines,
+          applications: template.applications.map((link) => ({
+            applicationId: link.applicationId,
+            name: link.application.name,
+            parameters: (link.parameters as Record<string, unknown> | null) ?? undefined
+          })),
+          scripts: template.scripts.map((link) => ({
+            scriptId: link.scriptId,
+            name: link.script.name,
+            order: link.order,
+            inputValues: (link.inputValues as Record<string, unknown> | null) ?? undefined
+          }))
         }
       })
     )
@@ -150,7 +180,28 @@ export class MachineTemplateResolver implements MachineTemplateResolverInterface
         cores: input.cores,
         ram: input.ram,
         storage: input.storage,
-        categoryId: input.categoryId
+        categoryId: input.categoryId,
+        osType: input.osType ?? null,
+        wallpaperUrl: input.wallpaperUrl ?? null,
+        powerPlan: input.powerPlan ?? null,
+        encryptDisk: input.encryptDisk ?? false,
+        applications: input.applications && input.applications.length > 0
+          ? {
+              create: input.applications.map((a) => ({
+                applicationId: a.applicationId,
+                parameters: (a.parameters ?? Prisma.JsonNull) as Prisma.InputJsonValue
+              }))
+            }
+          : undefined,
+        scripts: input.scripts && input.scripts.length > 0
+          ? {
+              create: input.scripts.map((s, i) => ({
+                scriptId: s.scriptId,
+                order: s.order ?? i,
+                inputValues: (s.inputValues ?? Prisma.JsonNull) as Prisma.InputJsonValue
+              }))
+            }
+          : undefined
       },
       include: { category: true }
     })
@@ -213,17 +264,49 @@ export class MachineTemplateResolver implements MachineTemplateResolverInterface
   }
 
   updateMachineTemplateInDb = async (prisma: PrismaClient, id: string, input: MachineTemplateInputType): Promise<MachineTemplateType> => {
-    return await prisma.machineTemplate.update({
-      where: { id },
-      data: {
-        name: input.name,
-        description: input.description,
-        cores: input.cores,
-        ram: input.ram,
-        storage: input.storage,
-        categoryId: input.categoryId
-      },
-      include: { category: true }
+    // Joins are updated via replace semantics — the GraphQL input is the
+    // source of truth for the whole set of apps/scripts, so we wipe and
+    // re-create inside a transaction.
+    return await prisma.$transaction(async (tx) => {
+      if (input.applications !== undefined) {
+        await tx.machineTemplateApplication.deleteMany({ where: { templateId: id } })
+        if (input.applications.length > 0) {
+          await tx.machineTemplateApplication.createMany({
+            data: input.applications.map((a) => ({
+              templateId: id,
+              applicationId: a.applicationId,
+              parameters: (a.parameters ?? Prisma.JsonNull) as Prisma.InputJsonValue
+            }))
+          })
+        }
+      }
+      if (input.scripts !== undefined) {
+        await tx.machineTemplateScript.deleteMany({ where: { templateId: id } })
+        if (input.scripts.length > 0) {
+          await tx.machineTemplateScript.createMany({
+            data: input.scripts.map((s, i) => ({
+              templateId: id,
+              scriptId: s.scriptId,
+              order: s.order ?? i,
+              inputValues: (s.inputValues ?? Prisma.JsonNull) as Prisma.InputJsonValue
+            }))
+          })
+        }
+      }
+      return await tx.machineTemplate.update({
+        where: { id },
+        data: {
+          name: input.name,
+          description: input.description,
+          cores: input.cores,
+          ram: input.ram,
+          storage: input.storage,
+          categoryId: input.categoryId,
+          wallpaperUrl: input.wallpaperUrl ?? null,
+          powerPlan: input.powerPlan ?? null
+        },
+        include: { category: true }
+      })
     })
   }
 

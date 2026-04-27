@@ -120,7 +120,7 @@ export function createMockDepartment (overrides?: Partial<Department>): Departme
     internetSpeed: overrides?.internetSpeed ?? 100,
     ipSubnet: overrides?.ipSubnet ?? '192.168.1.0/24',
     firewallRuleSetId: overrides?.firewallRuleSetId || null,
-    bridgeName: overrides?.bridgeName || null,
+    bridgeName: overrides?.bridgeName ?? 'br-mock',
     gatewayIP: overrides?.gatewayIP || null,
     dhcpRangeStart: overrides?.dhcpRangeStart || null,
     dhcpRangeEnd: overrides?.dhcpRangeEnd || null,
@@ -187,7 +187,8 @@ export function createMockMachine (overrides?: Partial<Machine>): Machine {
     localIP: overrides?.localIP || null,
     publicIP: overrides?.publicIP || null,
     firewallRuleSetId: overrides?.firewallRuleSetId || null,
-    version: overrides?.version || 1
+    version: overrides?.version || 1,
+    poolId: overrides?.poolId ?? null
   }
 }
 

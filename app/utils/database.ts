@@ -62,22 +62,36 @@ if (process.env.NODE_ENV !== 'production') {
   globalThis.prisma = prisma
 }
 
-// Graceful shutdown
-process.on('beforeExit', async () => {
-  logger.info('Disconnecting from database...')
-  await prisma.$disconnect()
+// Graceful shutdown — guarded against reentry. Awaiting inside a
+// `beforeExit` handler schedules async work that keeps the event loop
+// alive, causing `beforeExit` to fire again on the next tick. Without a
+// once-flag this becomes an infinite "Disconnecting from database..."
+// loop (see Node.js docs on the beforeExit/exit lifecycle).
+let disconnecting = false
+const disconnect = async (reason: string): Promise<void> => {
+  if (disconnecting) return
+  disconnecting = true
+  logger.info(`${reason}, disconnecting from database...`)
+  try {
+    await prisma.$disconnect()
+  } catch (err) {
+    logger.error('Error during prisma.$disconnect():', err)
+  }
+}
+
+process.on('beforeExit', () => {
+  // Intentionally fire-and-forget — beforeExit must not reschedule
+  // async work onto the event loop.
+  void disconnect('process exiting')
 })
 
-// Handle termination signals
 process.on('SIGINT', async () => {
-  logger.info('SIGINT received, disconnecting from database...')
-  await prisma.$disconnect()
+  await disconnect('SIGINT received')
   process.exit(0)
 })
 
 process.on('SIGTERM', async () => {
-  logger.info('SIGTERM received, disconnecting from database...')
-  await prisma.$disconnect()
+  await disconnect('SIGTERM received')
   process.exit(0)
 })
 

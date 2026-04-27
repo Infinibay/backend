@@ -402,9 +402,13 @@ class SystemReset {
       const backendDir = path.resolve(__dirname, '..')
 
       this.logVerbose('Running prisma migrate reset...')
+      // Always inherit stdio — the seed output is large enough to blow
+      // past execSync's default 1MB maxBuffer in 'pipe' mode (ENOBUFS).
+      // Inheriting also gives the operator visible progress during the
+      // reset, which is what they want during a destructive op.
       execSync('npx prisma migrate reset --force', {
         cwd: backendDir,
-        stdio: this.options.verbose ? 'inherit' : 'pipe',
+        stdio: 'inherit',
         env: { ...process.env, FORCE_COLOR: '1' }
       })
 

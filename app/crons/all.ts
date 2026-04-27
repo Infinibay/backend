@@ -1,5 +1,6 @@
 import UpdateVmStatusJob from './UpdateVmStatus'
 import UpdateGraphicsInformationJob from './UpdateGraphicsInformation'
+import PoolRefillJob from './PoolRefill'
 import { createProcessHealthQueueJob } from './ProcessHealthQueue'
 import { createScheduleOverallScansJob } from './ScheduleOverallScans'
 import { createMetricsWatchdogJob } from './MetricsWatchdog'
@@ -16,6 +17,7 @@ export interface CronHandles {
 export async function startCrons (): Promise<CronHandles> {
   UpdateVmStatusJob.start()
   UpdateGraphicsInformationJob.start()
+  PoolRefillJob.start()
 
   // Start health monitoring cron jobs
   const eventManager = getEventManager()
@@ -46,6 +48,7 @@ export async function startCrons (): Promise<CronHandles> {
     stop: () => {
       UpdateVmStatusJob.stop()
       UpdateGraphicsInformationJob.stop()
+      PoolRefillJob.stop()
       processHealthQueueJob.stop()
       scheduleOverallScansJob.stop()
       metricsWatchdogJob.stop()

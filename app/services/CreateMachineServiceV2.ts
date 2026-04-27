@@ -22,7 +22,9 @@ import path from 'path'
 import si from 'systeminformation'
 import portfinder from 'portfinder'
 
-import { PrismaClient, Machine, MachineTemplate, MachineConfiguration } from '@prisma/client'
+import { PrismaClient, Machine, MachineTemplate, MachineConfiguration, GoldenImage } from '@prisma/client'
+
+type TemplateWithGoldenImage = MachineTemplate & { goldenImage: GoldenImage | null }
 import {
   VMCreateConfig,
   DiskConfig
@@ -92,6 +94,7 @@ export class CreateMachineServiceV2 {
     try {
       // Validate preconditions
       this.validatePreconditions(machine)
+      this.validateGpuPassthrough(pciBus)
 
       // Fetch related data
       const template = await this.fetchMachineTemplate(machine)
@@ -181,12 +184,70 @@ export class CreateMachineServiceV2 {
     }
   }
 
-  private async fetchMachineTemplate (machine: Machine): Promise<MachineTemplate | null> {
+  /**
+   * Pre-flight check for GPU passthrough. QEMU's `-device vfio-pci,host=...`
+   * fails with a cryptic "Could not open /dev/vfio/N" if the device isn't bound
+   * to vfio-pci. Catch that here with an actionable message instead.
+   *
+   * Verifies:
+   *  - IOMMU is enabled (the device has an iommu_group symlink)
+   *  - The host kernel exposes /dev/vfio/<group>
+   *  - The device's current driver is vfio-pci (not nvidia, amdgpu, etc.)
+   */
+  private validateGpuPassthrough (pciBus: string | null): void {
+    if (!pciBus) return
+
+    // Normalize to the sysfs form: lower-case, with 0000: domain prefix.
+    const addr = pciBus.toLowerCase().includes(':')
+      ? pciBus.toLowerCase()
+      : `0000:${pciBus.toLowerCase()}`
+    const sysDevice = `/sys/bus/pci/devices/${addr}`
+
+    if (!fs.existsSync(sysDevice)) {
+      throw new Error(
+        `GPU ${pciBus} not found on host (no ${sysDevice}). ` +
+        'The PCI address may be stale; refresh the GPU list and pick again.'
+      )
+    }
+
+    // iommu_group is a symlink → /sys/kernel/iommu_groups/<N>
+    const iommuLink = path.join(sysDevice, 'iommu_group')
+    if (!fs.existsSync(iommuLink)) {
+      throw new Error(
+        `IOMMU is not enabled for GPU ${pciBus}. ` +
+        'Enable VT-d/AMD-Vi in BIOS and add intel_iommu=on (or amd_iommu=on) to the kernel cmdline.'
+      )
+    }
+    const groupId = path.basename(fs.readlinkSync(iommuLink))
+    const vfioGroupNode = `/dev/vfio/${groupId}`
+    if (!fs.existsSync(vfioGroupNode)) {
+      throw new Error(
+        `GPU ${pciBus} is in IOMMU group ${groupId} but ${vfioGroupNode} doesn't exist. ` +
+        'Bind the device (and every other device in the same IOMMU group) to vfio-pci before retrying.'
+      )
+    }
+
+    // Confirm the device itself is bound to vfio-pci (not nvidia/amdgpu/etc).
+    const driverLink = path.join(sysDevice, 'driver')
+    let currentDriver: string | null = null
+    if (fs.existsSync(driverLink)) {
+      currentDriver = path.basename(fs.readlinkSync(driverLink))
+    }
+    if (currentDriver !== 'vfio-pci') {
+      throw new Error(
+        `GPU ${pciBus} is bound to "${currentDriver ?? 'no driver'}", not vfio-pci. ` +
+        'Unbind the host driver and bind to vfio-pci, or pick "No GPU" in the create wizard.'
+      )
+    }
+  }
+
+  private async fetchMachineTemplate (machine: Machine): Promise<TemplateWithGoldenImage | null> {
     if (!machine.templateId) {
       return null
     }
     const template = await this.prisma.machineTemplate.findUnique({
-      where: { id: machine.templateId }
+      where: { id: machine.templateId },
+      include: { goldenImage: true }
     })
     if (!template) {
       throw new Error(`Template not found for machine ${machine.name}`)
@@ -239,7 +300,7 @@ export class CreateMachineServiceV2 {
    */
   private async buildVMConfig (
     machine: Machine,
-    template: MachineTemplate | null,
+    template: TemplateWithGoldenImage | null,
     configuration: MachineConfiguration,
     username: string,
     password: string,
@@ -255,67 +316,92 @@ export class CreateMachineServiceV2 {
     const ramGB = template ? template.ram : machine.ramGB
     const cpuCores = template ? template.cores : machine.cpuCores
     const diskSizeGB = template ? template.storage : machine.diskSizeGB
+    // Blueprint-level OS wins when set — blueprints created from the
+    // new UI have osType required. For back-compat, legacy blueprints
+    // without osType fall through to the per-VM value.
+    const effectiveOs = template?.osType ?? machine.os
+
+    // Linked-clone fast path: when the template references a sealed golden
+    // image, new VMs are thin clones backed by that image. Skip the
+    // unattended-install ISO pipeline entirely — the OS is already inside
+    // the base disk.
+    const goldenImage = template?.goldenImage ?? null
+    const useLinkedClone = Boolean(goldenImage)
 
     // Get network bridge from the department
     // Each department has its own isolated bridge with DHCP and NAT
     // validatePreconditions() already ensures machine.departmentId is valid
     const departmentBridge = await this.departmentNetworkService.getBridgeForDepartment(machine.departmentId!)
 
-    let bridge: string
-    if (departmentBridge) {
-      bridge = departmentBridge
-      this.debug.info(`Using bridge '${bridge}' (dept: ${machine.departmentId})`)
-    } else {
-      // Fallback to environment variables or default virbr0
-      bridge = process.env.LIBVIRT_BRIDGE_NAME ?? process.env.LIBVIRT_NETWORK_NAME ?? 'virbr0'
-      this.debug.warn(`Fallback to global bridge for dept ${machine.departmentId}`)
+    if (!departmentBridge) {
+      throw new Error(
+        `Department ${machine.departmentId} has no Linux bridge configured. ` +
+        'Run DepartmentNetworkService.configureNetwork() for it before creating VMs.'
+      )
     }
+    const bridge = departmentBridge
+    this.debug.info(`Using bridge '${bridge}' (dept: ${machine.departmentId})`)
 
     // Find available SPICE port
     const displayPort = await this.findAvailablePort(5900)
 
-    // Build disk configuration
+    // Build disk configuration. With a golden image, disk0 is a thin
+    // qcow2 clone that inherits its virtual size from the backing file;
+    // sizeGB is ignored by qemu-img create for backing chains.
     const disks: DiskConfig[] = [
       {
         sizeGB: diskSizeGB,
         format: 'qcow2',
-        discard: true
+        discard: true,
+        backingFile: goldenImage?.baseDiskPath
       }
     ]
 
-    // Get base ISO path for OS installation
-    const baseIsoPath = await this.getOSIsoPath(machine.os)
+    // ISO + unattended pipeline — skipped when linked-clone fast path is
+    // active (the OS is already inside the base disk).
+    let isoPath: string | undefined
+    let virtioDriversIso: string | undefined
 
-    // Generate unattended installation ISO using legacy managers
-    let isoPath = baseIsoPath
-    const unattendedManager = await this.createUnattendedManager(
-      machine,
-      username,
-      password,
-      productKey,
-      applications,
-      scripts,
-      locale,
-      keyboard,
-      timezone
-    )
+    if (useLinkedClone) {
+      this.debug.info(
+        `Linked-clone fast path: backing=${goldenImage!.baseDiskPath} (golden image ${goldenImage!.id})`
+      )
+    } else {
+      // Get base ISO path for OS installation
+      const baseIsoPath = await this.getOSIsoPath(effectiveOs)
 
-    if (unattendedManager && baseIsoPath) {
-      this.debug.debug(`Generating unattended ISO for ${machine.os}`)
-      unattendedManager.isoPath = baseIsoPath
-      try {
-        isoPath = await unattendedManager.generateNewImage()
-        this.debug.debug(`Generated unattended ISO: ${isoPath}`)
-      } catch (error: any) {
-        this.debug.warn(`Failed to generate unattended ISO: ${error.message}`)
-        this.debug.warn('Falling back to base ISO (manual installation required)')
-        isoPath = baseIsoPath
+      // Generate unattended installation ISO using legacy managers
+      isoPath = baseIsoPath
+      const unattendedManager = await this.createUnattendedManager(
+        machine,
+        username,
+        password,
+        productKey,
+        applications,
+        scripts,
+        locale,
+        keyboard,
+        timezone,
+        effectiveOs
+      )
+
+      if (unattendedManager && baseIsoPath) {
+        this.debug.debug(`Generating unattended ISO for ${effectiveOs}`)
+        unattendedManager.isoPath = baseIsoPath
+        try {
+          isoPath = await unattendedManager.generateNewImage()
+          this.debug.debug(`Generated unattended ISO: ${isoPath}`)
+        } catch (error: any) {
+          this.debug.warn(`Failed to generate unattended ISO: ${error.message}`)
+          this.debug.warn('Falling back to base ISO (manual installation required)')
+          isoPath = baseIsoPath
+        }
       }
-    }
 
-    // Determine if Windows (for VirtIO drivers ISO)
-    const isWindows = machine.os.toLowerCase().includes('windows')
-    const virtioDriversIso = isWindows ? this.getVirtioDriversIsoPath() : undefined
+      // Determine if Windows (for VirtIO drivers ISO)
+      const isWindows = effectiveOs.toLowerCase().includes('windows')
+      virtioDriversIso = isWindows ? this.getVirtioDriversIsoPath() : undefined
+    }
 
     // Build base directories
     const socketDir = process.env.INFINIZATION_SOCKET_DIR ?? '/opt/infinibay/sockets'
@@ -328,7 +414,7 @@ export class CreateMachineServiceV2 {
       vmId: machine.id,
       name: machine.name,
       internalName: machine.internalName,
-      os: machine.os,
+      os: effectiveOs,
       cpuCores,
       ramGB,
       disks,
@@ -346,7 +432,7 @@ export class CreateMachineServiceV2 {
       networkQueues: 1,
 
       // UEFI for modern OS
-      uefiFirmware: this.getUefiFirmwarePath(machine.os),
+      uefiFirmware: this.getUefiFirmwarePath(effectiveOs),
 
       // ISO for installation (either base ISO or generated unattended ISO)
       isoPath,
@@ -361,7 +447,7 @@ export class CreateMachineServiceV2 {
       enableUsbTablet: true,
 
       // TPM for Windows 11
-      tpmSocketPath: machine.os.toLowerCase().includes('windows11')
+      tpmSocketPath: effectiveOs.toLowerCase().includes('windows11')
         ? path.join(socketDir, `${machine.internalName}-tpm.sock`)
         : undefined,
 
@@ -389,7 +475,8 @@ export class CreateMachineServiceV2 {
     scripts: any[],
     locale: string,
     keyboard: string,
-    timezone: string
+    timezone: string,
+    effectiveOs: string
   ): Promise<UnattendedManagerBase | null> {
     const osManagers: Record<string, () => UnattendedWindowsManager | UnattendedUbuntuManager | UnattendedRedHatManager> = {
       windows10: () => new UnattendedWindowsManager(10, username, password, productKey, applications, machine.id, scripts),
@@ -399,9 +486,9 @@ export class CreateMachineServiceV2 {
       redhat: () => new UnattendedRedHatManager(username, password, applications, machine.id, locale, keyboard, timezone)
     }
 
-    const managerCreator = osManagers[machine.os as keyof typeof osManagers]
+    const managerCreator = osManagers[effectiveOs as keyof typeof osManagers]
     if (!managerCreator) {
-      this.debug.warn(`No unattended manager for OS: ${machine.os}`)
+      this.debug.warn(`No unattended manager for OS: ${effectiveOs}`)
       return null
     }
 

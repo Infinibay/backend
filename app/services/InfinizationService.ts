@@ -174,6 +174,22 @@ function subscribeToVMEvents (infinization: Infinization): void {
         await eventManager.dispatchEvent('vms', action, vm)
         debug.debug(`Dispatched vms:${action} event for VM ${vm.name}`)
       }
+
+      // Non-persistent pool reset: when a pool-owned VM shuts down,
+      // wipe its qcow2 delta so the next connect sees the golden-
+      // image baseline. Fire-and-forget — failures shouldn't block
+      // other event handlers.
+      if (eventData.newStatus === 'off' && vm?.poolId) {
+        void (async () => {
+          try {
+            const { getNonPersistentResetService } = await import('./pool/NonPersistentResetService')
+            const resetService = getNonPersistentResetService(prisma)
+            await resetService.handleShutdown(eventData.vmId)
+          } catch (err) {
+            debug.warn(`Non-persistent reset failed for VM ${eventData.vmId}: ${(err as Error).message}`)
+          }
+        })()
+      }
     } catch (error) {
       debug.error(`Failed to dispatch event for VM ${eventData.vmId}: ${error}`)
     }

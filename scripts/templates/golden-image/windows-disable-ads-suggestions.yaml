@@ -1,0 +1,57 @@
+name: Disable Ads and Suggestions
+description: Disables Start menu suggestions, lock screen ads, "tips", tailored experiences, and consumer features that reinstall promoted apps.
+author: Infinibay
+version: 1.0.0
+category: Golden Image
+tags:
+  - golden-image
+  - hardening
+  - privacy
+  - windows
+  - ads
+
+os:
+  - windows
+
+shell: powershell
+
+script: |
+  $ErrorActionPreference = 'SilentlyContinue'
+
+  Write-Host "[ads] Machine-wide policy: disable consumer features and promoted apps"
+  $cc = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\CloudContent'
+  if (-not (Test-Path $cc)) { New-Item -Path $cc -Force | Out-Null }
+  New-ItemProperty -Path $cc -Name 'DisableWindowsConsumerFeatures'   -Value 1 -PropertyType DWORD -Force | Out-Null
+  New-ItemProperty -Path $cc -Name 'DisableSoftLanding'               -Value 1 -PropertyType DWORD -Force | Out-Null
+  New-ItemProperty -Path $cc -Name 'DisableThirdPartySuggestions'     -Value 1 -PropertyType DWORD -Force | Out-Null
+  New-ItemProperty -Path $cc -Name 'DisableWindowsSpotlightFeatures'  -Value 1 -PropertyType DWORD -Force | Out-Null
+
+  Write-Host "[ads] Default user hive: pre-seed suggestions-off for future profiles"
+  try {
+    $defaultNtuser = Join-Path $env:SystemDrive 'Users\Default\NTUSER.DAT'
+    if (Test-Path $defaultNtuser) {
+      reg load HKU\InfinibayDefault $defaultNtuser | Out-Null
+      $reg = 'Registry::HKEY_USERS\InfinibayDefault\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager'
+      if (-not (Test-Path $reg)) { New-Item -Path $reg -Force | Out-Null }
+      foreach ($k in @(
+        'ContentDeliveryAllowed','FeatureManagementEnabled','OemPreInstalledAppsEnabled',
+        'PreInstalledAppsEnabled','PreInstalledAppsEverEnabled','SilentInstalledAppsEnabled',
+        'SoftLandingEnabled','SubscribedContent-310093Enabled','SubscribedContent-338388Enabled',
+        'SubscribedContent-338389Enabled','SubscribedContent-338393Enabled','SubscribedContent-353694Enabled',
+        'SubscribedContent-353696Enabled','SystemPaneSuggestionsEnabled','RotatingLockScreenEnabled',
+        'RotatingLockScreenOverlayEnabled'
+      )) {
+        New-ItemProperty -Path $reg -Name $k -Value 0 -PropertyType DWORD -Force | Out-Null
+      }
+      [gc]::Collect()
+      reg unload HKU\InfinibayDefault | Out-Null
+    }
+  } catch {
+    try { reg unload HKU\InfinibayDefault | Out-Null } catch {}
+  }
+
+  Write-Host "[ads] Done."
+
+execution:
+  timeout: 120
+  run_as: system

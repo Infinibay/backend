@@ -1,0 +1,54 @@
+name: Disable Fedora Telemetry
+description: Disables geoclue, abrt, and related crash/analytics services on Fedora. Idempotent.
+author: Infinibay
+version: 1.0.0
+category: Golden Image
+tags:
+  - golden-image
+  - hardening
+  - privacy
+  - fedora
+  - telemetry
+
+os:
+  - linux
+
+shell: bash
+
+script: |
+  #!/usr/bin/env bash
+  set -u
+
+  disable_service() {
+    local svc="$1"
+    if systemctl list-unit-files 2>/dev/null | grep -qE "^${svc}\b"; then
+      echo "[telemetry] Disabling $svc"
+      sudo systemctl stop    "$svc" 2>/dev/null || true
+      sudo systemctl disable "$svc" 2>/dev/null || true
+      sudo systemctl mask    "$svc" 2>/dev/null || true
+    fi
+  }
+
+  # ABRT (Automatic Bug Reporting Tool)
+  disable_service abrtd.service
+  disable_service abrt-journal-core.service
+  disable_service abrt-oops.service
+  disable_service abrt-xorg.service
+  disable_service abrt-vmcore.service
+
+  # Geolocation
+  disable_service geoclue.service
+
+  # PackageKit background refreshes — heavy on VDI, not needed when
+  # updates are managed through Infinibay scripts.
+  disable_service packagekit.service
+  disable_service packagekit-offline-update.service
+
+  # GNOME initial-setup relics on cloned images
+  sudo rm -f /var/lib/gnome-initial-setup/*-done 2>/dev/null || true
+
+  echo "[telemetry] Done."
+
+execution:
+  timeout: 120
+  run_as: system

@@ -617,6 +617,16 @@ export class VMRecommendationService {
 
     // Use transaction for atomic bulk create
     return await this.prisma.$transaction(async (tx) => {
+      // Delete existing recommendations for this VM + snapshot before inserting new ones.
+      // This prevents duplicate entries when a VM is rescanned (e.g. new Edge update
+      // detected alongside stale entries from a previous scan).
+      await tx.vMRecommendation.deleteMany({
+        where: {
+          machineId: vmId,
+          ...(snapshotId ? { snapshotId } : {})
+        }
+      })
+
       // Bulk create
       await tx.vMRecommendation.createMany({
         data: bulkData,

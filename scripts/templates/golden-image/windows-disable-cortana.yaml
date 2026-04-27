@@ -1,0 +1,41 @@
+name: Disable Cortana
+description: Removes the Cortana AppX package (current user + provisioned) and sets policy keys that prevent its reinstallation.
+author: Infinibay
+version: 1.0.0
+category: Golden Image
+tags:
+  - golden-image
+  - hardening
+  - privacy
+  - windows
+  - cortana
+
+os:
+  - windows
+
+shell: powershell
+
+script: |
+  $ErrorActionPreference = 'SilentlyContinue'
+
+  Write-Host "[cortana] Removing AppX package"
+  Get-AppxPackage -AllUsers -Name 'Microsoft.549981C3F5F10' |
+    ForEach-Object { try { Remove-AppxPackage -Package $_.PackageFullName -AllUsers } catch {} }
+  Get-AppxProvisionedPackage -Online |
+    Where-Object DisplayName -eq 'Microsoft.549981C3F5F10' |
+    ForEach-Object { try { Remove-AppxProvisionedPackage -Online -PackageName $_.PackageName } catch {} }
+
+  Write-Host "[cortana] Applying policy keys"
+  $p = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\Windows Search'
+  if (-not (Test-Path $p)) { New-Item -Path $p -Force | Out-Null }
+  New-ItemProperty -Path $p -Name 'AllowCortana'              -Value 0 -PropertyType DWORD -Force | Out-Null
+  New-ItemProperty -Path $p -Name 'AllowCortanaAboveLock'     -Value 0 -PropertyType DWORD -Force | Out-Null
+  New-ItemProperty -Path $p -Name 'AllowSearchToUseLocation'  -Value 0 -PropertyType DWORD -Force | Out-Null
+  New-ItemProperty -Path $p -Name 'DisableWebSearch'          -Value 1 -PropertyType DWORD -Force | Out-Null
+  New-ItemProperty -Path $p -Name 'ConnectedSearchUseWeb'     -Value 0 -PropertyType DWORD -Force | Out-Null
+
+  Write-Host "[cortana] Done."
+
+execution:
+  timeout: 120
+  run_as: system

@@ -50,36 +50,30 @@ export class ISOService {
         const osType = this.extractOSType(filename)
 
         if (osType) {
-          // Check if ISO exists in database
-          const existingISO = await prisma.iSO.findUnique({
-            where: { filename }
+          // Upsert atomically — multiple callers may race on the same filename
+          // (e.g. syncISOsWithFileSystem + getAvailableISOs hitting checkSystemReadiness),
+          // and a findUnique→create pattern would trip the unique constraint.
+          const size = BigInt(stats.size)
+          const result = await prisma.iSO.upsert({
+            where: { filename },
+            create: {
+              filename,
+              os: osType,
+              size,
+              path: filePath,
+              isAvailable: true,
+              lastVerified: new Date()
+            },
+            update: {
+              lastVerified: new Date(),
+              isAvailable: true,
+              size
+            }
           })
-
-          if (!existingISO) {
-            // Add to database
-            const newISO = await prisma.iSO.create({
-              data: {
-                filename,
-                os: osType,
-                size: BigInt(stats.size),
-                path: filePath,
-                isAvailable: true,
-                lastVerified: new Date()
-              }
-            })
-            // Emit ISO registered event
-            this.eventManager.emitISORegistered(newISO)
-          } else {
-            // Update verification timestamp
-            // Update verification timestamp
-            await prisma.iSO.update({
-              where: { id: existingISO.id },
-              data: {
-                lastVerified: new Date(),
-                isAvailable: true,
-                size: BigInt(stats.size)
-              }
-            })
+          // Emit registered event only when the row was newly inserted.
+          // On a fresh insert createdAt === updatedAt; on update, updatedAt advances.
+          if (result.createdAt.getTime() === result.updatedAt.getTime()) {
+            this.eventManager.emitISORegistered(result)
           }
         }
       }

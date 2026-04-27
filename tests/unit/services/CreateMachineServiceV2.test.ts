@@ -91,6 +91,7 @@ function makeMachine(overrides?: Partial<Machine>): Machine {
     publicIP: null,
     firewallRuleSetId: null,
     version: 1,
+    poolId: null,
     ...overrides,
   }
 }

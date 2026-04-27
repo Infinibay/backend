@@ -1,0 +1,56 @@
+name: Disable Ubuntu Telemetry
+description: Disables apport (crash reporting), whoopsie (error submissions), and ubuntu-report (first-run popularity contest). Idempotent.
+author: Infinibay
+version: 1.0.0
+category: Golden Image
+tags:
+  - golden-image
+  - hardening
+  - privacy
+  - ubuntu
+  - telemetry
+
+os:
+  - linux
+
+shell: bash
+
+script: |
+  #!/usr/bin/env bash
+  set -u
+
+  disable_service() {
+    local svc="$1"
+    if systemctl list-unit-files 2>/dev/null | grep -qE "^${svc}\b"; then
+      echo "[telemetry] Disabling $svc"
+      sudo systemctl stop    "$svc" 2>/dev/null || true
+      sudo systemctl disable "$svc" 2>/dev/null || true
+      sudo systemctl mask    "$svc" 2>/dev/null || true
+    fi
+  }
+
+  disable_service apport.service
+  disable_service whoopsie.service
+  disable_service kerneloops.service
+
+  if [ -f /etc/default/apport ]; then
+    sudo sed -i 's/^enabled=.*/enabled=0/' /etc/default/apport
+  else
+    echo 'enabled=0' | sudo tee /etc/default/apport >/dev/null
+  fi
+
+  if command -v ubuntu-report >/dev/null 2>&1; then
+    echo "[telemetry] Opting out of ubuntu-report"
+    ubuntu-report send no --force 2>/dev/null || true
+  fi
+
+  # MOTD sponsored links
+  for f in /etc/update-motd.d/50-motd-news /etc/update-motd.d/91-contract-ua-esm-status; do
+    [ -f "$f" ] && sudo chmod -x "$f"
+  done
+
+  echo "[telemetry] Done."
+
+execution:
+  timeout: 120
+  run_as: system

@@ -1,0 +1,435 @@
+/**
+ * PoolService — lifecycle of VDI desktop pools.
+ *
+ * A pool groups N desktops backed by a single blueprint + golden image.
+ * This service owns provisioning (spawn linked clones up to sizeMin),
+ * scaling (reach an operator-set target), draining (freeze new
+ * connections), and deletion (archive every member then drop the row).
+ *
+ * Provisioning reuses the existing MachineLifecycleService pipeline —
+ * pool machines are normal Machine rows with `poolId` set. Because the
+ * blueprint carries a goldenImageId, CreateMachineServiceV2 takes the
+ * fast-path linked-clone route (5.A): no unattended ISO, thin qcow2
+ * clone of the sealed base, boot-time <30s.
+ *
+ * Refill is exposed as `runRefillTick()` — invoke it from a cron/queue
+ * at your desired cadence (typ. every minute). We deliberately don't
+ * ship a setInterval singleton here; the caller composes scheduling.
+ */
+
+import { Logger } from 'winston'
+import { PrismaClient, Pool, Machine } from '@prisma/client'
+import logger from '@main/logger'
+import { SafeUser } from '../utils/context'
+import { MachineLifecycleService } from './machineLifecycleService'
+import { MachineCleanupServiceV2 } from './cleanup/machineCleanupServiceV2'
+import { getEventManager, type EventAction } from './EventManager'
+import { OsEnum } from '../graphql/resolvers/machine/type'
+
+export interface CreatePoolInput {
+  name: string
+  templateId: string
+  goldenImageId?: string | null
+  departmentId: string
+  type?: 'persistent' | 'non-persistent'
+  sizeMin?: number
+  sizeMax?: number
+  idleTimeoutMinutes?: number | null
+  resetOnLogoff?: boolean
+}
+
+export interface UpdatePoolInput {
+  name?: string
+  sizeMin?: number
+  sizeMax?: number
+  idleTimeoutMinutes?: number | null
+  resetOnLogoff?: boolean
+  draining?: boolean
+}
+
+export class PoolService {
+  private prisma: PrismaClient
+  private user: SafeUser | null
+  private debug: Logger
+
+  constructor (prisma: PrismaClient, user: SafeUser | null = null) {
+    this.prisma = prisma
+    this.user = user
+    this.debug = logger.child({ module: 'pool-service' })
+  }
+
+  // -------------------------------------------------------------------
+  // Queries
+  // -------------------------------------------------------------------
+
+  async list (): Promise<Array<Pool & { currentSize: number }>> {
+    const pools = await this.prisma.pool.findMany({
+      orderBy: [{ departmentId: 'asc' }, { name: 'asc' }]
+    })
+    return await Promise.all(
+      pools.map(async (pool) => ({
+        ...pool,
+        currentSize: await this.prisma.machine.count({
+          where: { poolId: pool.id, status: { not: 'archived' } }
+        })
+      }))
+    )
+  }
+
+  async byId (id: string): Promise<(Pool & { currentSize: number }) | null> {
+    const pool = await this.prisma.pool.findUnique({ where: { id } })
+    if (!pool) return null
+    const currentSize = await this.prisma.machine.count({
+      where: { poolId: pool.id, status: { not: 'archived' } }
+    })
+    return { ...pool, currentSize }
+  }
+
+  // -------------------------------------------------------------------
+  // Create
+  // -------------------------------------------------------------------
+
+  async create (input: CreatePoolInput): Promise<Pool> {
+    const template = await this.prisma.machineTemplate.findUnique({
+      where: { id: input.templateId }
+    })
+    if (!template) throw new Error(`Template not found: ${input.templateId}`)
+
+    // If no explicit goldenImageId, inherit the template's — that's the
+    // usual path and what makes the fast-path linked clone possible.
+    const goldenImageId =
+      input.goldenImageId ?? template.goldenImageId ?? null
+    if (!goldenImageId) {
+      throw new Error(
+        'Pool requires a goldenImageId either on the input or on the blueprint. ' +
+        'Pools without a sealed base would pay the full install cost per VM.'
+      )
+    }
+
+    const image = await this.prisma.goldenImage.findUnique({
+      where: { id: goldenImageId }
+    })
+    if (!image) throw new Error(`Golden image not found: ${goldenImageId}`)
+
+    const sizeMin = input.sizeMin ?? 0
+    const sizeMax = input.sizeMax ?? 10
+    if (sizeMin > sizeMax) {
+      throw new Error('sizeMin cannot exceed sizeMax')
+    }
+
+    const pool = await this.prisma.pool.create({
+      data: {
+        name: input.name,
+        templateId: template.id,
+        goldenImageId,
+        departmentId: input.departmentId,
+        type: input.type ?? 'non-persistent',
+        sizeMin,
+        sizeMax,
+        idleTimeoutMinutes: input.idleTimeoutMinutes ?? null,
+        resetOnLogoff: input.resetOnLogoff ?? true
+      }
+    })
+
+    // Kick off the initial fill. Errors here are surfaced by the refill
+    // job later — we don't want to block the mutation on slow QEMU spawns.
+    void this.runRefillForPool(pool.id).catch((err) => {
+      this.debug.error(`initial refill for pool=${pool.id} failed: ${err?.message}`)
+    })
+
+    this.emit('create', pool)
+    return pool
+  }
+
+  // -------------------------------------------------------------------
+  // Scale / drain / update
+  // -------------------------------------------------------------------
+
+  async scale (id: string, targetSize: number): Promise<Pool> {
+    const pool = await this.prisma.pool.findUnique({ where: { id } })
+    if (!pool) throw new Error(`Pool not found: ${id}`)
+    if (targetSize < 0) throw new Error('targetSize cannot be negative')
+    if (targetSize > pool.sizeMax) {
+      throw new Error(`targetSize ${targetSize} exceeds pool.sizeMax ${pool.sizeMax}`)
+    }
+
+    const current = await this.prisma.machine.count({
+      where: { poolId: pool.id, status: { not: 'archived' } }
+    })
+
+    if (targetSize > current) {
+      const toAdd = targetSize - current
+      this.debug.info(`pool=${pool.id} scale up: +${toAdd} (current=${current} target=${targetSize})`)
+      for (let i = 0; i < toAdd; i++) {
+        await this.provisionOne(pool)
+      }
+    } else if (targetSize < current) {
+      const toRemove = current - targetSize
+      this.debug.info(`pool=${pool.id} scale down: -${toRemove} (current=${current} target=${targetSize})`)
+      const victims = await this.prisma.machine.findMany({
+        where: {
+          poolId: pool.id,
+          status: { notIn: ['archived', 'running'] }
+        },
+        orderBy: { createdAt: 'desc' },
+        take: toRemove
+      })
+      // Fallback to running machines if off/stopped pool is empty — scale
+      // down must succeed even if it means taking a running one down.
+      const ids = victims.map((v) => v.id)
+      if (ids.length < toRemove) {
+        const extra = await this.prisma.machine.findMany({
+          where: {
+            poolId: pool.id,
+            status: 'running',
+            id: { notIn: ids }
+          },
+          orderBy: { createdAt: 'desc' },
+          take: toRemove - ids.length
+        })
+        ids.push(...extra.map((v) => v.id))
+      }
+      for (const mid of ids) {
+        await this.archiveMachine(mid)
+      }
+    }
+
+    this.emit('scale', pool, { targetSize })
+    return pool
+  }
+
+  async update (id: string, input: UpdatePoolInput): Promise<Pool> {
+    const pool = await this.prisma.pool.update({
+      where: { id },
+      data: {
+        name: input.name,
+        sizeMin: input.sizeMin,
+        sizeMax: input.sizeMax,
+        idleTimeoutMinutes: input.idleTimeoutMinutes,
+        resetOnLogoff: input.resetOnLogoff,
+        draining: input.draining
+      }
+    })
+    this.emit('update', pool)
+    return pool
+  }
+
+  async drain (id: string): Promise<Pool> {
+    return await this.update(id, { draining: true })
+  }
+
+  async undrain (id: string): Promise<Pool> {
+    return await this.update(id, { draining: false })
+  }
+
+  async delete (id: string): Promise<boolean> {
+    const machines = await this.prisma.machine.findMany({
+      where: { poolId: id, status: { not: 'archived' } }
+    })
+    for (const m of machines) {
+      await this.archiveMachine(m.id)
+    }
+    await this.prisma.pool.delete({ where: { id } })
+    const em = getEventManager()
+    await em.dispatchEvent?.('pools', 'delete', { id })
+    return true
+  }
+
+  // -------------------------------------------------------------------
+  // Refill job — caller composes scheduling
+  // -------------------------------------------------------------------
+
+  /**
+   * Iterate every non-draining pool and ensure `current >= sizeMin`.
+   * Caps per-pool spawns per tick so a single cron tick can't thunder-
+   * herd infinization with dozens of QEMU boots.
+   */
+  async runRefillTick (opts: { maxPerPoolPerTick?: number } = {}): Promise<void> {
+    const cap = opts.maxPerPoolPerTick ?? 3
+    const pools = await this.prisma.pool.findMany({ where: { draining: false } })
+    for (const pool of pools) {
+      try {
+        const current = await this.prisma.machine.count({
+          where: { poolId: pool.id, status: { not: 'archived' } }
+        })
+        if (current >= pool.sizeMin) continue
+        const toAdd = Math.min(pool.sizeMin - current, cap)
+        for (let i = 0; i < toAdd; i++) {
+          await this.provisionOne(pool)
+        }
+      } catch (err) {
+        this.debug.warn(`refill tick for pool=${pool.id} failed: ${(err as Error).message}`)
+      }
+    }
+  }
+
+  async runRefillForPool (poolId: string): Promise<void> {
+    const pool = await this.prisma.pool.findUnique({ where: { id: poolId } })
+    if (!pool || pool.draining) return
+    const current = await this.prisma.machine.count({
+      where: { poolId: pool.id, status: { not: 'archived' } }
+    })
+    const toAdd = Math.max(0, pool.sizeMin - current)
+    for (let i = 0; i < toAdd; i++) {
+      await this.provisionOne(pool)
+    }
+  }
+
+  // -------------------------------------------------------------------
+  // Connection routing (stub for 6.F; placed here so tests can exercise)
+  // -------------------------------------------------------------------
+
+  /**
+   * Find a desktop from the pool for the given user. For persistent
+   * pools: return the user's assigned machine if any. For non-
+   * persistent: any idle (stopped/off) machine. Spawns on-demand up to
+   * sizeMax when nothing idle is available.
+   */
+  async checkOutDesktopForUser (poolId: string, userId: string): Promise<Machine> {
+    const pool = await this.prisma.pool.findUnique({ where: { id: poolId } })
+    if (!pool) throw new Error(`Pool not found: ${poolId}`)
+    if (pool.draining) throw new Error('Pool is draining — no new connections')
+
+    if (pool.type === 'persistent') {
+      const assigned = await this.prisma.machine.findFirst({
+        where: { poolId, userId, status: { not: 'archived' } }
+      })
+      if (assigned) return assigned
+    }
+
+    // Try idle
+    const idle = await this.prisma.machine.findFirst({
+      where: {
+        poolId,
+        status: { in: ['off', 'stopped', 'paused'] },
+        ...(pool.type === 'persistent' ? { userId: null } : {})
+      },
+      orderBy: { createdAt: 'asc' }
+    })
+    if (idle) {
+      if (pool.type === 'persistent') {
+        await this.prisma.machine.update({
+          where: { id: idle.id },
+          data: { userId }
+        })
+      }
+      return idle
+    }
+
+    // Spawn on-demand
+    const current = await this.prisma.machine.count({
+      where: { poolId, status: { not: 'archived' } }
+    })
+    if (current >= pool.sizeMax) {
+      throw new Error('Pool at capacity — try again later or ask the operator to scale up')
+    }
+    return await this.provisionOne(pool, pool.type === 'persistent' ? userId : undefined)
+  }
+
+  // -------------------------------------------------------------------
+  // Internals
+  // -------------------------------------------------------------------
+
+  private async provisionOne (pool: Pool, assignedUserId?: string): Promise<Machine> {
+    const seq = await this.nextSeqFor(pool)
+    const name = `${pool.name}-${String(seq).padStart(3, '0')}`
+
+    const template = await this.prisma.machineTemplate.findUnique({
+      where: { id: pool.templateId }
+    })
+    if (!template) throw new Error(`Pool ${pool.id} references missing template`)
+
+    const lifecycleService = new MachineLifecycleService(this.prisma, this.user)
+
+    // Linked-clone fast path: the golden image has the OS + apps baked.
+    // username/password are unused by CreateMachineServiceV2 when
+    // `template.goldenImageId` is set (see 5.A). We pass placeholders.
+    const machine = await lifecycleService.createMachine({
+      name,
+      templateId: pool.templateId,
+      departmentId: pool.departmentId,
+      os: inferOsEnumFromTemplate(template) ?? OsEnum.UBUNTU,
+      username: 'infinibay',
+      password: generatePlaceholderPassword(),
+      applications: [],
+      firstBootScripts: [],
+      customCores: null,
+      customRam: null,
+      customStorage: null,
+      productKey: undefined,
+      pciBus: null,
+      locale: null,
+      keyboard: null,
+      timezone: null
+    } as any)
+
+    // Bind the new Machine to the pool + optional user.
+    await this.prisma.machine.update({
+      where: { id: machine.id },
+      data: {
+        poolId: pool.id,
+        userId: assignedUserId ?? machine.userId ?? null
+      }
+    })
+
+    this.emit('machine_provisioned', pool, { machineId: machine.id })
+    return machine
+  }
+
+  private async nextSeqFor (pool: Pool): Promise<number> {
+    // Sequential numbering by creation order. Race-tolerant enough
+    // because name collisions just produce a suffix-like duplicate,
+    // which Prisma will reject (no unique constraint on Machine.name
+    // today — worst case two VMs share a name, cosmetic not blocking).
+    return await this.prisma.machine.count({ where: { poolId: pool.id } }) + 1
+  }
+
+  private async archiveMachine (machineId: string): Promise<void> {
+    try {
+      const cleanup = new MachineCleanupServiceV2(this.prisma)
+      await cleanup.cleanupVM(machineId)
+    } catch (err) {
+      this.debug.warn(`archive machine=${machineId} cleanup failed: ${(err as Error).message}`)
+      // Fall back to a marker so the row doesn't keep the pool's
+      // accounting inflated.
+      try {
+        await this.prisma.machine.update({
+          where: { id: machineId },
+          data: { status: 'archived', poolId: null }
+        })
+      } catch { /* best effort */ }
+    }
+  }
+
+  private emit (action: string, pool: Pool, extra?: Record<string, unknown>): void {
+    const em = getEventManager()
+    // EventAction is a closed string union; pool-specific verbs (scale,
+    // machine_provisioned) map to the generic 'update' so we stay
+    // type-safe while still carrying intent in the payload.
+    const mapped: EventAction =
+      action === 'create' || action === 'update' || action === 'delete'
+        ? action
+        : 'update'
+    void em.dispatchEvent?.('pools', mapped, { ...pool, detail: action, ...extra })
+  }
+}
+
+// ---------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------
+
+function generatePlaceholderPassword (): string {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
+  let out = ''
+  for (let i = 0; i < 16; i++) out += chars.charAt(Math.floor(Math.random() * chars.length))
+  return out
+}
+
+function inferOsEnumFromTemplate (t: { name: string | null; description: string | null }): OsEnum | null {
+  const s = `${t.name ?? ''} ${t.description ?? ''}`.toLowerCase()
+  if (s.includes('windows 11') || s.includes('windows11') || s.includes('win11')) return OsEnum.WINDOWS11
+  if (s.includes('windows 10') || s.includes('windows10') || s.includes('win10')) return OsEnum.WINDOWS10
+  if (s.includes('ubuntu')) return OsEnum.UBUNTU
+  if (s.includes('fedora')) return OsEnum.FEDORA
+  return null
+}

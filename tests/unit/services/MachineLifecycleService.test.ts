@@ -80,6 +80,37 @@ describe('MachineLifecycleService', () => {
     service = new MachineLifecycleService(mockPrisma, mockUser)
   })
 
+  function createMockTx (overrides: Record<string, unknown> = {}) {
+    return {
+      department: {
+        findUnique: jest.fn().mockResolvedValue(null as never),
+        findFirst: jest.fn().mockResolvedValue(null as never)
+      },
+      machine: {
+        create: jest.fn().mockResolvedValue(null as never)
+      },
+      machineApplication: {
+        create: jest.fn()
+      },
+      machineTemplateApplication: {
+        findMany: jest.fn().mockResolvedValue([] as never)
+      },
+      machineTemplateScript: {
+        findMany: jest.fn().mockResolvedValue([] as never)
+      },
+      machineTemplate: {
+        findUnique: jest.fn().mockResolvedValue(null as never)
+      },
+      script: {
+        findUnique: jest.fn().mockResolvedValue(null as never)
+      },
+      scriptExecution: {
+        create: jest.fn().mockResolvedValue(null as never)
+      },
+      ...overrides
+    }
+  }
+
   describe('createMachine', () => {
     it('should create machine with custom hardware', async () => {
       const input: CreateMachineInputType = {
@@ -117,18 +148,15 @@ describe('MachineLifecycleService', () => {
 
       mockPrisma.$transaction.mockImplementation(async (fn: unknown) => {
         if (typeof fn === 'function') {
-          const tx = {
+          const tx = createMockTx({
             department: {
               findUnique: jest.fn().mockResolvedValue(mockDepartment as never),
               findFirst: jest.fn().mockResolvedValue(mockDepartment as never)
             },
             machine: {
               create: jest.fn().mockResolvedValue(mockMachine as never)
-            },
-            machineApplication: {
-              create: jest.fn()
             }
-          }
+          })
           return fn(tx as unknown as typeof mockPrisma)
         }
         return Promise.resolve([])
@@ -166,7 +194,8 @@ describe('MachineLifecycleService', () => {
 
       const mockDepartment = {
         id: 'dept-123',
-        name: 'Default Department'
+        name: 'Default Department',
+        bridgeName: 'br-mock'
       }
 
       const mockMachine = createMockMachine({
@@ -188,17 +217,14 @@ describe('MachineLifecycleService', () => {
 
       mockPrisma.$transaction.mockImplementation(async (fn: unknown) => {
         if (typeof fn === 'function') {
-          const tx = {
+          const tx = createMockTx({
             department: {
               findUnique: jest.fn().mockResolvedValue(mockDepartment as never)
             },
             machine: {
               create: jest.fn().mockResolvedValue(mockMachine as never)
-            },
-            machineApplication: {
-              create: jest.fn()
             }
-          }
+          })
           return fn(tx as unknown as typeof mockPrisma)
         }
         return Promise.resolve([])
@@ -268,18 +294,15 @@ describe('MachineLifecycleService', () => {
 
       mockPrisma.$transaction.mockImplementation(async (fn: unknown) => {
         if (typeof fn === 'function') {
-          const tx = {
+          const tx = createMockTx({
             department: {
               findUnique: jest.fn().mockResolvedValue(null as never),
               findFirst: jest.fn().mockResolvedValue(null as never)
             },
             machine: {
               create: jest.fn()
-            },
-            machineApplication: {
-              create: jest.fn()
             }
-          }
+          })
           return fn(tx as unknown as typeof mockPrisma)
         }
         return Promise.resolve([])
@@ -309,7 +332,8 @@ describe('MachineLifecycleService', () => {
 
       const mockDepartment = {
         id: 'dept-123',
-        name: 'Default Department'
+        name: 'Default Department',
+        bridgeName: 'br-mock'
       }
 
       const mockMachine = createMockMachine({
@@ -331,7 +355,7 @@ describe('MachineLifecycleService', () => {
 
       mockPrisma.$transaction.mockImplementation(async (fn: unknown) => {
         if (typeof fn === 'function') {
-          const tx = {
+          const tx = createMockTx({
             department: {
               findUnique: jest.fn().mockResolvedValue(mockDepartment as never),
               findFirst: jest.fn().mockResolvedValue(mockDepartment as never)
@@ -342,7 +366,7 @@ describe('MachineLifecycleService', () => {
             machineApplication: {
               create: createApplicationMock
             }
-          }
+          })
           return fn(tx as unknown as typeof mockPrisma)
         }
         return Promise.resolve([])

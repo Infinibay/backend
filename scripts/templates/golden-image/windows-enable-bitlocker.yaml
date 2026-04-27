@@ -1,0 +1,63 @@
+name: Enable BitLocker (Windows)
+description: "Enables BitLocker on C: using the TPM and a recovery password. Stores the recovery key at C:\\BitLockerRecoveryKey.txt (demo-grade escrow — replace with AD/Intune or an external vault for production)."
+author: Infinibay
+version: 1.0.0
+category: Golden Image
+tags:
+  - golden-image
+  - hardening
+  - encryption
+  - bitlocker
+  - windows
+
+os:
+  - windows
+
+shell: powershell
+
+script: |
+  $ErrorActionPreference = 'Stop'
+
+  # Preconditions: require TPM presence. BitLocker without TPM requires
+  # a startup key/password that doesn't fit a headless VDI desktop.
+  $tpm = Get-Tpm -ErrorAction SilentlyContinue
+  if (-not $tpm -or -not $tpm.TpmPresent) {
+    Write-Host '[bitlocker] no TPM available — skipping (document in pool notes)'
+    exit 0
+  }
+  if (-not $tpm.TpmReady) {
+    Write-Host '[bitlocker] TPM present but not ready — initializing'
+    try { Initialize-Tpm -AllowClear -AllowPhysicalPresence | Out-Null } catch { }
+  }
+
+  # If already encrypted, nothing to do — idempotent.
+  $status = Get-BitLockerVolume -MountPoint 'C:' -ErrorAction SilentlyContinue
+  if ($status -and $status.ProtectionStatus -eq 'On') {
+    Write-Host '[bitlocker] already protected — no-op'
+    exit 0
+  }
+
+  Write-Host '[bitlocker] adding TPM protector'
+  try { Add-BitLockerKeyProtector -MountPoint 'C:' -TpmProtector -ErrorAction SilentlyContinue } catch { }
+
+  Write-Host '[bitlocker] adding recovery password protector'
+  $recovery = Add-BitLockerKeyProtector -MountPoint 'C:' -RecoveryPasswordProtector
+
+  Write-Host '[bitlocker] enabling encryption (UsedSpaceOnly for speed)'
+  Enable-BitLocker -MountPoint 'C:' -EncryptionMethod XtsAes256 -UsedSpaceOnly -SkipHardwareTest -TpmProtector
+
+  # Escrow the recovery key to disk. This is demo-grade — production
+  # should push it to AD / Intune / an external key vault. The file is
+  # ACL-restricted to Administrators to reduce casual exposure.
+  $keyPath = 'C:\\BitLockerRecoveryKey.txt'
+  $keyData = $recovery.RecoveryPassword
+  Set-Content -Path $keyPath -Value $keyData -Encoding UTF8
+  icacls $keyPath /inheritance:r | Out-Null
+  icacls $keyPath /grant:r 'Administrators:F' | Out-Null
+  icacls $keyPath /grant:r 'SYSTEM:F' | Out-Null
+  Write-Host "[bitlocker] recovery key written to $keyPath"
+  Write-Host '[bitlocker] encryption started — progress visible via `manage-bde -status`'
+
+execution:
+  timeout: 600
+  run_as: system

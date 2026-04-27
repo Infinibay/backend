@@ -1,0 +1,25 @@
+name: Disk encryption notice (Linux — not applied)
+description: "Placeholder: full-disk encryption on Linux VMs requires LUKS at install time (preseed / cloud-init storage config), which isn't wired up yet. This script just records a notice in /var/log so operators know the blueprint's encryption flag was seen but not honored."
+author: Infinibay
+version: 1.0.0
+category: Golden Image
+tags:
+  - golden-image
+  - encryption
+  - linux
+  - placeholder
+
+os:
+  - linux
+
+shell: bash
+
+script: |
+  #!/usr/bin/env bash
+  msg="[infinibay] encryption requested by blueprint but NOT applied: LUKS must be configured at install time (preseed/cloud-init). This VM runs unencrypted."
+  echo "$msg" | sudo tee -a /var/log/infinibay-encryption-notice.log >/dev/null
+  echo "$msg"
+
+execution:
+  timeout: 30
+  run_as: system

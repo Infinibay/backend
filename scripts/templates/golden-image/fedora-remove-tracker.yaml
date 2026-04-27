@@ -1,0 +1,46 @@
+name: Disable Fedora Tracker (Indexer)
+description: Masks tracker3-miner-fs and tracker3-xdg-portal user units to stop the GNOME file indexer — a significant CPU/RAM drain on VDI desktops.
+author: Infinibay
+version: 1.0.0
+category: Golden Image
+tags:
+  - golden-image
+  - hardening
+  - performance
+  - fedora
+  - tracker
+
+os:
+  - linux
+
+shell: bash
+
+script: |
+  #!/usr/bin/env bash
+  set -u
+
+  if ! command -v tracker3 >/dev/null 2>&1; then
+    echo "[tracker] tracker3 not installed; nothing to do"
+    exit 0
+  fi
+
+  echo "[tracker] Stopping any running miners (per-user best effort)"
+  for u in $(awk -F: '$3>=1000 && $1!="nobody" {print $1}' /etc/passwd); do
+    sudo -u "$u" XDG_RUNTIME_DIR=/run/user/$(id -u "$u") tracker3 daemon --terminate 2>/dev/null || true
+  done
+
+  echo "[tracker] Masking user units globally"
+  sudo systemctl --global mask \
+    tracker-miner-fs-3.service \
+    tracker-xdg-portal-3.service \
+    tracker-extract-3.service 2>/dev/null || true
+
+  echo "[tracker] Dropping autostart entries"
+  sudo rm -f /etc/xdg/autostart/tracker-miner-fs-3.desktop 2>/dev/null || true
+  sudo rm -f /etc/xdg/autostart/tracker-miner-rss-3.desktop 2>/dev/null || true
+
+  echo "[tracker] Done."
+
+execution:
+  timeout: 120
+  run_as: system

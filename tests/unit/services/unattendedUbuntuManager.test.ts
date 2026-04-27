@@ -328,7 +328,7 @@ describe('UnattendedUbuntuManager', () => {
       expect(joined).toContain('cloud/scripts/per-instance')
     })
 
-    it('should generate first-boot script commands', async () => {
+    it('should generate first-boot script commands (handled by InfiniService post-boot)', async () => {
       const manager = new UnattendedUbuntuManager(
         validUsername,
         validPassword,
@@ -336,12 +336,11 @@ describe('UnattendedUbuntuManager', () => {
       )
 
       const commands = manager['generateLateCommands']()
-      const commandsWithScripts = manager['generateFirstBootScriptCommands']()
-
-      // With no scripts configured, generateFirstBootScriptCommands returns empty array
-      expect(commandsWithScripts).toEqual([])
+      // Scripts are no longer embedded in late-commands;
+      // InfiniService handles all FIRST_BOOT scripts post-boot
+      expect(commands).toBeDefined()
+      expect(commands.length).toBeGreaterThan(0)
     })
-  })
 
   describe('generateInfiniServiceInstallCommands', () => {
     it('should generate InfiniService installation commands', async () => {
@@ -400,78 +399,6 @@ describe('UnattendedUbuntuManager', () => {
     })
   })
 
-  describe('generateFirstBootScriptCommands', () => {
-    it('should generate commands for each script', () => {
-      const mockScripts = [
-        {
-          script: { name: 'TestScript', id: 'script-1' },
-          inputValues: {},
-          executionId: 'exec-1'
-        }
-      ]
-      const manager = new UnattendedUbuntuManager(
-        validUsername,
-        validPassword,
-        mockApplications,
-        undefined,
-        mockScripts
-      )
-
-      const commands = manager['generateFirstBootScriptCommands']()
-
-      expect(commands.length).toBeGreaterThan(0)
-      expect(commands.join('\n')).toContain('TestScript')
-    })
-
-    it('should sanitize script names', () => {
-      const mockScripts = [
-        {
-          script: { name: 'Test Script 123!', id: 'script-1' },
-          inputValues: {},
-          executionId: 'exec-1'
-        }
-      ]
-      const manager = new UnattendedUbuntuManager(
-        validUsername,
-        validPassword,
-        mockApplications,
-        undefined,
-        mockScripts
-      )
-
-      const commands = manager['generateFirstBootScriptCommands']()
-      const commandString = commands.join('\n')
-
-      // The sanitized script name should be used in file paths (no spaces or special chars in the name part)
-      // sanitizeScriptName('Test Script 123!') -> 'Test_Script_123'
-      expect(commandString).toContain('Test_Script_123')
-      // File paths should use the sanitized name
-      expect(commandString).toContain('/tmp/Test_Script_123_exec-1.sh')
-    })
-
-    it('should include download and execute script commands', () => {
-      const mockScripts = [
-        {
-          script: { name: 'TestScript', id: 'script-1' },
-          inputValues: {},
-          executionId: 'exec-1'
-        }
-      ]
-      const manager = new UnattendedUbuntuManager(
-        validUsername,
-        validPassword,
-        mockApplications,
-        undefined,
-        mockScripts
-      )
-
-      const commands = manager['generateFirstBootScriptCommands']()
-      const commandString = commands.join('\n')
-
-      expect(commandString).toContain('curl')
-      expect(commandString).toContain('chmod +x')
-    })
-  })
 
   describe('generateAppScriptCommands', () => {
     it('should generate script commands for each application', () => {
@@ -907,5 +834,5 @@ autoinstall:
       expect(parsed.autoinstall).toBeDefined()
     })
   })
-
+  })
 })

@@ -92,6 +92,8 @@ model Machine {
   firewallRuleSet    FirewallRuleSet?      @relation(fields: [firewallRuleSetId], references: [id], onDelete: SetNull)
   template           MachineTemplate?      @relation(fields: [templateId], references: [id])
   user               User?                 @relation(fields: [userId], references: [id])
+  poolId             String?
+  pool               Pool?                 @relation(fields: [poolId], references: [id])
   applications       MachineApplication[]
   configuration      MachineConfiguration?
   maintenanceHistory MaintenanceHistory[]
@@ -149,8 +151,9 @@ model MachineConfiguration {
   // ============================================================================
 
   // Network configuration (HIGH PRIORITY)
-  // Network bridge device name (e.g., virbr0, br0) - used by VMLifecycle to create TAP devices
-  bridge        String? @default("virbr0")
+  // Network bridge device name (e.g., infinibr-XXXXXX) - per-department bridge.
+  // Populated by machineLifecycleService from Department.bridgeName at create time.
+  bridge        String?
   // NIC model for network device (virtio-net-pci provides best performance)
   networkModel  String? @default("virtio-net-pci")
   // Multi-queue networking support - number of queues for parallel packet processing
@@ -173,6 +176,10 @@ model MachineConfiguration {
   // Format: ["path/to/disk1.qcow2", "path/to/disk2.qcow2"]
   // NULL or empty array means use legacy single-disk path computation
   diskPaths     Json?
+
+  // Last error captured by backgroundCode rollback. Surfaces failure reasons
+  // (e.g. "GPU bound to nvidia, not vfio-pci") to the UI instead of bare 'error'.
+  lastError     String?
 
   // GPU configuration (ADDITIONAL)
   // Path to GPU ROM file for passthrough (needed for some GPUs)
@@ -236,19 +243,164 @@ model MachineConfiguration {
 }
 
 model MachineTemplate {
-  id          String                   @id @default(uuid())
-  name        String
-  description String?
-  cores       Int
+  id            String                       @id @default(uuid())
+  name          String
+  description   String?
+  // Canonical OS key. Required by the UI for new blueprints; nullable
+  // at the DB level so rows created before this column existed keep
+  // working. When set, CreateMachineService uses it as the source of
+  // truth and ignores the per-VM Machine.os.
+  // Values: 'windows10' | 'windows11' | 'ubuntu' | 'fedora'.
+  osType        String?
+  cores         Int
   /// In GB
-  ram         Int
+  ram           Int
   /// In GB
-  storage     Int
-  createdAt   DateTime                 @default(now())
-  categoryId  String?
-  updatedAt   DateTime                 @updatedAt
-  machines    Machine[]
-  category    MachineTemplateCategory? @relation(fields: [categoryId], references: [id])
+  storage       Int
+  createdAt     DateTime                     @default(now())
+  categoryId    String?
+  updatedAt     DateTime                     @updatedAt
+  // Optional link to a sealed base disk image. When set, VMs instantiated
+  // from this template are created as thin linked clones (qcow2 backing
+  // chain) instead of being installed from an unattended ISO.
+  goldenImageId String?
+  // Path/URL of the desktop wallpaper image applied on first boot.
+  wallpaperUrl  String?
+  // Power plan token: 'balanced' | 'high-performance' | 'power-saver'.
+  // Applied on first boot via a generated script; OS-specific.
+  powerPlan     String?
+  // Enable full-disk encryption on VMs created from this blueprint.
+  // Windows: BitLocker on C: (requires TPM, auto-configured by infinization
+  // for Win11; Win10 must have TPM exposed). Linux: currently NOT APPLIED —
+  // LUKS requires unattended-install rework. Field persists for future use.
+  encryptDisk   Boolean                      @default(false)
+  machines      Machine[]
+  category      MachineTemplateCategory?     @relation(fields: [categoryId], references: [id])
+  goldenImage   GoldenImage?                 @relation(fields: [goldenImageId], references: [id])
+  // Apps pre-installed on every VM instantiated from this blueprint.
+  // These propagate to per-VM MachineApplication rows on create.
+  applications  MachineTemplateApplication[]
+  // Scripts executed at FIRST_BOOT on every VM. Typically hardening
+  // scripts from the 'golden-image' category, but any Script works.
+  scripts       MachineTemplateScript[]
+  pools         Pool[]
+
+  @@index([goldenImageId])
+}
+
+// A pool is a group of desktops sharing a blueprint + golden image +
+// department + assignment policy. Covers the canonical VDI modes:
+// persistent (each user has their own machine) and non-persistent
+// (any idle machine, wiped on logoff). The background refill job
+// keeps `current >= sizeMin` whenever capacity allows; on-demand
+// spawn kicks in up to `sizeMax` when a user requests a desktop and
+// none are idle. Pools are scoped to a single department to align
+// with the network + firewall tenancy model.
+model Pool {
+  id                 String          @id @default(uuid())
+  name               String
+  templateId         String
+  goldenImageId      String?
+  departmentId       String
+  // 'persistent' | 'non-persistent'
+  type               String          @default("non-persistent")
+  sizeMin            Int             @default(0)
+  sizeMax            Int             @default(10)
+  idleTimeoutMinutes Int? // null = no idle auto-stop
+  // If true, a non-persistent VM is reset to golden-image state when
+  // its QEMU process exits (user logoff or shutdown). Ignored on
+  // persistent pools.
+  resetOnLogoff      Boolean         @default(true)
+  // Drain state: when true, no new connections are handed out from
+  // this pool. Existing sessions keep running. The refill job stops.
+  draining           Boolean         @default(false)
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+  template           MachineTemplate @relation(fields: [templateId], references: [id])
+  goldenImage        GoldenImage?    @relation(fields: [goldenImageId], references: [id])
+  department         Department      @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  machines           Machine[]
+
+  @@index([departmentId])
+  @@index([templateId])
+  @@index([goldenImageId])
+}
+
+// Join: which apps every VM from this blueprint gets.
+model MachineTemplateApplication {
+  templateId    String
+  applicationId String
+  // Override parameters (same shape as MachineApplication.parameters).
+  // Merged with the Application's default parameters at VM creation.
+  parameters    Json?
+  createdAt     DateTime        @default(now())
+  template      MachineTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  application   Application     @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@id([templateId, applicationId])
+  @@index([templateId])
+  @@index([applicationId])
+}
+
+// Join: which FIRST_BOOT scripts every VM runs.
+model MachineTemplateScript {
+  templateId  String
+  scriptId    String
+  // Values to interpolate into the script — shape matches
+  // ScriptExecution.inputValues.
+  inputValues Json?
+  // Execution order within the blueprint (lower first).
+  order       Int             @default(0)
+  createdAt   DateTime        @default(now())
+  template    MachineTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  script      Script          @relation(fields: [scriptId], references: [id], onDelete: Cascade)
+
+  @@id([templateId, scriptId])
+  @@index([templateId])
+  @@index([scriptId])
+}
+
+// A sealed base disk image used as the backing file for thin clones.
+// Separate from MachineTemplate (config blueprint): this entity owns the
+// actual on-disk qcow2 at baseDiskPath. Lifecycle: building → draft →
+// published → deprecated. Versions form a family tree via parentImageId.
+model GoldenImage {
+  id               String            @id @default(uuid())
+  name             String
+  // Canonical OS key: 'windows-10' | 'windows-11' | 'ubuntu' | 'fedora'.
+  osType           String
+  osVersion        String?
+  // Absolute path to the sealed qcow2 on the host. Read-only in practice:
+  // modifying it invalidates every clone that backs off it.
+  baseDiskPath     String
+  sizeBytes        BigInt            @default(0)
+  // 'building' | 'draft' | 'published' | 'deprecated' | 'failed'
+  status           String            @default("building")
+  version          Int               @default(1)
+  // Previous version in the same family (null for the first version).
+  parentImageId    String?
+  parent           GoldenImage?      @relation("GoldenImageVersions", fields: [parentImageId], references: [id])
+  children         GoldenImage[]     @relation("GoldenImageVersions")
+  // 'automated' (from blueprint) | 'manual-capture' (from existing VM).
+  sourceType       String
+  sourceMachineId  String?
+  sourceTemplateId String?
+  // Snapshot of the hardening toggles applied at build time, for audit
+  // and reproducibility. Shape is free-form JSON (e.g. { telemetry: true,
+  // cortana: true, bloatware: 'curated', defender: 'keep' }).
+  hardeningApplied Json?
+  notes            String?
+  createdById      String?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  sealedAt         DateTime?
+  deprecatedAt     DateTime?
+  templates        MachineTemplate[]
+  pools            Pool[]
+
+  @@index([status])
+  @@index([osType, status])
+  @@index([parentImageId])
 }
 
 model MachineTemplateCategory {
@@ -261,7 +413,7 @@ model MachineTemplateCategory {
 }
 
 model Application {
-  id             String               @id @default(uuid())
+  id             String                       @id @default(uuid())
   name           String
   description    String?
   version        String?
@@ -270,9 +422,10 @@ model Application {
   os             String[]
   installCommand Json
   parameters     Json
-  createdAt      DateTime             @default(now())
-  updatedAt      DateTime             @updatedAt
+  createdAt      DateTime                     @default(now())
+  updatedAt      DateTime                     @updatedAt
   machines       MachineApplication[]
+  templates      MachineTemplateApplication[]
 }
 
 model MachineApplication {
@@ -317,6 +470,7 @@ model Department {
   firewallRuleSet   FirewallRuleSet?   @relation(fields: [firewallRuleSetId], references: [id], onDelete: SetNull)
   machines          Machine[]
   scriptAssignments DepartmentScript[]
+  pools             Pool[]
 
   // Network infrastructure fields
   bridgeName     String? // Linux bridge name: "infinibr-{shortId}" (max 15 chars)
@@ -803,6 +957,11 @@ model AppSettings {
   wallpaper     String   @default("wallpaper1.jpg")
   logoUrl       String?
   interfaceSize String   @default("xl")
+  brandName     String?
+  themePreset   String?
+  accentColor   String?
+  accent2Color  String?
+  accent3Color  String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
@@ -810,10 +969,10 @@ model AppSettings {
 }
 
 model Script {
-  id                    String             @id @default(uuid())
+  id                    String                  @id @default(uuid())
   name                  String
   description           String?
-  fileName              String             @unique
+  fileName              String                  @unique
   category              String?
   tags                  String[]
   os                    OS[]
@@ -822,17 +981,18 @@ model Script {
   // Default status is APPROVED for backward compatibility
   // To enable: check status === APPROVED before execution in ScriptExecutor
   // Add mutations to approve/reject and set approvedById/approvedAt
-  status                ScriptStatus       @default(APPROVED)
+  status                ScriptStatus            @default(APPROVED)
   approvedById          String?
-  approvedBy            User?              @relation("ScriptApprovals", fields: [approvedById], references: [id])
+  approvedBy            User?                   @relation("ScriptApprovals", fields: [approvedById], references: [id])
   approvedAt            DateTime?
-  createdAt             DateTime           @default(now())
-  updatedAt             DateTime           @updatedAt
+  createdAt             DateTime                @default(now())
+  updatedAt             DateTime                @updatedAt
   createdById           String?
-  createdBy             User?              @relation(fields: [createdById], references: [id])
+  createdBy             User?                   @relation(fields: [createdById], references: [id])
   executions            ScriptExecution[]
   departmentAssignments DepartmentScript[]
   auditLogs             ScriptAuditLog[]
+  templateAssignments   MachineTemplateScript[]
 
   @@index([fileName])
   @@index([category])
@@ -869,6 +1029,9 @@ model ScriptExecution {
   stderr                String?         @db.Text
   error                 String?         @db.Text
   executedAs            String?
+  // Execution order — propagated from MachineTemplateScript.order for blueprints.
+  // Lower values execute first. Default 0 preserves FIFO for non-blueprint scripts.
+  order                  Int             @default(0)
   // Scheduling fields for immediate, scheduled, and repeating executions
   scheduledFor          DateTime? // When script should execute (NULL or past = immediate)
   repeatIntervalMinutes Int? // Interval in minutes for repeating scripts (NULL = one-time)
@@ -881,7 +1044,7 @@ model ScriptExecution {
   machine               Machine         @relation(fields: [machineId], references: [id], onDelete: Cascade)
   triggeredBy           User?           @relation(fields: [triggeredById], references: [id])
 
-  @@index([machineId, createdAt])
+  @@index([machineId, order])
   @@index([scriptId, createdAt])
   @@index([status])
   @@index([machineId, status])

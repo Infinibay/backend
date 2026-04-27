@@ -106,13 +106,23 @@ async function transformMachine (prismaMachine: MachineWithRelations, prisma?: P
       : undefined,
     template: template
       ? {
+        // Return ALL persisted fields so Apollo's normalized cache doesn't
+        // overwrite the template entity with nulls when this resolver is
+        // reached from createMachine / machine queries — that used to make
+        // blueprints "disappear" from the wizard until a hard refresh
+        // (categoryId went null → templatesByCategory grouped under null).
         id: template.id,
         name: template.name,
         description: template.description,
         cores: template.cores,
         ram: template.ram,
         storage: template.storage,
-        createdAt: template.createdAt
+        createdAt: template.createdAt,
+        categoryId: template.categoryId ?? null,
+        osType: template.osType ?? null,
+        wallpaperUrl: template.wallpaperUrl ?? null,
+        powerPlan: template.powerPlan ?? null,
+        encryptDisk: template.encryptDisk ?? null
       } as MachineTemplateType
       : undefined,
     department: department

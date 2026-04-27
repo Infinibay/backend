@@ -371,8 +371,15 @@ export interface SafeCommandType {
   'DiskCleanup' | 'AutoFixWindowsUpdates' | 'AutoFixDefender' | 'AutoOptimizeDisk' |
   // Maintenance commands
   'ExecutePowerShellScript' | 'RunMaintenanceTask' | 'ValidateSystemHealth' |
-  'CleanTemporaryFiles' | 'UpdateSystemSoftware' | 'RestartServices' | 'CheckSystemIntegrity'
+  'CleanTemporaryFiles' | 'UpdateSystemSoftware' | 'RestartServices' | 'CheckSystemIntegrity' |
+  // Golden-image seal — runs per-OS cleanup and triggers sysprep / poweroff
+  'PrepareGoldenImage'
   params?: SafeCommandParams
+  // Top-level fields for PrepareGoldenImage (flattened, matching the
+  // serde(tag="action") shape expected by infiniservice).
+  cleanup_level?: 'minimal' | 'standard' | 'deep'
+  sanitize_user_data?: boolean
+  shutdown_after?: boolean
 }
 
 // Parameters for safe commands

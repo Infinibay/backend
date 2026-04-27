@@ -570,9 +570,8 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
     commands = commands.concat(infiniServiceCommands)
 
     // Application installations intentionally remain in FirstLogon.
-    // Unlike custom scripts (which are now executed via InfiniService protocol),
-    // applications may include critical system components, drivers, or software
-    // needed before the system is fully operational.
+    // Custom scripts (from blueprint) are handled by InfiniService post-boot
+    // via VirtioSocketWatcherService — this is the standard path for ALL OS types.
     const apps = this.generateAppsToInstallScripts(10 + infiniServiceCommands.length)
 
     commands = commands.concat(apps)

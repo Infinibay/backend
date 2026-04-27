@@ -1,0 +1,74 @@
+name: Remove Snap Bloat (Ubuntu)
+description: Removes snapd entirely and reinstalls Firefox as a proper apt package. Substantially reduces boot time and disk usage on Ubuntu VDI.
+author: Infinibay
+version: 1.0.0
+category: Golden Image
+tags:
+  - golden-image
+  - hardening
+  - bloatware
+  - ubuntu
+  - snap
+
+os:
+  - linux
+
+shell: bash
+
+script: |
+  #!/usr/bin/env bash
+  # NOTE: idempotent — if snapd is already gone, script exits cleanly.
+  set -u
+  if ! command -v snap >/dev/null 2>&1; then
+    echo "[snap] snapd not installed; nothing to do"
+    exit 0
+  fi
+
+  echo "[snap] Listing installed snaps"
+  snap list || true
+
+  echo "[snap] Removing snaps in reverse order (apps first, then core)"
+  for s in $(snap list 2>/dev/null | awk 'NR>1 {print $1}'); do
+    echo "[snap]   remove $s"
+    sudo snap remove --purge "$s" 2>/dev/null || true
+  done
+
+  echo "[snap] Stopping snapd services"
+  sudo systemctl stop snapd.service snapd.socket snapd.seeded.service 2>/dev/null || true
+  sudo systemctl disable snapd.service snapd.socket snapd.seeded.service 2>/dev/null || true
+
+  echo "[snap] Purging snapd package"
+  sudo apt-get purge -y snapd gnome-software-plugin-snap 2>/dev/null || true
+  sudo rm -rf /var/cache/snapd /var/lib/snapd /root/snap
+  sudo rm -rf /home/*/snap
+
+  echo "[snap] Blocking snapd from being reinstalled by recommendations"
+  sudo tee /etc/apt/preferences.d/no-snap.pref >/dev/null <<'EOF'
+  Package: snapd
+  Pin: release a=*
+  Pin-Priority: -10
+  EOF
+
+  echo "[snap] Reinstalling Firefox via Mozilla PPA"
+  sudo install -d -m 0755 /etc/apt/keyrings
+  if [ ! -f /etc/apt/keyrings/packages.mozilla.org.asc ]; then
+    wget -q https://packages.mozilla.org/apt/repo-signing-key.gpg -O /etc/apt/keyrings/packages.mozilla.org.asc || true
+  fi
+  if [ ! -f /etc/apt/sources.list.d/mozilla.list ]; then
+    echo "deb [signed-by=/etc/apt/keyrings/packages.mozilla.org.asc] https://packages.mozilla.org/apt mozilla main" | \
+      sudo tee /etc/apt/sources.list.d/mozilla.list >/dev/null
+  fi
+  sudo tee /etc/apt/preferences.d/mozilla >/dev/null <<'EOF'
+  Package: *
+  Pin: origin packages.mozilla.org
+  Pin-Priority: 1000
+  EOF
+
+  sudo apt-get update -o Acquire::Retries=3 2>/dev/null || true
+  sudo apt-get install -y firefox 2>/dev/null || echo "[snap] firefox apt install failed — check connectivity"
+
+  echo "[snap] Done."
+
+execution:
+  timeout: 900
+  run_as: system

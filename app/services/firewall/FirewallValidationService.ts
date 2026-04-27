@@ -162,6 +162,16 @@ export class FirewallValidationService {
           continue
         }
 
+        // Connection-state predicates carve out a subset of packets — e.g.
+        // "ESTABLISHED,RELATED" only matches return traffic, while a
+        // state-less rule matches new connections too. Two rules that differ
+        // in their state filter are NOT redundant with each other (this is
+        // the common stateful "allow established + allow new outbound"
+        // pattern shipped by FirewallPolicyService.generateDefaultRules).
+        if (!this.sameConnectionState(rule1.connectionState, rule2.connectionState)) {
+          continue
+        }
+
         const overlapDetails = this.getPortOverlapDetails(rule1, rule2)
         if (overlapDetails) {
           conflicts.push({
@@ -174,6 +184,26 @@ export class FirewallValidationService {
     }
 
     return conflicts
+  }
+
+  /**
+   * Two rules with different connection-state predicates do not redundantly
+   * overlap — they apply to disjoint packet flows. Returns true only when
+   * both rules have the *same* state filter (or both are state-less).
+   *
+   * The shape on disk is `{ states: string[] }` (Prisma Json). We normalise
+   * into a sorted, comma-joined string and compare.
+   */
+  private sameConnectionState (cs1: unknown, cs2: unknown): boolean {
+    return this.normalizeConnectionState(cs1) === this.normalizeConnectionState(cs2)
+  }
+
+  private normalizeConnectionState (cs: unknown): string {
+    if (cs == null) return ''
+    if (typeof cs !== 'object') return ''
+    const states = (cs as { states?: unknown }).states
+    if (!Array.isArray(states) || states.length === 0) return ''
+    return states.map(s => String(s).toUpperCase()).sort().join(',')
   }
 
   /**
@@ -331,7 +361,10 @@ export class FirewallValidationService {
       srcIpAddr: rule.srcIpAddr,
       srcIpMask: rule.srcIpMask,
       dstIpAddr: rule.dstIpAddr,
-      dstIpMask: rule.dstIpMask
+      dstIpMask: rule.dstIpMask,
+      // Include state predicate so a state-less ACCEPT and an
+      // ESTABLISHED-only ACCEPT aren't flagged as duplicates.
+      connectionState: this.normalizeConnectionState(rule.connectionState)
     })
   }
 

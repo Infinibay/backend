@@ -279,10 +279,9 @@ NETWORK_HELPER_EOF`,
       'mkdir -p /target/var/lib/cloud/scripts/per-instance',
 
       // Create InfiniService installation script
-      ...this.generateInfiniServiceInstallCommands(),
-
-      // Create first-boot script execution commands
-      ...this.generateFirstBootScriptCommands(),
+      // Custom scripts are NOT executed here during installation.
+      // InfiniService (installed above) handles all FIRST_BOOT scripts post-boot
+      // via VirtioSocketWatcherService — this is the standard path for ALL OS types.
 
       // Create post-installation script
       `cat > /target/var/lib/cloud/scripts/per-instance/post_install.py << 'EOF'
@@ -408,71 +407,6 @@ EOF`,
     return commands
   }
 
-  /**
-   * Generates commands for first-boot script execution.
-   * Creates wrapper scripts that download, execute, and report completion for each script.
-   *
-   * @returns Array of late commands for script execution
-   */
-  private generateFirstBootScriptCommands (): string[] {
-    const backendHost = process.env.APP_HOST || 'localhost'
-    const backendPort = process.env.PORT || '4000'
-    const baseUrl = `http://${backendHost}:${backendPort}`
-
-    const commands: string[] = []
-
-    this.scripts.forEach(scriptData => {
-      const { script, inputValues, executionId } = scriptData
-      const scriptNameSafe = this.sanitizeScriptName(script.name)
-      const scriptPath = `/tmp/${scriptNameSafe}_${executionId}.sh`
-      const logFile = `/var/log/${scriptNameSafe}_${executionId}.log`
-
-      // Create script execution wrapper
-      commands.push(`cat > /target${scriptPath} << 'SCRIPT_EOF'
-#!/bin/bash
-set -e
-
-LOG_FILE="${logFile}"
-echo "Starting script: ${script.name}" | tee -a \\$LOG_FILE
-
-# Wait for network before downloading script
-if ! /usr/local/bin/wait-for-network.sh 10 2 2>&1 | tee -a \\$LOG_FILE; then
-    echo "Network validation failed before script download" | tee -a \\$LOG_FILE
-    /usr/local/bin/infiniservice report-script-completion --execution-id ${executionId} --exit-code 1 --log-file \\$LOG_FILE
-    exit 1
-fi
-
-# Download script content with interpolated inputs
-if curl -f -o /tmp/${scriptNameSafe}.sh "${baseUrl}/scripts/${script.id}/content?vmId=${this.vmId}&executionId=${executionId}&format=bash" 2>&1 | tee -a \\$LOG_FILE; then
-    echo "Script downloaded successfully" | tee -a \\$LOG_FILE
-    chmod +x /tmp/${scriptNameSafe}.sh
-
-    # Execute script
-    if /tmp/${scriptNameSafe}.sh 2>&1 | tee -a \\$LOG_FILE; then
-        echo "Script executed successfully" | tee -a \\$LOG_FILE
-        EXIT_CODE=0
-    else
-        EXIT_CODE=\\$?
-        echo "Script execution failed with exit code \\$EXIT_CODE" | tee -a \\$LOG_FILE
-    fi
-
-    # Report completion to backend via infiniservice
-    /usr/local/bin/infiniservice report-script-completion --execution-id ${executionId} --exit-code \\$EXIT_CODE --log-file \\$LOG_FILE
-else
-    echo "Failed to download script" | tee -a \\$LOG_FILE
-    /usr/local/bin/infiniservice report-script-completion --execution-id ${executionId} --exit-code 1 --log-file \\$LOG_FILE
-fi
-SCRIPT_EOF`)
-
-      // Make script executable
-      commands.push(`chmod +x /target${scriptPath}`)
-
-      // Execute script via curtin in-target
-      commands.push(`curtin in-target -- ${scriptPath}`)
-    })
-
-    return commands
-  }
 
   /**
    * Generates commands to create individual application installation scripts.

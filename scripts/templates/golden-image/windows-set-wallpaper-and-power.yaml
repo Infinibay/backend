@@ -1,0 +1,74 @@
+name: Apply Wallpaper and Power Plan (Windows)
+description: Applies the blueprint's wallpaper URL and power plan token on first boot. Reads WALLPAPER_URL and POWER_PLAN from inputValues.
+author: Infinibay
+version: 1.0.0
+category: Golden Image
+tags:
+  - golden-image
+  - first-boot
+  - wallpaper
+  - power
+  - windows
+
+os:
+  - windows
+
+shell: powershell
+
+inputs:
+  - name: WALLPAPER_URL
+    label: Wallpaper path or URL
+    type: string
+    required: false
+    default: ""
+  - name: POWER_PLAN
+    label: Power plan token
+    type: string
+    required: false
+    default: ""
+
+script: |
+  $ErrorActionPreference = 'SilentlyContinue'
+  $wallpaper = '${{ inputs.WALLPAPER_URL }}'
+  $plan      = '${{ inputs.POWER_PLAN }}'
+
+  if ($wallpaper) {
+    Write-Host "[wallpaper] applying $wallpaper"
+    $dest = "$env:ProgramData\\Infinibay\\wallpaper.jpg"
+    New-Item -ItemType Directory -Force -Path (Split-Path $dest) | Out-Null
+    try {
+      if ($wallpaper -match '^https?://') {
+        Invoke-WebRequest -Uri $wallpaper -OutFile $dest -UseBasicParsing
+      } else {
+        Copy-Item -Path $wallpaper -Destination $dest -Force
+      }
+      # Write user-level reg key (applies to the default profile for
+      # fresh accounts). For the currently logged-on user, set too.
+      $key = 'HKCU:\Control Panel\Desktop'
+      Set-ItemProperty -Path $key -Name Wallpaper      -Value $dest
+      Set-ItemProperty -Path $key -Name WallpaperStyle -Value 10       # Fill
+      Set-ItemProperty -Path $key -Name TileWallpaper  -Value 0
+      rundll32.exe user32.dll, UpdatePerUserSystemParameters | Out-Null
+    } catch {
+      Write-Host "[wallpaper] failed: $_"
+    }
+  } else {
+    Write-Host '[wallpaper] not set (WALLPAPER_URL empty)'
+  }
+
+  switch ($plan) {
+    'high-performance' { $guid = '8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c' }
+    'power-saver'      { $guid = 'a1841308-3541-4fab-bc81-f71556f20b4a' }
+    'balanced'         { $guid = '381b4222-f694-41f0-9685-ff5bb260df2e' }
+    default            { $guid = '' }
+  }
+  if ($guid) {
+    Write-Host "[power] applying plan=$plan ($guid)"
+    powercfg /SETACTIVE $guid 2>$null
+  } else {
+    Write-Host '[power] not set (POWER_PLAN empty or unknown)'
+  }
+
+execution:
+  timeout: 180
+  run_as: system

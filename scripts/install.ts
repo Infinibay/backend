@@ -51,16 +51,27 @@ function prepareFolders () {
   const templatesDestDir = path.join(baseDir, 'scripts', 'templates')
 
   if (fs.existsSync(templatesSourceDir)) {
-    const templateFiles = fs.readdirSync(templatesSourceDir)
-    templateFiles.forEach(file => {
-      if (file.endsWith('.yaml') || file.endsWith('.json')) {
-        const sourcePath = path.join(templatesSourceDir, file)
-        const destPath = path.join(templatesDestDir, file)
-        fs.copyFileSync(sourcePath, destPath)
-        fs.chmodSync(destPath, 0o644) // Read-only for templates
-        console.log(`Copied template script: ${file}`)
-      }
-    })
+    // Walk recursively — first-boot scripts live in subdirectories (e.g.
+    // golden-image/windows-disable-telemetry.yaml) and ScriptManager resolves
+    // them by relative path. A flat readdirSync would silently skip them.
+    copyTemplateScriptsRecursive(templatesSourceDir, templatesDestDir)
+  }
+}
+
+function copyTemplateScriptsRecursive (srcDir: string, destDir: string): void {
+  if (!fs.existsSync(destDir)) {
+    fs.mkdirSync(destDir, { recursive: true })
+  }
+  for (const entry of fs.readdirSync(srcDir, { withFileTypes: true })) {
+    const srcPath = path.join(srcDir, entry.name)
+    const destPath = path.join(destDir, entry.name)
+    if (entry.isDirectory()) {
+      copyTemplateScriptsRecursive(srcPath, destPath)
+    } else if (entry.isFile() && (entry.name.endsWith('.yaml') || entry.name.endsWith('.json'))) {
+      fs.copyFileSync(srcPath, destPath)
+      fs.chmodSync(destPath, 0o644) // Read-only for templates
+      console.log(`Copied template script: ${path.relative(srcDir, srcPath)}`)
+    }
   }
 }
 

@@ -1,0 +1,57 @@
+name: Disable Windows Telemetry
+description: Stops DiagTrack/dmwappushservice, sets AllowTelemetry=0, disables CEIP and compatibility appraiser scheduled tasks. Idempotent.
+author: Infinibay
+version: 1.0.0
+category: Golden Image
+tags:
+  - golden-image
+  - hardening
+  - privacy
+  - windows
+  - telemetry
+
+os:
+  - windows
+
+shell: powershell
+
+script: |
+  $ErrorActionPreference = 'SilentlyContinue'
+  Write-Host "[telemetry] Stopping and disabling DiagTrack + dmwappushservice"
+  foreach ($svc in 'DiagTrack','dmwappushservice') {
+    try { Stop-Service $svc -Force -ErrorAction SilentlyContinue } catch {}
+    try { Set-Service $svc -StartupType Disabled } catch {}
+  }
+
+  Write-Host "[telemetry] Writing AllowTelemetry policy keys"
+  $paths = @(
+    'HKLM:\SOFTWARE\Policies\Microsoft\Windows\DataCollection',
+    'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\DataCollection'
+  )
+  foreach ($p in $paths) {
+    if (-not (Test-Path $p)) { New-Item -Path $p -Force | Out-Null }
+    New-ItemProperty -Path $p -Name 'AllowTelemetry'        -Value 0 -PropertyType DWORD -Force | Out-Null
+    New-ItemProperty -Path $p -Name 'AllowDeviceNameInTelemetry' -Value 0 -PropertyType DWORD -Force | Out-Null
+    New-ItemProperty -Path $p -Name 'DoNotShowFeedbackNotifications' -Value 1 -PropertyType DWORD -Force | Out-Null
+  }
+
+  Write-Host "[telemetry] Disabling CEIP + Compatibility Appraiser scheduled tasks"
+  $tasks = @(
+    '\Microsoft\Windows\Application Experience\Microsoft Compatibility Appraiser',
+    '\Microsoft\Windows\Application Experience\ProgramDataUpdater',
+    '\Microsoft\Windows\Autochk\Proxy',
+    '\Microsoft\Windows\Customer Experience Improvement Program\Consolidator',
+    '\Microsoft\Windows\Customer Experience Improvement Program\UsbCeip',
+    '\Microsoft\Windows\DiskDiagnostic\Microsoft-Windows-DiskDiagnosticDataCollector',
+    '\Microsoft\Windows\Feedback\Siuf\DmClient',
+    '\Microsoft\Windows\Feedback\Siuf\DmClientOnScenarioDownload'
+  )
+  foreach ($t in $tasks) {
+    try { Disable-ScheduledTask -TaskPath (Split-Path $t) -TaskName (Split-Path $t -Leaf) -ErrorAction SilentlyContinue | Out-Null } catch {}
+  }
+
+  Write-Host "[telemetry] Done."
+
+execution:
+  timeout: 180
+  run_as: system

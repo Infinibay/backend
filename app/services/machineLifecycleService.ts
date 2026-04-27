@@ -83,6 +83,13 @@ export class MachineLifecycleService {
         throw new UserInputError('Department not found')
       }
 
+      if (!department.bridgeName) {
+        throw new UserInputError(
+          `Department "${department.name}" has no Linux bridge configured. ` +
+          'Recreate it through the UI so its network gets provisioned.'
+        )
+      }
+
       const createdMachine = await tx.machine.create({
         data: {
           name: input.name,
@@ -98,10 +105,10 @@ export class MachineLifecycleService {
           gpuPciAddress: normalizePciAddress(input.pciBus),
           configuration: {
             create: {
-              graphicPort: 0,
               graphicProtocol: 'spice',
               graphicHost: process.env.GRAPHIC_HOST || 'localhost',
-              graphicPassword: null
+              graphicPassword: null,
+              bridge: department.bridgeName
             }
           }
         },
@@ -117,6 +124,47 @@ export class MachineLifecycleService {
         throw new ApolloError('Machine not created')
       }
 
+      // ── Golden-image vs. blueprint mutual exclusion ──────────────
+      // A template that references a GoldenImage creates linked-clone
+      // VMs whose disk already contains the OS + apps.  Blueprint-
+      // level apps are NOT applicable — they belong to the ISO-install path.
+      //
+      // Scripts, however, ARE allowed on golden-image VMs — they run via
+      // infiniservice AFTER the VM boots, not during installation, so
+      // they can customize any VM regardless of how it was provisioned.
+      const isGoldenImage = Boolean(template?.goldenImageId)
+
+      if (isGoldenImage) {
+        // Reject user-supplied applications when the template is backed
+        // by a golden image — apps are embedded in the ISO and executed
+        // during installation, which is skipped for linked clones.
+        if (input.applications.length > 0) {
+          throw new UserInputError(
+            'Cannot assign applications to a golden-image VM. ' +
+            'The template is backed by a sealed golden image and does not support blueprint-level application installation. ' +
+            'Scripts can still be assigned to golden-image VMs and will be executed via infiniservice after boot.'
+          )
+        }
+      }
+
+      // Merge blueprint-level apps/scripts with per-VM overrides.
+      // For golden-image templates, only user-supplied scripts are allowed
+      // (blueprint apps/scripts are skipped because they belong to ISO path).
+      const blueprintApps = (!isGoldenImage && createdMachine.templateId)
+        ? await tx.machineTemplateApplication.findMany({
+            where: { templateId: createdMachine.templateId }
+          })
+        : []
+      const blueprintScripts = (!isGoldenImage && createdMachine.templateId)
+        ? await tx.machineTemplateScript.findMany({
+            where: { templateId: createdMachine.templateId },
+            orderBy: { order: 'asc' }
+          })
+        : []
+
+      const appIds = new Set(input.applications.map((a) => a.applicationId))
+      const scriptIds = new Set(input.firstBootScripts.map((s) => s.scriptId))
+
       for (const application of input.applications) {
         await tx.machineApplication.create({
           data: {
@@ -126,17 +174,27 @@ export class MachineLifecycleService {
           }
         })
       }
+      for (const link of blueprintApps) {
+        if (appIds.has(link.applicationId)) continue
+        await tx.machineApplication.create({
+          data: {
+            machineId: createdMachine.id,
+            applicationId: link.applicationId,
+            parameters: (link.parameters ?? {}) as Prisma.InputJsonValue
+          }
+        })
+      }
 
       // Create ScriptExecution records for first-boot scripts.
       // These will be executed by InfiniService via the protocol after the VM boots.
       // Scripts are scheduled for immediate execution (scheduledFor = now).
+      // This applies to BOTH regular VMs and golden-image VMs.
       for (const scriptInput of input.firstBootScripts) {
         await tx.scriptExecution.create({
           data: {
             scriptId: scriptInput.scriptId,
             machineId: createdMachine.id,
             executionType: 'FIRST_BOOT',
-            // triggeredById is nullable in schema - null indicates system-initiated execution
             triggeredById: this.user?.id,
             inputValues: scriptInput.inputValues as Prisma.InputJsonValue,
             status: 'PENDING',
@@ -144,9 +202,106 @@ export class MachineLifecycleService {
             repeatIntervalMinutes: null,
             lastExecutedAt: null,
             executionCount: 0,
-            maxExecutions: null
+            maxExecutions: null,
+            order: (scriptInput as any).order ?? 0
           }
         })
+      }
+      for (const link of blueprintScripts) {
+        if (scriptIds.has(link.scriptId)) continue
+        await tx.scriptExecution.create({
+          data: {
+            scriptId: link.scriptId,
+            machineId: createdMachine.id,
+            executionType: 'FIRST_BOOT',
+            triggeredById: this.user?.id,
+            inputValues: (link.inputValues ?? {}) as Prisma.InputJsonValue,
+            status: 'PENDING',
+            scheduledFor: new Date(),
+            repeatIntervalMinutes: null,
+            lastExecutedAt: null,
+            executionCount: 0,
+            maxExecutions: null,
+            order: link.order ?? 0
+          }
+        })
+      }
+
+      // Wallpaper + power plan: if the blueprint sets either, queue the
+      // OS-specific applier script with the values as inputs.
+      // ── Skipped for golden-image templates (apps/scripts belong to ISO path) ──
+      if (!isGoldenImage && createdMachine.templateId) {
+        const tpl = await tx.machineTemplate.findUnique({
+          where: { id: createdMachine.templateId },
+          select: { wallpaperUrl: true, powerPlan: true, encryptDisk: true, osType: true }
+        })
+        const os = String(tpl?.osType ?? createdMachine.os).toLowerCase()
+        if (tpl && (tpl.wallpaperUrl || tpl.powerPlan)) {
+          const isWindows = os.includes('windows')
+          const applierFile = isWindows
+            ? 'golden-image/windows-set-wallpaper-and-power.yaml'
+            : 'golden-image/linux-set-wallpaper-and-power.yaml'
+          const applier = await tx.script.findUnique({
+            where: { fileName: applierFile }
+          })
+          if (applier) {
+            await tx.scriptExecution.create({
+              data: {
+                scriptId: applier.id,
+                machineId: createdMachine.id,
+                executionType: 'FIRST_BOOT',
+                triggeredById: this.user?.id,
+                inputValues: {
+                  WALLPAPER_URL: tpl.wallpaperUrl ?? '',
+                  POWER_PLAN: tpl.powerPlan ?? ''
+                } as Prisma.InputJsonValue,
+                status: 'PENDING',
+                scheduledFor: new Date(),
+                repeatIntervalMinutes: null,
+                lastExecutedAt: null,
+                executionCount: 0,
+                maxExecutions: null,
+                order: 0
+              }
+            })
+          } else {
+            this.debug.warn(
+              `wallpaper/powerPlan set on template ${createdMachine.templateId} ` +
+              `but applier script ${applierFile} is not seeded. `
+            )
+          }
+        }
+
+        // Disk encryption — applied as a FIRST_BOOT script.
+        if (tpl?.encryptDisk) {
+          const isWindows = os.includes('windows')
+          const encFile = isWindows
+            ? 'golden-image/windows-enable-bitlocker.yaml'
+            : 'golden-image/linux-disk-encryption-notice.yaml'
+          const encScript = await tx.script.findUnique({ where: { fileName: encFile } })
+          if (encScript) {
+            await tx.scriptExecution.create({
+              data: {
+                scriptId: encScript.id,
+                machineId: createdMachine.id,
+                executionType: 'FIRST_BOOT',
+                triggeredById: this.user?.id,
+                inputValues: {} as Prisma.InputJsonValue,
+                status: 'PENDING',
+                scheduledFor: new Date(),
+                repeatIntervalMinutes: null,
+                lastExecutedAt: null,
+                executionCount: 0,
+                maxExecutions: null,
+                order: 0
+              }
+            })
+          } else {
+            this.debug.warn(
+              `encryptDisk set on template ${createdMachine.templateId} `
+            )
+          }
+        }
       }
 
       return createdMachine
@@ -426,14 +581,48 @@ export class MachineLifecycleService {
     } catch (error: any) {
       logger.error(`[backgroundCode] Error creating machine ${id}:`, error?.message || error)
       logger.error(`[backgroundCode] Stack:`, error?.stack)
-      // Update status to error
+
+      // Best-effort host cleanup. Without this, a failed creation leaves
+      // QEMU/TAP/nftables/sockets behind and the user has no way to retry
+      // because internalName collides on next attempt.
+      // We don't delete the DB Machine row — keep status='error' so the user
+      // can see what happened and click destroy from the UI.
+      try {
+        const { getInfinization } = await import('@services/InfinizationService')
+        const infinization = await getInfinization()
+        const destroyResult = await infinization.destroyVM(id)
+        if (!destroyResult.success) {
+          logger.warn(`[backgroundCode] destroyVM during rollback returned: ${destroyResult.error ?? destroyResult.message ?? 'unknown'}`)
+        }
+      } catch (cleanupError: any) {
+        logger.warn(`[backgroundCode] Host cleanup failed for ${id}: ${cleanupError?.message ?? cleanupError}`)
+      }
+
+      // Persist a short error reason so the UI can show it instead of bare 'error'.
+      const reason = (error?.message ?? String(error)).slice(0, 500)
       try {
         await this.prisma.machine.update({
           where: { id },
-          data: { status: 'error' }
+          data: {
+            status: 'error',
+            configuration: {
+              update: {
+                qemuPid: null,
+                qmpSocketPath: null,
+                tapDeviceName: null,
+                lastError: reason
+              }
+            }
+          }
         })
       } catch {
-        // Ignore status update errors
+        // If the configuration update fails (e.g. lastError column missing on
+        // an older schema), fall back to just flipping status.
+        try {
+          await this.prisma.machine.update({ where: { id }, data: { status: 'error' } })
+        } catch {
+          // give up
+        }
       }
     }
   }

@@ -1,0 +1,75 @@
+name: Remove Windows Bloatware
+description: Removes curated list of non-business UWP apps (Xbox, Mixed Reality, Clipchamp, Feedback Hub, 3D Viewer, etc.) both from all users and the provisioning manifest.
+author: Infinibay
+version: 1.0.0
+category: Golden Image
+tags:
+  - golden-image
+  - hardening
+  - bloatware
+  - windows
+
+os:
+  - windows
+
+shell: powershell
+
+script: |
+  $ErrorActionPreference = 'SilentlyContinue'
+
+  # Curated: Microsoft-published consumer apps that have no place on an
+  # MSP-managed desktop. Office / Edge / Calculator / Photos / Sticky Notes
+  # intentionally left alone. Extend via the user-facing toggle later.
+  $targets = @(
+    'Microsoft.3DBuilder',
+    'Microsoft.BingFinance',
+    'Microsoft.BingNews',
+    'Microsoft.BingSports',
+    'Microsoft.BingWeather',
+    'Microsoft.Clipchamp',
+    'Microsoft.GetHelp',
+    'Microsoft.Getstarted',
+    'Microsoft.MicrosoftOfficeHub',
+    'Microsoft.MicrosoftSolitaireCollection',
+    'Microsoft.MixedReality.Portal',
+    'Microsoft.Office.Sway',
+    'Microsoft.OneConnect',
+    'Microsoft.People',
+    'Microsoft.Print3D',
+    'Microsoft.SkypeApp',
+    'Microsoft.Wallet',
+    'Microsoft.WindowsAlarms',
+    'Microsoft.WindowsCommunicationsApps',
+    'Microsoft.WindowsFeedbackHub',
+    'Microsoft.WindowsMaps',
+    'Microsoft.WindowsSoundRecorder',
+    'Microsoft.Xbox.TCUI',
+    'Microsoft.XboxApp',
+    'Microsoft.XboxGameOverlay',
+    'Microsoft.XboxGamingOverlay',
+    'Microsoft.XboxIdentityProvider',
+    'Microsoft.XboxSpeechToTextOverlay',
+    'Microsoft.YourPhone',
+    'Microsoft.ZuneMusic',
+    'Microsoft.ZuneVideo'
+  )
+
+  foreach ($name in $targets) {
+    Get-AppxPackage -AllUsers -Name $name |
+      ForEach-Object {
+        Write-Host "[bloatware] Remove AppxPackage: $($_.PackageFullName)"
+        try { Remove-AppxPackage -Package $_.PackageFullName -AllUsers } catch {}
+      }
+    Get-AppxProvisionedPackage -Online |
+      Where-Object DisplayName -eq $name |
+      ForEach-Object {
+        Write-Host "[bloatware] Remove Provisioned: $($_.PackageName)"
+        try { Remove-AppxProvisionedPackage -Online -PackageName $_.PackageName } catch {}
+      }
+  }
+
+  Write-Host "[bloatware] Done."
+
+execution:
+  timeout: 600
+  run_as: system

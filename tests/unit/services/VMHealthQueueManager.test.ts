@@ -56,7 +56,8 @@ describe('VMHealthQueueManager', () => {
       firewallRuleSetId: null,
       version: 1,
       localIP: null,
-      publicIP: null
+      publicIP: null,
+      poolId: null
     })
   })
 
@@ -84,7 +85,8 @@ describe('VMHealthQueueManager', () => {
     version: 1,
     localIP: null,
     publicIP: null,
-    firewallRuleSetId: null
+    firewallRuleSetId: null,
+    poolId: null
   })
 
   describe('queueHealthCheck', () => {

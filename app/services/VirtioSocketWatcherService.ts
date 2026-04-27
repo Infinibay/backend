@@ -678,9 +678,10 @@ export class VirtioSocketWatcherService extends EventEmitter {
           script: true,
           machine: true
         },
-        orderBy: {
-          createdAt: 'asc'
-        }
+        orderBy: [
+          { order: 'asc' },
+          { createdAt: 'asc' }
+        ]
       })
 
       // Filter executions based on scheduling rules
@@ -835,9 +836,10 @@ export class VirtioSocketWatcherService extends EventEmitter {
           script: true,
           machine: true
         },
-        orderBy: {
-          createdAt: 'asc'
-        }
+        orderBy: [
+          { order: 'asc' },
+          { createdAt: 'asc' }
+        ]
       })
 
       // 3. Filter Eligible Executions

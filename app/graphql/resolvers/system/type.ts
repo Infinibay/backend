@@ -13,6 +13,15 @@ export class GPU {
 
   @Field(() => Float)
     memory: number = 0
+
+  // Whether this GPU is ready for VFIO passthrough on the host.
+  // False = wizard should disable selection and show the reason.
+  @Field(() => Boolean)
+    passthroughReady: boolean = false
+
+  // Human-readable reason when passthroughReady=false (e.g. "Bound to nvidia, not vfio-pci").
+  @Field(() => String, { nullable: true })
+    passthroughBlockedReason?: string | null
 }
 
 @ObjectType()

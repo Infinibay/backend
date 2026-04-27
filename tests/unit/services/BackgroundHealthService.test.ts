@@ -106,7 +106,8 @@ describe('BackgroundHealthService', () => {
         firewallRuleSetId: null,
         version: 1,
         localIP: null,
-        publicIP: null
+        publicIP: null,
+        poolId: null
       }
     ])
 
@@ -313,7 +314,8 @@ describe('BackgroundHealthService', () => {
           firewallRuleSetId: null,
           version: 1,
           localIP: null,
-          publicIP: null
+          publicIP: null,
+          poolId: null
         },
         {
           id: 'vm-2',
@@ -333,7 +335,8 @@ describe('BackgroundHealthService', () => {
           firewallRuleSetId: null,
           version: 1,
           localIP: null,
-          publicIP: null
+          publicIP: null,
+          poolId: null
         }
       ])
 
@@ -488,7 +491,8 @@ describe('BackgroundHealthService', () => {
           firewallRuleSetId: null,
           version: 1,
           localIP: null,
-          publicIP: null
+          publicIP: null,
+          poolId: null
         }
       ])
 
@@ -569,7 +573,8 @@ describe('BackgroundHealthService', () => {
           firewallRuleSetId: null,
           version: 1,
           localIP: null,
-          publicIP: null
+          publicIP: null,
+          poolId: null
         },
         {
           id: 'vm-running-2',
@@ -589,7 +594,8 @@ describe('BackgroundHealthService', () => {
           firewallRuleSetId: null,
           version: 1,
           localIP: null,
-          publicIP: null
+          publicIP: null,
+          poolId: null
         }
       ])
 

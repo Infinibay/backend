@@ -8,6 +8,11 @@ export interface AppSettingsUpdateInput {
   wallpaper?: string;
   logoUrl?: string;
   interfaceSize?: string;
+  brandName?: string;
+  themePreset?: string;
+  accentColor?: string;
+  accent2Color?: string;
+  accent3Color?: string;
 }
 
 const SUPPORTED_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp', '.gif']
@@ -151,6 +156,11 @@ export class AppSettingsService {
           wallpaper: 'wallpaper1.jpg',
           logoUrl: null,
           interfaceSize: 'xl',
+          brandName: null,
+          themePreset: null,
+          accentColor: null,
+          accent2Color: null,
+          accent3Color: null,
           updatedAt: new Date()
         }
       })
@@ -183,6 +193,17 @@ export class AppSettingsService {
 
     if (input.logoUrl !== undefined && input.logoUrl !== null && typeof input.logoUrl !== 'string') {
       throw new Error('Logo URL must be a string or null')
+    }
+
+    const HEX = /^#([a-f0-9]{3}|[a-f0-9]{6})$/i
+    const TRIPLET = /^\s*\d{1,3}\s+\d{1,3}\s+\d{1,3}\s*$/
+    const isColor = (v: unknown): v is string =>
+      typeof v === 'string' && (HEX.test(v) || TRIPLET.test(v))
+    for (const key of ['accentColor', 'accent2Color', 'accent3Color'] as const) {
+      const v = input[key]
+      if (v !== undefined && v !== null && v !== '' && !isColor(v)) {
+        throw new Error(`${key} must be a hex ("#RRGGBB") or "R G B" triplet`)
+      }
     }
   }
 
