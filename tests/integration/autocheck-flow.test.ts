@@ -8,7 +8,7 @@ import { EventManager, createEventManager } from '../../app/services/EventManage
 import { SocketService, createSocketService } from '../../app/services/SocketService'
 import { BackgroundHealthService } from '../../app/services/BackgroundHealthService'
 import { VMHealthQueueManager } from '../../app/services/VMHealthQueueManager'
-import { RUNNING_STATUS, STOPPED_STATUS } from '../../app/constants/machine-status'
+import { RUNNING_STATUS, OFF_STATUS } from '../../app/constants/machine-status'
 import { testPrisma } from '../setup/jest.setup'
 import {
   createUser,
@@ -76,7 +76,12 @@ describe('Auto-check end-to-end integration — real database', () => {
     await createMachine(prisma, {
       userId: OWNER_ID,
       departmentId: DEPT_ID,
-      overrides: { id: VM_ID, name: 'integration-test-vm', status: RUNNING_STATUS, os: 'windows' }
+      overrides: { id: VM_ID, name: 'integration-test-vm', status: RUNNING_STATUS, os: 'windows' },
+      withConfiguration: true
+    })
+    await prisma.machineConfiguration.update({
+      where: { machineId: VM_ID },
+      data: { setupComplete: true }
     })
   })
 
@@ -158,7 +163,7 @@ describe('Auto-check end-to-end integration — real database', () => {
       await createMachine(prisma, {
         userId: OWNER_ID,
         departmentId: DEPT_ID,
-        overrides: { id: STOPPED_ID, status: STOPPED_STATUS, name: 'stopped-vm' }
+        overrides: { id: STOPPED_ID, status: OFF_STATUS, name: 'stopped-vm' }
       })
 
       const spy = jest.spyOn(socketService, 'sendToUser').mockImplementation(jest.fn())
@@ -203,12 +208,21 @@ describe('Auto-check end-to-end integration — real database', () => {
       await createMachine(prisma, {
         userId: OWNER_ID,
         departmentId: DEPT_ID,
-        overrides: { status: STOPPED_STATUS, name: 'stopped' }
+        overrides: { status: OFF_STATUS, name: 'stopped' }
       })
       await createMachine(prisma, {
         userId: OWNER_ID,
         departmentId: DEPT_ID,
-        overrides: { status: RUNNING_STATUS, name: 'running-extra' }
+        overrides: { status: RUNNING_STATUS, name: 'running-extra' },
+        withConfiguration: true
+      })
+      await prisma.machineConfiguration.updateMany({
+        where: {
+          machine: {
+            name: 'running-extra'
+          }
+        },
+        data: { setupComplete: true }
       })
 
       const { service, mockQueueManager, mockEventManager } = await buildBackgroundHealthService()
@@ -237,7 +251,7 @@ describe('Auto-check end-to-end integration — real database', () => {
       await createMachine(prisma, {
         userId: OWNER_ID,
         departmentId: DEPT_ID,
-        overrides: { id: STOPPED_ID, status: STOPPED_STATUS, name: 'stopped-queue-vm' }
+        overrides: { id: STOPPED_ID, status: OFF_STATUS, name: 'stopped-queue-vm' }
       })
 
       const mockEventManager = { dispatchEvent: jest.fn() }

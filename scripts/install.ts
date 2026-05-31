@@ -4,7 +4,7 @@ import dotenv from 'dotenv'
 import path from 'path'
 import { Connection, Network } from '@infinibay/libvirt-node'
 import { v4 as uuidv4 } from 'uuid'
-import { DOMParser } from 'xmldom'
+import { DOMParser } from '@xmldom/xmldom'
 
 // TODO: Re-enable when networkFilters module is implemented
 // import { installNetworkFilters } from './installation/networkFilters'

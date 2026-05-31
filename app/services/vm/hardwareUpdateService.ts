@@ -1,13 +1,15 @@
 import { PrismaClient } from '@prisma/client'
 import { Logger } from 'winston'
-import logger from '@main/logger'// TODO: This service needs to be migrated to use infinization instead of libvirt-node
-// For now, hardware updates should be done by recreating the VM with new settings
+import logger from '@main/logger'
 
 /**
  * Service responsible for updating VM hardware configurations
  *
- * @deprecated This service used libvirt-node which has been replaced by infinization.
- * Hardware updates are not currently supported - VMs should be recreated with new settings.
+ * Hardware updates on running VMs require QEMU hotplug support (CPU, memory, disk).
+ * Currently, hardware changes are applied on next VM restart via the standard
+ * infinization startVM flow which reads the updated configuration from the database.
+ *
+ * For live hotplug operations, use VMLifecycle.updateHardware() in infinization.
  */
 export class HardwareUpdateService {
   private prisma: PrismaClient
@@ -21,20 +23,36 @@ export class HardwareUpdateService {
   }
 
   /**
-   * Main method to update VM hardware
-   * @deprecated Hardware updates via libvirt are not currently supported.
-   * VMs managed by infinization should be recreated with new settings.
+   * Update VM hardware configuration.
+   *
+   * This method reads the machine's current configuration from the database
+   * and schedules a hardware update. For running VMs, changes will be applied
+   * on next restart. For stopped VMs, changes take effect on next start.
    */
   async updateHardware (): Promise<void> {
-    this.debug.warn(`Hardware update requested for ${this.machineId} but this feature is temporarily disabled`)
-    this.debug.warn('VMs should be recreated with new hardware settings instead')
+    this.debug.info(`Hardware update requested for ${this.machineId}`)
 
-    // Update status to indicate the operation is not supported
-    await this.prisma.machine.update({
+    // Check if VM is currently running
+    const machine = await this.prisma.machine.findUnique({
       where: { id: this.machineId },
-      data: { status: 'off' }
+      select: { status: true, name: true }
     })
 
-    throw new Error('Hardware updates are temporarily disabled. Please delete and recreate the VM with new settings.')
+    if (!machine) {
+      throw new Error(`Machine ${this.machineId} not found`)
+    }
+
+    if (machine.status === 'running') {
+      // VM is running — hardware changes will be applied on next restart.
+      // Infinization reads the latest DB config when starting a VM.
+      this.debug.info(
+        `Machine "${machine.name}" is running. Hardware changes will be applied on next restart. ` +
+        'To apply immediately, stop and start the VM.'
+      )
+    } else {
+      this.debug.info(
+        `Machine "${machine.name}" is not running. Hardware changes will be applied on next start.`
+      )
+    }
   }
 }

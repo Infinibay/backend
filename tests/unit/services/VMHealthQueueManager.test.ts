@@ -2,8 +2,8 @@ import 'reflect-metadata'
 import { VMHealthQueueManager } from '@services/VMHealthQueueManager'
 import type { EventManager } from '@services/EventManager'
 import { mockPrisma } from '../../setup/jest.setup'
-import { TaskStatus, TaskPriority, HealthCheckType } from '@prisma/client'
-import { RUNNING_STATUS, STOPPED_STATUS, PAUSED_STATUS } from '../../../app/constants/machine-status'
+// (TaskStatus, TaskPriority and HealthCheckType were imported only for now-removed asserts.)
+import { RUNNING_STATUS, OFF_STATUS, PAUSED_STATUS } from '../../../app/constants/machine-status'
 
 // Mock VirtioSocketWatcherService
 import logger from '@main/logger'
@@ -38,10 +38,12 @@ describe('VMHealthQueueManager', () => {
     jest.spyOn(logger, 'info').mockImplementation(() => undefined as any)
 
     // Mock machine data for tests - using lowercase status to match database values
-    mockPrisma.machine.findUnique.mockResolvedValue({
+    mockPrisma.machine.findUnique.mockResolvedValue(<any>{
       id: mockMachineId,
       name: 'test-vm',
       status: RUNNING_STATUS,
+      // findMachine() reads setupComplete from configuration relation
+      configuration: { setupComplete: true },
       userId: 'user-1',
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -57,6 +59,7 @@ describe('VMHealthQueueManager', () => {
       version: 1,
       localIP: null,
       publicIP: null,
+      nodeId: null,
       poolId: null
     })
   })
@@ -67,10 +70,13 @@ describe('VMHealthQueueManager', () => {
   })
 
   // Helper methods for creating mock VMs with different statuses - using lowercase status values
-  const createMockVM = (status: string) => ({
+  const createMockVM = (status: string, setupComplete: boolean = true) => ({
     id: mockMachineId,
     name: 'test-vm',
     status,
+    // findMachine() reads setupComplete from the configuration relation,
+    // not from the Machine record directly.
+    configuration: { setupComplete },
     userId: 'user-1',
     createdAt: new Date(),
     updatedAt: new Date(),
@@ -85,6 +91,7 @@ describe('VMHealthQueueManager', () => {
     version: 1,
     localIP: null,
     publicIP: null,
+    nodeId: null,
     firewallRuleSetId: null,
     poolId: null
   })
@@ -114,7 +121,15 @@ describe('VMHealthQueueManager', () => {
 
       expect(mockPrisma.machine.findUnique).toHaveBeenCalledWith({
         where: { id: mockMachineId },
-        select: { id: true, name: true, status: true, os: true }
+        select: {
+          id: true,
+          name: true,
+          status: true,
+          os: true,
+          configuration: {
+            select: { setupComplete: true }
+          }
+        }
       })
       expect(mockPrisma.vMHealthCheckQueue.create).toHaveBeenCalled()
       expect(typeof queueId).toBe('string')
@@ -129,11 +144,11 @@ describe('VMHealthQueueManager', () => {
     })
 
     it('should throw error when VM is stopped', async () => {
-      mockPrisma.machine.findUnique.mockResolvedValue(createMockVM(STOPPED_STATUS))
+      mockPrisma.machine.findUnique.mockResolvedValue(createMockVM(OFF_STATUS))
 
       await expect(
         queueManager.queueHealthCheck(mockMachineId, 'DISK_SPACE')
-      ).rejects.toThrow(`Cannot queue health check for VM test-vm (${mockMachineId}) - VM status is '${STOPPED_STATUS}', expected '${RUNNING_STATUS}'`)
+      ).rejects.toThrow(`Cannot queue health check for VM test-vm (${mockMachineId}) - status='${OFF_STATUS}' setupComplete=true`)
 
       // Verify no database writes occurred
       expect(mockPrisma.vMHealthCheckQueue.create).not.toHaveBeenCalled()
@@ -144,7 +159,7 @@ describe('VMHealthQueueManager', () => {
 
       await expect(
         queueManager.queueHealthCheck(mockMachineId, 'DISK_SPACE')
-      ).rejects.toThrow(`Cannot queue health check for VM test-vm (${mockMachineId}) - VM status is '${PAUSED_STATUS}', expected '${RUNNING_STATUS}'`)
+      ).rejects.toThrow(`Cannot queue health check for VM test-vm (${mockMachineId}) - status='${PAUSED_STATUS}' setupComplete=true`)
 
       // Verify no database writes occurred
       expect(mockPrisma.vMHealthCheckQueue.create).not.toHaveBeenCalled()
@@ -155,7 +170,7 @@ describe('VMHealthQueueManager', () => {
 
       await expect(
         queueManager.queueHealthCheck(mockMachineId, 'DISK_SPACE')
-      ).rejects.toThrow(`Cannot queue health check for VM test-vm (${mockMachineId}) - VM status is 'error', expected '${RUNNING_STATUS}'`)
+      ).rejects.toThrow(`Cannot queue health check for VM test-vm (${mockMachineId}) - status='error' setupComplete=true`)
 
       // Verify no database writes occurred
       expect(mockPrisma.vMHealthCheckQueue.create).not.toHaveBeenCalled()
@@ -166,7 +181,7 @@ describe('VMHealthQueueManager', () => {
 
       await expect(
         queueManager.queueHealthCheck(mockMachineId, 'DISK_SPACE')
-      ).rejects.toThrow(`Cannot queue health check for VM test-vm (${mockMachineId}) - VM status is 'creating', expected '${RUNNING_STATUS}'`)
+      ).rejects.toThrow(`Cannot queue health check for VM test-vm (${mockMachineId}) - status='creating' setupComplete=true`)
 
       // Verify no database writes occurred
       expect(mockPrisma.vMHealthCheckQueue.create).not.toHaveBeenCalled()
@@ -205,7 +220,7 @@ describe('VMHealthQueueManager', () => {
 
       await expect(
         queueManager.queueHealthCheck(mockMachineId, 'DISK_SPACE')
-      ).rejects.toThrow(`Cannot queue health check for VM test-vm (${mockMachineId}) - VM status is 'null', expected '${RUNNING_STATUS}'`)
+      ).rejects.toThrow(`Cannot queue health check for VM test-vm (${mockMachineId}) - status='null' setupComplete=true`)
 
       // Verify no database writes occurred
       expect(mockPrisma.vMHealthCheckQueue.create).not.toHaveBeenCalled()
@@ -216,7 +231,7 @@ describe('VMHealthQueueManager', () => {
 
       await expect(
         queueManager.queueHealthCheck(mockMachineId, 'DISK_SPACE')
-      ).rejects.toThrow(`Cannot queue health check for VM test-vm (${mockMachineId}) - VM status is 'undefined', expected '${RUNNING_STATUS}'`)
+      ).rejects.toThrow(`Cannot queue health check for VM test-vm (${mockMachineId}) - status='undefined' setupComplete=true`)
 
       // Verify no database writes occurred
       expect(mockPrisma.vMHealthCheckQueue.create).not.toHaveBeenCalled()
@@ -274,7 +289,7 @@ describe('VMHealthQueueManager', () => {
     })
 
     it('should skip queuing and log message when VM is stopped', async () => {
-      mockPrisma.machine.findUnique.mockResolvedValue(createMockVM(STOPPED_STATUS))
+      mockPrisma.machine.findUnique.mockResolvedValue(createMockVM(OFF_STATUS))
 
       await queueManager.queueHealthChecks(mockMachineId)
 
@@ -283,7 +298,7 @@ describe('VMHealthQueueManager', () => {
 
       // Verify logging behavior for skipped VM
       expect(logger.info).toHaveBeenCalledWith(
-        expect.stringContaining(`Skipping health checks for VM test-vm (${mockMachineId}) - VM status is '${STOPPED_STATUS}', expected '${RUNNING_STATUS}'`)
+        expect.stringContaining(`Skipping health checks for VM test-vm (${mockMachineId}) - status='${OFF_STATUS}' setupComplete=true`)
       )
     })
 
@@ -297,7 +312,7 @@ describe('VMHealthQueueManager', () => {
 
       // Verify logging behavior for skipped VM
       expect(logger.info).toHaveBeenCalledWith(
-        expect.stringContaining(`Skipping health checks for VM test-vm (${mockMachineId}) - VM status is '${PAUSED_STATUS}', expected '${RUNNING_STATUS}'`)
+        expect.stringContaining(`Skipping health checks for VM test-vm (${mockMachineId}) - status='${PAUSED_STATUS}' setupComplete=true`)
       )
     })
 
@@ -311,7 +326,7 @@ describe('VMHealthQueueManager', () => {
 
       // Verify logging behavior for skipped VM
       expect(logger.info).toHaveBeenCalledWith(
-        expect.stringContaining(`Skipping health checks for VM test-vm (${mockMachineId}) - VM status is 'error', expected '${RUNNING_STATUS}'`)
+        expect.stringContaining(`Skipping health checks for VM test-vm (${mockMachineId}) - status='error' setupComplete=true`)
       )
     })
 
@@ -325,7 +340,7 @@ describe('VMHealthQueueManager', () => {
 
       // Verify logging behavior for skipped VM
       expect(logger.info).toHaveBeenCalledWith(
-        expect.stringContaining(`Skipping health checks for VM test-vm (${mockMachineId}) - VM status is 'creating', expected '${RUNNING_STATUS}'`)
+        expect.stringContaining(`Skipping health checks for VM test-vm (${mockMachineId}) - status='creating' setupComplete=true`)
       )
     })
 
@@ -388,14 +403,22 @@ describe('VMHealthQueueManager', () => {
     })
 
     it('should verify no unnecessary database operations when VM is not running', async () => {
-      mockPrisma.machine.findUnique.mockResolvedValue(createMockVM(STOPPED_STATUS))
+      mockPrisma.machine.findUnique.mockResolvedValue(createMockVM(OFF_STATUS))
 
       await queueManager.queueHealthChecks(mockMachineId)
 
       // Verify VM status was checked
       expect(mockPrisma.machine.findUnique).toHaveBeenCalledWith({
         where: { id: mockMachineId },
-        select: { id: true, name: true, status: true, os: true }
+        select: {
+          id: true,
+          name: true,
+          status: true,
+          os: true,
+          configuration: {
+            select: { setupComplete: true }
+          }
+        }
       })
 
       // Verify no health check creation operations were performed

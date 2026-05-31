@@ -200,14 +200,26 @@ function checkSetupModeAccess (context: InfinibayContext): boolean {
  * Uses the same pattern as UserEventManager for consistency
  */
 export async function getUserAccessibleDepartments (prisma: any, userId: string): Promise<string[]> {
-  const userVMs = await prisma.machine.findMany({
-    where: { userId },
-    select: { departmentId: true }
-  })
+  // A user can reach a department two ways: they own a VM in it, or they hold
+  // an explicit DepartmentMembership (the department-scoped roles feature).
+  const [userVMs, memberships] = await Promise.all([
+    prisma.machine.findMany({
+      where: { userId },
+      select: { departmentId: true }
+    }),
+    // Only MANAGER memberships grant access to a department's resources.
+    // A plain MEMBER is just a recorded participant and must NOT widen the
+    // user's resource scope.
+    prisma.departmentMembership.findMany({
+      where: { userId, role: 'MANAGER' },
+      select: { departmentId: true }
+    })
+  ])
 
-  const departmentIds = userVMs
-    .map((vm: any) => vm.departmentId)
-    .filter(Boolean) as string[]
+  const departmentIds = [
+    ...userVMs.map((vm: any) => vm.departmentId),
+    ...memberships.map((m: any) => m.departmentId)
+  ].filter(Boolean) as string[]
 
   // Remove duplicates and return
   return [...new Set(departmentIds)]

@@ -1,8 +1,10 @@
 import logger from '@main/logger'
-import { Resolver, Query, Mutation, Arg, Authorized } from 'type-graphql'
+import { Resolver, Query, Mutation, Arg, Authorized, Ctx } from 'type-graphql'
 import { ISO, ISOStatus, SystemReadiness, ISOAvailabilityMap } from '../types/ISOType'
 import ISOService from '@services/ISOService'
 import { UserInputError } from '@utils/errors'
+import { InfinibayContext } from '@utils/context'
+import { assertCanAccessResource } from '../utils/auth'
 
 @Resolver()
 export class ISOResolver {
@@ -102,7 +104,10 @@ export class ISOResolver {
 
   @Query(() => [ISO], { description: 'Get all ISOs (available and unavailable)' })
   @Authorized(['ADMIN'])
-  async allISOs (): Promise<ISO[]> {
+  async allISOs (
+    @Ctx() ctx: InfinibayContext
+  ): Promise<ISO[]> {
+    await assertCanAccessResource(ctx, 'blueprints')
     try {
       await this.isoService.syncISOsWithFileSystem()
 
@@ -131,8 +136,10 @@ export class ISOResolver {
   @Mutation(() => Boolean, { description: 'Validate ISO file integrity' })
   @Authorized(['ADMIN'])
   async validateISO (
-    @Arg('isoId') isoId: string
+    @Arg('isoId') isoId: string,
+      @Ctx() ctx: InfinibayContext
   ): Promise<boolean> {
+    await assertCanAccessResource(ctx, 'blueprints')
     try {
       return await this.isoService.validateISO(isoId)
     } catch (error) {
@@ -144,8 +151,10 @@ export class ISOResolver {
   @Mutation(() => String, { description: 'Calculate ISO checksum' })
   @Authorized(['ADMIN'])
   async calculateISOChecksum (
-    @Arg('isoId') isoId: string
+    @Arg('isoId') isoId: string,
+      @Ctx() ctx: InfinibayContext
   ): Promise<string> {
+    await assertCanAccessResource(ctx, 'blueprints')
     try {
       return await this.isoService.calculateChecksum(isoId)
     } catch (error) {
@@ -157,8 +166,10 @@ export class ISOResolver {
   @Mutation(() => Boolean, { description: 'Remove ISO file' })
   @Authorized(['ADMIN'])
   async removeISO (
-    @Arg('isoId') isoId: string
+    @Arg('isoId') isoId: string,
+      @Ctx() ctx: InfinibayContext
   ): Promise<boolean> {
+    await assertCanAccessResource(ctx, 'blueprints')
     try {
       await this.isoService.removeISO(isoId)
       return true
@@ -170,7 +181,10 @@ export class ISOResolver {
 
   @Mutation(() => Boolean, { description: 'Sync ISOs with filesystem' })
   @Authorized(['ADMIN'])
-  async syncISOs (): Promise<boolean> {
+  async syncISOs (
+    @Ctx() ctx: InfinibayContext
+  ): Promise<boolean> {
+    await assertCanAccessResource(ctx, 'blueprints')
     try {
       await this.isoService.syncISOsWithFileSystem()
       return true
@@ -186,8 +200,10 @@ export class ISOResolver {
     @Arg('filename') filename: string,
     @Arg('os') os: string,
     @Arg('size') size: number,
-    @Arg('path') path: string
+    @Arg('path') path: string,
+      @Ctx() ctx: InfinibayContext
   ): Promise<ISO> {
+    await assertCanAccessResource(ctx, 'blueprints')
     try {
       const iso = await this.isoService.registerISO(filename, os, size, path)
 

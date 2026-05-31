@@ -116,11 +116,25 @@ export class VMHealthQueueRepository {
     })
   }
 
-  async findMachine(machineId: string): Promise<{ id: string; name: string; status: string; os?: string | null } | null> {
-    return this.prisma.machine.findUnique({
+  async findMachine(machineId: string): Promise<{ id: string; name: string; status: string; os?: string | null; setupComplete: boolean } | null> {
+    const m = await this.prisma.machine.findUnique({
       where: { id: machineId },
-      select: { id: true, name: true, status: true, os: true },
+      select: {
+        id: true,
+        name: true,
+        status: true,
+        os: true,
+        configuration: { select: { setupComplete: true } },
+      },
     })
+    if (!m) return null
+    return {
+      id: m.id,
+      name: m.name,
+      status: m.status,
+      os: m.os,
+      setupComplete: m.configuration?.setupComplete ?? false,
+    }
   }
 
   async getLastOverallScanTime(machineId: string): Promise<Date | null> {

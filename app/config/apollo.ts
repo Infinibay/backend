@@ -3,22 +3,28 @@
 // Repository: https://github.com/apollographql/apollo-server
 import logger from '@main/logger'
 import { ApolloServer } from '@apollo/server'
-import { GraphQLError } from 'graphql'
+import { GraphQLError, GraphQLSchema } from 'graphql'
 import { buildSchema } from 'type-graphql'
 import path from 'node:path'
 import { InfinibayContext } from '@main/utils/context'
 import { authChecker } from '@main/utils/authChecker'
 import resolvers from '@main/graphql/resolvers'
+import { pubsub } from '@main/utils/pubsub'
 
-export const createApolloServer = async (): Promise<ApolloServer> => {
-  // Build TypeGraphQL executable schema
+export interface ApolloServerBundle {
+  server: ApolloServer
+  schema: GraphQLSchema
+}
+
+export const createApolloServer = async (): Promise<ApolloServerBundle> => {
   const schema = await buildSchema({
     resolvers,
     emitSchemaFile: path.resolve(__dirname, '../schema.graphql'),
-    authChecker
+    authChecker,
+    pubSub: pubsub
   })
 
-  return new ApolloServer({
+  const server = new ApolloServer({
     schema,
     csrfPrevention: true,
     cache: 'bounded',
@@ -57,4 +63,6 @@ export const createApolloServer = async (): Promise<ApolloServer> => {
       return error
     }
   })
+
+  return { server, schema }
 }

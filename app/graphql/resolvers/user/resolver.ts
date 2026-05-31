@@ -1,5 +1,5 @@
 import logger from '@main/logger'
-import { PrismaClient } from '@prisma/client'
+import { Prisma, PrismaClient } from '@prisma/client'
 import bcrypt from 'bcrypt'
 import jwt from 'jsonwebtoken'
 import {
@@ -11,17 +11,20 @@ import {
   Resolver
 } from 'type-graphql'
 import { UserInputError, AuthenticationError } from '@utils/errors'
-import { UserType, UserToken, LoginResponse, UserOrderByInputType, CreateUserInputType, UpdateUserInputType, UserRole } from './type'
+import { UserType, LoginResponse, UserOrderByInputType, CreateUserInputType, UpdateUserInputType, UserRole } from './type'
 import { PaginationInputType } from '@utils/pagination'
 import { InfinibayContext } from '@utils/context'
 import { getEventManager } from '../../../services/EventManager'
+import { assertCanAccessResource } from '../../utils/auth'
+import { IdentityProviderService } from '../../../services/identity/IdentityProviderService'
 
 export interface UserResolverInterface {
   currentUser(context: InfinibayContext): Promise<UserType | null>;
-  user(id: string): Promise<UserType | null>;
+  user(id: string, context: InfinibayContext): Promise<UserType | null>;
   users(
     orderBy: UserOrderByInputType,
-    pagination: PaginationInputType
+    pagination: PaginationInputType,
+    context: InfinibayContext
   ): Promise<UserType[]>;
   login(email: string, password: string): Promise<LoginResponse | null>;
   createUser(
@@ -35,7 +38,7 @@ export interface UserResolverInterface {
   ): Promise<UserType>
 }
 
-@Resolver(_of => UserType)
+@Resolver(() => UserType)
 export class UserResolver implements UserResolverInterface {
   @Query(() => UserType, { nullable: true })
   @Authorized('USER')
@@ -62,12 +65,14 @@ export class UserResolver implements UserResolverInterface {
     id: ID
   Require auth('ADMIN')
   */
-  @Query(_returns => UserType)
+  @Query(() => UserType)
   @Authorized('ADMIN')
   async user (
-    @Arg('id') id: string
+    @Arg('id') id: string,
+    @Ctx() context: InfinibayContext
   ): Promise<UserType | null> {
-    const prisma = new PrismaClient()
+    await assertCanAccessResource(context, 'users')
+    const prisma = context.prisma
     const user = await prisma.user.findUnique({ where: { id } })
     // thrwo exception if user not found
     if (!user) {
@@ -88,9 +93,11 @@ export class UserResolver implements UserResolverInterface {
   @Authorized('ADMIN')
   async users (
     @Arg('orderBy', { nullable: true }) orderBy: UserOrderByInputType,
-    @Arg('pagination', { nullable: true }) pagination: PaginationInputType
+    @Arg('pagination', { nullable: true }) pagination: PaginationInputType,
+    @Ctx() context: InfinibayContext
   ): Promise<UserType[]> {
-    const prisma = new PrismaClient()
+    await assertCanAccessResource(context, 'users')
+    const prisma = context.prisma
     // Check if pagination is valid
     if (pagination.take < 0 || pagination.skip < 0) {
       throw new UserInputError('Invalid pagination')
@@ -126,11 +133,24 @@ export class UserResolver implements UserResolverInterface {
     @Arg('password') password: string
   ): Promise<LoginResponse | null> {
     const prisma = new PrismaClient()
-    const user = await prisma.user.findFirst({ where: { email } })
+    const user = await prisma.user.findFirst({ where: { email, deleted: false } })
     if (!user) {
       throw new AuthenticationError('Invalid credentials')
     }
-    const passwordMatch = await bcrypt.compare(password, user.password)
+    let passwordMatch = await bcrypt.compare(password, user.password)
+    if (!passwordMatch && user.identityProviderId && user.externalDn) {
+      passwordMatch = await new IdentityProviderService(prisma).authenticateUser(
+        user.identityProviderId,
+        user.externalDn,
+        password
+      )
+      if (passwordMatch) {
+        await prisma.user.update({
+          where: { id: user.id },
+          data: { lastDirectorySyncAt: new Date() }
+        })
+      }
+    }
     if (!passwordMatch) {
       throw new AuthenticationError('Invalid credentials')
     }
@@ -161,7 +181,8 @@ export class UserResolver implements UserResolverInterface {
     @Arg('input', { nullable: false }) input: CreateUserInputType,
     @Ctx() context: InfinibayContext
   ): Promise<UserType> {
-    const prisma = new PrismaClient()
+    await assertCanAccessResource(context, 'users')
+    const prisma = context.prisma
 
     // Protection: Only SUPER_ADMIN can create SUPER_ADMIN users
     if (input.role === UserRole.SUPER_ADMIN && context.user?.role !== 'SUPER_ADMIN') {
@@ -230,7 +251,12 @@ export class UserResolver implements UserResolverInterface {
     @Arg('input', { nullable: false }) input: UpdateUserInputType,
     @Ctx() context: InfinibayContext
   ): Promise<UserType> {
-    const { password, passwordConfirmation, currentPassword, ...safeInput } = input
+    const safeInput = {
+      firstName: input.firstName,
+      lastName: input.lastName,
+      role: input.role,
+      avatar: input.avatar
+    }
     logger.info('🔧 Backend updateUser called:', {
       id,
       inputKeys: Object.keys(safeInput),
@@ -239,7 +265,7 @@ export class UserResolver implements UserResolverInterface {
       willUpdateFields: Object.keys(safeInput).filter(key => safeInput[key as keyof typeof safeInput] !== undefined)
     })
 
-    const prisma = new PrismaClient()
+    const prisma = context.prisma
     const user = await prisma.user.findUnique({ where: { id } })
     if (!user) {
       throw new UserInputError('User not found')
@@ -248,6 +274,9 @@ export class UserResolver implements UserResolverInterface {
     // Check if this is a self-update
     const isSelfUpdate = context.user?.id === id
     const isPrivileged = context.user?.role === 'ADMIN' || context.user?.role === 'SUPER_ADMIN'
+    if (!isSelfUpdate || input.role !== undefined) {
+      await assertCanAccessResource(context, 'users')
+    }
     if (!isSelfUpdate && !isPrivileged) {
       throw new AuthenticationError('Not authorized to update this user')
     }
@@ -289,7 +318,7 @@ export class UserResolver implements UserResolverInterface {
     }
 
     // Build update data object with only the fields that were provided
-    const updateData: any = {}
+    const updateData: Prisma.UserUpdateInput = {}
 
     // Only update password if provided
     if (input.password) {

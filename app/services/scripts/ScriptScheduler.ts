@@ -79,15 +79,26 @@ export class ScriptScheduler {
       const warnings: string[] = [];
       const machines = await this.prisma.machine.findMany({
         where: { id: { in: targetMachineIds } },
-        select: { id: true, name: true, status: true }
+        select: {
+          id: true,
+          name: true,
+          status: true,
+          configuration: { select: { setupComplete: true } },
+        }
       });
 
-      const offlineVMs = machines.filter(m => m.status !== 'running');
-      if (offlineVMs.length > 0) {
-        offlineVMs.forEach(vm => {
-          warnings.push(`VM "${vm.name}" is currently offline. Schedule will execute when VM starts.`);
+      const notReadyVMs = machines.filter(
+        m => m.status !== 'running' || !m.configuration?.setupComplete
+      );
+      if (notReadyVMs.length > 0) {
+        notReadyVMs.forEach(vm => {
+          if (vm.status !== 'running') {
+            warnings.push(`VM "${vm.name}" is currently offline. Schedule will execute when VM starts.`);
+          } else {
+            warnings.push(`VM "${vm.name}" is still setting up. Schedule will execute once the OS is ready.`);
+          }
         });
-        log.debug('Warning: %d VMs are offline', offlineVMs.length);
+        log.debug('Warning: %d VMs not ready (offline or still installing)', notReadyVMs.length);
       }
 
       // 4. Validate input values
@@ -195,17 +206,17 @@ export class ScriptScheduler {
               // Check if machine is online
               const machine = machines.find(m => m.id === machineId);
 
-              if (machine && machine.status === 'running') {
-                // Push scripts to online VM
+              if (machine && machine.status === 'running' && machine.configuration?.setupComplete) {
+                // Push scripts to a VM whose OS is ready
                 const result = await virtioService.pushPendingScriptsToVM(machineId);
-                log.debug('Pushed scripts to online VM %s: success=%s, count=%d', machineId, result.success, result.scriptCount);
+                log.debug('Pushed scripts to ready VM %s: success=%s, count=%d', machineId, result.success, result.scriptCount);
 
                 if (!result.success) {
                   log.debug('Failed to push scripts to VM %s: %s (will be picked up on next poll)', machineId, result.error);
                   warnings.push(`Failed to immediately push script to VM "${machine.name}". Script will execute on next VM poll.`);
                 }
               } else {
-                log.debug('VM %s is offline (status: %s), scripts will be picked up on next boot/poll', machineId, machine?.status || 'unknown');
+                log.debug('VM %s not ready (status=%s setupComplete=%s), scripts will be picked up on next boot/poll', machineId, machine?.status || 'unknown', machine?.configuration?.setupComplete ?? false);
               }
             } catch (error) {
               log.debug('Error pushing scripts to VM %s: %s (will be picked up on next poll)', machineId, (error as Error).message);

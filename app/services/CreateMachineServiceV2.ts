@@ -103,9 +103,6 @@ export class CreateMachineServiceV2 {
       const applications = await this.fetchMachineApplications(machine)
       const scripts = await this.fetchMachineScripts(machine)
 
-      // Update status to 'building'
-      await this.updateMachineStatus(machine.id, 'building')
-
       // Get infinization instance
       const infinization = await getInfinization()
 
@@ -157,10 +154,11 @@ export class CreateMachineServiceV2 {
         }
       })
 
-      // Status remains 'building' until infiniservice connects for the first time.
-      // VirtioSocketWatcherService will change it to 'running' when it receives
-      // the first message from infiniservice, indicating the VM has completed
-      // its initial setup (OS installation, infiniservice startup).
+      // Machine.status will transition 'off' → 'starting' → 'running' via
+      // QMP events handled by infinization. The orthogonal setupComplete
+      // flag is set by VirtioSocketWatcherService when infiniservice
+      // connects for the first time (signaling that OS install and the
+      // initial agent handshake are done).
       this.debug.info(`VM ${machine.name} started - waiting for infiniservice connection`)
 
       return true

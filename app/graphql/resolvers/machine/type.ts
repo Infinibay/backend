@@ -48,11 +48,23 @@ export class Machine {
     @Field(() => String, { nullable: true })
       publicIP: string | null = null
 
+    @Field(() => String, { nullable: true })
+      nodeId: string | null = null
+
     @Field(() => GraphQLJSONObject, { nullable: true })
       configuration: Record<string, unknown> | null = null
 
     @Field(() => String)
-      status: MachineStatus = MachineStatus.STOPPED
+      status: MachineStatus = MachineStatus.OFF
+
+    /**
+     * True once the OS finished installing and infiniservice handshaked.
+     * Orthogonal to `status` (which only reflects QEMU process state).
+     * UI uses (status, setupComplete) together: e.g. running && !setupComplete
+     * means the VM is currently installing.
+     */
+    @Field(() => Boolean)
+      setupComplete: boolean = false
 
     @Field(() => String, { nullable: true })
       userId: string | null = null
@@ -118,6 +130,63 @@ export class CommandExecutionResponseType {
       response?: string
 }
 
+@ObjectType()
+export class DomainJoinResultType {
+    @Field(() => Boolean)
+      success: boolean = false
+
+    @Field(() => String, { nullable: true })
+      message?: string
+
+    @Field(() => String, { nullable: true })
+      domain?: string
+
+    @Field(() => String, { nullable: true })
+      error?: string
+}
+
+@InputType()
+export class JoinDomainInput {
+    @Field(() => String)
+      machineId: string = ''
+
+    @Field(() => String)
+      identityProviderId: string = ''
+
+    @Field(() => String, { nullable: true })
+      username?: string
+
+    @Field(() => String, { nullable: true })
+      password?: string
+
+    @Field(() => String, { nullable: true })
+      ou?: string
+
+    @Field(() => String, { nullable: true })
+      computerName?: string
+
+    @Field(() => Boolean, { nullable: true })
+      restartAfter?: boolean
+}
+
+@ObjectType()
+export class MachineMigrationResultType {
+    @Field(() => Boolean)
+      success: boolean = false
+
+    @Field(() => String)
+      machineId: string = ''
+
+    @Field(() => String, { nullable: true })
+      sourceNodeId: string | null = null
+
+    @Field(() => String)
+      targetNodeId: string = ''
+
+    @Field(() => String, { nullable: true })
+      error?: string
+}
+
 @InputType()
 export class MachineOrderBy {
     @Field(() => MachineOrderByEnum, { nullable: true })
@@ -138,9 +207,14 @@ export enum MachineOrderByEnum {
 }
 
 export enum MachineStatus {
+    OFF = 'off',
+    STARTING = 'starting',
     RUNNING = 'running',
-    STOPPED = 'stopped',
-    PAUSED = 'paused'
+    SUSPENDED = 'suspended',
+    PAUSED = 'paused',
+    UPDATING_HARDWARE = 'updating_hardware',
+    POWERING_OFF_UPDATE = 'powering_off_update',
+    ERROR = 'error'
 }
 
 export enum OsEnum {

@@ -12,6 +12,7 @@ import {
   CommandResult
 } from './types'
 import { VirtioSocketWatcherService } from '@services/VirtioSocketWatcherService'
+import { assertCanManageVM } from '../../utils/auth'
 
 // Interface for service data returned from InfiniService
 interface InfiniServiceData {
@@ -57,9 +58,10 @@ export class VMManagementResolver {
   @Authorized()
   async listVMServices (
     @Arg('vmId', () => ID) vmId: string,
-    @Ctx() { prisma }: InfinibayContext
+    @Ctx() context: InfinibayContext
   ): Promise<ServiceInfo[]> {
-    const vm = await prisma.machine.findUnique({
+    await assertCanManageVM(context, vmId)
+    const vm = await context.prisma.machine.findUnique({
       where: { id: vmId }
     })
 
@@ -102,9 +104,10 @@ export class VMManagementResolver {
   @Authorized()
   async listVMPackages (
     @Arg('vmId', () => ID) vmId: string,
-    @Ctx() { prisma }: InfinibayContext
+    @Ctx() context: InfinibayContext
   ): Promise<PackageInfo[]> {
-    const vm = await prisma.machine.findUnique({
+    await assertCanManageVM(context, vmId)
+    const vm = await context.prisma.machine.findUnique({
       where: { id: vmId }
     })
 
@@ -147,9 +150,10 @@ export class VMManagementResolver {
   @Authorized()
   async listVMSnapshots (
     @Arg('vmId', () => ID) vmId: string,
-    @Ctx() { prisma }: InfinibayContext
+    @Ctx() context: InfinibayContext
   ): Promise<VMSnapshot[]> {
-    const vm = await prisma.machine.findUnique({
+    await assertCanManageVM(context, vmId)
+    const vm = await context.prisma.machine.findUnique({
       where: { id: vmId }
     })
 
@@ -181,9 +185,10 @@ export class VMManagementResolver {
   @Authorized()
   async controlVMService (
     @Arg('input') input: ServiceActionInput,
-    @Ctx() { prisma }: InfinibayContext
+    @Ctx() context: InfinibayContext
   ): Promise<CommandResult> {
-    const vm = await prisma.machine.findUnique({
+    await assertCanManageVM(context, input.vmId)
+    const vm = await context.prisma.machine.findUnique({
       where: { id: input.vmId }
     })
 
@@ -225,9 +230,10 @@ export class VMManagementResolver {
   @Authorized()
   async manageVMPackage (
     @Arg('input') input: PackageActionInput,
-    @Ctx() { prisma }: InfinibayContext
+    @Ctx() context: InfinibayContext
   ): Promise<CommandResult> {
-    const vm = await prisma.machine.findUnique({
+    await assertCanManageVM(context, input.vmId)
+    const vm = await context.prisma.machine.findUnique({
       where: { id: input.vmId }
     })
 
@@ -281,9 +287,10 @@ export class VMManagementResolver {
   @Authorized()
   async createVMSnapshot (
     @Arg('input') input: CreateSnapshotInput,
-    @Ctx() { prisma }: InfinibayContext
+    @Ctx() context: InfinibayContext
   ): Promise<VMSnapshot> {
-    const vm = await prisma.machine.findUnique({
+    await assertCanManageVM(context, input.vmId)
+    const vm = await context.prisma.machine.findUnique({
       where: { id: input.vmId }
     })
 
@@ -321,9 +328,10 @@ export class VMManagementResolver {
   async revertVMSnapshot (
     @Arg('vmId', () => ID) vmId: string,
     @Arg('snapshotName') snapshotName: string,
-    @Ctx() { prisma }: InfinibayContext
+    @Ctx() context: InfinibayContext
   ): Promise<boolean> {
-    const vm = await prisma.machine.findUnique({
+    await assertCanManageVM(context, vmId)
+    const vm = await context.prisma.machine.findUnique({
       where: { id: vmId }
     })
 
@@ -349,9 +357,10 @@ export class VMManagementResolver {
   async deleteVMSnapshot (
     @Arg('vmId', () => ID) vmId: string,
     @Arg('snapshotName') snapshotName: string,
-    @Ctx() { prisma }: InfinibayContext
+    @Ctx() context: InfinibayContext
   ): Promise<boolean> {
-    const vm = await prisma.machine.findUnique({
+    await assertCanManageVM(context, vmId)
+    const vm = await context.prisma.machine.findUnique({
       where: { id: vmId }
     })
 

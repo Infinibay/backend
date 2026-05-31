@@ -23,6 +23,7 @@ import { getBackupService } from '@services/BackupService'
 import { getBackupScheduleService } from '@services/BackupScheduleService'
 import { InfinibayContext } from '@utils/context'
 import { UserInputError } from '@utils/errors'
+import { assertCanAccessResource } from '../utils/auth'
 
 @Resolver()
 export class BackupResolver {
@@ -69,6 +70,7 @@ export class BackupResolver {
     @Ctx() ctx?: InfinibayContext
   ): Promise<BackupResult> {
     if (!ctx?.prisma) throw new UserInputError('Database context not available')
+    await assertCanAccessResource(ctx, 'desktops')
 
     try {
       const service = getBackupService(ctx.prisma)
@@ -109,6 +111,7 @@ export class BackupResolver {
     @Ctx() ctx?: InfinibayContext
   ): Promise<BackupRestoreResult> {
     if (!ctx?.prisma) throw new UserInputError('Database context not available')
+    await assertCanAccessResource(ctx, 'desktops')
 
     try {
       const service = getBackupService(ctx.prisma)
@@ -140,6 +143,7 @@ export class BackupResolver {
     @Ctx() ctx?: InfinibayContext
   ): Promise<SuccessType> {
     if (!ctx?.prisma) throw new UserInputError('Database context not available')
+    await assertCanAccessResource(ctx, 'desktops')
 
     try {
       const service = getBackupService(ctx.prisma)
@@ -185,6 +189,7 @@ export class BackupResolver {
     @Ctx() ctx?: InfinibayContext
   ): Promise<BackupScheduleGql> {
     if (!ctx?.prisma) throw new UserInputError('Database context not available')
+    await assertCanAccessResource(ctx, 'desktops')
 
     try {
       const backupService = getBackupService(ctx.prisma)
@@ -214,6 +219,7 @@ export class BackupResolver {
     @Ctx() ctx?: InfinibayContext
   ): Promise<BackupScheduleGql> {
     if (!ctx?.prisma) throw new UserInputError('Database context not available')
+    await assertCanAccessResource(ctx, 'desktops')
 
     try {
       const backupService = getBackupService(ctx.prisma)
@@ -241,6 +247,7 @@ export class BackupResolver {
     @Ctx() ctx?: InfinibayContext
   ): Promise<SuccessType> {
     if (!ctx?.prisma) throw new UserInputError('Database context not available')
+    await assertCanAccessResource(ctx, 'desktops')
 
     try {
       const backupService = getBackupService(ctx.prisma)

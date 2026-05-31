@@ -2,6 +2,7 @@ import { Resolver, Query, Mutation, Arg, Authorized, Ctx } from 'type-graphql'
 import { AppSettingsService, AppSettingsUpdateInput } from '@services/AppSettingsService'
 import { AppSettings, AppSettingsInput } from '@graphql/types/AppSettingsType'
 import { InfinibayContext } from '@utils/context'
+import { assertCanAccessResource } from '../utils/auth'
 
 function toGraphql (s: {
   id: string
@@ -53,8 +54,10 @@ export class AppSettingsResolver {
   @Authorized('ADMIN')
   async updateAppSettings (
     @Arg('input') input: AppSettingsInput,
-    @Ctx() { prisma }: InfinibayContext
+    @Ctx() context: InfinibayContext
   ): Promise<AppSettings> {
+    const { prisma } = context
+    await assertCanAccessResource(context, 'settings')
     const appSettingsService = new AppSettingsService(prisma)
 
     // Build update object with only provided fields. Allow-list keeps

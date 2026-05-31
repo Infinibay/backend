@@ -6,6 +6,7 @@ import { VMHealthQueueManager } from '@services/VMHealthQueueManager'
 import { BackgroundTaskService } from '@services/BackgroundTaskService'
 import { createEventManager } from '@services/EventManager'
 import { getSocketService } from '@services/SocketService'
+import { assertCanAccessResource } from '../../utils/auth'
 
 /**
  * Background Health Service Status Type
@@ -109,6 +110,7 @@ export class BackgroundHealthResolver {
   async backgroundHealthServiceStatus (
     @Ctx() context: InfinibayContext
   ): Promise<BackgroundHealthServiceStatus> {
+    await assertCanAccessResource(context, 'infrastructure')
     const service = this.getBackgroundHealthService(context)
     const status = service.getStatus()
 
@@ -145,6 +147,7 @@ export class BackgroundHealthResolver {
   async healthQueueStatistics (
     @Ctx() context: InfinibayContext
   ): Promise<QueueStatistics> {
+    await assertCanAccessResource(context, 'infrastructure')
     const today = new Date()
     today.setHours(0, 0, 0, 0)
 
@@ -189,6 +192,7 @@ export class BackgroundHealthResolver {
   async triggerHealthCheckRound (
     @Ctx() context: InfinibayContext
   ): Promise<HealthCheckRoundResult> {
+    await assertCanAccessResource(context, 'infrastructure')
     try {
       const service = this.getBackgroundHealthService(context)
       const taskId = await service.triggerHealthCheckRound()
@@ -219,9 +223,14 @@ export class BackgroundHealthResolver {
   async queueAllVMHealthChecks (
     @Ctx() context: InfinibayContext
   ): Promise<HealthCheckRoundResult> {
+    await assertCanAccessResource(context, 'infrastructure')
     try {
       if (!this.queueManager) {
         this.getBackgroundHealthService(context) // Initialize services
+      }
+      const queueManager = this.queueManager
+      if (!queueManager) {
+        throw new Error('Health queue manager not initialized')
       }
 
       const activeVMs = await context.prisma.machine.findMany({
@@ -234,7 +243,7 @@ export class BackgroundHealthResolver {
 
       for (const vm of activeVMs) {
         try {
-          await this.queueManager!.queueHealthChecks(vm.id)
+          await queueManager.queueHealthChecks(vm.id)
           successCount++
         } catch (error) {
           failureCount++

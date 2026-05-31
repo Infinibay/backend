@@ -6,7 +6,6 @@ node_modules/
 
 # Prisma
 .prisma/
-prisma/migrations/
 
 # Uploads
 uploads/*

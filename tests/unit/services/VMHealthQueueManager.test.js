@@ -15,6 +15,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 require("reflect-metadata");
 const VMHealthQueueManager_1 = require("@services/VMHealthQueueManager");
 const jest_setup_1 = require("../../setup/jest.setup");
+// (TaskStatus, TaskPriority and HealthCheckType were imported only for now-removed asserts.)
 const machine_status_1 = require("../../../app/constants/machine-status");
 // Mock VirtioSocketWatcherService
 const logger_1 = __importDefault(require("@main/logger"));
@@ -49,6 +50,8 @@ describe('VMHealthQueueManager', () => {
             id: mockMachineId,
             name: 'test-vm',
             status: machine_status_1.RUNNING_STATUS,
+            // findMachine() reads setupComplete from configuration relation
+            configuration: { setupComplete: true },
             userId: 'user-1',
             createdAt: new Date(),
             updatedAt: new Date(),
@@ -63,7 +66,8 @@ describe('VMHealthQueueManager', () => {
             firewallRuleSetId: null,
             version: 1,
             localIP: null,
-            publicIP: null
+            publicIP: null,
+            poolId: null
         });
     });
     afterEach(() => {
@@ -71,10 +75,13 @@ describe('VMHealthQueueManager', () => {
         jest.restoreAllMocks();
     });
     // Helper methods for creating mock VMs with different statuses - using lowercase status values
-    const createMockVM = (status) => ({
+    const createMockVM = (status, setupComplete = true) => ({
         id: mockMachineId,
         name: 'test-vm',
         status,
+        // findMachine() reads setupComplete from the configuration relation,
+        // not from the Machine record directly.
+        configuration: { setupComplete },
         userId: 'user-1',
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -89,7 +96,8 @@ describe('VMHealthQueueManager', () => {
         version: 1,
         localIP: null,
         publicIP: null,
-        firewallRuleSetId: null
+        firewallRuleSetId: null,
+        poolId: null
     });
     describe('queueHealthCheck', () => {
         it('should queue a single health check successfully', () => __awaiter(void 0, void 0, void 0, function* () {
@@ -124,26 +132,26 @@ describe('VMHealthQueueManager', () => {
             yield expect(queueManager.queueHealthCheck(mockMachineId, 'DISK_SPACE')).rejects.toThrow(`VM with ID ${mockMachineId} not found`);
         }));
         it('should throw error when VM is stopped', () => __awaiter(void 0, void 0, void 0, function* () {
-            jest_setup_1.mockPrisma.machine.findUnique.mockResolvedValue(createMockVM(machine_status_1.STOPPED_STATUS));
-            yield expect(queueManager.queueHealthCheck(mockMachineId, 'DISK_SPACE')).rejects.toThrow(`Cannot queue health check for VM test-vm (${mockMachineId}) - VM status is '${machine_status_1.STOPPED_STATUS}', expected '${machine_status_1.RUNNING_STATUS}'`);
+            jest_setup_1.mockPrisma.machine.findUnique.mockResolvedValue(createMockVM(machine_status_1.OFF_STATUS));
+            yield expect(queueManager.queueHealthCheck(mockMachineId, 'DISK_SPACE')).rejects.toThrow(`Cannot queue health check for VM test-vm (${mockMachineId}) - status='${machine_status_1.OFF_STATUS}' setupComplete=true`);
             // Verify no database writes occurred
             expect(jest_setup_1.mockPrisma.vMHealthCheckQueue.create).not.toHaveBeenCalled();
         }));
         it('should throw error when VM is suspended', () => __awaiter(void 0, void 0, void 0, function* () {
             jest_setup_1.mockPrisma.machine.findUnique.mockResolvedValue(createMockVM(machine_status_1.PAUSED_STATUS));
-            yield expect(queueManager.queueHealthCheck(mockMachineId, 'DISK_SPACE')).rejects.toThrow(`Cannot queue health check for VM test-vm (${mockMachineId}) - VM status is '${machine_status_1.PAUSED_STATUS}', expected '${machine_status_1.RUNNING_STATUS}'`);
+            yield expect(queueManager.queueHealthCheck(mockMachineId, 'DISK_SPACE')).rejects.toThrow(`Cannot queue health check for VM test-vm (${mockMachineId}) - status='${machine_status_1.PAUSED_STATUS}' setupComplete=true`);
             // Verify no database writes occurred
             expect(jest_setup_1.mockPrisma.vMHealthCheckQueue.create).not.toHaveBeenCalled();
         }));
         it('should throw error when VM is in error state', () => __awaiter(void 0, void 0, void 0, function* () {
             jest_setup_1.mockPrisma.machine.findUnique.mockResolvedValue(createMockVM('error'));
-            yield expect(queueManager.queueHealthCheck(mockMachineId, 'DISK_SPACE')).rejects.toThrow(`Cannot queue health check for VM test-vm (${mockMachineId}) - VM status is 'error', expected '${machine_status_1.RUNNING_STATUS}'`);
+            yield expect(queueManager.queueHealthCheck(mockMachineId, 'DISK_SPACE')).rejects.toThrow(`Cannot queue health check for VM test-vm (${mockMachineId}) - status='error' setupComplete=true`);
             // Verify no database writes occurred
             expect(jest_setup_1.mockPrisma.vMHealthCheckQueue.create).not.toHaveBeenCalled();
         }));
         it('should throw error when VM is creating', () => __awaiter(void 0, void 0, void 0, function* () {
             jest_setup_1.mockPrisma.machine.findUnique.mockResolvedValue(createMockVM('creating'));
-            yield expect(queueManager.queueHealthCheck(mockMachineId, 'DISK_SPACE')).rejects.toThrow(`Cannot queue health check for VM test-vm (${mockMachineId}) - VM status is 'creating', expected '${machine_status_1.RUNNING_STATUS}'`);
+            yield expect(queueManager.queueHealthCheck(mockMachineId, 'DISK_SPACE')).rejects.toThrow(`Cannot queue health check for VM test-vm (${mockMachineId}) - status='creating' setupComplete=true`);
             // Verify no database writes occurred
             expect(jest_setup_1.mockPrisma.vMHealthCheckQueue.create).not.toHaveBeenCalled();
         }));
@@ -174,13 +182,13 @@ describe('VMHealthQueueManager', () => {
         }));
         it('should handle edge case with null VM status', () => __awaiter(void 0, void 0, void 0, function* () {
             jest_setup_1.mockPrisma.machine.findUnique.mockResolvedValue(createMockVM(null));
-            yield expect(queueManager.queueHealthCheck(mockMachineId, 'DISK_SPACE')).rejects.toThrow(`Cannot queue health check for VM test-vm (${mockMachineId}) - VM status is 'null', expected '${machine_status_1.RUNNING_STATUS}'`);
+            yield expect(queueManager.queueHealthCheck(mockMachineId, 'DISK_SPACE')).rejects.toThrow(`Cannot queue health check for VM test-vm (${mockMachineId}) - status='null' setupComplete=true`);
             // Verify no database writes occurred
             expect(jest_setup_1.mockPrisma.vMHealthCheckQueue.create).not.toHaveBeenCalled();
         }));
         it('should handle edge case with undefined VM status', () => __awaiter(void 0, void 0, void 0, function* () {
             jest_setup_1.mockPrisma.machine.findUnique.mockResolvedValue(createMockVM(undefined));
-            yield expect(queueManager.queueHealthCheck(mockMachineId, 'DISK_SPACE')).rejects.toThrow(`Cannot queue health check for VM test-vm (${mockMachineId}) - VM status is 'undefined', expected '${machine_status_1.RUNNING_STATUS}'`);
+            yield expect(queueManager.queueHealthCheck(mockMachineId, 'DISK_SPACE')).rejects.toThrow(`Cannot queue health check for VM test-vm (${mockMachineId}) - status='undefined' setupComplete=true`);
             // Verify no database writes occurred
             expect(jest_setup_1.mockPrisma.vMHealthCheckQueue.create).not.toHaveBeenCalled();
         }));
@@ -232,12 +240,12 @@ describe('VMHealthQueueManager', () => {
             expect(jest_setup_1.mockPrisma.vMHealthCheckQueue.create).toHaveBeenCalledTimes(6);
         }));
         it('should skip queuing and log message when VM is stopped', () => __awaiter(void 0, void 0, void 0, function* () {
-            jest_setup_1.mockPrisma.machine.findUnique.mockResolvedValue(createMockVM(machine_status_1.STOPPED_STATUS));
+            jest_setup_1.mockPrisma.machine.findUnique.mockResolvedValue(createMockVM(machine_status_1.OFF_STATUS));
             yield queueManager.queueHealthChecks(mockMachineId);
             // Focus on functional outcome: should not queue any health checks
             expect(jest_setup_1.mockPrisma.vMHealthCheckQueue.create).not.toHaveBeenCalled();
             // Verify logging behavior for skipped VM
-            expect(logger_1.default.info).toHaveBeenCalledWith(expect.stringContaining(`Skipping health checks for VM test-vm (${mockMachineId}) - VM status is '${machine_status_1.STOPPED_STATUS}', expected '${machine_status_1.RUNNING_STATUS}'`));
+            expect(logger_1.default.info).toHaveBeenCalledWith(expect.stringContaining(`Skipping health checks for VM test-vm (${mockMachineId}) - status='${machine_status_1.OFF_STATUS}' setupComplete=true`));
         }));
         it('should skip queuing and log message when VM is suspended', () => __awaiter(void 0, void 0, void 0, function* () {
             jest_setup_1.mockPrisma.machine.findUnique.mockResolvedValue(createMockVM(machine_status_1.PAUSED_STATUS));
@@ -245,7 +253,7 @@ describe('VMHealthQueueManager', () => {
             // Focus on functional outcome: should not queue any health checks
             expect(jest_setup_1.mockPrisma.vMHealthCheckQueue.create).not.toHaveBeenCalled();
             // Verify logging behavior for skipped VM
-            expect(logger_1.default.info).toHaveBeenCalledWith(expect.stringContaining(`Skipping health checks for VM test-vm (${mockMachineId}) - VM status is '${machine_status_1.PAUSED_STATUS}', expected '${machine_status_1.RUNNING_STATUS}'`));
+            expect(logger_1.default.info).toHaveBeenCalledWith(expect.stringContaining(`Skipping health checks for VM test-vm (${mockMachineId}) - status='${machine_status_1.PAUSED_STATUS}' setupComplete=true`));
         }));
         it('should skip queuing when VM is in error state', () => __awaiter(void 0, void 0, void 0, function* () {
             jest_setup_1.mockPrisma.machine.findUnique.mockResolvedValue(createMockVM('error'));
@@ -253,7 +261,7 @@ describe('VMHealthQueueManager', () => {
             // Focus on functional outcome: should not queue any health checks
             expect(jest_setup_1.mockPrisma.vMHealthCheckQueue.create).not.toHaveBeenCalled();
             // Verify logging behavior for skipped VM
-            expect(logger_1.default.info).toHaveBeenCalledWith(expect.stringContaining(`Skipping health checks for VM test-vm (${mockMachineId}) - VM status is 'error', expected '${machine_status_1.RUNNING_STATUS}'`));
+            expect(logger_1.default.info).toHaveBeenCalledWith(expect.stringContaining(`Skipping health checks for VM test-vm (${mockMachineId}) - status='error' setupComplete=true`));
         }));
         it('should skip queuing when VM is creating', () => __awaiter(void 0, void 0, void 0, function* () {
             jest_setup_1.mockPrisma.machine.findUnique.mockResolvedValue(createMockVM('creating'));
@@ -261,7 +269,7 @@ describe('VMHealthQueueManager', () => {
             // Focus on functional outcome: should not queue any health checks
             expect(jest_setup_1.mockPrisma.vMHealthCheckQueue.create).not.toHaveBeenCalled();
             // Verify logging behavior for skipped VM
-            expect(logger_1.default.info).toHaveBeenCalledWith(expect.stringContaining(`Skipping health checks for VM test-vm (${mockMachineId}) - VM status is 'creating', expected '${machine_status_1.RUNNING_STATUS}'`));
+            expect(logger_1.default.info).toHaveBeenCalledWith(expect.stringContaining(`Skipping health checks for VM test-vm (${mockMachineId}) - status='creating' setupComplete=true`));
         }));
         it('should throw error when VM not found', () => __awaiter(void 0, void 0, void 0, function* () {
             jest_setup_1.mockPrisma.machine.findUnique.mockResolvedValue(null);
@@ -314,7 +322,7 @@ describe('VMHealthQueueManager', () => {
             expect(jest_setup_1.mockPrisma.vMHealthCheckQueue.create).toHaveBeenCalledTimes(6);
         }));
         it('should verify no unnecessary database operations when VM is not running', () => __awaiter(void 0, void 0, void 0, function* () {
-            jest_setup_1.mockPrisma.machine.findUnique.mockResolvedValue(createMockVM(machine_status_1.STOPPED_STATUS));
+            jest_setup_1.mockPrisma.machine.findUnique.mockResolvedValue(createMockVM(machine_status_1.OFF_STATUS));
             yield queueManager.queueHealthChecks(mockMachineId);
             // Verify VM status was checked
             expect(jest_setup_1.mockPrisma.machine.findUnique).toHaveBeenCalledWith({

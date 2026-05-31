@@ -108,8 +108,8 @@ export class VMHealthQueueManager {
       throw new Error(`VM with ID ${machineId} not found`)
     }
 
-    if (vm.status !== MachineStatus.RUNNING) {
-      logger.info(`🗂️ Skipping health checks for VM ${vm.name} (${machineId}) - VM status is '${vm.status}', expected '${MachineStatus.RUNNING}'`)
+    if (vm.status !== MachineStatus.RUNNING || !vm.setupComplete) {
+      logger.info(`🗂️ Skipping health checks for VM ${vm.name} (${machineId}) - status='${vm.status}' setupComplete=${vm.setupComplete}`)
       return
     }
 
@@ -177,7 +177,7 @@ export class VMHealthQueueManager {
     checkType: HealthCheckType,
     priority: TaskPriority = 'MEDIUM',
     payload?: HealthCheckPayload,
-    vm?: { id: string; name: string; status: string }
+    vm?: { id: string; name: string; status: string; setupComplete: boolean }
   ): Promise<string> {
     // Use provided VM object or fetch from database
     let vmData = vm
@@ -199,10 +199,10 @@ export class VMHealthQueueManager {
       return existingTask.id
     }
 
-    // Check if VM is running before queuing new health check
-    if (vmData.status !== MachineStatus.RUNNING) {
-      logger.info(`🗂️ Skipping health check ${checkType} for VM ${vmData.name} (${machineId}) - VM status is '${vmData.status}', expected '${MachineStatus.RUNNING}'`)
-      throw new Error(`Cannot queue health check for VM ${vmData.name} (${machineId}) - VM status is '${vmData.status}', expected '${MachineStatus.RUNNING}'`)
+    // Check if VM is running and OS is ready before queuing new health check
+    if (vmData.status !== MachineStatus.RUNNING || !vmData.setupComplete) {
+      logger.info(`🗂️ Skipping health check ${checkType} for VM ${vmData.name} (${machineId}) - status='${vmData.status}' setupComplete=${vmData.setupComplete}`)
+      throw new Error(`Cannot queue health check for VM ${vmData.name} (${machineId}) - status='${vmData.status}' setupComplete=${vmData.setupComplete}`)
     }
 
     // For OVERALL_STATUS, also check if completed recently within per-VM interval
@@ -650,7 +650,7 @@ export class VMHealthQueueManager {
     priority: TaskPriority = 'MEDIUM',
     snapshotId: string,
     payload?: HealthCheckPayload,
-    vm?: { id: string; name: string; status: string }
+    vm?: { id: string; name: string; status: string; setupComplete: boolean }
   ): Promise<string> {
     // Use the existing queueHealthCheck logic but associate with snapshot
     // For now, we'll use the existing method and add snapshot association in a comment

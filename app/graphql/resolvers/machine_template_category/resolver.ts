@@ -10,6 +10,7 @@ import {
 import { InfinibayContext } from '@utils/context'
 import { UserInputError } from '@utils/errors'
 import { MachineTemplateCategoryType, MachineTemplateCategoryInputType } from './type'
+import { assertCanAccessResource } from '../../utils/auth'
 
 export interface MachineTemplateCategoryResolverInterface {
   machineTemplateCategories(ctx: InfinibayContext): Promise<MachineTemplateCategoryType[]>
@@ -18,7 +19,7 @@ export interface MachineTemplateCategoryResolverInterface {
   updateMachineTemplateCategory(id: string, input: MachineTemplateCategoryInputType, ctx: InfinibayContext): Promise<MachineTemplateCategoryType>
 }
 
-@Resolver(_of => MachineTemplateCategoryType)
+@Resolver(() => MachineTemplateCategoryType)
 export class MachineTemplateCategoryResolver implements MachineTemplateCategoryResolverInterface {
   /**
    * Retrieves all machine template categories.
@@ -31,6 +32,7 @@ export class MachineTemplateCategoryResolver implements MachineTemplateCategoryR
   async machineTemplateCategories (
     @Ctx() ctx: InfinibayContext
   ): Promise<MachineTemplateCategoryType[]> {
+    await assertCanAccessResource(ctx, 'blueprints')
     const { prisma } = ctx
     const categories = await prisma.machineTemplateCategory.findMany()
 
@@ -75,6 +77,7 @@ export class MachineTemplateCategoryResolver implements MachineTemplateCategoryR
     @Arg('id', { nullable: false }) id: string,
     @Ctx() ctx: InfinibayContext
   ): Promise<MachineTemplateCategoryType | null> {
+    await assertCanAccessResource(ctx, 'blueprints')
     const { prisma } = ctx
     const category = await prisma.machineTemplateCategory.findUnique({
       where: { id }
@@ -117,6 +120,7 @@ export class MachineTemplateCategoryResolver implements MachineTemplateCategoryR
     @Arg('input', () => MachineTemplateCategoryInputType) input: MachineTemplateCategoryInputType,
     @Ctx() ctx: InfinibayContext
   ): Promise<MachineTemplateCategoryType> {
+    await assertCanAccessResource(ctx, 'blueprints')
     const { prisma } = ctx
 
     await this.checkCategoryExistence(input.name, prisma)
@@ -147,6 +151,7 @@ export class MachineTemplateCategoryResolver implements MachineTemplateCategoryR
     @Arg('input', () => MachineTemplateCategoryInputType) input: MachineTemplateCategoryInputType,
     @Ctx() ctx: InfinibayContext
   ): Promise<MachineTemplateCategoryType> {
+    await assertCanAccessResource(ctx, 'blueprints')
     const { prisma } = ctx
 
     const exists = await this.categoryExists(prisma, id)

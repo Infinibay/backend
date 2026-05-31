@@ -117,11 +117,10 @@
     //  ---------------------
     "outDir": "./dist",
     // "rootDir": "./",
-    "moduleResolution": "node"
+    "moduleResolution": "bundler"
   },
   "include": [
     "app/**/*.ts",
-    "tests/**/*.ts",
     "types/**/*.d.ts"
   ]
 }

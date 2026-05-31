@@ -55,10 +55,12 @@ export class MetricsWatchdogJob {
     try {
       debug.debug('Starting stale metrics check')
 
-      // Get all running VMs
+      // Get all running VMs whose OS is ready (infiniservice handshaked).
+      // VMs still installing won't have metrics yet — skip them.
       const runningVMs = await this.prisma.machine.findMany({
         where: {
-          status: 'running'
+          status: 'running',
+          configuration: { setupComplete: true }
         },
         select: {
           id: true,

@@ -72,7 +72,7 @@ describe('VM Lifecycle — real database', () => {
   beforeEach(async () => {
     admin = await createAdmin(prisma)
     regularUser = await createUser(prisma)
-    department = await createDepartment(prisma)
+    department = await createDepartment(prisma, { bridgeName: 'br-test' })
     template = await createTemplate(prisma, { cores: 4, ram: 8, storage: 100 })
     application = await createApplication(prisma)
   })
@@ -99,7 +99,7 @@ describe('VM Lifecycle — real database', () => {
       })
 
       expect(created.id).toBeDefined()
-      expect(created.status).toBe('building')
+      expect(created.status).toBe('off')
       expect(created.cpuCores).toBe(template.cores)
       expect(created.ramGB).toBe(template.ram)
 

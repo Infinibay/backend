@@ -7,9 +7,10 @@ const mockISO = {
   findUnique: jest.fn<any, any[]>(),
   findMany: jest.fn<any, any[]>(),
   create: jest.fn<any, any[]>(),
+  upsert: jest.fn<any, any[]>(),
   update: jest.fn<any, any[]>(),
   delete: jest.fn<any, any[]>()
-} as { findFirst: jest.Mock; findUnique: jest.Mock; findMany: jest.Mock; create: jest.Mock; update: jest.Mock; delete: jest.Mock }
+} as { findFirst: jest.Mock; findUnique: jest.Mock; findMany: jest.Mock; create: jest.Mock; upsert: jest.Mock; update: jest.Mock; delete: jest.Mock }
 
 // Mock @prisma/client BEFORE ISOService imports it
 jest.mock('@prisma/client', () => ({
@@ -130,29 +131,34 @@ describe('ISOService', () => {
  describe('syncISOsWithFileSystem', () => {
    it('should sync ISOs from filesystem to database', async () => {
       mockFs.readdir.mockResolvedValueOnce(['windows10.iso', 'ubuntu.iso'])
-      mockPrismaISO.findUnique.mockResolvedValue(null)
-      mockPrismaISO.create.mockResolvedValue(createMockISO())
+      mockPrismaISO.upsert.mockResolvedValue(createMockISO({
+        createdAt: new Date('2026-01-01T00:00:00Z'),
+        updatedAt: new Date('2026-01-01T00:00:00Z')
+      }))
       mockPrismaISO.findMany.mockResolvedValue([])
       await service.syncISOsWithFileSystem()
       expect(mockFs.mkdir).toHaveBeenCalledWith(expect.any(String), { recursive: true })
-      expect(mockPrismaISO.create).toHaveBeenCalled()
+      expect(mockPrismaISO.upsert).toHaveBeenCalled()
       expect(mockISOEventManagerInstance.emitISORegistered).toHaveBeenCalled()
     })
 
     it('should update existing ISO with new verification timestamp', async () => {
       mockFs.readdir.mockResolvedValueOnce(['windows10.iso'])
       const existing = createMockISO({ id: 'existing-iso' })
-      mockPrismaISO.findUnique.mockResolvedValueOnce(existing)
-      mockPrismaISO.findUnique.mockResolvedValueOnce(null)
-      mockPrismaISO.update.mockResolvedValue(existing)
+      mockPrismaISO.upsert.mockResolvedValue({
+        ...existing,
+        createdAt: new Date('2026-01-01T00:00:00Z'),
+        updatedAt: new Date('2026-01-01T00:01:00Z')
+      })
       mockPrismaISO.findMany.mockResolvedValue([])
       await service.syncISOsWithFileSystem()
-      expect(mockPrismaISO.update).toHaveBeenCalledWith(
+      expect(mockPrismaISO.upsert).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { id: 'existing-iso' },
-          data: expect.objectContaining({ lastVerified: expect.any(Date), isAvailable: true })
+          where: { filename: 'windows10.iso' },
+          update: expect.objectContaining({ lastVerified: expect.any(Date), isAvailable: true })
         })
       )
+      expect(mockISOEventManagerInstance.emitISORegistered).not.toHaveBeenCalled()
     })
 
     it('should mark ISOs as unavailable if file is deleted', async () => {
@@ -289,6 +295,7 @@ describe('calculateChecksum', () => {
  describe('registerISO', () => {
   it('should create new ISO record', async () => {
       mockPrismaISO.findUnique.mockResolvedValueOnce(null)
+      mockPrismaISO.create.mockResolvedValue(createMockISO())
       const result = await service.registerISO('windows10.iso', 'windows10', 5368709120, '/opt/infinibay/iso/windows10.iso')
       expect(result).toMatchObject({
         filename: 'windows10.iso',
@@ -456,11 +463,10 @@ describe('calculateChecksum', () => {
 
     it('should handle non-ISO files in directory', async () => {
       mockFs.readdir.mockResolvedValueOnce(['windows10.iso', 'readme.txt', 'ubuntu.iso'])
-      mockPrismaISO.findUnique.mockResolvedValue(null)
-      mockPrismaISO.create.mockResolvedValue(createMockISO())
+      mockPrismaISO.upsert.mockResolvedValue(createMockISO())
       mockPrismaISO.findMany.mockResolvedValue([])
       await service.syncISOsWithFileSystem()
-      expect(mockPrismaISO.create).toHaveBeenCalled()
+      expect(mockPrismaISO.upsert).toHaveBeenCalled()
     })
 
     it('should handle invalid filename format gracefully', async () => {
@@ -472,8 +478,7 @@ describe('calculateChecksum', () => {
 
     it('should handle database error in sync', async () => {
       mockFs.readdir.mockResolvedValueOnce(['windows10.iso'])
-      mockPrismaISO.findUnique.mockResolvedValueOnce(null)
-      mockPrismaISO.create.mockRejectedValueOnce(new Error('Database error'))
+      mockPrismaISO.upsert.mockRejectedValueOnce(new Error('Database error'))
       await expect(service.syncISOsWithFileSystem()).rejects.toThrow('Database error')
     })
 
@@ -488,11 +493,10 @@ describe('calculateChecksum', () => {
    it('should handle very large file size (BigInt)', async () => {
       mockFs.readdir.mockResolvedValueOnce(['windows10.iso'])
       mockFs.stat.mockResolvedValue({ size: Number.MAX_SAFE_INTEGER, isFile: () => true })
-      mockPrismaISO.findUnique.mockResolvedValueOnce(null)
-      mockPrismaISO.create.mockResolvedValue(createMockISO())
+      mockPrismaISO.upsert.mockResolvedValue(createMockISO())
       await service.syncISOsWithFileSystem()
-      expect(mockPrismaISO.create).toHaveBeenCalledWith(
-        expect.objectContaining({ data: expect.objectContaining({ size: expect.any(BigInt) }) })
+      expect(mockPrismaISO.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({ create: expect.objectContaining({ size: expect.any(BigInt) }) })
       )
     })
 

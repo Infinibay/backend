@@ -1,5 +1,4 @@
-import { ObjectType, Field, Int, ID, InputType, registerEnumType } from 'type-graphql'
-import { OrderByDirection } from '@utils/pagination'
+import { ObjectType, Field } from 'type-graphql'
 
 @ObjectType()
 export class DyummyType {

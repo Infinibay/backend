@@ -66,16 +66,6 @@ export class ProcessManager {
         return null
       }
 
-      // Update machine status in DB if it's different
-      if (machine.status !== 'running') {
-        logger.debug(`Updating machine ${machineId} status from '${machine.status}' to 'running' based on infinization state`)
-        await this.prisma.machine.update({
-          where: { id: machineId },
-          data: { status: 'running' }
-        })
-        machine.status = 'running'
-      }
-
       return { machine }
     } catch (error) {
       logger.debug(`Failed to verify machine ${machineId} is running: ${error}`)

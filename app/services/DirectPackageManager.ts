@@ -94,15 +94,15 @@ export class DirectPackageManager {
       // Verify machine exists and get its info
       const machine = await this.prisma.machine.findUnique({
         where: { id: machineId },
-        select: { id: true, name: true, os: true, status: true }
+        select: { id: true, name: true, os: true, status: true, configuration: { select: { setupComplete: true } } }
       })
 
       if (!machine) {
         throw new Error(`Machine ${machineId} not found`)
       }
 
-      if (machine.status !== 'running') {
-        throw new Error(`Machine ${machine.name} is not running`)
+      if (machine.status !== 'running' || !machine.configuration?.setupComplete) {
+        throw new Error(`Machine ${machine.name} is not ready (status=${machine.status} setupComplete=${machine.configuration?.setupComplete ?? false})`)
       }
 
       this.debug.info(`Listing packages for VM ${machineId} (${machine.name})`)
@@ -203,7 +203,7 @@ export class DirectPackageManager {
       // Verify machine exists
       const machine = await this.prisma.machine.findUnique({
         where: { id: machineId },
-        select: { id: true, name: true, os: true, status: true }
+        select: { id: true, name: true, os: true, status: true, configuration: { select: { setupComplete: true } } }
       })
 
       if (!machine) {
@@ -214,11 +214,11 @@ export class DirectPackageManager {
         }
       }
 
-      if (machine.status !== 'running') {
+      if (machine.status !== 'running' || !machine.configuration?.setupComplete) {
         return {
           success: false,
-          message: `Machine ${machine.name} is not running`,
-          error: 'Machine not running'
+          message: `Machine ${machine.name} is not ready (status=${machine.status} setupComplete=${machine.configuration?.setupComplete ?? false})`,
+          error: 'Machine not ready'
         }
       }
 
@@ -259,7 +259,7 @@ export class DirectPackageManager {
       // Verify machine exists
       const machine = await this.prisma.machine.findUnique({
         where: { id: machineId },
-        select: { id: true, name: true, os: true, status: true }
+        select: { id: true, name: true, os: true, status: true, configuration: { select: { setupComplete: true } } }
       })
 
       if (!machine) {
@@ -270,11 +270,11 @@ export class DirectPackageManager {
         }
       }
 
-      if (machine.status !== 'running') {
+      if (machine.status !== 'running' || !machine.configuration?.setupComplete) {
         return {
           success: false,
-          message: `Machine ${machine.name} is not running`,
-          error: 'Machine not running'
+          message: `Machine ${machine.name} is not ready (status=${machine.status} setupComplete=${machine.configuration?.setupComplete ?? false})`,
+          error: 'Machine not ready'
         }
       }
 
@@ -315,7 +315,7 @@ export class DirectPackageManager {
       // Verify machine exists
       const machine = await this.prisma.machine.findUnique({
         where: { id: machineId },
-        select: { id: true, name: true, os: true, status: true }
+        select: { id: true, name: true, os: true, status: true, configuration: { select: { setupComplete: true } } }
       })
 
       if (!machine) {
@@ -326,11 +326,11 @@ export class DirectPackageManager {
         }
       }
 
-      if (machine.status !== 'running') {
+      if (machine.status !== 'running' || !machine.configuration?.setupComplete) {
         return {
           success: false,
-          message: `Machine ${machine.name} is not running`,
-          error: 'Machine not running'
+          message: `Machine ${machine.name} is not ready (status=${machine.status} setupComplete=${machine.configuration?.setupComplete ?? false})`,
+          error: 'Machine not ready'
         }
       }
 
@@ -371,15 +371,15 @@ export class DirectPackageManager {
       // Verify machine exists
       const machine = await this.prisma.machine.findUnique({
         where: { id: machineId },
-        select: { id: true, name: true, os: true, status: true }
+        select: { id: true, name: true, os: true, status: true, configuration: { select: { setupComplete: true } } }
       })
 
       if (!machine) {
         throw new Error(`Machine ${machineId} not found`)
       }
 
-      if (machine.status !== 'running') {
-        throw new Error(`Machine ${machine.name} is not running`)
+      if (machine.status !== 'running' || !machine.configuration?.setupComplete) {
+        throw new Error(`Machine ${machine.name} is not ready (status=${machine.status} setupComplete=${machine.configuration?.setupComplete ?? false})`)
       }
 
       this.debug.info(`Searching packages for query "${query}" on VM ${machineId}`)

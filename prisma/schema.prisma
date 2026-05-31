@@ -18,6 +18,11 @@ model User {
   createdAt                   DateTime                   @default(now())
   role                        UserRole                   @default(USER)
   updatedAt                   DateTime                   @updatedAt
+  identityProviderId          String?
+  externalId                  String?
+  externalDn                  String?
+  lastDirectorySyncAt         DateTime?
+  identityProvider            IdentityProvider?           @relation(fields: [identityProviderId], references: [id], onDelete: SetNull)
   VM                          Machine[]
   maintenanceHistory          MaintenanceHistory[]
   maintenanceTasks            MaintenanceTask[]
@@ -27,6 +32,86 @@ model User {
   scriptAuditLogs             ScriptAuditLog[]
   approvedScripts             Script[]                   @relation("ScriptApprovals")
   recommendationResolutions   RecommendationResolution[]
+  departmentMemberships       DepartmentMembership[]
+  policyAuditLogs             PolicyAuditLog[]           @relation("PolicyAuditActor")
+
+  @@unique([identityProviderId, externalId])
+  @@index([identityProviderId])
+}
+
+model IdentityProvider {
+  id                 String                 @id @default(uuid())
+  name               String                 @unique
+  providerType       IdentityProviderType
+  status             IdentityProviderStatus @default(DISCONNECTED)
+  enabled            Boolean                @default(true)
+  domain             String?
+  host               String
+  port               Int                    @default(389)
+  useTls             Boolean                @default(false)
+  baseDn             String
+  bindDn             String?
+  bindPasswordSecret String?
+  userFilter         String?
+  groupFilter        String?
+  attributes         Json?
+  lastTestAt         DateTime?
+  lastSyncAt         DateTime?
+  lastError          String?                @db.Text
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @updatedAt
+  syncRuns           IdentitySyncRun[]
+  users              User[]
+  groupRoleMappings  IdentityGroupRoleMapping[]
+
+  @@index([providerType])
+  @@index([status])
+}
+
+model IdentityGroupRoleMapping {
+  id            String           @id @default(uuid())
+  providerId    String
+  groupDn       String
+  groupName     String
+  role          UserRole
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+  provider      IdentityProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@unique([providerId, groupDn])
+  @@index([providerId])
+  @@index([role])
+}
+
+model IdentitySyncRun {
+  id            String             @id @default(uuid())
+  providerId    String
+  status        IdentitySyncStatus
+  startedAt     DateTime           @default(now())
+  finishedAt    DateTime?
+  usersCreated  Int                @default(0)
+  usersUpdated  Int                @default(0)
+  usersDisabled Int                @default(0)
+  groupsSeen    Int                @default(0)
+  message       String?
+  error         String?            @db.Text
+  provider      IdentityProvider   @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@index([providerId, startedAt])
+  @@index([status])
+}
+
+model RolePermission {
+  id        String           @id @default(uuid())
+  role      UserRole
+  resource  String
+  effect    PermissionEffect
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  @@unique([role, resource])
+  @@index([role])
+  @@index([resource])
 }
 
 model Node {
@@ -37,9 +122,11 @@ model Node {
   cpuFlags    Json
   ram         Int
   cores       Int
+  maintenanceMode Boolean @default(false)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   disks       Disk[]
+  machines    Machine[]
 }
 
 model Disk {
@@ -72,6 +159,8 @@ model Machine {
   id                 String                @id @default(uuid())
   name               String
   internalName       String
+  /// QEMU process state. Allowed values: off | starting | running | suspended | paused | updating_hardware | powering_off_update | error.
+  /// Independent from MachineConfiguration.setupComplete (whether OS install + first infiniservice handshake completed).
   status             String
   userId             String?
   templateId         String?
@@ -84,12 +173,14 @@ model Machine {
   updatedAt          DateTime              @updatedAt
   departmentId       String?
   version            Int                   @default(1)
+  nodeId             String?
   localIP            String?
   publicIP           String?
   firewallRuleSetId  String?               @unique
   applicationUsage   ApplicationUsage[]
   department         Department?           @relation(fields: [departmentId], references: [id])
   firewallRuleSet    FirewallRuleSet?      @relation(fields: [firewallRuleSetId], references: [id], onDelete: SetNull)
+  node               Node?                 @relation(fields: [nodeId], references: [id], onDelete: SetNull)
   template           MachineTemplate?      @relation(fields: [templateId], references: [id])
   user               User?                 @relation(fields: [userId], references: [id])
   poolId             String?
@@ -114,6 +205,8 @@ model Machine {
   agentEvents        AgentEvent[]
   backups            Backup[]
   backupSchedules    BackupSchedule[]
+
+  @@index([nodeId])
 }
 
 /// Structured event/log entry forwarded by the in-VM agent (infiniservice).
@@ -141,6 +234,30 @@ enum AgentEventSeverity {
   INFO
   WARN
   ERROR
+}
+
+enum IdentityProviderType {
+  ACTIVE_DIRECTORY
+  LDAP
+}
+
+enum IdentityProviderStatus {
+  CONNECTED
+  DISCONNECTED
+  ERROR
+  SYNCING
+}
+
+enum IdentitySyncStatus {
+  RUNNING
+  SUCCESS
+  ERROR
+}
+
+enum PermissionEffect {
+  ALLOW
+  DENY
+  INHERIT
 }
 
 model MachineConfiguration {
@@ -268,6 +385,22 @@ model MachineConfiguration {
   // true = VM has completed initial setup (infiniservice connected for first time)
   // false/null = VM still in building/installation phase
   setupComplete Boolean? @default(false)
+
+  // ============================================================================
+  // ACTIVE DIRECTORY DOMAIN JOIN STATE
+  // ============================================================================
+  // Set by DomainJoinService when a VM is joined to an AD/LDAP domain via the
+  // in-VM agent (JoinDomain command). All nullable for backward compatibility.
+  // 'PENDING' | 'JOINED' | 'FAILED'
+  domainJoinStatus     String?
+  // The domain the VM was last (attempted to be) joined to, e.g. corp.example.com.
+  domainName           String?
+  // Timestamp of the last successful join.
+  domainJoinedAt       DateTime?
+  // Error message from the last failed join attempt.
+  domainJoinError      String?
+  // The IdentityProvider whose domain/credentials were used for the join.
+  domainIdentityProviderId String?
 }
 
 model MachineTemplate {
@@ -499,6 +632,7 @@ model Department {
   machines          Machine[]
   scriptAssignments DepartmentScript[]
   pools             Pool[]
+  memberships       DepartmentMembership[]
 
   // Network infrastructure fields
   bridgeName     String? // Linux bridge name: "infinibr-{shortId}" (max 15 chars)
@@ -516,6 +650,54 @@ model Department {
   firewallCustomRules   Json?
 
   @@index([bridgeName])
+}
+
+// Explicit, role-bearing membership of a user in a department. This is the
+// backbone of department-scoped permissions: a MANAGER can operate the
+// department's resources (desktops, pools, scripts) without being a global
+// ADMIN, while a MEMBER is simply a recorded participant. Global ADMIN /
+// SUPER_ADMIN still bypass these checks.
+model DepartmentMembership {
+  id           String         @id @default(uuid())
+  departmentId String
+  userId       String
+  role         DepartmentRole @default(MEMBER)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  department   Department     @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  user         User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([departmentId, userId])
+  @@index([userId])
+  @@index([departmentId])
+}
+
+// Append-only audit trail for authorization changes: role-permission matrix
+// edits and department-membership changes. Never updated or deleted by the
+// app — it is the record of "who changed access, when, and to what".
+model PolicyAuditLog {
+  id         String   @id @default(uuid())
+  // Null when the actor user was later deleted (FK set null).
+  actorId    String?
+  // Machine-readable action, e.g. 'role_permission.set', 'department_member.set'.
+  action     String
+  // What the change targeted: 'role' | 'department' | etc.
+  targetType String
+  targetId   String?
+  // Human-readable one-line description shown in the audit UI.
+  summary    String
+  // Free-form structured detail (before/after, resource, effect, …).
+  metadata   Json?
+  createdAt  DateTime @default(now())
+  actor      User?    @relation("PolicyAuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([actorId])
+}
+
+enum DepartmentRole {
+  MEMBER
+  MANAGER
 }
 
 model SystemMetrics {

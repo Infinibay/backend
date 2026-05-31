@@ -9,11 +9,12 @@ import {
   DeleteSnapshotInput
 } from '../types/SnapshotType'
 import { SuccessType } from './machine/type'
-import { SnapshotServiceV2, getSnapshotServiceV2 } from '@services/SnapshotServiceV2'
+import { getSnapshotServiceV2 } from '@services/SnapshotServiceV2'
 import { VMOperationsService } from '@services/VMOperationsService'
 import { UserInputError } from '@utils/errors'
 import { getSocketService } from '@services/SocketService'
 import { InfinibayContext } from '@utils/context'
+import { assertCanManageVM } from '../utils/auth'
 
 @Resolver()
 export class SnapshotResolver {
@@ -26,6 +27,7 @@ export class SnapshotResolver {
     if (!ctx?.prisma) {
       throw new UserInputError('Database context not available')
     }
+    await assertCanManageVM(ctx, input.machineId)
 
     try {
       const snapshotService = getSnapshotServiceV2(ctx.prisma)
@@ -117,6 +119,7 @@ export class SnapshotResolver {
     if (!ctx?.prisma) {
       throw new UserInputError('Database context not available')
     }
+    await assertCanManageVM(ctx, input.machineId)
 
     try {
       const snapshotService = getSnapshotServiceV2(ctx.prisma)
@@ -186,6 +189,7 @@ export class SnapshotResolver {
     if (!ctx?.prisma) {
       throw new UserInputError('Database context not available')
     }
+    await assertCanManageVM(ctx, input.machineId)
 
     try {
       const snapshotService = getSnapshotServiceV2(ctx.prisma)
@@ -255,6 +259,7 @@ export class SnapshotResolver {
     if (!ctx?.prisma) {
       throw new UserInputError('Database context not available')
     }
+    await assertCanManageVM(ctx, machineId)
 
     try {
       const snapshotService = getSnapshotServiceV2(ctx.prisma)
@@ -323,6 +328,7 @@ export class SnapshotResolver {
     if (!ctx?.prisma) {
       throw new UserInputError('Database context not available')
     }
+    await assertCanManageVM(ctx, machineId)
 
     try {
       const snapshotService = getSnapshotServiceV2(ctx.prisma)
@@ -375,6 +381,7 @@ export class SnapshotResolver {
     if (!ctx?.prisma) {
       throw new UserInputError('Database context not available')
     }
+    await assertCanManageVM(ctx, input.machineId)
 
     try {
       const snapshotService = getSnapshotServiceV2(ctx.prisma)

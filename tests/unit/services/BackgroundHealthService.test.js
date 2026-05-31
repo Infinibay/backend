@@ -95,7 +95,8 @@ const BackgroundHealthService_1 = require("@services/BackgroundHealthService");
                 firewallRuleSetId: null,
                 version: 1,
                 localIP: null,
-                publicIP: null
+                publicIP: null,
+                poolId: null
             }
         ]);
         // Create a shared mock CronJob instance
@@ -247,7 +248,8 @@ const BackgroundHealthService_1 = require("@services/BackgroundHealthService");
                     firewallRuleSetId: null,
                     version: 1,
                     localIP: null,
-                    publicIP: null
+                    publicIP: null,
+                    poolId: null
                 },
                 {
                     id: 'vm-2',
@@ -267,7 +269,8 @@ const BackgroundHealthService_1 = require("@services/BackgroundHealthService");
                     firewallRuleSetId: null,
                     version: 1,
                     localIP: null,
-                    publicIP: null
+                    publicIP: null,
+                    poolId: null
                 }
             ]);
             const error = new Error('Queue full');
@@ -380,7 +383,8 @@ const BackgroundHealthService_1 = require("@services/BackgroundHealthService");
                     firewallRuleSetId: null,
                     version: 1,
                     localIP: null,
-                    publicIP: null
+                    publicIP: null,
+                    poolId: null
                 }
             ]);
             mockBackgroundTaskService.queueTask.mockImplementation((name, taskFn) => __awaiter(void 0, void 0, void 0, function* () {
@@ -448,7 +452,8 @@ const BackgroundHealthService_1 = require("@services/BackgroundHealthService");
                     firewallRuleSetId: null,
                     version: 1,
                     localIP: null,
-                    publicIP: null
+                    publicIP: null,
+                    poolId: null
                 },
                 {
                     id: 'vm-running-2',
@@ -468,7 +473,8 @@ const BackgroundHealthService_1 = require("@services/BackgroundHealthService");
                     firewallRuleSetId: null,
                     version: 1,
                     localIP: null,
-                    publicIP: null
+                    publicIP: null,
+                    poolId: null
                 }
             ]);
             mockBackgroundTaskService.queueTask.mockImplementation((name, taskFn) => __awaiter(void 0, void 0, void 0, function* () {

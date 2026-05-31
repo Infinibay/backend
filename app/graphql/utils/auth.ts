@@ -1,4 +1,23 @@
 import { InfinibayContext } from '@utils/context'
+import { UserInputError } from '@utils/errors'
+import { UserRole } from '@prisma/client'
+import { RolePermissionService } from '../../services/policy/RolePermissionService'
+
+export function isOperatorRole (role?: string | null): boolean {
+  return role === 'ADMIN' || role === 'SUPER_ADMIN'
+}
+
+export async function assertCanAccessResource (ctx: InfinibayContext, resource: string): Promise<void> {
+  const role = ctx.user?.role as UserRole | undefined
+  if (!role) {
+    throw new UserInputError('Not authorized')
+  }
+
+  const allowed = await new RolePermissionService(ctx.prisma).canAccess(role, resource)
+  if (!allowed) {
+    throw new UserInputError(`Not authorized to access ${resource}`)
+  }
+}
 
 /**
  * Assert that the current user can manage the specified VM
@@ -10,12 +29,12 @@ export async function assertCanManageVM (ctx: InfinibayContext, machineId: strin
   })
 
   if (!vm) {
-    throw new Error('VM not found')
+    throw new UserInputError('VM not found')
   }
 
   const user = ctx.user
-  if (!user || (user.role !== 'ADMIN' && vm.userId !== user.id)) {
-    throw new Error('Not authorized')
+  if (!user || (!isOperatorRole(user.role) && vm.userId !== user.id)) {
+    throw new UserInputError('Not authorized')
   }
 }
 
@@ -29,7 +48,7 @@ export async function assertCanManageMaintenanceTask (ctx: InfinibayContext, tas
   })
 
   if (!task) {
-    throw new Error('Maintenance task not found')
+    throw new UserInputError('Maintenance task not found')
   }
 
   await assertCanManageVM(ctx, task.machineId)

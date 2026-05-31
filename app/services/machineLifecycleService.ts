@@ -9,6 +9,7 @@ import { MachineCleanupServiceV2 } from './cleanup/machineCleanupServiceV2'
 import { HardwareUpdateService } from './vm/hardwareUpdateService'
 import { getEventManager } from '../services/EventManager'
 import { CreateMachineServiceV2 } from './CreateMachineServiceV2'
+import { NodePlacementService } from './node/NodePlacementService'
 import { CreateMachineInputType, UpdateMachineHardwareInput, UpdateMachineNameInput, UpdateMachineUserInput, SuccessType, FirstBootScriptInputType } from '../graphql/resolvers/machine/type'
 
 /**
@@ -90,15 +91,22 @@ export class MachineLifecycleService {
         )
       }
 
+      const nodeId = await new NodePlacementService(tx).chooseNodeForMachine({
+        cpuCores,
+        ramGB,
+        diskSizeGB
+      })
+
       const createdMachine = await tx.machine.create({
         data: {
           name: input.name,
           userId: this.user?.id,
-          status: 'building',
+          status: 'off',
           os: input.os,
           templateId: template ? input.templateId : null,
           internalName,
           departmentId: department.id,
+          nodeId,
           cpuCores,
           ramGB,
           diskSizeGB,
@@ -566,9 +574,13 @@ export class MachineLifecycleService {
       })
 
       // Emit real-time event for VM status update.
-      // NOTE: VM status is still 'building' at this point. The transition to 'running'
-      // happens later when VirtioSocketWatcherService receives the first message from
-      // InfiniService, indicating the VM has completed OS installation and booted.
+      // NOTE: At this point the QEMU process has been spawned by infinization
+      // and Machine.status will transition 'off' → 'starting' → 'running' via
+      // QMP events. The orthogonal MachineConfiguration.setupComplete remains
+      // false until VirtioSocketWatcherService receives the first message
+      // from infiniservice (which indicates the OS finished installing and
+      // booted). The UI uses (status, setupComplete) together to render
+      // "Installing…" vs "Running".
       if (updatedMachine) {
         try {
           const eventManager = getEventManager()

@@ -42,7 +42,7 @@ export class VMRecommendationResolver {
     }
 
     // Regular users can only see their own machines
-    if (context.user?.role !== 'ADMIN' && machine.userId !== context.user?.id) {
+    if ((context.user?.role !== 'ADMIN' && context.user?.role !== 'SUPER_ADMIN') && machine.userId !== context.user?.id) {
       throw new GraphQLError('Access denied', {
         extensions: { code: 'FORBIDDEN' }
       })
@@ -90,7 +90,7 @@ export class VMRecommendationResolver {
     }
 
     // Regular users can only see recommendations for their own machines
-    if (context.user?.role !== 'ADMIN') {
+    if ((context.user?.role !== 'ADMIN' && context.user?.role !== 'SUPER_ADMIN')) {
       whereClause.machine = { userId: context.user?.id }
     }
 
@@ -119,7 +119,7 @@ export class VMRecommendationResolver {
     }
 
     // Regular users can only see recommendations for their own machines
-    if (context.user?.role !== 'ADMIN') {
+    if ((context.user?.role !== 'ADMIN' && context.user?.role !== 'SUPER_ADMIN')) {
       whereClause.machine = { userId: context.user?.id }
     }
 
@@ -188,7 +188,7 @@ export class VMRecommendationResolver {
       return { success: false, error: 'Recommendation not found' }
     }
 
-    if (context.user?.role !== 'ADMIN' && rec.machine.userId !== context.user?.id) {
+    if ((context.user?.role !== 'ADMIN' && context.user?.role !== 'SUPER_ADMIN') && rec.machine.userId !== context.user?.id) {
       return { success: false, error: 'Access denied' }
     }
 
@@ -218,7 +218,7 @@ export class VMRecommendationResolver {
       ]
     }
 
-    if (context.user?.role !== 'ADMIN') {
+    if ((context.user?.role !== 'ADMIN' && context.user?.role !== 'SUPER_ADMIN')) {
       whereClause.machine = { userId: context.user?.id }
     }
 
@@ -249,7 +249,7 @@ export class VMRecommendationResolver {
       return { success: false, error: 'Recommendation not found' }
     }
 
-    if (context.user?.role !== 'ADMIN' && rec.machine.userId !== context.user?.id) {
+    if ((context.user?.role !== 'ADMIN' && context.user?.role !== 'SUPER_ADMIN') && rec.machine.userId !== context.user?.id) {
       return { success: false, error: 'Access denied' }
     }
 
@@ -283,7 +283,7 @@ export class VMRecommendationResolver {
       ]
     }
 
-    if (context.user?.role !== 'ADMIN') {
+    if ((context.user?.role !== 'ADMIN' && context.user?.role !== 'SUPER_ADMIN')) {
       whereClause.machine = { userId: context.user?.id }
     }
 

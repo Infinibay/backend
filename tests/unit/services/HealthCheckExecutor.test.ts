@@ -51,6 +51,17 @@ function makeSuccessResponse(overrides?: Partial<CommandResponse>): CommandRespo
   }
 }
 
+function makeMachine (overrides?: Partial<{ id: string; name: string; status: string; os: string; setupComplete: boolean }>) {
+  return {
+    id: 'vm-1',
+    name: 'TestVM',
+    status: 'running',
+    os: 'ubuntu',
+    setupComplete: true,
+    ...overrides,
+  }
+}
+
 // ─── Test Suite ─────────────────────────────────────────────────────────────
 
 describe('HealthCheckExecutor', () => {
@@ -88,7 +99,7 @@ describe('HealthCheckExecutor', () => {
       const task = makeTask()
       const response = makeSuccessResponse()
 
-      mockRepository.findMachine.mockResolvedValue({ id: 'vm-1', name: 'TestVM', status: 'running', os: 'ubuntu' })
+      mockRepository.findMachine.mockResolvedValue(makeMachine())
       mockSendSafeCommand.mockResolvedValue(response)
 
       await executor.executeHealthCheck(task)
@@ -144,16 +155,16 @@ describe('HealthCheckExecutor', () => {
 
     it('throws if VM is not running', async () => {
       const task = makeTask()
-      mockRepository.findMachine.mockResolvedValue({ id: 'vm-1', name: 'TestVM', status: 'stopped', os: 'ubuntu' })
+      mockRepository.findMachine.mockResolvedValue(makeMachine({ status: 'stopped' }))
 
-      await expect(executor.executeHealthCheck(task)).rejects.toThrow('is not running')
+      await expect(executor.executeHealthCheck(task)).rejects.toThrow('not ready for health checks')
     })
 
     it('does not throw when snapshot store fails (best-effort)', async () => {
       const task = makeTask()
       const response = makeSuccessResponse()
 
-      mockRepository.findMachine.mockResolvedValue({ id: 'vm-1', name: 'TestVM', status: 'running', os: 'ubuntu' })
+      mockRepository.findMachine.mockResolvedValue(makeMachine())
       mockSendSafeCommand.mockResolvedValue(response)
       mockSnapshotStore.storeSuccess.mockRejectedValue(new Error('Snapshot DB error'))
 
@@ -169,7 +180,7 @@ describe('HealthCheckExecutor', () => {
       const task = makeTask()
       const response = makeSuccessResponse()
 
-      mockRepository.findMachine.mockResolvedValue({ id: 'vm-1', name: 'TestVM', status: 'running', os: 'ubuntu' })
+      mockRepository.findMachine.mockResolvedValue(makeMachine())
       mockSendSafeCommand.mockResolvedValue(response)
 
       await executorNoSnap.executeHealthCheck(task)
@@ -178,7 +189,7 @@ describe('HealthCheckExecutor', () => {
 
     it('sends payload params when task has payload', async () => {
       const task = makeTask({ payload: { drive: 'C:', threshold: 90 } })
-      mockRepository.findMachine.mockResolvedValue({ id: 'vm-1', name: 'TestVM', status: 'running', os: 'ubuntu' })
+      mockRepository.findMachine.mockResolvedValue(makeMachine())
       mockSendSafeCommand.mockResolvedValue(makeSuccessResponse())
 
       await executor.executeHealthCheck(task)

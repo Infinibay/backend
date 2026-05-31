@@ -14,6 +14,7 @@ import { getVirtioSocketWatcherService } from '@services/VirtioSocketWatcherServ
 import { InfinibayContext } from '@utils/context'
 import { UserInputError } from '@utils/errors'
 import { GoldenImage as PrismaGoldenImage } from '@prisma/client'
+import { assertCanAccessResource } from '../../utils/auth'
 
 function getService (ctx: InfinibayContext): GoldenImageService {
   if (!ctx.prisma) throw new UserInputError('Database context not available')
@@ -83,6 +84,7 @@ export class GoldenImageResolver {
     @Ctx() ctx?: InfinibayContext
   ): Promise<GoldenImageResult> {
     if (!ctx) throw new UserInputError('Context not available')
+    await assertCanAccessResource(ctx, 'blueprints')
     try {
       const row = await getService(ctx).buildAutomated({
         templateId: input.templateId,
@@ -107,6 +109,7 @@ export class GoldenImageResolver {
     @Ctx() ctx?: InfinibayContext
   ): Promise<GoldenImageResult> {
     if (!ctx) throw new UserInputError('Context not available')
+    await assertCanAccessResource(ctx, 'blueprints')
     try {
       const row = await getService(ctx).captureFromMachine({
         machineId: input.machineId,
@@ -135,6 +138,7 @@ export class GoldenImageResolver {
     @Ctx() ctx?: InfinibayContext
   ): Promise<GoldenImageResult> {
     if (!ctx) throw new UserInputError('Context not available')
+    await assertCanAccessResource(ctx, 'blueprints')
     try {
       const row = await getService(ctx).publish(id)
       return { success: true, image: toGql(row) }
@@ -150,6 +154,7 @@ export class GoldenImageResolver {
     @Ctx() ctx?: InfinibayContext
   ): Promise<GoldenImageResult> {
     if (!ctx) throw new UserInputError('Context not available')
+    await assertCanAccessResource(ctx, 'blueprints')
     try {
       const row = await getService(ctx).deprecate(id)
       return { success: true, image: toGql(row) }
@@ -167,6 +172,7 @@ export class GoldenImageResolver {
     @Ctx() ctx?: InfinibayContext
   ): Promise<GoldenImageResult> {
     if (!ctx) throw new UserInputError('Context not available')
+    await assertCanAccessResource(ctx, 'blueprints')
     try {
       const row = await getService(ctx).retryBuild(id)
       return { success: true, image: toGql(row) }
@@ -182,6 +188,7 @@ export class GoldenImageResolver {
     @Ctx() ctx?: InfinibayContext
   ): Promise<boolean> {
     if (!ctx) throw new UserInputError('Context not available')
+    await assertCanAccessResource(ctx, 'blueprints')
     return await getService(ctx).delete(id)
   }
 }

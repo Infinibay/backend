@@ -15,9 +15,17 @@ describe('MachineTemplateResolver', () => {
   let resolver: MachineTemplateResolver
   const ctx = createAdminContext()
 
+  const withRelations = (template: ReturnType<typeof createMockMachineTemplate>, extras: Record<string, unknown> = {}) => ({
+    ...template,
+    applications: [],
+    scripts: [],
+    ...extras
+  })
+
   beforeEach(() => {
     resolver = new MachineTemplateResolver()
     jest.clearAllMocks()
+    mockPrisma.$transaction.mockImplementation(async (callback) => callback(mockPrisma))
   })
 
   describe('Query: machineTemplate', () => {
@@ -25,10 +33,9 @@ describe('MachineTemplateResolver', () => {
       const category = createMockMachineTemplateCategory()
       const template = createMockMachineTemplate({ categoryId: category.id })
 
-      const templateWithCategory = {
-        ...template,
+      const templateWithCategory = withRelations(template, {
         category
-      }
+      })
 
       mockPrisma.machineTemplate.findUnique.mockResolvedValue(templateWithCategory)
       mockPrisma.machine.count.mockResolvedValue(5)
@@ -38,7 +45,9 @@ describe('MachineTemplateResolver', () => {
       expect(mockPrisma.machineTemplate.findUnique).toHaveBeenCalledWith({
         where: { id: template.id },
         include: {
-          category: true
+          category: true,
+          applications: { include: { application: true } },
+          scripts: { include: { script: true }, orderBy: { order: 'asc' } }
         }
       })
       expect(mockPrisma.machine.count).toHaveBeenCalledWith({
@@ -46,7 +55,9 @@ describe('MachineTemplateResolver', () => {
       })
       expect(result).toEqual({
         ...templateWithCategory,
-        totalMachines: 5
+        totalMachines: 5,
+        applications: [],
+        scripts: []
       })
     })
 
@@ -62,7 +73,7 @@ describe('MachineTemplateResolver', () => {
 
   describe('Query: machineTemplates', () => {
     it('should return all templates with default pagination', async () => {
-      const templates = Array.from({ length: 5 }, () => createMockMachineTemplate())
+      const templates = Array.from({ length: 5 }, () => withRelations(createMockMachineTemplate()))
 
       mockPrisma.machineTemplate.findMany.mockResolvedValue(templates)
       templates.forEach(() => {
@@ -75,7 +86,9 @@ describe('MachineTemplateResolver', () => {
         skip: 0,
         take: 10,
         include: {
-          category: true
+          category: true,
+          applications: { include: { application: true } },
+          scripts: { include: { script: true }, orderBy: { order: 'asc' } }
         },
         orderBy: undefined
       })
@@ -87,7 +100,7 @@ describe('MachineTemplateResolver', () => {
     })
 
     it('should apply pagination parameters', async () => {
-      const templates = Array.from({ length: 3 }, () => createMockMachineTemplate())
+      const templates = Array.from({ length: 3 }, () => withRelations(createMockMachineTemplate()))
       const pagination: PaginationInputType = { skip: 5, take: 3 }
 
       mockPrisma.machineTemplate.findMany.mockResolvedValue(templates)
@@ -101,7 +114,9 @@ describe('MachineTemplateResolver', () => {
         skip: pagination.skip,
         take: pagination.take,
         include: {
-          category: true
+          category: true,
+          applications: { include: { application: true } },
+          scripts: { include: { script: true }, orderBy: { order: 'asc' } }
         },
         orderBy: undefined
       })
@@ -109,7 +124,7 @@ describe('MachineTemplateResolver', () => {
     })
 
     it('should apply custom ordering', async () => {
-      const templates = Array.from({ length: 5 }, () => createMockMachineTemplate())
+      const templates = Array.from({ length: 5 }, () => withRelations(createMockMachineTemplate()))
       const orderBy: MachineTemplateOrderBy = {
         fieldName: MachineTemplateOrderByEnum.CORES,
         direction: OrderByDirection.DESC
@@ -126,7 +141,9 @@ describe('MachineTemplateResolver', () => {
         skip: 0,
         take: 10,
         include: {
-          category: true
+          category: true,
+          applications: { include: { application: true } },
+          scripts: { include: { script: true }, orderBy: { order: 'asc' } }
         },
         orderBy: { cores: OrderByDirection.DESC }
       })
@@ -170,7 +187,13 @@ describe('MachineTemplateResolver', () => {
           cores: input.cores,
           ram: input.ram,
           storage: input.storage,
-          categoryId: input.categoryId
+          categoryId: input.categoryId,
+          osType: null,
+          wallpaperUrl: null,
+          powerPlan: null,
+          encryptDisk: false,
+          applications: undefined,
+          scripts: undefined
         },
         include: {
           category: true
@@ -277,7 +300,9 @@ describe('MachineTemplateResolver', () => {
           cores: updateInput.cores,
           ram: updateInput.ram,
           storage: updateInput.storage,
-          categoryId: updateInput.categoryId
+          categoryId: updateInput.categoryId,
+          wallpaperUrl: null,
+          powerPlan: null
         },
         include: {
           category: true

@@ -4,13 +4,14 @@ import {
   Authorized,
   Mutation,
   Query,
-  Resolver
-  , Ctx
+  Resolver,
+  Ctx
 } from 'type-graphql'
 import { InfinibayContext } from '@utils/context'
 import { UserInputError } from '@utils/errors'
 import { MachineTemplateType, MachineTemplateOrderBy, MachineTemplateInputType } from './type'
 import { PaginationInputType } from '@utils/pagination'
+import { assertCanAccessResource } from '../../utils/auth'
 
 export interface MachineTemplateResolverInterface {
   machineTemplates(pagination: PaginationInputType | undefined, orderBy: MachineTemplateOrderBy | undefined, ctx: InfinibayContext): Promise<MachineTemplateType[]>
@@ -27,7 +28,7 @@ const MIN_RAM = 1
 const MAX_STORAGE = 1024
 const MIN_STORAGE = 1
 
-@Resolver(_of => MachineTemplateType)
+@Resolver(() => MachineTemplateType)
 export class MachineTemplateResolver implements MachineTemplateResolverInterface {
   /**
    * Retrieves a machine template by id.
@@ -43,6 +44,7 @@ export class MachineTemplateResolver implements MachineTemplateResolverInterface
     @Arg('id', { nullable: false }) id: string,
     @Ctx() ctx: InfinibayContext
   ): Promise<MachineTemplateType | null> {
+    await assertCanAccessResource(ctx, 'blueprints')
     const machineTemplate = await ctx.prisma.machineTemplate.findUnique({
       where: { id },
       include: {
@@ -89,6 +91,7 @@ export class MachineTemplateResolver implements MachineTemplateResolverInterface
     @Arg('orderBy', { nullable: true }) orderBy: MachineTemplateOrderBy,
     @Ctx() ctx: InfinibayContext
   ): Promise<MachineTemplateType[]> {
+    await assertCanAccessResource(ctx, 'blueprints')
     const { prisma } = ctx
     const order = this.resolveOrder(orderBy)
     const skip = this.resolveSkip(pagination)
@@ -165,6 +168,7 @@ export class MachineTemplateResolver implements MachineTemplateResolverInterface
     @Arg('input', { nullable: false }) input: MachineTemplateInputType,
     @Ctx() ctx: InfinibayContext
   ): Promise<MachineTemplateType> {
+    await assertCanAccessResource(ctx, 'blueprints')
     const { prisma } = ctx
 
     await this.checkMachineTemplateExistence(input.name, prisma)
@@ -187,20 +191,20 @@ export class MachineTemplateResolver implements MachineTemplateResolverInterface
         encryptDisk: input.encryptDisk ?? false,
         applications: input.applications && input.applications.length > 0
           ? {
-              create: input.applications.map((a) => ({
-                applicationId: a.applicationId,
-                parameters: (a.parameters ?? Prisma.JsonNull) as Prisma.InputJsonValue
-              }))
-            }
+            create: input.applications.map((a) => ({
+              applicationId: a.applicationId,
+              parameters: (a.parameters ?? Prisma.JsonNull) as Prisma.InputJsonValue
+            }))
+          }
           : undefined,
         scripts: input.scripts && input.scripts.length > 0
           ? {
-              create: input.scripts.map((s, i) => ({
-                scriptId: s.scriptId,
-                order: s.order ?? i,
-                inputValues: (s.inputValues ?? Prisma.JsonNull) as Prisma.InputJsonValue
-              }))
-            }
+            create: input.scripts.map((s, i) => ({
+              scriptId: s.scriptId,
+              order: s.order ?? i,
+              inputValues: (s.inputValues ?? Prisma.JsonNull) as Prisma.InputJsonValue
+            }))
+          }
           : undefined
       },
       include: { category: true }
@@ -242,6 +246,7 @@ export class MachineTemplateResolver implements MachineTemplateResolverInterface
     @Arg('input', { nullable: false }) input: MachineTemplateInputType,
     @Ctx() ctx: InfinibayContext
   ): Promise<MachineTemplateType> {
+    await assertCanAccessResource(ctx, 'blueprints')
     const { prisma } = ctx
 
     // Ensure the machine template exists before updating
@@ -302,8 +307,19 @@ export class MachineTemplateResolver implements MachineTemplateResolverInterface
           ram: input.ram,
           storage: input.storage,
           categoryId: input.categoryId,
+          // osType is the source of truth for VM creation. It is only set on
+          // create when omitted on update (legacy rows), but if the caller
+          // provides one we honour it so blueprints created before the column
+          // existed can be back-filled through the edit form.
+          ...(input.osType !== undefined ? { osType: input.osType ?? null } : {}),
           wallpaperUrl: input.wallpaperUrl ?? null,
-          powerPlan: input.powerPlan ?? null
+          powerPlan: input.powerPlan ?? null,
+          // Previously omitted — toggling disk encryption on an existing
+          // blueprint silently did nothing. Persist it like create does, but
+          // only when the caller actually sends it: an unconditional `?? false`
+          // would silently disable encryption on any partial update that omits
+          // the field.
+          ...(input.encryptDisk !== undefined ? { encryptDisk: input.encryptDisk } : {})
         },
         include: { category: true }
       })
@@ -323,6 +339,7 @@ export class MachineTemplateResolver implements MachineTemplateResolverInterface
     @Arg('id', { nullable: false }) id: string,
     @Ctx() ctx: InfinibayContext
   ): Promise<boolean> {
+    await assertCanAccessResource(ctx, 'blueprints')
     const { prisma } = ctx
 
     // Check if template exists
@@ -364,6 +381,7 @@ export class MachineTemplateResolver implements MachineTemplateResolverInterface
     @Arg('id', { nullable: false }) id: string,
     @Ctx() ctx: InfinibayContext
   ): Promise<boolean> {
+    await assertCanAccessResource(ctx, 'blueprints')
     const { prisma } = ctx
 
     // Check if category exists

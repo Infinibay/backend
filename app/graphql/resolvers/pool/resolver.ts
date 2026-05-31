@@ -11,6 +11,7 @@ import { PoolService } from '@services/PoolService'
 import { InfinibayContext } from '@utils/context'
 import { UserInputError } from '@utils/errors'
 import type { Pool as PrismaPool } from '@prisma/client'
+import { assertCanAccessResource } from '../../utils/auth'
 
 function getService (ctx: InfinibayContext): PoolService {
   if (!ctx.prisma) throw new UserInputError('Database context not available')
@@ -72,6 +73,7 @@ export class PoolResolver {
     @Ctx() ctx?: InfinibayContext
   ): Promise<PoolResult> {
     if (!ctx) throw new UserInputError('Context not available')
+    await assertCanAccessResource(ctx, 'desktops')
     try {
       const pool = await getService(ctx).create({
         name: input.name,
@@ -99,6 +101,7 @@ export class PoolResolver {
     @Ctx() ctx?: InfinibayContext
   ): Promise<PoolResult> {
     if (!ctx) throw new UserInputError('Context not available')
+    await assertCanAccessResource(ctx, 'desktops')
     try {
       await getService(ctx).update(id, input)
       const row = await getService(ctx).byId(id)
@@ -116,6 +119,7 @@ export class PoolResolver {
     @Ctx() ctx?: InfinibayContext
   ): Promise<PoolResult> {
     if (!ctx) throw new UserInputError('Context not available')
+    await assertCanAccessResource(ctx, 'desktops')
     try {
       await getService(ctx).scale(id, targetSize)
       const row = await getService(ctx).byId(id)
@@ -132,6 +136,7 @@ export class PoolResolver {
     @Ctx() ctx?: InfinibayContext
   ): Promise<PoolResult> {
     if (!ctx) throw new UserInputError('Context not available')
+    await assertCanAccessResource(ctx, 'desktops')
     try {
       await getService(ctx).drain(id)
       const row = await getService(ctx).byId(id)
@@ -148,6 +153,7 @@ export class PoolResolver {
     @Ctx() ctx?: InfinibayContext
   ): Promise<PoolResult> {
     if (!ctx) throw new UserInputError('Context not available')
+    await assertCanAccessResource(ctx, 'desktops')
     try {
       await getService(ctx).undrain(id)
       const row = await getService(ctx).byId(id)
@@ -164,6 +170,7 @@ export class PoolResolver {
     @Ctx() ctx?: InfinibayContext
   ): Promise<boolean> {
     if (!ctx) throw new UserInputError('Context not available')
+    await assertCanAccessResource(ctx, 'desktops')
     return await getService(ctx).delete(id)
   }
 

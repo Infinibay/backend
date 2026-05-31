@@ -89,6 +89,9 @@ describe('MachineLifecycleService', () => {
       machine: {
         create: jest.fn().mockResolvedValue(null as never)
       },
+      node: {
+        findMany: jest.fn().mockResolvedValue([] as never)
+      },
       machineApplication: {
         create: jest.fn()
       },
@@ -168,6 +171,91 @@ describe('MachineLifecycleService', () => {
       expect(result.cpuCores).toBe(4)
       expect(result.ramGB).toBe(8)
       expect(result.diskSizeGB).toBe(100)
+    })
+
+    it('should assign the registered local node when creating a machine', async () => {
+      const input: CreateMachineInputType = {
+        name: 'Node Assigned Machine',
+        customCores: 4,
+        customRam: 8,
+        customStorage: 100,
+        os: OsEnum.UBUNTU,
+        applications: [],
+        username: 'admin',
+        password: 'password123',
+        departmentId: 'dept-123',
+        pciBus: null,
+        firstBootScripts: []
+      }
+      const mockDepartment = createMockDepartment({
+        id: 'dept-123',
+        name: 'Default Department'
+      })
+      const mockMachine = createMockMachine({
+        id: 'machine-123',
+        name: 'Node Assigned Machine',
+        internalName: 'mock-uuid-123',
+        departmentId: 'dept-123',
+        nodeId: 'node-123'
+      })
+      let tx: ReturnType<typeof createMockTx> | undefined
+
+      process.env.INFINIBAY_NODE_NAME = 'node-alpha'
+
+      mockPrisma.$transaction.mockImplementation(async (fn: unknown) => {
+        if (typeof fn === 'function') {
+          tx = createMockTx({
+            department: {
+              findUnique: jest.fn().mockResolvedValue(mockDepartment as never),
+              findFirst: jest.fn().mockResolvedValue(mockDepartment as never)
+            },
+            node: {
+              findMany: jest.fn().mockResolvedValue([{
+                id: 'node-123',
+                name: 'node-alpha',
+                cores: 16,
+                ram: 32768,
+                updatedAt: new Date(),
+                maintenanceMode: false,
+                machines: []
+              }] as never)
+            },
+            machine: {
+              create: jest.fn().mockResolvedValue(mockMachine as never)
+            }
+          })
+          return fn(tx as unknown as typeof mockPrisma)
+        }
+        return Promise.resolve([])
+      })
+
+      await service.createMachine(input)
+
+      expect(tx).toBeDefined()
+      const capturedTx = tx as ReturnType<typeof createMockTx>
+
+      expect(capturedTx.node.findMany).toHaveBeenCalledWith({
+        select: {
+          id: true,
+          name: true,
+          cores: true,
+          ram: true,
+          updatedAt: true,
+          maintenanceMode: true,
+          machines: {
+            select: {
+              cpuCores: true,
+              ramGB: true,
+              diskSizeGB: true
+            }
+          }
+        }
+      })
+      expect(capturedTx.machine.create).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({
+          nodeId: 'node-123'
+        })
+      }))
     })
 
     it('should create machine with template', async () => {

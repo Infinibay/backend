@@ -1,4 +1,5 @@
 import logger from '@main/logger'
+import { PrismaClient } from '@prisma/client'
 import { Resolver, Query, Mutation, Arg, Ctx, Authorized, Int } from 'type-graphql'
 import { UserInputError } from '../../../utils/errors'
 import { DepartmentType, UpdateDepartmentNameInput, UpdateDepartmentNetworkInput, CreateDepartmentFirewallInput, UpdateDepartmentFirewallPolicyInput, DepartmentNetworkDiagnosticsType, DhcpTrafficCaptureType } from './type'
@@ -11,6 +12,7 @@ import { FirewallPolicyService } from '../../../services/firewall/FirewallPolicy
 import { FirewallOrchestrationService } from '../../../services/firewall/FirewallOrchestrationService'
 import { FirewallValidationService } from '../../../services/firewall/FirewallValidationService'
 import { InfinizationFirewallService } from '../../../services/firewall/InfinizationFirewallService'
+import { assertCanAccessResource } from '../../utils/auth'
 
 @Resolver(DepartmentType)
 export class DepartmentResolver {
@@ -80,8 +82,10 @@ export class DepartmentResolver {
   async createDepartment (
     @Arg('name') name: string,
     @Arg('firewallConfig', { nullable: true }) firewallConfig: CreateDepartmentFirewallInput,
-    @Ctx() { prisma, user }: InfinibayContext
+    @Ctx() context: InfinibayContext
   ): Promise<DepartmentType> {
+    await assertCanAccessResource(context, 'departments')
+    const { prisma, user } = context
     // Validate name is not empty
     const trimmedName = name.trim()
     if (!trimmedName) {
@@ -222,8 +226,10 @@ export class DepartmentResolver {
   @Authorized('ADMIN')
   async destroyDepartment (
     @Arg('id') id: string,
-    @Ctx() { prisma, user }: InfinibayContext
+    @Ctx() context: InfinibayContext
   ): Promise<DepartmentType> {
+    await assertCanAccessResource(context, 'departments')
+    const { prisma, user } = context
     // Check if deparment exist, if not, error, if yes, dlete it
     const department = await prisma.department.findUnique({
       where: { id }
@@ -274,8 +280,10 @@ export class DepartmentResolver {
   @Authorized('ADMIN')
   async updateDepartmentName (
     @Arg('input') input: UpdateDepartmentNameInput,
-    @Ctx() { prisma, user }: InfinibayContext
+    @Ctx() context: InfinibayContext
   ): Promise<DepartmentType> {
+    await assertCanAccessResource(context, 'departments')
+    const { prisma, user } = context
     const { id, name } = input
 
     // Check if department exists
@@ -399,8 +407,10 @@ export class DepartmentResolver {
   @Authorized('ADMIN')
   async updateDepartmentNetwork (
     @Arg('input') input: UpdateDepartmentNetworkInput,
-    @Ctx() { prisma, user }: InfinibayContext
+    @Ctx() context: InfinibayContext
   ): Promise<DepartmentType> {
+    await assertCanAccessResource(context, 'infrastructure')
+    const { prisma, user } = context
     const { id, dnsServers, ntpServers } = input
 
     // Check if department exists
@@ -498,8 +508,10 @@ export class DepartmentResolver {
   async updateDepartmentFirewallPolicy (
     @Arg('departmentId', () => String) departmentId: string,
     @Arg('input') input: UpdateDepartmentFirewallPolicyInput,
-    @Ctx() { prisma, user }: InfinibayContext
+    @Ctx() context: InfinibayContext
   ): Promise<DepartmentType> {
+    await assertCanAccessResource(context, 'firewall')
+    const { prisma, user } = context
     const { firewallPolicy, firewallDefaultConfig, firewallCustomRules } = input
     const id = departmentId
 
@@ -595,7 +607,7 @@ export class DepartmentResolver {
     try {
       const eventManager = getEventManager()
       await eventManager.dispatchEvent('departments', 'update', { id: updatedDepartment.id }, user?.id)
-      logger.info(`🎯 Triggered real-time event: departments:update for firewall policy change`)
+      logger.info('Triggered real-time event: departments:update for firewall policy change')
     } catch (eventError) {
       logger.error('Failed to trigger real-time event:', eventError)
     }
@@ -625,8 +637,10 @@ export class DepartmentResolver {
   @Authorized('ADMIN')
   async departmentNetworkDiagnostics (
     @Arg('departmentId') departmentId: string,
-    @Ctx() { prisma }: InfinibayContext
+    @Ctx() context: InfinibayContext
   ): Promise<DepartmentNetworkDiagnosticsType> {
+    await assertCanAccessResource(context, 'infrastructure')
+    const { prisma } = context
     const networkService = new DepartmentNetworkService(prisma)
 
     try {
@@ -646,8 +660,10 @@ export class DepartmentResolver {
   async captureDepartmentDhcpTraffic (
     @Arg('departmentId') departmentId: string,
     @Arg('durationSeconds', () => Int, { defaultValue: 30 }) durationSeconds: number,
-    @Ctx() { prisma }: InfinibayContext
+    @Ctx() context: InfinibayContext
   ): Promise<DhcpTrafficCaptureType> {
+    await assertCanAccessResource(context, 'infrastructure')
+    const { prisma } = context
     // Validate duration
     if (durationSeconds < 5 || durationSeconds > 120) {
       throw new UserInputError('Duration must be between 5 and 120 seconds')
@@ -668,7 +684,7 @@ export class DepartmentResolver {
    * Uses pattern 10.10.X.0/24 where X starts at 1 and increments.
    * Finds gaps in existing subnets to reuse freed numbers.
    */
-  private async getNextAvailableSubnet (prisma: any): Promise<string> {
+  private async getNextAvailableSubnet (prisma: PrismaClient): Promise<string> {
     // Get all existing subnets
     const departments = await prisma.department.findMany({
       where: { ipSubnet: { not: null } },

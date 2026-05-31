@@ -1,6 +1,4 @@
-import { PrismaClient } from '@prisma/client'
 import {
-  Arg,
   Authorized,
   Mutation,
   Query,
@@ -8,6 +6,7 @@ import {
   , Ctx
 } from 'type-graphql'
 import { InfinibayContext } from '@utils/context'
+import { LocalNodeRegistrationService } from '@services/node/LocalNodeRegistrationService'
 
 import { DyummyType } from './type'
 
@@ -16,6 +15,7 @@ export interface SetupResolverInterface {
   checkSetupStatus(ctx: InfinibayContext): Promise<DyummyType>
 }
 
+@Resolver()
 export class SetupResolver implements SetupResolverInterface {
   @Mutation(() => DyummyType)
   @Authorized('SETUP_MODE')
@@ -37,8 +37,11 @@ export class SetupResolver implements SetupResolverInterface {
     10. TODO: Import the main admin user from /user.json.p7m
      */
 
+    const service = new LocalNodeRegistrationService(ctx.prisma)
+    const node = await service.registerLocalNode()
+
     return {
-      value: 'dummy'
+      value: node.id
     }
   }
 
@@ -47,8 +50,10 @@ export class SetupResolver implements SetupResolverInterface {
   async checkSetupStatus (
     @Ctx() ctx: InfinibayContext
   ): Promise<DyummyType> {
+    const nodes = await ctx.prisma.node.count()
+
     return {
-      value: 'dummy'
+      value: nodes > 0 ? 'configured' : 'not_configured'
     }
   }
 }

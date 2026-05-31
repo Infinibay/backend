@@ -88,7 +88,8 @@ export class ScriptSchedulePushService {
             select: {
               id: true,
               name: true,
-              status: true
+              status: true,
+              configuration: { select: { setupComplete: true } }
             }
           },
           script: {
@@ -135,9 +136,9 @@ export class ScriptSchedulePushService {
           // Check if machine is online
           const machine = executions[0].machine;
 
-          if (machine.status !== 'running') {
-            log.debug('VM %s (%s) is offline (status: %s), skipping %d executions',
-              machine.name, machineId, machine.status, executions.length);
+          if (machine.status !== 'running' || !machine.configuration?.setupComplete) {
+            log.debug('VM %s (%s) not ready (status=%s setupComplete=%s), skipping %d executions',
+              machine.name, machineId, machine.status, machine.configuration?.setupComplete ?? false, executions.length);
             offlineCount++;
             continue;
           }

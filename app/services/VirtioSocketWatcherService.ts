@@ -251,7 +251,9 @@ export class VirtioSocketWatcherService extends EventEmitter {
       const messageSize = Buffer.byteLength(messageStr, 'utf8')
 
       this.debug.debug(`📤 Sending message to VM ${connection.vmId}: size=${messageSize} bytes, type=${message.type || 'unknown'}`)
-      this.debug.debug(`Message preview: ${messageStr.slice(0, 200)}${messageStr.length > 200 ? '...' : ''}`)
+      // Payload preview suppressed: outbound messages can carry secrets
+      // (e.g. the domain-join password). Log only the size, never the body.
+      this.debug.debug(`Message payload suppressed (${messageSize} bytes)`)
 
       connection.socket.write(messageStr, (error) => {
         if (error) {

@@ -14,6 +14,7 @@ interface MockWatcher extends EventEmitter {
 }
 
 const mockWatcher = new EventEmitter() as MockWatcher
+mockWatcher.setMaxListeners(0)
 mockWatcher.close = jest.fn().mockResolvedValue(undefined)
 
 jest.mock('chokidar', () => ({
@@ -34,6 +35,11 @@ jest.mock('fs', () => ({
 
 // Mock net.Socket
 class MockSocket extends EventEmitter {
+  constructor () {
+    super()
+    this.setMaxListeners(0)
+  }
+
   connect = jest.fn().mockImplementation(() => {
     // Simulate async connection success
     process.nextTick(() => this.emit('connect'))

@@ -528,7 +528,7 @@ export class GoldenImageService {
   // Lifecycle
   // ---------------------------------------------------------------------
 
-  async publish (id: string): Promise<GoldenImage> {
+  async publish (id: string, autoDeprecatePrevious = true): Promise<GoldenImage> {
     const img = await this.prisma.goldenImage.findUnique({ where: { id } })
     if (!img) throw new Error(`Golden image not found: ${id}`)
     if (img.status !== 'draft') {
@@ -539,7 +539,68 @@ export class GoldenImageService {
       data: { status: 'published' }
     })
     this.emitUpdate(updated)
+
+    // Supersede older published versions in the same family: a family should
+    // have at most one published image at a time, otherwise it's ambiguous
+    // which one new VMs/pools should clone from.
+    if (autoDeprecatePrevious) {
+      const familyIds = await this.familyMemberIds(updated)
+      const previouslyPublished = await this.prisma.goldenImage.findMany({
+        where: {
+          id: { in: familyIds, not: updated.id },
+          status: 'published'
+        }
+      })
+      for (const old of previouslyPublished) {
+        const deprecated = await this.prisma.goldenImage.update({
+          where: { id: old.id },
+          data: { status: 'deprecated', deprecatedAt: new Date() }
+        })
+        this.emitUpdate(deprecated)
+        this.debug.info(
+          `Auto-deprecated golden image ${old.id} (v${old.version}) superseded by ${updated.id} (v${updated.version})`
+        )
+      }
+    }
+
     return updated
+  }
+
+  /**
+   * Returns the ids of every image in `img`'s version family: walk up to the
+   * root via parentImageId, then collect all descendants. Used to decide which
+   * older published versions a freshly-published image supersedes.
+   */
+  private async familyMemberIds (img: GoldenImage): Promise<string[]> {
+    const all = await this.prisma.goldenImage.findMany({
+      select: { id: true, parentImageId: true }
+    })
+    const byId = new Map(all.map((i) => [i.id, i]))
+
+    // Walk up to the family root.
+    let rootId = img.id
+    let cursor = byId.get(img.id)
+    const visited = new Set<string>([img.id])
+    while (cursor?.parentImageId && byId.has(cursor.parentImageId) && !visited.has(cursor.parentImageId)) {
+      visited.add(cursor.parentImageId)
+      rootId = cursor.parentImageId
+      cursor = byId.get(cursor.parentImageId)
+    }
+
+    // BFS down from the root to gather every descendant.
+    const members = new Set<string>([rootId])
+    const queue = [rootId]
+    while (queue.length > 0) {
+      const current = queue.shift() as string
+      for (const candidate of all) {
+        if (candidate.parentImageId === current && !members.has(candidate.id)) {
+          members.add(candidate.id)
+          queue.push(candidate.id)
+        }
+      }
+    }
+
+    return [...members]
   }
 
   async deprecate (id: string): Promise<GoldenImage> {

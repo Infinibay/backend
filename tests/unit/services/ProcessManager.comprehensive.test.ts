@@ -119,16 +119,17 @@ describe('ProcessManager', () => {
       expect(result).toEqual({ machine: mockMachine })
     })
 
-    it('should update machine status when different from infinization', async () => {
+    it('should return null when infinization reports the VM process is not alive', async () => {
       const mockMachine = { id: testMachineId, name: 'Test VM', os: 'windows', status: 'stopped', internalName: 'vm-test' } as any
-      const mockStatus = { processAlive: true }
+      const mockStatus = { processAlive: false }
 
       jest.spyOn(mockPrisma.machine, 'findUnique').mockResolvedValue(mockMachine)
       mockInfinization.getVMStatus.mockResolvedValue(mockStatus)
 
-      await (service as any).getRunningMachine(testMachineId)
+      const result = await (service as any).getRunningMachine(testMachineId)
 
-      expect(mockPrisma.machine.update).toHaveBeenCalled()
+      expect(result).toBeNull()
+      expect(mockPrisma.machine.update).not.toHaveBeenCalled()
     })
   })
 })

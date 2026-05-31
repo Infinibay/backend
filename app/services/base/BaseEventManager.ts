@@ -56,7 +56,7 @@ export abstract class BaseEventManager {
     try {
       const adminUsers = await this.prisma.user.findMany({
         where: {
-          role: 'ADMIN',
+          role: { in: ['ADMIN', 'SUPER_ADMIN'] },
           deleted: false
         },
         select: { id: true }

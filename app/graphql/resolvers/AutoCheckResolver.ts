@@ -140,7 +140,7 @@ export class AutoCheckResolver {
         throw new Error('Machine not found')
       }
 
-      const isAdmin = user?.role === 'ADMIN'
+      const isAdmin = (user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN')
       const isOwner = machine.userId === user?.id
 
       if (!isAdmin && !isOwner) {
@@ -221,7 +221,7 @@ export class AutoCheckResolver {
         throw new Error('Machine not found')
       }
 
-      const isAdmin = user?.role === 'ADMIN'
+      const isAdmin = (user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN')
       const isOwner = machine.userId === user?.id
 
       if (!isAdmin && !isOwner) {
@@ -286,7 +286,7 @@ export class AutoCheckResolver {
         throw new Error('Machine not found')
       }
 
-      const isAdmin = user?.role === 'ADMIN'
+      const isAdmin = (user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN')
       const isOwner = machine.userId === user?.id
 
       if (!isAdmin && !isOwner) {
@@ -369,7 +369,7 @@ export class AutoCheckResolver {
         throw new Error('Machine not found')
       }
 
-      const isAdmin = user?.role === 'ADMIN'
+      const isAdmin = (user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN')
       const isOwner = machine.userId === user?.id
 
       if (!isAdmin && !isOwner) {
@@ -447,7 +447,7 @@ export class AutoCheckResolver {
         throw new Error('Machine not found')
       }
 
-      const isAdmin = user?.role === 'ADMIN'
+      const isAdmin = (user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN')
       const isOwner = machine.userId === user?.id
 
       if (!isAdmin && !isOwner) {
@@ -527,7 +527,7 @@ export class AutoCheckResolver {
         throw new Error('Machine not found')
       }
 
-      const isAdmin = user?.role === 'ADMIN'
+      const isAdmin = (user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN')
       const isOwner = machine.userId === user?.id
 
       if (!isAdmin && !isOwner) {
@@ -600,7 +600,7 @@ export class AutoCheckResolver {
         throw new Error('Machine not found')
       }
 
-      const isAdmin = user?.role === 'ADMIN'
+      const isAdmin = (user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN')
       const isOwner = machine.userId === user?.id
 
       if (!isAdmin && !isOwner) {
@@ -678,7 +678,7 @@ export class AutoCheckResolver {
         throw new Error('Machine not found')
       }
 
-      const isAdmin = user?.role === 'ADMIN'
+      const isAdmin = (user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN')
       const isOwner = machine.userId === user?.id
 
       if (!isAdmin && !isOwner) {
@@ -745,7 +745,7 @@ export class AutoCheckResolver {
         throw new Error('Machine not found')
       }
 
-      const isAdmin = user?.role === 'ADMIN'
+      const isAdmin = (user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN')
       const isOwner = machine.userId === user?.id
 
       if (!isAdmin && !isOwner) {
@@ -854,7 +854,7 @@ export class AutoCheckResolver {
         throw new Error('Machine not found')
       }
 
-      const isAdmin = user?.role === 'ADMIN'
+      const isAdmin = (user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN')
       const isOwner = machine.userId === user?.id
 
       if (!isAdmin && !isOwner) {
@@ -913,7 +913,7 @@ export class AutoCheckResolver {
         throw new Error('Machine not found')
       }
 
-      const isAdmin = user?.role === 'ADMIN'
+      const isAdmin = (user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN')
       const isOwner = machine.userId === user?.id
 
       if (!isAdmin && !isOwner) {

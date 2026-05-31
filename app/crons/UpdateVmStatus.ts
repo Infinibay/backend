@@ -71,7 +71,10 @@ const UpdateVmStatusJob = new CronJob('*/5 * * * *', async () => {
     for (const vm of allVms) {
       const isActuallyRunning = vmStatuses.get(vm.id) ?? false
 
-      if (isActuallyRunning && vm.status !== 'running') {
+      if (isActuallyRunning && vm.status !== 'running' && vm.status !== 'starting') {
+        // Skip 'starting': it's an in-flight transition owned by VMLifecycle/QMP
+        // events. Promoting it from this safety-net cron would race with the
+        // legitimate transition path.
         runningVmIds.push(vm.id)
       } else if (!isActuallyRunning && vm.status === 'running') {
         // Only mark as stopped if it was running

@@ -141,6 +141,10 @@ describe('SocketService', () => {
         firstName: 'Test',
         lastName: 'User',
         role: 'USER' as const,
+        identityProviderId: null,
+        externalId: null,
+        externalDn: null,
+        lastDirectorySyncAt: null,
         createdAt: new Date(),
         updatedAt: new Date()
       }

@@ -2,6 +2,7 @@ import { Arg, Authorized, Ctx, Query, Resolver, ObjectType, Field, ID, Int } fro
 import { GraphQLJSONObject } from 'graphql-type-json'
 import { TaskStatus, TaskPriority, HealthCheckType } from '@prisma/client'
 import { InfinibayContext } from '@utils/context'
+import { assertCanAccessResource } from '../utils/auth'
 
 @ObjectType()
 export class VMHealthSnapshotType {
@@ -171,7 +172,7 @@ export class VMHealthHistoryResolver {
     }
 
     // Regular users can only see their own machines
-    if (context.user?.role !== 'ADMIN' && machine.userId !== context.user?.id) {
+    if ((context.user?.role !== 'ADMIN' && context.user?.role !== 'SUPER_ADMIN') && machine.userId !== context.user?.id) {
       throw new Error('Access denied')
     }
 
@@ -202,7 +203,7 @@ export class VMHealthHistoryResolver {
     }
 
     // Regular users can only see their own machines
-    if (context.user?.role !== 'ADMIN' && machine.userId !== context.user?.id) {
+    if ((context.user?.role !== 'ADMIN' && context.user?.role !== 'SUPER_ADMIN') && machine.userId !== context.user?.id) {
       throw new Error('Access denied')
     }
 
@@ -240,12 +241,12 @@ export class VMHealthHistoryResolver {
       }
 
       // Regular users can only see their own machines
-      if (context.user?.role !== 'ADMIN' && machine.userId !== context.user?.id) {
+      if ((context.user?.role !== 'ADMIN' && context.user?.role !== 'SUPER_ADMIN') && machine.userId !== context.user?.id) {
         throw new Error('Access denied')
       }
 
       where.machineId = machineId
-    } else if (context.user?.role !== 'ADMIN') {
+    } else if ((context.user?.role !== 'ADMIN' && context.user?.role !== 'SUPER_ADMIN')) {
       // Regular users can only see their own machines' queues
       const userMachines = await context.prisma.machine.findMany({
         where: { userId: context.user?.id },
@@ -285,7 +286,7 @@ export class VMHealthHistoryResolver {
     }
 
     // Regular users can only see their own machines
-    if (context.user?.role !== 'ADMIN' && machine.userId !== context.user?.id) {
+    if ((context.user?.role !== 'ADMIN' && context.user?.role !== 'SUPER_ADMIN') && machine.userId !== context.user?.id) {
       throw new Error('Access denied')
     }
 
@@ -314,7 +315,7 @@ export class VMHealthHistoryResolver {
     }
 
     // Regular users can only see their own machines
-    if (context.user?.role !== 'ADMIN' && machine.userId !== context.user?.id) {
+    if ((context.user?.role !== 'ADMIN' && context.user?.role !== 'SUPER_ADMIN') && machine.userId !== context.user?.id) {
       throw new Error('Access denied')
     }
 
@@ -357,6 +358,7 @@ export class VMHealthHistoryResolver {
   @Query(() => QueueStatsType)
   @Authorized(['ADMIN'])
   async healthCheckQueueStats (@Ctx() context: InfinibayContext): Promise<QueueStatsType> {
+    await assertCanAccessResource(context, 'infrastructure')
     const today = new Date()
     today.setHours(0, 0, 0, 0)
 

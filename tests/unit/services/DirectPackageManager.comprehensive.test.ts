@@ -47,14 +47,18 @@ describe('DirectPackageManager', () => {
     service = new DirectPackageManager(mockPrisma as any, mockVirtioService as any)
   })
 
+  const readyMachine = (overrides: Record<string, unknown> = {}) => ({
+    id: 'vm-123',
+    name: 'test-vm',
+    os: 'WINDOWS10',
+    status: 'running',
+    configuration: { setupComplete: true },
+    ...overrides
+  })
+
   describe('listPackages', () => {
     it('should list all packages on a machine', async () => {
-      const mockMachine = {
-        id: 'vm-123',
-        name: 'test-vm',
-        os: 'WINDOWS10',
-        status: 'running'
-      }
+      const mockMachine = readyMachine()
       const mockPackages = [
         { name: 'Chrome', version: '100.0', installed: true },
         { name: 'Firefox', version: '99.0', installed: true }
@@ -70,7 +74,7 @@ describe('DirectPackageManager', () => {
 
       expect(mockPrisma.machine.findUnique).toHaveBeenCalledWith({
         where: { id: 'vm-123' },
-        select: { id: true, name: true, os: true, status: true }
+        select: { id: true, name: true, os: true, status: true, configuration: { select: { setupComplete: true } } }
       })
       expect(result.length).toBe(2)
       expect(result[0].name).toBe('Chrome')
@@ -85,12 +89,7 @@ describe('DirectPackageManager', () => {
     })
 
     it('should throw error when command execution fails', async () => {
-      const mockMachine = {
-        id: 'vm-123',
-        name: 'test-vm',
-        os: 'WINDOWS10',
-        status: 'running'
-      }
+      const mockMachine = readyMachine()
 
       ;(mockPrisma.machine.findUnique as jest.Mock<any>).mockResolvedValue(mockMachine)
       ;(mockVirtioService.sendPackageCommand as jest.Mock<any>).mockResolvedValue({
@@ -102,12 +101,7 @@ describe('DirectPackageManager', () => {
     })
 
     it('should return empty array when no packages installed', async () => {
-      const mockMachine = {
-        id: 'vm-123',
-        name: 'test-vm',
-        os: 'WINDOWS10',
-        status: 'running'
-      }
+      const mockMachine = readyMachine()
 
       ;(mockPrisma.machine.findUnique as jest.Mock<any>).mockResolvedValue(mockMachine)
       ;(mockVirtioService.sendPackageCommand as jest.Mock<any>).mockResolvedValue({
@@ -121,29 +115,19 @@ describe('DirectPackageManager', () => {
     })
 
     it('should throw error when machine is not running', async () => {
-      const mockMachine = {
-        id: 'vm-123',
-        name: 'test-vm',
-        os: 'WINDOWS10',
-        status: 'stopped'
-      }
+      const mockMachine = readyMachine({ status: 'stopped' })
 
       ;(mockPrisma.machine.findUnique as jest.Mock<any>).mockResolvedValue(mockMachine)
 
       await expect(service.listPackages('vm-123')).rejects.toThrow(
-        'not running'
+        'not ready'
       )
     })
   })
 
   describe('installPackage', () => {
     it('should install a package successfully', async () => {
-      const mockMachine = {
-        id: 'vm-123',
-        name: 'test-vm',
-        os: 'WINDOWS10',
-        status: 'running'
-      }
+      const mockMachine = readyMachine()
 
       ;(mockPrisma.machine.findUnique as jest.Mock<any>).mockResolvedValue(mockMachine)
       ;(mockVirtioService.sendPackageCommand as jest.Mock<any>).mockResolvedValue({
@@ -159,12 +143,7 @@ describe('DirectPackageManager', () => {
     })
 
     it('should return failure when installation fails', async () => {
-      const mockMachine = {
-        id: 'vm-123',
-        name: 'test-vm',
-        os: 'WINDOWS10',
-        status: 'running'
-      }
+      const mockMachine = readyMachine()
 
       ;(mockPrisma.machine.findUnique as jest.Mock<any>).mockResolvedValue(mockMachine)
       ;(mockVirtioService.sendPackageCommand as jest.Mock<any>).mockResolvedValue({
@@ -191,12 +170,7 @@ describe('DirectPackageManager', () => {
 
   describe('removePackage', () => {
     it('should remove a package successfully', async () => {
-      const mockMachine = {
-        id: 'vm-123',
-        name: 'test-vm',
-        os: 'WINDOWS10',
-        status: 'running'
-      }
+      const mockMachine = readyMachine()
 
       ;(mockPrisma.machine.findUnique as jest.Mock<any>).mockResolvedValue(mockMachine)
       ;(mockVirtioService.sendPackageCommand as jest.Mock<any>).mockResolvedValue({
@@ -211,12 +185,7 @@ describe('DirectPackageManager', () => {
     })
 
     it('should return failure when removal fails', async () => {
-      const mockMachine = {
-        id: 'vm-123',
-        name: 'test-vm',
-        os: 'WINDOWS10',
-        status: 'running'
-      }
+      const mockMachine = readyMachine()
 
       ;(mockPrisma.machine.findUnique as jest.Mock<any>).mockResolvedValue(mockMachine)
       ;(mockVirtioService.sendPackageCommand as jest.Mock<any>).mockResolvedValue({
@@ -234,12 +203,7 @@ describe('DirectPackageManager', () => {
 
   describe('updatePackage', () => {
     it('should update a package successfully', async () => {
-      const mockMachine = {
-        id: 'vm-123',
-        name: 'test-vm',
-        os: 'WINDOWS10',
-        status: 'running'
-      }
+      const mockMachine = readyMachine()
 
       ;(mockPrisma.machine.findUnique as jest.Mock<any>).mockResolvedValue(mockMachine)
       ;(mockVirtioService.sendPackageCommand as jest.Mock<any>).mockResolvedValue({
@@ -256,12 +220,7 @@ describe('DirectPackageManager', () => {
 
   describe('error handling', () => {
     it('should handle VirtioSocketWatcherService execution errors in installPackage', async () => {
-      const mockMachine = {
-        id: 'vm-123',
-        name: 'test-vm',
-        os: 'WINDOWS10',
-        status: 'running'
-      }
+      const mockMachine = readyMachine()
 
       ;(mockPrisma.machine.findUnique as jest.Mock<any>).mockResolvedValue(mockMachine)
       ;(mockVirtioService.sendPackageCommand as jest.Mock<any>).mockRejectedValue(
@@ -287,12 +246,7 @@ describe('DirectPackageManager', () => {
 
   describe('package format handling', () => {
     it('should handle PascalCase response fields', async () => {
-      const mockMachine = {
-        id: 'vm-123',
-        name: 'test-vm',
-        os: 'WINDOWS10',
-        status: 'running'
-      }
+      const mockMachine = readyMachine()
       const mockPackage = {
         Name: 'Chrome',
         Version: '100.0',
@@ -319,12 +273,7 @@ describe('DirectPackageManager', () => {
     })
 
     it('should handle lowercase response fields', async () => {
-      const mockMachine = {
-        id: 'vm-123',
-        name: 'test-vm',
-        os: 'WINDOWS10',
-        status: 'running'
-      }
+      const mockMachine = readyMachine()
       const mockPackage = {
         name: 'Firefox',
         version: '99.0',
@@ -353,12 +302,7 @@ describe('DirectPackageManager', () => {
 
   describe('edge cases', () => {
     it('should handle empty package list', async () => {
-      const mockMachine = {
-        id: 'vm-123',
-        name: 'test-vm',
-        os: 'WINDOWS10',
-        status: 'running'
-      }
+      const mockMachine = readyMachine()
 
       ;(mockPrisma.machine.findUnique as jest.Mock<any>).mockResolvedValue(mockMachine)
       ;(mockVirtioService.sendPackageCommand as jest.Mock<any>).mockResolvedValue({
@@ -372,12 +316,7 @@ describe('DirectPackageManager', () => {
     })
 
     it('should handle packages without version', async () => {
-      const mockMachine = {
-        id: 'vm-123',
-        name: 'test-vm',
-        os: 'WINDOWS10',
-        status: 'running'
-      }
+      const mockMachine = readyMachine()
       const mockPackages = [
         { name: 'App1', installed: true },
         { name: 'App2', version: '1.0', installed: true }
@@ -397,12 +336,7 @@ describe('DirectPackageManager', () => {
     })
 
     it('should handle packages with missing optional fields', async () => {
-      const mockMachine = {
-        id: 'vm-123',
-        name: 'test-vm',
-        os: 'WINDOWS10',
-        status: 'running'
-      }
+      const mockMachine = readyMachine()
       const mockPackages = [
         { name: 'App1', installed: true },
         { name: 'App2', version: '1.0', installed: true, description: 'Test app' }
@@ -423,12 +357,7 @@ describe('DirectPackageManager', () => {
 
   describe('managePackage', () => {
     it('should route to installPackage for INSTALL action', async () => {
-      const mockMachine = {
-        id: 'vm-123',
-        name: 'test-vm',
-        os: 'WINDOWS10',
-        status: 'running'
-      }
+      const mockMachine = readyMachine()
 
       ;(mockPrisma.machine.findUnique as jest.Mock<any>).mockResolvedValue(mockMachine)
       ;(mockVirtioService.sendPackageCommand as jest.Mock<any>).mockResolvedValue({
@@ -441,12 +370,7 @@ describe('DirectPackageManager', () => {
     })
 
     it('should route to removePackage for REMOVE action', async () => {
-      const mockMachine = {
-        id: 'vm-123',
-        name: 'test-vm',
-        os: 'WINDOWS10',
-        status: 'running'
-      }
+      const mockMachine = readyMachine()
 
       ;(mockPrisma.machine.findUnique as jest.Mock<any>).mockResolvedValue(mockMachine)
       ;(mockVirtioService.sendPackageCommand as jest.Mock<any>).mockResolvedValue({
@@ -459,12 +383,7 @@ describe('DirectPackageManager', () => {
     })
 
     it('should route to updatePackage for UPDATE action', async () => {
-      const mockMachine = {
-        id: 'vm-123',
-        name: 'test-vm',
-        os: 'WINDOWS10',
-        status: 'running'
-      }
+      const mockMachine = readyMachine()
 
       ;(mockPrisma.machine.findUnique as jest.Mock<any>).mockResolvedValue(mockMachine)
       ;(mockVirtioService.sendPackageCommand as jest.Mock<any>).mockResolvedValue({

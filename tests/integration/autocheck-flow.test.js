@@ -132,7 +132,7 @@ describe('Auto-check end-to-end integration — real database', () => {
             yield (0, db_factories_1.createMachine)(prisma, {
                 userId: OWNER_ID,
                 departmentId: DEPT_ID,
-                overrides: { id: STOPPED_ID, status: machine_status_1.STOPPED_STATUS, name: 'stopped-vm' }
+                overrides: { id: STOPPED_ID, status: machine_status_1.OFF_STATUS, name: 'stopped-vm' }
             });
             const spy = jest.spyOn(socketService, 'sendToUser').mockImplementation(jest.fn());
             yield vmEventManager.handleAutoCheckIssueDetected(STOPPED_ID, {
@@ -166,7 +166,7 @@ describe('Auto-check end-to-end integration — real database', () => {
             yield (0, db_factories_1.createMachine)(prisma, {
                 userId: OWNER_ID,
                 departmentId: DEPT_ID,
-                overrides: { status: machine_status_1.STOPPED_STATUS, name: 'stopped' }
+                overrides: { status: machine_status_1.OFF_STATUS, name: 'stopped' }
             });
             yield (0, db_factories_1.createMachine)(prisma, {
                 userId: OWNER_ID,
@@ -190,7 +190,7 @@ describe('Auto-check end-to-end integration — real database', () => {
             yield (0, db_factories_1.createMachine)(prisma, {
                 userId: OWNER_ID,
                 departmentId: DEPT_ID,
-                overrides: { id: STOPPED_ID, status: machine_status_1.STOPPED_STATUS, name: 'stopped-queue-vm' }
+                overrides: { id: STOPPED_ID, status: machine_status_1.OFF_STATUS, name: 'stopped-queue-vm' }
             });
             const mockEventManager = { dispatchEvent: jest.fn() };
             jest.useFakeTimers({ advanceTimers: false });

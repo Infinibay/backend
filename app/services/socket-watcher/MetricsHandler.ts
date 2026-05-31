@@ -63,12 +63,14 @@ export class MetricsHandler {
   // ──────────────────────────────────────────────────────────────────────────
 
   /**
-   * Handles the first message from infiniservice.
-   * Transitions VM from 'building' to 'running' and ejects installation ISOs.
+   * Handles the first message from infiniservice. This signals the OS
+   * finished installing and the agent handshaked, so we mark
+   * MachineConfiguration.setupComplete=true and eject installation ISOs.
+   *
+   * Machine.status is owned by infinization (QMP events) — we don't touch it.
    */
   async handleFirstInfiniserviceMessage(vmId: string): Promise<void> {
     try {
-      // Get machine with configuration
       const machine = await this.prisma.machine.findUnique({
         where: { id: vmId },
         include: { configuration: true }
@@ -78,46 +80,35 @@ export class MetricsHandler {
         return
       }
 
-      // Check if already setup complete - skip if already done
+      // Idempotency: don't re-fire on subsequent infiniservice messages.
       if (machine.configuration.setupComplete) {
         return
       }
 
-      // Check if VM is in 'building' state
-      if (machine.status !== 'building') {
-        return
-      }
+      this.debug.info(`First infiniservice message from VM ${vmId} - marking setupComplete`)
 
-      this.debug.info(`First infiniservice message from VM ${vmId} - completing setup`)
-
-      // 1. Mark setup as complete
+      // 1. Mark setup as complete (the orthogonal "OS is ready" flag).
       await this.prisma.machineConfiguration.update({
         where: { machineId: vmId },
         data: { setupComplete: true }
       })
 
-      // 2. Update VM status to 'running'
-      await this.prisma.machine.update({
-        where: { id: vmId },
-        data: { status: 'running' }
-      })
-
-      // 3. Eject all CD-ROMs (async, non-blocking)
+      // 2. Eject all CD-ROMs (async, non-blocking)
       const { ejectAllCdroms } = await import('../InfinizationService')
       ejectAllCdroms(vmId).catch((err: Error) => {
         this.debug.warn(`Failed to eject CD-ROMs: ${err.message}`)
       })
 
-      // 4. Emit event to frontend
+      // 3. Emit event so the UI flips Installing → Running without a refetch.
       const vmEventManager = this.getVmEventManager()
       if (vmEventManager) {
         await vmEventManager.handleEvent('update', {
           id: vmId,
-          status: 'running'
+          setupComplete: true
         })
       }
 
-      this.debug.info(`VM ${vmId} setup complete - status changed to running`)
+      this.debug.info(`VM ${vmId} setupComplete=true`)
 
     } catch (error: any) {
       this.debug.error(`Error handling first infiniservice message: ${error.message}`)

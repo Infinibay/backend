@@ -56,14 +56,14 @@ describe('UserResolver — real database', () => {
   describe('user(id)', () => {
     it('returns a user by id', async () => {
       const target = await createUser(prisma)
-      const result = await resolver.user(target.id)
+      const result = await resolver.user(target.id, adminContext)
       expect(result).not.toBeNull()
       expect(result?.id).toBe(target.id)
       expect(result?.email).toBe(target.email)
     })
 
     it('returns null when the id is unknown', async () => {
-      expect(await resolver.user('non-existent-id')).toBeNull()
+      expect(await resolver.user('non-existent-id', adminContext)).toBeNull()
     })
   })
 
@@ -76,7 +76,8 @@ describe('UserResolver — real database', () => {
 
       const result = await resolver.users(
         { fieldName: UserOrderByField.CREATED_AT, direction: OrderByDirection.DESC },
-        { take: 3, skip: 0 }
+        { take: 3, skip: 0 },
+        adminContext
       )
 
       expect(result).toHaveLength(3)
@@ -91,7 +92,8 @@ describe('UserResolver — real database', () => {
     it('returns an empty array when pagination skips past all rows', async () => {
       const result = await resolver.users(
         { fieldName: UserOrderByField.EMAIL, direction: OrderByDirection.ASC },
-        { take: 10, skip: 10_000 }
+        { take: 10, skip: 10_000 },
+        adminContext
       )
       expect(result).toEqual([])
     })
@@ -102,7 +104,8 @@ describe('UserResolver — real database', () => {
 
       const result = await resolver.users(
         { fieldName: UserOrderByField.EMAIL, direction: OrderByDirection.ASC },
-        { take: 100, skip: 0 }
+        { take: 100, skip: 0 },
+        adminContext
       )
 
       const emails = result.map(u => u.email)
@@ -135,14 +138,15 @@ describe('UserResolver — real database', () => {
         .rejects.toThrow('Invalid credentials')
     })
 
-    it('still authenticates a soft-deleted user (resolver does not check the flag)', async () => {
+    it('rejects soft-deleted users', async () => {
       const password = 'password'
       const user = await createUser(prisma, {
         deleted: true,
         password: bcrypt.hashSync(password, 4)
       })
-      const result = await resolver.login(user.email, password)
-      expect(result?.token).toBeTruthy()
+
+      await expect(resolver.login(user.email, password))
+        .rejects.toThrow('Invalid credentials')
     })
   })
 

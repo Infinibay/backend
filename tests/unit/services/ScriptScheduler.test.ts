@@ -222,7 +222,7 @@ describe('ScriptScheduler', () => {
 
     it('warns about offline VMs but still schedules', async () => {
       mockPrisma.machine.findMany.mockResolvedValue([
-        { id: 'vm-1', name: 'OnlineVM', status: 'running' },
+        { id: 'vm-1', name: 'OnlineVM', status: 'running', configuration: { setupComplete: true } },
         { id: 'vm-2', name: 'OfflineVM', status: 'stopped' },
       ] as any)
 

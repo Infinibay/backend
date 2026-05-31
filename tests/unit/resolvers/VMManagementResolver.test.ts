@@ -41,7 +41,7 @@ describe('VMManagementResolver', () => {
     mockUser = createMockUser()
     mockAdminUser = createMockAdminUser()
     mockVM = createMockMachine({ userId: mockUser.id })
-    mockContext = createUserContext()
+    mockContext = createMockContext(mockUser)
     mockAdminContext = createAdminContext()
   })
 

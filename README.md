@@ -73,6 +73,10 @@ npm run dev
 - `npm test` - Run test suite
 - `npm run cleanup:nwfilters` - Clean orphaned network filters
 
+## Production Operations
+
+For multi-node rollout, migrations, node maintenance, cold VM migration, Active Directory/LDAP and enterprise permissions, see [docs/production-operations.md](../docs/production-operations.md).
+
 See [backend/CLAUDE.md](./CLAUDE.md) for architecture details and development patterns.
 
 ## GraphQL API

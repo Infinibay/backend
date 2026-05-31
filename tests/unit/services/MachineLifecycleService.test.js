@@ -76,6 +76,26 @@ globals_1.jest.mock('uuid', () => ({
         });
         service = new machineLifecycleService_1.MachineLifecycleService(jest_setup_1.mockPrisma, mockUser);
     });
+    function createMockTx(overrides = {}) {
+        return Object.assign({ department: {
+                findUnique: globals_1.jest.fn().mockResolvedValue(null),
+                findFirst: globals_1.jest.fn().mockResolvedValue(null)
+            }, machine: {
+                create: globals_1.jest.fn().mockResolvedValue(null)
+            }, machineApplication: {
+                create: globals_1.jest.fn()
+            }, machineTemplateApplication: {
+                findMany: globals_1.jest.fn().mockResolvedValue([])
+            }, machineTemplateScript: {
+                findMany: globals_1.jest.fn().mockResolvedValue([])
+            }, machineTemplate: {
+                findUnique: globals_1.jest.fn().mockResolvedValue(null)
+            }, script: {
+                findUnique: globals_1.jest.fn().mockResolvedValue(null)
+            }, scriptExecution: {
+                create: globals_1.jest.fn().mockResolvedValue(null)
+            } }, overrides);
+    }
     (0, globals_1.describe)('createMachine', () => {
         (0, globals_1.it)('should create machine with custom hardware', () => __awaiter(void 0, void 0, void 0, function* () {
             const input = {
@@ -111,18 +131,15 @@ globals_1.jest.mock('uuid', () => ({
             });
             jest_setup_1.mockPrisma.$transaction.mockImplementation((fn) => __awaiter(void 0, void 0, void 0, function* () {
                 if (typeof fn === 'function') {
-                    const tx = {
+                    const tx = createMockTx({
                         department: {
                             findUnique: globals_1.jest.fn().mockResolvedValue(mockDepartment),
                             findFirst: globals_1.jest.fn().mockResolvedValue(mockDepartment)
                         },
                         machine: {
                             create: globals_1.jest.fn().mockResolvedValue(mockMachine)
-                        },
-                        machineApplication: {
-                            create: globals_1.jest.fn()
                         }
-                    };
+                    });
                     return fn(tx);
                 }
                 return Promise.resolve([]);
@@ -155,7 +172,8 @@ globals_1.jest.mock('uuid', () => ({
             });
             const mockDepartment = {
                 id: 'dept-123',
-                name: 'Default Department'
+                name: 'Default Department',
+                bridgeName: 'br-mock'
             };
             const mockMachine = (0, mock_factories_1.createMockMachine)({
                 id: 'machine-123',
@@ -174,17 +192,14 @@ globals_1.jest.mock('uuid', () => ({
             jest_setup_1.mockPrisma.machineTemplate.findUnique.mockResolvedValue(mockTemplate);
             jest_setup_1.mockPrisma.$transaction.mockImplementation((fn) => __awaiter(void 0, void 0, void 0, function* () {
                 if (typeof fn === 'function') {
-                    const tx = {
+                    const tx = createMockTx({
                         department: {
                             findUnique: globals_1.jest.fn().mockResolvedValue(mockDepartment)
                         },
                         machine: {
                             create: globals_1.jest.fn().mockResolvedValue(mockMachine)
-                        },
-                        machineApplication: {
-                            create: globals_1.jest.fn()
                         }
-                    };
+                    });
                     return fn(tx);
                 }
                 return Promise.resolve([]);
@@ -245,18 +260,15 @@ globals_1.jest.mock('uuid', () => ({
             };
             jest_setup_1.mockPrisma.$transaction.mockImplementation((fn) => __awaiter(void 0, void 0, void 0, function* () {
                 if (typeof fn === 'function') {
-                    const tx = {
+                    const tx = createMockTx({
                         department: {
                             findUnique: globals_1.jest.fn().mockResolvedValue(null),
                             findFirst: globals_1.jest.fn().mockResolvedValue(null)
                         },
                         machine: {
                             create: globals_1.jest.fn()
-                        },
-                        machineApplication: {
-                            create: globals_1.jest.fn()
                         }
-                    };
+                    });
                     return fn(tx);
                 }
                 return Promise.resolve([]);
@@ -283,7 +295,8 @@ globals_1.jest.mock('uuid', () => ({
             };
             const mockDepartment = {
                 id: 'dept-123',
-                name: 'Default Department'
+                name: 'Default Department',
+                bridgeName: 'br-mock'
             };
             const mockMachine = (0, mock_factories_1.createMockMachine)({
                 id: 'machine-123',
@@ -302,7 +315,7 @@ globals_1.jest.mock('uuid', () => ({
             const createApplicationMock = globals_1.jest.fn();
             jest_setup_1.mockPrisma.$transaction.mockImplementation((fn) => __awaiter(void 0, void 0, void 0, function* () {
                 if (typeof fn === 'function') {
-                    const tx = {
+                    const tx = createMockTx({
                         department: {
                             findUnique: globals_1.jest.fn().mockResolvedValue(mockDepartment),
                             findFirst: globals_1.jest.fn().mockResolvedValue(mockDepartment)
@@ -313,7 +326,7 @@ globals_1.jest.mock('uuid', () => ({
                         machineApplication: {
                             create: createApplicationMock
                         }
-                    };
+                    });
                     return fn(tx);
                 }
                 return Promise.resolve([]);

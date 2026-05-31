@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "Department" ALTER COLUMN "ntpServers" SET DEFAULT ARRAY['216.239.35.0', '162.159.200.1']::TEXT[];

@@ -62,10 +62,11 @@ export class ScheduleOverallScansJob {
     try {
       debug.debug('Starting overdue scan scheduling cycle')
 
-      // Get all running VMs (only schedule scans for running VMs to avoid wasting queue capacity)
+      // Only schedule scans for VMs whose OS is ready (infiniservice handshaked).
       const runningVMs = await this.prisma.machine.findMany({
         where: {
-          status: 'running'
+          status: 'running',
+          configuration: { setupComplete: true }
         },
         select: {
           id: true,

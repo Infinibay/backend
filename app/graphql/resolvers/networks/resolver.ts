@@ -1,30 +1,45 @@
-import { Resolver, Query, Mutation, Arg, Authorized } from 'type-graphql'
-import { NetworkService } from '@services/networkService'
+import { Resolver, Query, Mutation, Arg, Authorized, Ctx } from 'type-graphql'
+import { DepartmentNetworkService } from '@services/network/DepartmentNetworkService'
+import { InfinibayContext } from '@main/utils/context'
 import { Network, IpRangeInput, NetworkIpInput, BridgeNameInput, NetworkBridge, NetworkIp, NetworkDhcp, NetworkDhcpRange, CreateNetworkInput, DeleteNetworkInput } from './types'
+import { assertCanAccessResource } from '../../utils/auth'
+
+type NetworkXml = {
+  $?: Record<string, string>
+  range?: NetworkXml[]
+  dhcp?: NetworkXml[]
+  bridge?: NetworkXml[]
+  ip?: NetworkXml[]
+  uuid?: string[]
+  description?: string[]
+}
 
 @Resolver()
 export class NetworkResolver {
-  private networkService: NetworkService
+  private networkService?: DepartmentNetworkService
 
-  constructor () {
-    this.networkService = new NetworkService()
+  private getNetworkService (ctx: InfinibayContext): DepartmentNetworkService {
+    if (!this.networkService) {
+      this.networkService = new DepartmentNetworkService(ctx.prisma)
+    }
+    return this.networkService
   }
 
-  private formatDhcpRange (xml: any): NetworkDhcpRange {
+  private formatDhcpRange (xml: NetworkXml): NetworkDhcpRange {
     return {
-      start: xml.range[0].$.start,
-      end: xml.range[0].$.end
+      start: xml.range?.[0]?.$?.start ?? '',
+      end: xml.range?.[0]?.$?.end ?? ''
     }
   }
 
-  private formatDhcp (xml: any): NetworkDhcp | undefined {
+  private formatDhcp (xml: NetworkXml[] | undefined): NetworkDhcp | undefined {
     if (!xml) return undefined
     return {
       range: this.formatDhcpRange(xml[0])
     }
   }
 
-  private formatNetworkIp (xml: any): NetworkIp {
+  private formatNetworkIp (xml: NetworkXml | undefined): NetworkIp {
     if (!xml) {
       return {
         address: '',
@@ -32,13 +47,13 @@ export class NetworkResolver {
       }
     }
     return {
-      address: xml.$.address,
-      netmask: xml.$.netmask,
+      address: xml.$?.address ?? '',
+      netmask: xml.$?.netmask ?? '',
       dhcp: this.formatDhcp(xml.dhcp)
     }
   }
 
-  private formatBridge (xml: any): NetworkBridge {
+  private formatBridge (xml: NetworkXml | undefined): NetworkBridge {
     if (!xml) {
       return {
         name: '',
@@ -47,13 +62,13 @@ export class NetworkResolver {
       }
     }
     return {
-      name: xml.$.name,
-      stp: xml.$.stp,
-      delay: xml.$.delay
+      name: xml.$?.name ?? '',
+      stp: xml.$?.stp ?? 'on',
+      delay: xml.$?.delay ?? '0'
     }
   }
 
-  private formatNetwork (name: string, xml: any): Network {
+  private formatNetwork (name: string, xml: NetworkXml): Network {
     return {
       name,
       uuid: xml.uuid?.[0] || '',
@@ -66,74 +81,64 @@ export class NetworkResolver {
   @Query(() => [Network])
   @Authorized('USER')
   async networks (): Promise<Network[]> {
-    const networks = await this.networkService.getAllNetworks()
-    return networks.map(net => this.formatNetwork(net.name, net.xml))
+    // Department networks are managed per-department, not as global libvirt networks
+    // Return empty array — network info is now available via department resolvers
+    return []
   }
 
   @Query(() => Network)
   @Authorized('USER')
   async network (@Arg('name') name: string): Promise<Network> {
-    const net = await this.networkService.getNetwork(name)
-    return this.formatNetwork(net.name, net.xml)
+    throw new Error(`Network '${name}' not found. Network management is now handled per-department via DepartmentNetworkService.`)
   }
 
   @Mutation(() => Boolean)
   @Authorized('ADMIN')
   async createNetwork (
-    @Arg('input') input: CreateNetworkInput
+    @Arg('input') _input: CreateNetworkInput,
+    @Ctx() ctx: InfinibayContext
   ): Promise<boolean> {
-    await this.networkService.createNetwork(input)
-    return true
+    await assertCanAccessResource(ctx, 'infrastructure')
+    throw new Error('Global network creation is deprecated. Create networks via department management.')
   }
 
   @Mutation(() => Boolean)
   @Authorized('ADMIN')
   async setNetworkIpRange (
-    @Arg('input') input: IpRangeInput
+    @Arg('input') _input: IpRangeInput,
+    @Ctx() ctx: InfinibayContext
   ): Promise<boolean> {
-    await this.networkService.setIpRange(
-      input.networkName,
-      input.start,
-      input.end
-    )
-    return true
+    await assertCanAccessResource(ctx, 'infrastructure')
+    throw new Error('Global network IP range management is deprecated. Use department network settings.')
   }
 
   @Mutation(() => Boolean)
   @Authorized('ADMIN')
   async setNetworkIp (
-    @Arg('input') input: NetworkIpInput
+    @Arg('input') _input: NetworkIpInput,
+    @Ctx() ctx: InfinibayContext
   ): Promise<boolean> {
-    await this.networkService.setNetworkIp(
-      input.networkName,
-      input.address,
-      input.netmask
-    )
-    return true
+    await assertCanAccessResource(ctx, 'infrastructure')
+    throw new Error('Global network IP management is deprecated. Use department network settings.')
   }
 
   @Mutation(() => Boolean)
   @Authorized('ADMIN')
   async setNetworkBridgeName (
-    @Arg('input') input: BridgeNameInput
+    @Arg('input') _input: BridgeNameInput,
+    @Ctx() ctx: InfinibayContext
   ): Promise<boolean> {
-    await this.networkService.setBridgeName(
-      input.networkName,
-      input.bridgeName
-    )
-    return true
+    await assertCanAccessResource(ctx, 'infrastructure')
+    throw new Error('Global network bridge management is deprecated. Use department network settings.')
   }
 
   @Mutation(() => Boolean)
   @Authorized('ADMIN')
   async deleteNetwork (
-    @Arg('input') input: DeleteNetworkInput
+    @Arg('input') _input: DeleteNetworkInput,
+    @Ctx() ctx: InfinibayContext
   ): Promise<boolean> {
-    try {
-      await this.networkService.deleteNetwork(input.name)
-      return true
-    } catch (error: any) {
-      throw new Error(`Failed to delete network: ${error?.message}`)
-    }
+    await assertCanAccessResource(ctx, 'infrastructure')
+    throw new Error('Global network deletion is deprecated. Delete networks via department management.')
   }
 }

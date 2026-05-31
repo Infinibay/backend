@@ -95,6 +95,10 @@ export function createMockUser (overrides?: Partial<User>): User {
     firstName: overrides?.firstName || 'Test',
     lastName: overrides?.lastName || 'User',
     role: overrides?.role || UserRole.USER,
+    identityProviderId: overrides?.identityProviderId ?? null,
+    externalId: overrides?.externalId ?? null,
+    externalDn: overrides?.externalDn ?? null,
+    lastDirectorySyncAt: overrides?.lastDirectorySyncAt ?? null,
     createdAt: overrides?.createdAt || new Date(),
     updatedAt: overrides?.updatedAt || new Date()
   }
@@ -186,6 +190,7 @@ export function createMockMachine (overrides?: Partial<Machine>): Machine {
     departmentId: overrides?.departmentId || null,
     localIP: overrides?.localIP || null,
     publicIP: overrides?.publicIP || null,
+    nodeId: overrides?.nodeId || null,
     firewallRuleSetId: overrides?.firewallRuleSetId || null,
     version: overrides?.version || 1,
     poolId: overrides?.poolId ?? null
@@ -421,6 +426,7 @@ export function createMockNode (overrides?: Partial<Node>): Node {
     cpuFlags: overrides?.cpuFlags || { vmx: true, svm: false },
     ram: overrides?.ram || 32768,
     cores: overrides?.cores || 16,
+    maintenanceMode: overrides?.maintenanceMode ?? false,
     createdAt: overrides?.createdAt || new Date(),
     updatedAt: overrides?.updatedAt || new Date()
   }

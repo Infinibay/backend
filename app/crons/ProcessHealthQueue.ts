@@ -67,10 +67,12 @@ export class ProcessHealthQueueJob {
       // Sync from database first
       await this.queueManager.syncFromDatabase()
 
-      // Get all running VMs
+      // Only target VMs whose OS is ready — health check queue items
+      // can't run until infiniservice handshaked.
       const runningVMs = await this.prisma.machine.findMany({
         where: {
-          status: 'running'
+          status: 'running',
+          configuration: { setupComplete: true }
         },
         select: {
           id: true,

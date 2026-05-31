@@ -115,7 +115,7 @@ export class SocketService {
       socket.join(authSocket.userNamespace)
 
       // Join admin users to admin room (for admin-only events)
-      if (authSocket.userRole === 'ADMIN') {
+      if ((authSocket.userRole === 'ADMIN' || authSocket.userRole === 'SUPER_ADMIN')) {
         socket.join('admin')
       }
 

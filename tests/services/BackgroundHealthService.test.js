@@ -150,7 +150,7 @@ describe('BackgroundHealthService', () => {
             // Mock the queue manager to reject health check queuing for one VM (simulating failure)
             mockQueueManager.queueHealthChecks
                 .mockResolvedValueOnce(undefined) // First VM succeeds
-                .mockRejectedValueOnce(new Error(`Cannot queue health check for VM running-vm-2 (vm-running-2) - VM status is '${machine_status_1.STOPPED_STATUS}', expected '${machine_status_1.RUNNING_STATUS}'`)); // Second VM fails
+                .mockRejectedValueOnce(new Error(`Cannot queue health check for VM running-vm-2 (vm-running-2) - status='${machine_status_1.OFF_STATUS}' setupComplete=true`)); // Second VM fails
             // The service should handle this gracefully and continue processing
             const taskId = yield service.triggerHealthCheckRound();
             expect(typeof taskId).toBe('string');

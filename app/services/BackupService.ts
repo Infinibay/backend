@@ -128,7 +128,12 @@ export class BackupService {
       throw new Error(`VM ${params.vmId} not found`)
     }
 
-    const diskPaths = params.diskPaths ?? this.resolveDiskPaths(vm.configuration?.diskPaths)
+    // Treat an empty array the same as "not provided": the UI sends [] to mean
+    // "all of the VM's disks". Without this, `[] ?? default` keeps the empty
+    // array and the operation fails the length check below.
+    const diskPaths = (params.diskPaths && params.diskPaths.length > 0)
+      ? params.diskPaths
+      : this.resolveDiskPaths(vm.configuration?.diskPaths)
     if (diskPaths.length === 0) {
       throw new Error(`VM ${params.vmId} has no disk paths configured`)
     }
@@ -339,9 +344,26 @@ export class BackupService {
     })
     if (!vm) throw new Error(`VM ${params.vmId} not found`)
 
-    const diskPaths = params.diskPaths ?? this.resolveDiskPaths(vm.configuration?.diskPaths)
+    // Empty array means "restore every disk to its original location" — the UI
+    // sends [] for a full restore. infinization requires the target list to
+    // match the backup's disk count, so resolve the paths from the VM record.
+    const diskPaths = (params.diskPaths && params.diskPaths.length > 0)
+      ? params.diskPaths
+      : this.resolveDiskPaths(vm.configuration?.diskPaths)
     if (diskPaths.length === 0) {
       throw new Error(`VM ${params.vmId} has no disk paths configured for restore`)
+    }
+
+    // Announce the restore so the UI (and other sessions) can show activity
+    // while the — potentially multi-minute — copy runs. The mutation itself
+    // stays awaited and returns the final result.
+    const startedEventManager = getEventManager()
+    if (startedEventManager) {
+      startedEventManager.dispatchEvent('backups', 'started', {
+        id: params.backupId,
+        vmId: vm.id,
+        restoring: true
+      }).catch((err: unknown) => logger.warn(`backups:restore started event failed: ${err instanceof Error ? err.message : String(err)}`))
     }
 
     const result = await this.infinization.restoreBackup({

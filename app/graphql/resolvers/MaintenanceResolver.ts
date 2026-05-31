@@ -2,7 +2,7 @@ import { Resolver, Query, Mutation, Arg, Ctx, ID } from 'type-graphql'
 import { MaintenanceTaskType, MaintenanceStatus, MaintenanceTrigger, Prisma } from '@prisma/client'
 import { InfinibayContext, requireUser } from '@utils/context'
 import { MaintenanceService } from '@services/MaintenanceService'
-import { assertCanManageVM, assertCanManageMaintenanceTask } from '@graphql/utils/auth'
+import { assertCanAccessResource, assertCanManageVM, assertCanManageMaintenanceTask } from '@graphql/utils/auth'
 import {
   MaintenanceTask,
   MaintenanceHistory,
@@ -45,7 +45,7 @@ export class MaintenanceResolver {
       nextRunAt: task.nextRunAt,
       lastRunAt: task.lastRunAt,
       executionStatus: task.executionStatus,
-      parameters: task.parameters as Record<string, any> | null,
+      parameters: task.parameters as Record<string, unknown> | null,
       createdByUserId: task.createdByUserId,
       createdAt: task.createdAt,
       updatedAt: task.updatedAt
@@ -83,7 +83,7 @@ export class MaintenanceResolver {
       nextRunAt: task.nextRunAt,
       lastRunAt: task.lastRunAt,
       executionStatus: task.executionStatus,
-      parameters: task.parameters as Record<string, any> | null,
+      parameters: task.parameters as Record<string, unknown> | null,
       createdByUserId: task.createdByUserId,
       createdAt: task.createdAt,
       updatedAt: task.updatedAt
@@ -126,7 +126,7 @@ export class MaintenanceResolver {
       executedByUserId: h.executedByUserId,
       executedAt: h.executedAt,
       duration: h.duration,
-      result: h.result as Record<string, any> | null,
+      result: h.result as Record<string, unknown> | null,
       error: h.error,
       parameters: null // Not stored in history table
     }))
@@ -251,7 +251,7 @@ export class MaintenanceResolver {
           nextRunAt: task.nextRunAt,
           lastRunAt: task.lastRunAt,
           executionStatus: task.executionStatus,
-          parameters: task.parameters as Record<string, any> | null,
+          parameters: task.parameters as Record<string, unknown> | null,
           createdByUserId: task.createdByUserId,
           createdAt: task.createdAt,
           updatedAt: task.updatedAt
@@ -308,7 +308,7 @@ export class MaintenanceResolver {
           nextRunAt: task.nextRunAt,
           lastRunAt: task.lastRunAt,
           executionStatus: task.executionStatus,
-          parameters: task.parameters as Record<string, any> | null,
+          parameters: task.parameters as Record<string, unknown> | null,
           createdByUserId: task.createdByUserId,
           createdAt: task.createdAt,
           updatedAt: task.updatedAt
@@ -393,7 +393,7 @@ export class MaintenanceResolver {
     @Arg('input') input: ExecuteMaintenanceInput,
     @Ctx() ctx: InfinibayContext
   ): Promise<MaintenanceExecutionResponse> {
-      const user = requireUser(ctx)
+    const user = requireUser(ctx)
     try {
       // Check authorization
       await assertCanManageVM(ctx, input.machineId)
@@ -456,7 +456,7 @@ export class MaintenanceResolver {
           nextRunAt: task.nextRunAt,
           lastRunAt: task.lastRunAt,
           executionStatus: task.executionStatus,
-          parameters: task.parameters as Record<string, any> | null,
+          parameters: task.parameters as Record<string, unknown> | null,
           createdByUserId: task.createdByUserId,
           createdAt: task.createdAt,
           updatedAt: task.updatedAt
@@ -477,11 +477,7 @@ export class MaintenanceResolver {
   async dueMaintenanceTasks (
     @Ctx() ctx: InfinibayContext
   ): Promise<MaintenanceTask[]> {
-    // Check admin authorization - only admins can access system-wide tasks
-    const user = ctx.user
-    if (!user || user.role !== 'ADMIN') {
-      throw new Error('Not authorized - admin access required')
-    }
+    await assertCanAccessResource(ctx, 'infrastructure')
 
     // Create MaintenanceService instance for this request
     const maintenanceService = new MaintenanceService(ctx.prisma)
@@ -501,7 +497,7 @@ export class MaintenanceResolver {
       nextRunAt: task.nextRunAt,
       lastRunAt: task.lastRunAt,
       executionStatus: task.executionStatus,
-      parameters: task.parameters as Record<string, any> | null,
+      parameters: task.parameters as Record<string, unknown> | null,
       createdByUserId: task.createdByUserId,
       createdAt: task.createdAt,
       updatedAt: task.updatedAt

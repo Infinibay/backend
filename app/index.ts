@@ -27,6 +27,10 @@ import { expressMiddleware } from '@as-integrations/express5'
 import { InfinibayContext, createUserValidationHelpers, SafeUser } from './utils/context'
 import { verifyRequestAuth } from './utils/jwtAuth'
 
+// GraphQL Subscriptions transport
+import { WebSocketServer } from 'ws'
+import { useServer } from 'graphql-ws/use/ws'
+
 import { checkGpuAffinity } from './utils/checkGpuAffinity'
 import { DepartmentNetworkService } from './services/network/DepartmentNetworkService'
 
@@ -90,8 +94,51 @@ async function bootstrap (): Promise<void> {
     const virtioSocketWatcher = createVirtioSocketWatcherService(prisma)
 
     // Initialize Apollo Server
-    const apolloServer = await createApolloServer()
+    const { server: apolloServer, schema } = await createApolloServer()
     await apolloServer.start()
+
+    // GraphQL Subscriptions via graphql-ws
+    // Attach a WebSocketServer to the HTTP server for /graphql subscriptions.
+    // Must be set up BEFORE Socket.io initializes (which also uses upgrade events).
+    const wsServer = new WebSocketServer({
+      noServer: true,
+      path: '/graphql'
+    })
+
+    useServer(
+      {
+        schema,
+        context: async (ctx: any) => {
+          // Re-use the same auth verification as HTTP queries
+          const req = ctx.extra.request as express.Request
+          const debugAuth = process.env.DEBUG_AUTH === '1' || process.env.NODE_ENV !== 'production'
+          const authResult = await verifyRequestAuth(req, { method: 'context', debugAuth })
+          const userHelpers = createUserValidationHelpers(authResult.user, authResult.meta)
+          return {
+            prisma,
+            user: authResult.user,
+            setupMode: false,
+            virtioSocketWatcher,
+            auth: authResult.meta,
+            userHelpers
+          }
+        }
+      },
+      wsServer
+    )
+
+    // Intercept WebSocket upgrade requests for /graphql path only
+    httpServer.on('upgrade', (request, socket, head) => {
+      const pathname = new URL(request.url ?? '/', `http://${request.headers.host}`).pathname
+      if (pathname === '/graphql') {
+        wsServer.handleUpgrade(request, socket, head, (ws) => {
+          wsServer.emit('connection', ws, request)
+        })
+      }
+      // Other paths (e.g., /socket.io) fall through to Socket.io's handler
+    })
+
+    logger.info('📡 GraphQL subscriptions (graphql-ws) configured on /graphql')
 
     // Apply Apollo middleware
     app.use(

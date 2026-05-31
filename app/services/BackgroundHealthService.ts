@@ -115,10 +115,12 @@ export class BackgroundHealthService {
     const roundId = `round-${startTime}`
 
     try {
-      // Get all running VMs (only schedule health checks for running VMs to avoid errors on stopped VMs)
+      // Only target VMs whose OS is ready — health checks can't run on a VM
+      // that's still installing.
       const runningVMs = await this.prisma.machine.findMany({
         where: {
-          status: 'running'
+          status: 'running',
+          configuration: { setupComplete: true }
         },
         select: {
           id: true,
@@ -129,7 +131,7 @@ export class BackgroundHealthService {
         }
       })
 
-      logger.info(`🩺 Starting health check round for ${runningVMs.length} running VMs`)
+      logger.info(`🩺 Starting health check round for ${runningVMs.length} ready VMs`)
 
       // Skip round_started event when no running VMs exist to reduce noise
       if (runningVMs.length === 0) {
@@ -472,7 +474,8 @@ export class BackgroundHealthService {
     try {
       const runningVMs = await this.prisma.machine.findMany({
         where: {
-          status: 'running'
+          status: 'running',
+          configuration: { setupComplete: true }
         },
         select: {
           id: true,
@@ -480,7 +483,7 @@ export class BackgroundHealthService {
         }
       })
 
-      logger.info(`💡 Starting recommendation regeneration for ${runningVMs.length} running VMs`)
+      logger.info(`💡 Starting recommendation regeneration for ${runningVMs.length} ready VMs`)
 
       for (const vm of runningVMs) {
         try {

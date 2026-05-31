@@ -237,10 +237,10 @@ export class HealthCheckExecutor {
     if (!vm) {
       throw new Error(`VM ${task.machineId} not found in database`)
     }
-    if (vm.status !== MachineStatus.RUNNING) {
+    if (vm.status !== MachineStatus.RUNNING || !vm.setupComplete) {
       throw new Error(
-        `VM ${vm.name} (${task.machineId}) is not running (status: ${vm.status}). ` +
-        'Cannot execute health check.',
+        `VM ${vm.name} (${task.machineId}) is not ready for health checks ` +
+        `(status: ${vm.status}, setupComplete: ${vm.setupComplete}).`,
       )
     }
   }

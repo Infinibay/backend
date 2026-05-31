@@ -28,7 +28,23 @@ const prisma = new PrismaClient()
 
 const DEFAULT_ADMIN_EMAIL = process.env.DEFAULT_ADMIN_EMAIL || 'admin@example.com'
 const DEFAULT_ADMIN_PASSWORD = process.env.DEFAULT_ADMIN_PASSWORD || 'password'
+const DEFAULT_ADMIN_ROLE = process.env.DEFAULT_ADMIN_ROLE === 'ADMIN' ? 'ADMIN' : 'SUPER_ADMIN'
+
+function validateAdminSeedPassword () {
+  if (process.env.NODE_ENV !== 'production') {
+    if (DEFAULT_ADMIN_PASSWORD === 'password') {
+      console.warn('WARNING: DEFAULT_ADMIN_PASSWORD is using the development default. Set a strong value before production use.')
+    }
+    return
+  }
+
+  if (DEFAULT_ADMIN_PASSWORD === 'password' || DEFAULT_ADMIN_PASSWORD.length < 12) {
+    throw new Error('DEFAULT_ADMIN_PASSWORD must be set to a unique password with at least 12 characters in production.')
+  }
+}
+
 async function createAdminUser () {
+  validateAdminSeedPassword()
   const password = await bcrypt.hash(DEFAULT_ADMIN_PASSWORD, 10)
   try {
     await prisma.user.upsert({
@@ -39,7 +55,7 @@ async function createAdminUser () {
         password,
         firstName: 'Admin',
         lastName: 'User',
-        role: 'ADMIN',
+        role: DEFAULT_ADMIN_ROLE,
         deleted: false
       },
       create: {
@@ -47,11 +63,11 @@ async function createAdminUser () {
         password,
         firstName: 'Admin',
         lastName: 'User',
-        role: 'ADMIN',
+        role: DEFAULT_ADMIN_ROLE,
         deleted: false
       }
     })
-    console.log('Admin user created/updated successfully')
+    console.log(`${DEFAULT_ADMIN_ROLE} user created/updated successfully`)
   } catch (error) {
     console.error('Error creating admin user:', error)
   }
@@ -98,7 +114,7 @@ async function updateMachineTemplates (defaultCategoryId: string) {
   }
 }
 
-async function createDefaultMachineTemplate (_defaultCategoryId: string) {
+async function createDefaultMachineTemplate () {
   // Removed default template creation - users should create their own templates
   // or use custom hardware configuration
   console.log('Skipping default template creation - users will use custom hardware')
@@ -142,7 +158,7 @@ async function main () {
       const defaultCategory = await createDefaultMachineTemplateCategory()
       if (defaultCategory) {
         await updateMachineTemplates(defaultCategory.id)
-        await createDefaultMachineTemplate(defaultCategory.id)
+        await createDefaultMachineTemplate()
       }
       await createApplications(transactionPrisma)
       await createScripts(transactionPrisma)

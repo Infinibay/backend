@@ -165,16 +165,15 @@ export class ScriptExecutor {
         inputValues
       );
 
-      // 6. Update status to RUNNING and emit started event
-      log.debug('Updating status to RUNNING');
-      await this.prisma.scriptExecution.update({
-        where: { id: executionId },
-        data: {
-          status: ExecutionStatus.RUNNING,
-          startedAt: new Date(),
-        },
-      });
-
+      // 6. Emit started event but keep status as PENDING. The execution stays
+      // PENDING while we wait for the guest to actually pick up the command
+      // (e.g., during VM provisioning infiniservice may not be connected yet).
+      // We only transition past PENDING when we have a real response — at
+      // which point we go straight to SUCCESS/FAILED/TIMEOUT below. RUNNING
+      // is still a valid state for ScriptExecution (used by the cancel path
+      // and CleanupStuckScripts), but flipping into it preemptively here
+      // would lie about whether the guest is actually executing anything.
+      log.debug('Emitting started event (status remains PENDING until guest responds)');
       await this.emitExecutionEvent(
         executionId,
         machineId,
@@ -525,7 +524,7 @@ export class ScriptExecutor {
 
     // Get all admin users
     const admins = await this.prisma.user.findMany({
-      where: { role: 'ADMIN' },
+      where: { role: { in: ['ADMIN', 'SUPER_ADMIN'] } },
       select: { id: true },
     });
 

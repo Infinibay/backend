@@ -1,4 +1,3 @@
-import logger from '@main/logger'
 import { Logger } from 'winston'
 /**
  * CommandDispatcher — Handles command construction, sending, and retry logic
@@ -24,6 +23,7 @@ import type {
   UnsafeCommandRequest,
   CommandResponse,
 } from './types'
+import { redactSensitive } from './types'
 
 // ────────────────────────────────────────────────────────────────────────────────
 // Types for injected dependencies
@@ -136,7 +136,9 @@ export class CommandDispatcher {
         timeout: Math.floor(timeout / 1000) // Convert to seconds for InfiniService
       }
 
-      this.debug.debug(`Sending safe command ${commandId} to VM ${vmId}: ${JSON.stringify(message)}`)
+      // Redact before logging: JoinDomain (and future commands) carry secrets
+      // like the domain bind password, which must never hit the log.
+      this.debug.debug(`Sending safe command ${commandId} to VM ${vmId}: ${JSON.stringify(redactSensitive(message))}`)
       this.sendMessage(connection, message)
     })
   }
@@ -533,6 +535,18 @@ export class CommandDispatcher {
         }
       case 'UserList':
         return { action: 'UserList' }
+      case 'JoinDomain':
+        // Flattened fields matching infiniservice's serde(tag="action").
+        // Required fields are validated by the caller (DomainJoinService).
+        return {
+          action: 'JoinDomain',
+          domain: commandType.domain,
+          username: commandType.username,
+          password: commandType.password,
+          ou: commandType.ou ?? undefined,
+          computer_name: commandType.computer_name ?? undefined,
+          restart_after: commandType.restart_after ?? false
+        }
       default:
         return { action: commandType.action }
     }

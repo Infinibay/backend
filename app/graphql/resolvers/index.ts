@@ -1,4 +1,4 @@
-import { NonEmptyArray } from 'type-graphql'
+import { ClassType, NonEmptyArray } from 'type-graphql'
 import { UserResolver } from './user/resolver'
 import { MachineTemplateResolver } from './machine_template/resolver'
 import { MachineMutations, MachineQueries } from './machine/resolver'
@@ -30,8 +30,11 @@ import { ScriptResolver } from './scripts/resolver'
 import { PluginPackageResolver } from './plugin-package'
 import { GoldenImageResolver } from './goldenImage/resolver'
 import { PoolResolver } from './pool/resolver'
+import { NodeResolver } from './node/resolver'
+import { IdentityProviderResolver } from './identity/resolver'
+import { PolicyResolver } from './policy/resolver'
 
-const resolvers: NonEmptyArray<Function> = [
+const resolvers: NonEmptyArray<ClassType> = [
   UserResolver,
   MachineTemplateResolver,
   MachineMutations,
@@ -61,7 +64,10 @@ const resolvers: NonEmptyArray<Function> = [
   ScriptResolver,
   PluginPackageResolver,
   GoldenImageResolver,
-  PoolResolver
+  PoolResolver,
+  NodeResolver,
+  IdentityProviderResolver,
+  PolicyResolver
 ]
 
-export default resolvers as NonEmptyArray<Function>
+export default resolvers

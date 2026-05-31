@@ -25,6 +25,7 @@ import {
 } from './type';
 import { InfinibayContext, requireUser } from '../../../utils/context';
 import { ExecutionStatus, ExecutionType } from '@prisma/client';
+import { assertCanAccessResource, isOperatorRole } from '../../utils/auth';
 
 // Helper function to extract request metadata
 function extractRequestMetadata(ctx: InfinibayContext): { ipAddress?: string; userAgent?: string } {
@@ -283,7 +284,7 @@ export class ScriptResolver {
       };
     }
 
-    const isAdmin = ctx.user.role === 'ADMIN';
+    const isAdmin = isOperatorRole(ctx.user.role);
 
     // If not admin, verify user has access
     if (!isAdmin) {
@@ -465,7 +466,12 @@ export class ScriptResolver {
       // Check user access to machine
       const machine = await ctx.prisma.machine.findUnique({
         where: { id: machineId },
-        select: { userId: true, status: true, os: true }
+        select: {
+          userId: true,
+          status: true,
+          os: true,
+          configuration: { select: { setupComplete: true } }
+        }
       })
 
       if (!machine) {
@@ -473,7 +479,7 @@ export class ScriptResolver {
       }
 
       const isOwner = machine.userId === user.id
-      const isAdmin = user.role === 'ADMIN'
+      const isAdmin = isOperatorRole(user.role)
 
       if (!isOwner && !isAdmin) {
         throw new Error('Access denied')
@@ -485,9 +491,9 @@ export class ScriptResolver {
         ? ['root', 'system']
         : ['administrator', 'system']
 
-      // Check if VM is running
-      if (machine.status !== 'running') {
-        return defaultUsers // Return OS-aware defaults if VM is not running
+      // Check if VM is running and OS is ready
+      if (machine.status !== 'running' || !machine.configuration?.setupComplete) {
+        return defaultUsers // Return OS-aware defaults if VM is not ready
       }
 
       // Get user list from infiniservice
@@ -527,6 +533,7 @@ export class ScriptResolver {
     @Ctx() ctx: InfinibayContext
   ): Promise<ScriptResponseType> {
     try {
+      await assertCanAccessResource(ctx, 'scripts')
       const { ipAddress, userAgent } = extractRequestMetadata(ctx)
       const user = requireUser(ctx)
       const scriptManager = new ScriptManager(ctx.prisma);
@@ -564,6 +571,7 @@ export class ScriptResolver {
     @Ctx() ctx: InfinibayContext
   ): Promise<ScriptResponseType> {
     try {
+      await assertCanAccessResource(ctx, 'scripts')
       const { ipAddress, userAgent } = extractRequestMetadata(ctx)
       const user = requireUser(ctx)
       const scriptManager = new ScriptManager(ctx.prisma);
@@ -603,6 +611,7 @@ export class ScriptResolver {
     @Ctx() ctx: InfinibayContext
   ): Promise<ScriptResponseType> {
     try {
+      await assertCanAccessResource(ctx, 'scripts')
       // Check for active schedules before deletion
       const user = requireUser(ctx)
       const scheduler = new ScriptScheduler(ctx.prisma);
@@ -667,6 +676,7 @@ export class ScriptResolver {
     @Arg('departmentId', () => ID) departmentId: string,
     @Ctx() ctx: InfinibayContext
   ): Promise<boolean> {
+    await assertCanAccessResource(ctx, 'scripts')
     const scriptManager = new ScriptManager(ctx.prisma);
     const user = requireUser(ctx)
     await scriptManager.assignScriptToDepartment(scriptId, departmentId, user.id);
@@ -683,6 +693,7 @@ export class ScriptResolver {
     @Arg('departmentId', () => ID) departmentId: string,
     @Ctx() ctx: InfinibayContext
   ): Promise<boolean> {
+    await assertCanAccessResource(ctx, 'scripts')
     const scriptManager = new ScriptManager(ctx.prisma);
     await scriptManager.unassignScriptFromDepartment(scriptId, departmentId);
     return true;
@@ -713,7 +724,7 @@ export class ScriptResolver {
       }
 
       const isOwner = machine.userId === user.id;
-      const isAdmin = user.role === 'ADMIN';
+      const isAdmin = isOperatorRole(user.role);
 
       if (!isOwner && !isAdmin) {
         return {
@@ -845,7 +856,7 @@ export class ScriptResolver {
       // Check permissions: triggeredBy, machine owner, or admin
       const isTriggeredBy = execution.triggeredById === user.id;
       const isOwner = execution.machine.userId === user.id;
-      const isAdmin = user.role === 'ADMIN';
+      const isAdmin = isOperatorRole(user.role);
 
       if (!isTriggeredBy && !isOwner && !isAdmin) {
         return {
@@ -1025,7 +1036,7 @@ export class ScriptResolver {
     // Check permissions: triggeredBy, machine owner, or admin
     const isTriggeredBy = execution.triggeredById === user.id;
     const isOwner = execution.machine && execution.machine.userId === user.id;
-    const isAdmin = user.role === 'ADMIN' || user.role === 'SUPER_ADMIN';
+    const isAdmin = isOperatorRole(user.role);
 
     if (!isTriggeredBy && !isOwner && !isAdmin) {
       return null;
@@ -1093,10 +1104,11 @@ export class ScriptResolver {
       }
 
       const isScriptCreator = script.createdById === user.id;
-      const isAdmin = user.role === 'ADMIN';
+      const isAdmin = isOperatorRole(user.role);
 
       // If departmentId provided, verify user has access to department
       if (input.departmentId) {
+        await assertCanAccessResource(ctx, 'scripts')
         const department = await ctx.prisma.department.findUnique({
           where: { id: input.departmentId }
         });
@@ -1296,7 +1308,7 @@ export class ScriptResolver {
       // Verify user has permission (triggeredBy, machine owner, or admin)
       const isTriggeredBy = execution.triggeredById === user.id;
       const isOwner = execution.machine.userId === user.id;
-      const isAdmin = user.role === 'ADMIN';
+      const isAdmin = isOperatorRole(user.role);
 
       if (!isTriggeredBy && !isOwner && !isAdmin) {
         return {
@@ -1412,7 +1424,7 @@ export class ScriptResolver {
       // Verify user has permission
       const isTriggeredBy = execution.triggeredById === user.id;
       const isOwner = execution.machine.userId === user.id;
-      const isAdmin = user.role === 'ADMIN';
+      const isAdmin = isOperatorRole(user.role);
 
       if (!isTriggeredBy && !isOwner && !isAdmin) {
         return {

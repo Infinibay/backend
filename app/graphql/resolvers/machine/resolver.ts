@@ -11,7 +11,10 @@ import {
   CommandExecutionResponseType,
   UpdateMachineHardwareInput,
   UpdateMachineNameInput,
-  UpdateMachineUserInput
+  UpdateMachineUserInput,
+  MachineMigrationResultType,
+  DomainJoinResultType,
+  JoinDomainInput
 } from './type'
 import { UserType } from '../user/type'
 import { MachineTemplateType } from '../machine_template/type'
@@ -29,8 +32,11 @@ import { FirewallOrchestrationService } from '../../../services/firewall/Firewal
 import { FirewallRuleService } from '../../../services/firewall/FirewallRuleService'
 import { FirewallValidationService } from '../../../services/firewall/FirewallValidationService'
 import { InfinizationFirewallService } from '../../../services/firewall/InfinizationFirewallService'
-import { Machine as PrismaMachine, User as PrismaUser, MachineTemplate as PrismaMachineTemplate, Department as PrismaDepartment, MachineConfiguration, PrismaClient } from '@prisma/client'
+import { VMMigrationService } from '../../../services/node/VMMigrationService'
+import { DomainJoinService } from '../../../services/DomainJoinService'
+import { Machine as PrismaMachine, MachineTemplate as PrismaMachineTemplate, Department as PrismaDepartment, MachineConfiguration, PrismaClient } from '@prisma/client'
 import { SafeUser } from '@utils/context'
+import { assertCanAccessResource, isOperatorRole } from '../../utils/auth'
 
 type MachineWithRelations = PrismaMachine & {
   configuration?: MachineConfiguration | null
@@ -94,6 +100,7 @@ async function transformMachine (prismaMachine: MachineWithRelations, prisma?: P
     userId: prismaMachine.userId || null,
     departmentId: prismaMachine.departmentId || null, // Explicitly include departmentId
     templateId: prismaMachine.templateId || null,
+    nodeId: prismaMachine.nodeId || null,
     user: user
       ? {
         id: user.id,
@@ -135,7 +142,8 @@ async function transformMachine (prismaMachine: MachineWithRelations, prisma?: P
       } as DepartmentType
       : undefined,
     configuration: configurationField,
-    status: prismaMachine.status as MachineStatus
+    status: prismaMachine.status as MachineStatus,
+    setupComplete: prismaMachine.configuration?.setupComplete ?? false
   }
 }
 
@@ -149,7 +157,7 @@ export class MachineQueries {
     @Arg('id') id: string,
     @Ctx() { prisma, user }: InfinibayContext
   ): Promise<Machine | null> {
-    const isAdmin = user?.role === 'ADMIN'
+    const isAdmin = isOperatorRole(user?.role)
     const whereClause = isAdmin ? { id } : { id, userId: user?.id }
     const prismaMachine = await prisma.machine.findFirst({
       where: whereClause,
@@ -165,7 +173,7 @@ export class MachineQueries {
     @Arg('orderBy', { nullable: true }) orderBy: MachineOrderBy,
     @Ctx() { prisma, user }: InfinibayContext
   ): Promise<Machine[]> {
-    const isAdmin = user?.role === 'ADMIN'
+    const isAdmin = isOperatorRole(user?.role)
     const whereClause = isAdmin ? {} : { userId: user?.id }
     const order = { [(orderBy?.fieldName ?? 'createdAt')]: orderBy?.direction ?? 'desc' }
 
@@ -185,7 +193,7 @@ export class MachineQueries {
     @Arg('id') id: string,
     @Ctx() { prisma, user }: InfinibayContext
   ): Promise<GraphicConfigurationType | null> {
-    const isAdmin = user?.role === 'ADMIN'
+    const isAdmin = isOperatorRole(user?.role)
     const whereClause = isAdmin ? { id } : { id, userId: user?.id }
     const machine = await prisma.machine.findFirst({
       where: whereClause,
@@ -226,8 +234,10 @@ export class MachineMutations {
   @Authorized('ADMIN')
   async createMachine (
     @Arg('input') input: CreateMachineInputType,
-    @Ctx() { prisma, user }: InfinibayContext
+    @Ctx() context: InfinibayContext
   ): Promise<Machine> {
+    const { prisma, user } = context
+    await assertCanAccessResource(context, 'desktops')
     const lifecycleService = new MachineLifecycleService(prisma, user)
     const newMachine = await lifecycleService.createMachine(input)
 
@@ -249,8 +259,10 @@ export class MachineMutations {
   @Authorized('ADMIN')
   async updateMachineHardware (
     @Arg('input') input: UpdateMachineHardwareInput,
-    @Ctx() { prisma, user }: InfinibayContext
+    @Ctx() context: InfinibayContext
   ): Promise<Machine> {
+    const { prisma, user } = context
+    await assertCanAccessResource(context, 'desktops')
     const lifecycleService = new MachineLifecycleService(prisma, user)
     const updatedMachine = await lifecycleService.updateMachineHardware(input)
 
@@ -271,8 +283,10 @@ export class MachineMutations {
   @Authorized('ADMIN')
   async updateMachineName (
     @Arg('input') input: UpdateMachineNameInput,
-    @Ctx() { prisma, user }: InfinibayContext
+    @Ctx() context: InfinibayContext
   ): Promise<Machine> {
+    const { prisma, user } = context
+    await assertCanAccessResource(context, 'desktops')
     const lifecycleService = new MachineLifecycleService(prisma, user)
     const updatedMachine = await lifecycleService.updateMachineName(input)
 
@@ -293,8 +307,10 @@ export class MachineMutations {
   @Authorized('ADMIN')
   async updateMachineUser (
     @Arg('input') input: UpdateMachineUserInput,
-    @Ctx() { prisma, user }: InfinibayContext
+    @Ctx() context: InfinibayContext
   ): Promise<Machine> {
+    const { prisma, user } = context
+    await assertCanAccessResource(context, 'desktops')
     const lifecycleService = new MachineLifecycleService(prisma, user)
     const updatedMachine = await lifecycleService.updateMachineUser(input)
 
@@ -309,6 +325,33 @@ export class MachineMutations {
     }
 
     return transformMachine(updatedMachine, prisma)
+  }
+
+  @Mutation(() => MachineMigrationResultType)
+  @Authorized('ADMIN')
+  async migrateMachineToNode (
+    @Arg('id') id: string,
+    @Arg('targetNodeId') targetNodeId: string,
+    @Ctx() context: InfinibayContext
+  ): Promise<MachineMigrationResultType> {
+    const { prisma, user } = context
+    await assertCanAccessResource(context, 'desktops')
+    const migrationService = new VMMigrationService(prisma)
+    const result = await migrationService.migrateStoppedMachineToNode(id, targetNodeId)
+
+    try {
+      const updatedMachine = await prisma.machine.findUnique({
+        where: { id },
+        include: { configuration: true, department: true, template: true, user: true }
+      })
+      if (updatedMachine) {
+        await getEventManager().dispatchEvent('vms', 'update', updatedMachine, user?.id)
+      }
+    } catch (eventError) {
+      logger.error('Failed to trigger migration event:', eventError)
+    }
+
+    return result
   }
 
   @Mutation(() => SuccessType)
@@ -339,6 +382,34 @@ export class MachineMutations {
   }
 
   /**
+   * Join a running VM to the Active Directory / LDAP domain configured on an
+   * IdentityProvider. Admin-only: it changes machine identity and uses the
+   * provider's bind credentials. The actual join runs inside the guest via
+   * the infiniservice JoinDomain command; state is persisted on the VM's
+   * configuration and surfaced over the 'vms' event channel.
+   */
+  @Mutation(() => DomainJoinResultType)
+  @Authorized('ADMIN')
+  async joinVmToDomain (
+    @Arg('input') input: JoinDomainInput,
+    @Ctx() context: InfinibayContext
+  ): Promise<DomainJoinResultType> {
+    await assertCanAccessResource(context, 'desktops')
+    const service = new DomainJoinService(context.prisma)
+    const result = await service.joinMachineToDomain({
+      machineId: input.machineId,
+      identityProviderId: input.identityProviderId,
+      username: input.username,
+      password: input.password,
+      ou: input.ou,
+      computerName: input.computerName,
+      restartAfter: input.restartAfter ?? false,
+      triggeredBy: context.user?.id
+    })
+    return result
+  }
+
+  /**
    * Destroys a virtual machine and cleans up associated resources.
    *
    * @param id - The ID of the machine to destroy.
@@ -350,8 +421,12 @@ export class MachineMutations {
   @Authorized('USER')
   async destroyMachine (
     @Arg('id') id: string,
-    @Ctx() { prisma, user }: InfinibayContext
+    @Ctx() context: InfinibayContext
   ): Promise<SuccessType> {
+    const { prisma, user } = context
+    if (isOperatorRole(user?.role)) {
+      await assertCanAccessResource(context, 'desktops')
+    }
     const lifecycleService = new MachineLifecycleService(prisma, user)
     const result = await lifecycleService.destroyMachine(id)
 
@@ -384,8 +459,10 @@ export class MachineMutations {
   async executeCommand (
     @Arg('id') id: string,
     @Arg('command') command: string,
-    @Ctx() { prisma, user }: InfinibayContext
+    @Ctx() context: InfinibayContext
   ): Promise<CommandExecutionResponseType> {
+    const { prisma } = context
+    await assertCanAccessResource(context, 'desktops')
     try {
       // Retrieve the machine from the database
       const machine = await prisma.machine.findFirst({ where: { id } })
@@ -393,12 +470,13 @@ export class MachineMutations {
         return { success: false, message: 'Machine not found' }
       }
 
-      // TODO: Implement guest agent command execution via QMP guest-exec
-      // infinization needs to implement QMPClient.guestExec() for this feature
-      // For now, return not implemented
+      // Execute the command inside the VM via QEMU Guest Agent
+      const vmOpsService = new VMOperationsService(prisma)
+      const result = await vmOpsService.executeGuestCommand(id, command)
+
       return {
-        success: false,
-        message: 'QEMU Guest Agent command execution is not yet implemented. This feature requires guest-agent support in infinization.'
+        success: result.success,
+        message: result.stdout ?? result.message ?? result.error ?? 'Command executed'
       }
     } catch (error) {
       // Log the error and return a failure response
@@ -432,7 +510,7 @@ export class MachineMutations {
 
     try {
       // Check if the user is an admin or the owner of the machine
-      const isAdmin = user?.role === 'ADMIN'
+      const isAdmin = isOperatorRole(user?.role)
       const whereClause = isAdmin ? { id } : { id, userId: user?.id }
 
       // Retrieve the machine from the database
@@ -457,20 +535,20 @@ export class MachineMutations {
       // Perform the requested action
       let result
       switch (action) {
-        case 'powerOn':
-          result = await vmOpsService.startMachine(id)
-          break
-        case 'destroy':
-          result = await vmOpsService.forcePowerOff(id)
-          break
-        case 'shutdown':
-          result = await vmOpsService.gracefulPowerOff(id)
-          break
-        case 'suspend':
-          result = await vmOpsService.suspendMachine(id)
-          break
-        default:
-          throw new UserInputError(`Invalid action: ${action}`)
+      case 'powerOn':
+        result = await vmOpsService.startMachine(id)
+        break
+      case 'destroy':
+        result = await vmOpsService.forcePowerOff(id)
+        break
+      case 'shutdown':
+        result = await vmOpsService.gracefulPowerOff(id)
+        break
+      case 'suspend':
+        result = await vmOpsService.suspendMachine(id)
+        break
+      default:
+        throw new UserInputError(`Invalid action: ${action}`)
       }
 
       // Check if the action was successful
@@ -607,8 +685,10 @@ export class MachineMutations {
   async moveMachine (
     @Arg('id') id: string,
     @Arg('departmentId') departmentId: string,
-    @Ctx() { prisma, user }: InfinibayContext
+    @Ctx() context: InfinibayContext
   ): Promise<Machine> {
+    const { prisma, user } = context
+    await assertCanAccessResource(context, 'desktops')
     // Check if machine exists
     const machine = await prisma.machine.findUnique({
       where: { id }
@@ -633,7 +713,10 @@ export class MachineMutations {
         where: { id },
         include: { configuration: true, department: true, template: true, user: true }
       })
-      return transformMachine(existingMachine!, prisma)
+      if (!existingMachine) {
+        throw new UserInputError('Machine not found')
+      }
+      return transformMachine(existingMachine, prisma)
     }
 
     // Initialize firewall services for VMMoveService
@@ -688,7 +771,7 @@ export class MachineMutations {
     @Ctx() { prisma, user }: InfinibayContext
   ): Promise<SuccessType> {
     // Check if the user is an admin or the owner of the machine
-    const isAdmin = user?.role === 'ADMIN'
+    const isAdmin = isOperatorRole(user?.role)
     const whereClause = isAdmin ? { id } : { id, userId: user?.id }
 
     // Retrieve the machine from the database
@@ -741,7 +824,7 @@ export class MachineMutations {
     @Ctx() { prisma, user }: InfinibayContext
   ): Promise<SuccessType> {
     // Check if the user is an admin or the owner of the machine
-    const isAdmin = user?.role === 'ADMIN'
+    const isAdmin = isOperatorRole(user?.role)
     const whereClause = isAdmin ? { id } : { id, userId: user?.id }
 
     // Retrieve the machine from the database
@@ -788,7 +871,7 @@ export class MachineMutations {
     @Ctx() { prisma, user }: InfinibayContext
   ): Promise<SuccessType> {
     // Check if the user is an admin or the owner of the machine
-    const isAdmin = user?.role === 'ADMIN'
+    const isAdmin = isOperatorRole(user?.role)
     const whereClause = isAdmin ? { id } : { id, userId: user?.id }
 
     // Retrieve the machine from the database

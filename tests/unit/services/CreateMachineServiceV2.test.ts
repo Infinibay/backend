@@ -72,7 +72,7 @@ jest.mock('../../../app/services/unattendedManagerBase', () => ({
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 function makeMachine(overrides?: Partial<Machine>): Machine {
-  return {
+  const machine = {
     id: 'vm-1',
     name: 'TestVM',
     internalName: 'vm-test-1',
@@ -92,7 +92,13 @@ function makeMachine(overrides?: Partial<Machine>): Machine {
     firewallRuleSetId: null,
     version: 1,
     poolId: null,
+    nodeId: null,
     ...overrides,
+  }
+
+  return {
+    ...machine,
+    nodeId: machine.nodeId ?? null,
   }
 }
 
@@ -245,13 +251,8 @@ describe('CreateMachineServiceV2', () => {
 
       expect(result).toBe(true)
 
-      // Verify status was set to 'building'
-      expect(mockPrisma.machine.update).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: { id: 'vm-1' },
-          data: { status: 'building' },
-        }),
-      )
+      // Status transitions are driven by infinization/QMP events; create only writes runtime config.
+      expect(mockPrisma.machine.update).not.toHaveBeenCalled()
 
       // Verify infinization was called
       expect(mockInfinization.createVM).toHaveBeenCalledWith(

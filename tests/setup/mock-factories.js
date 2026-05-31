@@ -76,7 +76,7 @@ function createMockAdminUser(overrides) {
 }
 // Department factory
 function createMockDepartment(overrides) {
-    var _a, _b, _c;
+    var _a, _b, _c, _d;
     const id = (overrides === null || overrides === void 0 ? void 0 : overrides.id) || (0, exports.generateId)();
     return {
         id,
@@ -86,14 +86,14 @@ function createMockDepartment(overrides) {
         internetSpeed: (_a = overrides === null || overrides === void 0 ? void 0 : overrides.internetSpeed) !== null && _a !== void 0 ? _a : 100,
         ipSubnet: (_b = overrides === null || overrides === void 0 ? void 0 : overrides.ipSubnet) !== null && _b !== void 0 ? _b : '192.168.1.0/24',
         firewallRuleSetId: (overrides === null || overrides === void 0 ? void 0 : overrides.firewallRuleSetId) || null,
-        bridgeName: (_a = overrides === null || overrides === void 0 ? void 0 : overrides.bridgeName) !== null && _a !== void 0 ? _a : 'br-mock',
+        bridgeName: (_c = overrides === null || overrides === void 0 ? void 0 : overrides.bridgeName) !== null && _c !== void 0 ? _c : 'br-mock',
         gatewayIP: (overrides === null || overrides === void 0 ? void 0 : overrides.gatewayIP) || null,
         dhcpRangeStart: (overrides === null || overrides === void 0 ? void 0 : overrides.dhcpRangeStart) || null,
         dhcpRangeEnd: (overrides === null || overrides === void 0 ? void 0 : overrides.dhcpRangeEnd) || null,
         dnsmasqPid: (overrides === null || overrides === void 0 ? void 0 : overrides.dnsmasqPid) || null,
         dnsServers: (overrides === null || overrides === void 0 ? void 0 : overrides.dnsServers) || ['8.8.8.8', '8.8.4.4', '1.1.1.1'],
         ntpServers: (overrides === null || overrides === void 0 ? void 0 : overrides.ntpServers) || ['216.239.35.0', '162.159.200.1'],
-        mtu: (_c = overrides === null || overrides === void 0 ? void 0 : overrides.mtu) !== null && _c !== void 0 ? _c : 1500,
+        mtu: (_d = overrides === null || overrides === void 0 ? void 0 : overrides.mtu) !== null && _d !== void 0 ? _d : 1500,
         firewallPolicy: (overrides === null || overrides === void 0 ? void 0 : overrides.firewallPolicy) || client_1.FirewallPolicy.BLOCK_ALL,
         firewallDefaultConfig: (overrides === null || overrides === void 0 ? void 0 : overrides.firewallDefaultConfig) || 'allow_outbound',
         firewallCustomRules: (overrides === null || overrides === void 0 ? void 0 : overrides.firewallCustomRules) || null
@@ -127,6 +127,7 @@ function createMockMachineTemplate(overrides) {
 }
 // Machine factory
 function createMockMachine(overrides) {
+    var _a;
     const id = (overrides === null || overrides === void 0 ? void 0 : overrides.id) || (0, exports.generateId)();
     return {
         id,
@@ -145,9 +146,10 @@ function createMockMachine(overrides) {
         departmentId: (overrides === null || overrides === void 0 ? void 0 : overrides.departmentId) || null,
         localIP: (overrides === null || overrides === void 0 ? void 0 : overrides.localIP) || null,
         publicIP: (overrides === null || overrides === void 0 ? void 0 : overrides.publicIP) || null,
+        nodeId: (overrides === null || overrides === void 0 ? void 0 : overrides.nodeId) || null,
         firewallRuleSetId: (overrides === null || overrides === void 0 ? void 0 : overrides.firewallRuleSetId) || null,
         version: (overrides === null || overrides === void 0 ? void 0 : overrides.version) || 1,
-        poolId: (overrides === null || overrides === void 0 ? void 0 : overrides.poolId) !== null && (overrides === null || overrides === void 0 ? void 0 : overrides.poolId) !== undefined ? overrides === null || overrides === void 0 ? void 0 : overrides.poolId : null
+        poolId: (_a = overrides === null || overrides === void 0 ? void 0 : overrides.poolId) !== null && _a !== void 0 ? _a : null
     };
 }
 // Machine Configuration factory
@@ -326,6 +328,7 @@ function createMockNode(overrides) {
         cpuFlags: (overrides === null || overrides === void 0 ? void 0 : overrides.cpuFlags) || { vmx: true, svm: false },
         ram: (overrides === null || overrides === void 0 ? void 0 : overrides.ram) || 32768,
         cores: (overrides === null || overrides === void 0 ? void 0 : overrides.cores) || 16,
+        maintenanceMode: (overrides === null || overrides === void 0 ? void 0 : overrides.maintenanceMode) !== null && (overrides === null || overrides === void 0 ? void 0 : overrides.maintenanceMode) !== void 0 ? overrides.maintenanceMode : false,
         createdAt: (overrides === null || overrides === void 0 ? void 0 : overrides.createdAt) || new Date(),
         updatedAt: (overrides === null || overrides === void 0 ? void 0 : overrides.updatedAt) || new Date()
     };

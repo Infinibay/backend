@@ -3,7 +3,7 @@ import { VMHealthQueueManager } from '../../app/services/VMHealthQueueManager'
 import { BackgroundTaskService } from '../../app/services/BackgroundTaskService'
 import { EventManager } from '../../app/services/EventManager'
 import { PrismaClient } from '@prisma/client'
-import { RUNNING_STATUS, STOPPED_STATUS } from '../../app/constants/machine-status'
+import { RUNNING_STATUS, OFF_STATUS } from '../../app/constants/machine-status'
 
 // Mock dependencies
 jest.mock('../../app/services/VMHealthQueueManager')
@@ -179,7 +179,7 @@ describe('BackgroundHealthService', () => {
       mockQueueManager.queueHealthChecks
         .mockResolvedValueOnce(undefined) // First VM succeeds
         .mockRejectedValueOnce(
-          new Error(`Cannot queue health check for VM running-vm-2 (vm-running-2) - VM status is '${STOPPED_STATUS}', expected '${RUNNING_STATUS}'`)
+          new Error(`Cannot queue health check for VM running-vm-2 (vm-running-2) - status='${OFF_STATUS}' setupComplete=true`)
         ) // Second VM fails
 
       // The service should handle this gracefully and continue processing

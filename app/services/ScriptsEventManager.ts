@@ -238,7 +238,7 @@ export class ScriptsEventManager implements ResourceEventManager {
 
       // Add all admins
       const admins = await this.prisma.user.findMany({
-        where: { role: 'ADMIN', deleted: false },
+        where: { role: { in: ['ADMIN', 'SUPER_ADMIN'] }, deleted: false },
         select: { id: true }
       })
       admins.forEach(admin => targetUsers.add(admin.id))
@@ -280,7 +280,7 @@ export class ScriptsEventManager implements ResourceEventManager {
 
       // Add all admins
       const admins = await this.prisma.user.findMany({
-        where: { role: 'ADMIN', deleted: false },
+        where: { role: { in: ['ADMIN', 'SUPER_ADMIN'] }, deleted: false },
         select: { id: true }
       })
       admins.forEach(admin => targetUsers.add(admin.id))

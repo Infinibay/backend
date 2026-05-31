@@ -1,7 +1,7 @@
 import 'reflect-metadata'
 import { describe, it, expect, beforeEach, jest, afterEach } from '@jest/globals'
 import { mockPrisma } from '../../setup/jest.setup'
-import { RUNNING_STATUS, STOPPED_STATUS, PAUSED_STATUS } from '../../../app/constants/machine-status'
+import { RUNNING_STATUS, OFF_STATUS, PAUSED_STATUS } from '../../../app/constants/machine-status'
 
 // Mock VMRecommendationService before importing BackgroundHealthService
 jest.mock('@services/VMRecommendationService', () => {
@@ -107,6 +107,7 @@ describe('BackgroundHealthService', () => {
         version: 1,
         localIP: null,
         publicIP: null,
+        nodeId: null,
         poolId: null
       }
     ])
@@ -240,7 +241,12 @@ describe('BackgroundHealthService', () => {
       await service.executeHealthCheckRound()
 
       expect(mockPrisma.machine.findMany).toHaveBeenCalledWith({
-        where: { status: RUNNING_STATUS },
+        where: {
+          status: RUNNING_STATUS,
+          configuration: {
+            setupComplete: true
+          }
+        },
         select: {
           id: true,
           name: true,
@@ -315,6 +321,7 @@ describe('BackgroundHealthService', () => {
           version: 1,
           localIP: null,
           publicIP: null,
+          nodeId: null,
           poolId: null
         },
         {
@@ -336,6 +343,7 @@ describe('BackgroundHealthService', () => {
           version: 1,
           localIP: null,
           publicIP: null,
+          nodeId: null,
           poolId: null
         }
       ])
@@ -492,6 +500,7 @@ describe('BackgroundHealthService', () => {
           version: 1,
           localIP: null,
           publicIP: null,
+          nodeId: null,
           poolId: null
         }
       ])
@@ -505,7 +514,12 @@ describe('BackgroundHealthService', () => {
 
       // Should only queue health checks for running VMs
       expect(mockPrisma.machine.findMany).toHaveBeenCalledWith({
-        where: { status: RUNNING_STATUS },
+        where: {
+          status: RUNNING_STATUS,
+          configuration: {
+            setupComplete: true
+          }
+        },
         select: {
           id: true,
           name: true,
@@ -529,7 +543,12 @@ describe('BackgroundHealthService', () => {
       await service.executeHealthCheckRound()
 
       expect(mockPrisma.machine.findMany).toHaveBeenCalledWith({
-        where: { status: RUNNING_STATUS },
+        where: {
+          status: RUNNING_STATUS,
+          configuration: {
+            setupComplete: true
+          }
+        },
         select: {
           id: true,
           name: true,
@@ -574,6 +593,7 @@ describe('BackgroundHealthService', () => {
           version: 1,
           localIP: null,
           publicIP: null,
+          nodeId: null,
           poolId: null
         },
         {
@@ -595,6 +615,7 @@ describe('BackgroundHealthService', () => {
           version: 1,
           localIP: null,
           publicIP: null,
+          nodeId: null,
           poolId: null
         }
       ])
@@ -608,7 +629,12 @@ describe('BackgroundHealthService', () => {
 
       // Verify database query filters for running VMs only
       expect(mockPrisma.machine.findMany).toHaveBeenCalledWith({
-        where: { status: RUNNING_STATUS },
+        where: {
+          status: RUNNING_STATUS,
+          configuration: {
+            setupComplete: true
+          }
+        },
         select: {
           id: true,
           name: true,

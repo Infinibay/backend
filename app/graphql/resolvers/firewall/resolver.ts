@@ -4,6 +4,7 @@ import { UserInputError } from '@utils/errors'
 
 import { getEventManager } from '@services/EventManager'
 import { InfinibayContext } from '@utils/context'
+import { assertCanAccessResource } from '@main/graphql/utils/auth'
 
 import { FirewallOrchestrationService } from '@services/firewall/FirewallOrchestrationService'
 import { FirewallRuleService } from '@services/firewall/FirewallRuleService'
@@ -209,6 +210,7 @@ export class FirewallResolver {
   async listInfinibayFilters (
     @Ctx() ctx: InfinibayContext
   ): Promise<NftablesChainInfoType[]> {
+    await assertCanAccessResource(ctx, 'firewall')
     const { infinizationService } = await this.getServices(ctx)
 
     const vmChains = await infinizationService.listVMChains()
@@ -233,6 +235,7 @@ export class FirewallResolver {
     @Arg('input') input: CreateFirewallRuleInput,
     @Ctx() ctx: InfinibayContext
   ): Promise<FirewallRuleType> {
+    await assertCanAccessResource(ctx, 'firewall')
     const { ruleService, validationService, orchestrationService } = await this.getServices(ctx)
 
     // Check if department exists
@@ -327,6 +330,7 @@ export class FirewallResolver {
     @Arg('input') input: CreateFirewallRuleInput,
     @Ctx() ctx: InfinibayContext
   ): Promise<FirewallRuleType> {
+    await assertCanAccessResource(ctx, 'firewall')
     const { ruleService, validationService, orchestrationService } = await this.getServices(ctx)
 
     // Check if VM exists
@@ -430,6 +434,7 @@ export class FirewallResolver {
     @Arg('input') input: UpdateFirewallRuleInput,
     @Ctx() ctx: InfinibayContext
   ): Promise<FirewallRuleType> {
+    await assertCanAccessResource(ctx, 'firewall')
     const { ruleService, orchestrationService } = await this.getServices(ctx)
 
     // Get existing rule to find associated VM/Department
@@ -481,6 +486,7 @@ export class FirewallResolver {
     @Arg('ruleId', () => ID) ruleId: string,
     @Ctx() ctx: InfinibayContext
   ): Promise<boolean> {
+    await assertCanAccessResource(ctx, 'firewall')
     const { ruleService, orchestrationService } = await this.getServices(ctx)
 
     // Get existing rule to find associated VM/Department
@@ -532,6 +538,7 @@ export class FirewallResolver {
     @Arg('vmId', () => ID) vmId: string,
     @Ctx() ctx: InfinibayContext
   ): Promise<FlushResultType> {
+    await assertCanAccessResource(ctx, 'firewall')
     const { orchestrationService } = await this.getServices(ctx)
 
     const result = await orchestrationService.applyVMRules(vmId)
@@ -552,6 +559,7 @@ export class FirewallResolver {
   async syncFirewallToLibvirt (
     @Ctx() ctx: InfinibayContext
   ): Promise<SyncResultType> {
+    await assertCanAccessResource(ctx, 'firewall')
     const { orchestrationService } = await this.getServices(ctx)
 
     const result = await orchestrationService.syncAllToNftables()
@@ -572,6 +580,7 @@ export class FirewallResolver {
   async cleanupInfinibayFirewall (
     @Ctx() ctx: InfinibayContext
   ): Promise<CleanupResultType> {
+    await assertCanAccessResource(ctx, 'firewall')
     const { infinizationService } = await this.getServices(ctx)
 
     const vmChains = await infinizationService.listVMChains()

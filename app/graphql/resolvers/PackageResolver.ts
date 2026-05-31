@@ -75,7 +75,7 @@ export class PackageResolver {
       }
 
       // Check permissions
-      const isAdmin = ctx.user?.role === 'ADMIN'
+      const isAdmin = (ctx.user?.role === 'ADMIN' || ctx.user?.role === 'SUPER_ADMIN')
       const isOwner = machine.userId === ctx.user?.id
 
       if (!isAdmin && !isOwner) {
@@ -125,7 +125,7 @@ export class PackageResolver {
       }
 
       // Check permissions
-      const isAdmin = ctx.user?.role === 'ADMIN'
+      const isAdmin = (ctx.user?.role === 'ADMIN' || ctx.user?.role === 'SUPER_ADMIN')
       const isOwner = machine.userId === ctx.user?.id
 
       if (!isAdmin && !isOwner) {
@@ -178,7 +178,7 @@ export class PackageResolver {
       }
 
       // Check permissions
-      const isAdmin = ctx.user?.role === 'ADMIN'
+      const isAdmin = (ctx.user?.role === 'ADMIN' || ctx.user?.role === 'SUPER_ADMIN')
       const isOwner = machine.userId === ctx.user?.id
 
       if (!isAdmin && !isOwner) {
@@ -279,7 +279,7 @@ export class PackageResolver {
       }
 
       // Check permissions
-      const isAdmin = ctx.user?.role === 'ADMIN'
+      const isAdmin = (ctx.user?.role === 'ADMIN' || ctx.user?.role === 'SUPER_ADMIN')
       const isOwner = machine.userId === ctx.user?.id
 
       if (!isAdmin && !isOwner) {
@@ -360,7 +360,7 @@ export class PackageResolver {
       }
 
       // Check permissions
-      const isAdmin = ctx.user?.role === 'ADMIN'
+      const isAdmin = (ctx.user?.role === 'ADMIN' || ctx.user?.role === 'SUPER_ADMIN')
       const isOwner = machine.userId === ctx.user?.id
 
       if (!isAdmin && !isOwner) {
@@ -441,7 +441,7 @@ export class PackageResolver {
       }
 
       // Check permissions
-      const isAdmin = ctx.user?.role === 'ADMIN'
+      const isAdmin = (ctx.user?.role === 'ADMIN' || ctx.user?.role === 'SUPER_ADMIN')
       const isOwner = machine.userId === ctx.user?.id
 
       if (!isAdmin && !isOwner) {

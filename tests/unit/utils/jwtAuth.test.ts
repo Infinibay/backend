@@ -147,6 +147,10 @@ describe('JWT Authentication Security Tests', () => {
         lastName: 'User',
         role: 'USER',
         deleted: false,
+        identityProviderId: null,
+        externalId: null,
+        externalDn: null,
+        lastDirectorySyncAt: null,
         createdAt: new Date(),
         updatedAt: new Date()
         // password and token should not be assignable to SafeUser

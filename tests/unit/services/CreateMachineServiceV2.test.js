@@ -64,7 +64,7 @@ jest.mock('../../../app/services/unattendedManagerBase', () => ({
 }));
 // ─── Helpers ────────────────────────────────────────────────────────────────
 function makeMachine(overrides) {
-    return Object.assign({ id: 'vm-1', name: 'TestVM', internalName: 'vm-test-1', status: 'stopped', userId: null, templateId: 'tpl-1', os: 'ubuntu-22.04', cpuCores: 4, ramGB: 8, diskSizeGB: 100, gpuPciAddress: null, createdAt: new Date(), updatedAt: new Date(), departmentId: 'dept-1', localIP: null, publicIP: null, firewallRuleSetId: null, version: 1 }, overrides);
+    return Object.assign({ id: 'vm-1', name: 'TestVM', internalName: 'vm-test-1', status: 'stopped', userId: null, templateId: 'tpl-1', os: 'ubuntu-22.04', cpuCores: 4, ramGB: 8, diskSizeGB: 100, gpuPciAddress: null, createdAt: new Date(), updatedAt: new Date(), departmentId: 'dept-1', localIP: null, publicIP: null, firewallRuleSetId: null, version: 1, poolId: null }, overrides);
 }
 function makeTemplate() {
     return {

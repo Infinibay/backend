@@ -46,12 +46,24 @@ export class VmEventManager extends BaseEventManager {
 
   protected async fetchResourceData (vmData: EventData): Promise<VMData | null> {
     try {
-      // If we already have complete data, use it
-      if (vmData && typeof vmData === 'object' && vmData.name && 'status' in vmData && 'userId' in vmData && 'departmentId' in vmData) {
+      // If we already have complete data, use it. We require setupComplete to
+      // be present on full payloads, otherwise the broadcast would carry a
+      // stale value (or undefined) and Apollo would never flip the UI from
+      // Installing → Running.
+      if (
+        vmData &&
+        typeof vmData === 'object' &&
+        vmData.name &&
+        'status' in vmData &&
+        'userId' in vmData &&
+        'departmentId' in vmData &&
+        'setupComplete' in vmData
+      ) {
         return vmData as unknown as VMData
       }
 
-      // If we only have an ID, fetch from database
+      // If we only have an ID (or partial deltas like { id, setupComplete }),
+      // fetch from database to build the full payload.
       const vmId = typeof vmData === 'string' ? vmData : vmData?.id
       if (!vmId) {
         return null
@@ -81,11 +93,21 @@ export class VmEventManager extends BaseEventManager {
               id: true,
               name: true
             }
+          },
+          configuration: {
+            select: { setupComplete: true }
           }
         }
       })
 
-      return vm
+      if (!vm) return null
+
+      // Project setupComplete from configuration to top-level so the GraphQL
+      // payload matches the Machine type the frontend expects.
+      return {
+        ...vm,
+        setupComplete: vm.configuration?.setupComplete ?? false
+      } as unknown as VMData
     } catch (error) {
       logger.error('Error fetching VM data:', error)
       return null

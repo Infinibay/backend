@@ -3,6 +3,7 @@ import { Resolver, Query, Mutation, Arg, Ctx, Authorized } from 'type-graphql'
 import { InfinibayContext } from '@utils/context'
 import { getPackageManager } from '@services/packages/PackageManager'
 import { PackageType, PackageCheckerType, PackageStatusType } from '../../types/PluginPackageTypes'
+import { assertCanAccessResource } from '../../utils/auth'
 import * as fs from 'fs'
 import * as path from 'path'
 
@@ -13,7 +14,7 @@ export class PluginPackageResolver {
   /**
    * Maps Prisma Package to GraphQL PackageType
    */
-  private mapPackageToGraphQL(
+  private mapPackageToGraphQL (
     pkg: {
       id: string
       name: string
@@ -65,9 +66,10 @@ export class PluginPackageResolver {
     description: 'List all installed plugin packages'
   })
   @Authorized('ADMIN')
-  async packages(
+  async packages (
     @Ctx() ctx: InfinibayContext
   ): Promise<PackageType[]> {
+    await assertCanAccessResource(ctx, 'settings')
     logger.debug('Fetching all packages')
 
     const packages = await ctx.prisma.package.findMany({
@@ -83,10 +85,11 @@ export class PluginPackageResolver {
     description: 'Get a specific plugin package by name'
   })
   @Authorized('ADMIN')
-  async package(
+  async package (
     @Arg('name') name: string,
     @Ctx() ctx: InfinibayContext
   ): Promise<PackageType | null> {
+    await assertCanAccessResource(ctx, 'settings')
     logger.debug('Fetching package: %s', name)
 
     const pkg = await ctx.prisma.package.findUnique({
@@ -105,9 +108,10 @@ export class PluginPackageResolver {
     description: 'Get runtime status of all plugin packages'
   })
   @Authorized('ADMIN')
-  async packageStatuses(
+  async packageStatuses (
     @Ctx() ctx: InfinibayContext
   ): Promise<PackageStatusType[]> {
+    await assertCanAccessResource(ctx, 'settings')
     logger.debug('Fetching package statuses')
 
     const pm = getPackageManager(ctx.prisma)
@@ -131,10 +135,11 @@ export class PluginPackageResolver {
     description: 'Enable a plugin package'
   })
   @Authorized('ADMIN')
-  async enablePackage(
+  async enablePackage (
     @Arg('name') name: string,
     @Ctx() ctx: InfinibayContext
   ): Promise<PackageType | null> {
+    await assertCanAccessResource(ctx, 'settings')
     logger.debug('Enabling package: %s', name)
 
     const pkg = await ctx.prisma.package.findUnique({ where: { name } })
@@ -156,10 +161,11 @@ export class PluginPackageResolver {
     description: 'Disable a plugin package'
   })
   @Authorized('ADMIN')
-  async disablePackage(
+  async disablePackage (
     @Arg('name') name: string,
     @Ctx() ctx: InfinibayContext
   ): Promise<PackageType | null> {
+    await assertCanAccessResource(ctx, 'settings')
     logger.debug('Disabling package: %s', name)
 
     const pkg = await ctx.prisma.package.findUnique({ where: { name } })
@@ -180,10 +186,11 @@ export class PluginPackageResolver {
     description: 'Uninstall an external plugin package (cannot uninstall built-in packages)'
   })
   @Authorized('ADMIN')
-  async uninstallPackage(
+  async uninstallPackage (
     @Arg('name') name: string,
     @Ctx() ctx: InfinibayContext
   ): Promise<boolean> {
+    await assertCanAccessResource(ctx, 'settings')
     logger.debug('Uninstalling package: %s', name)
 
     const pkg = await ctx.prisma.package.findUnique({ where: { name } })
