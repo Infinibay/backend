@@ -61,10 +61,16 @@ interface DirectoryAttributeMap {
 }
 
 function encryptionKey (): Buffer {
-  return crypto
-    .createHash('sha256')
-    .update(process.env.IDENTITY_SECRET_KEY || process.env.TOKENKEY || 'infinibay-identity-development-key')
-    .digest()
+  const secret = process.env.IDENTITY_SECRET_KEY || process.env.TOKENKEY
+  if (!secret) {
+    // Never silently fall back to a public, hard-coded key in production — that
+    // would encrypt every bind secret under a key anyone can read from source.
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('IDENTITY_SECRET_KEY (or TOKENKEY) must be set in production to encrypt identity provider secrets')
+    }
+    return crypto.createHash('sha256').update('infinibay-identity-development-key').digest()
+  }
+  return crypto.createHash('sha256').update(secret).digest()
 }
 
 function encryptSecret (value: string): string {

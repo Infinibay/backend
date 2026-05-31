@@ -113,6 +113,13 @@ export class PolicyResolver {
     @Ctx() context: InfinibayContext
   ): Promise<DepartmentMemberType> {
     await assertCanAccessResource(context, 'policies')
+    // Granting MANAGER widens the target user's resource scope to that
+    // department (see getUserAccessibleDepartments), so it's a privilege grant
+    // and is restricted to SUPER_ADMIN — matching setRolePermission. Managing a
+    // plain MEMBER (which grants no access) stays available to ADMIN.
+    if (input.role === 'MANAGER' && context.user?.role !== 'SUPER_ADMIN') {
+      throw new UserInputError('Only SUPER_ADMIN can grant the MANAGER role')
+    }
     try {
       const member = await new DepartmentMembershipService(context.prisma).setMember(
         input.departmentId,

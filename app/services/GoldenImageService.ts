@@ -534,33 +534,44 @@ export class GoldenImageService {
     if (img.status !== 'draft') {
       throw new Error(`Only draft images can be published (current status: ${img.status})`)
     }
-    const updated = await this.prisma.goldenImage.update({
-      where: { id },
-      data: { status: 'published' }
-    })
-    this.emitUpdate(updated)
+    // Compute the family before opening the transaction (read-only walk over
+    // the table; publishing doesn't change parent links).
+    const familyIds = autoDeprecatePrevious ? await this.familyMemberIds(img) : []
 
-    // Supersede older published versions in the same family: a family should
-    // have at most one published image at a time, otherwise it's ambiguous
-    // which one new VMs/pools should clone from.
-    if (autoDeprecatePrevious) {
-      const familyIds = await this.familyMemberIds(updated)
-      const previouslyPublished = await this.prisma.goldenImage.findMany({
-        where: {
-          id: { in: familyIds, not: updated.id },
-          status: 'published'
-        }
+    // Publish and supersede older published versions atomically: a family should
+    // have at most one published image at a time. Doing these as separate
+    // statements risks a crash leaving two `published` images — the exact
+    // ambiguous state this auto-deprecation exists to prevent.
+    const now = new Date()
+    const { updated, deprecated } = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.goldenImage.update({
+        where: { id },
+        data: { status: 'published' }
       })
-      for (const old of previouslyPublished) {
-        const deprecated = await this.prisma.goldenImage.update({
-          where: { id: old.id },
-          data: { status: 'deprecated', deprecatedAt: new Date() }
+      let deprecated: GoldenImage[] = []
+      if (familyIds.length > 0) {
+        const previouslyPublished = await tx.goldenImage.findMany({
+          where: {
+            id: { in: familyIds, not: updated.id },
+            status: 'published'
+          }
         })
-        this.emitUpdate(deprecated)
-        this.debug.info(
-          `Auto-deprecated golden image ${old.id} (v${old.version}) superseded by ${updated.id} (v${updated.version})`
-        )
+        deprecated = await Promise.all(previouslyPublished.map((old) =>
+          tx.goldenImage.update({
+            where: { id: old.id },
+            data: { status: 'deprecated', deprecatedAt: now }
+          })
+        ))
       }
+      return { updated, deprecated }
+    })
+
+    this.emitUpdate(updated)
+    for (const dep of deprecated) {
+      this.emitUpdate(dep)
+      this.debug.info(
+        `Auto-deprecated golden image ${dep.id} (v${dep.version}) superseded by ${updated.id} (v${updated.version})`
+      )
     }
 
     return updated
