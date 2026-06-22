@@ -2,14 +2,20 @@ import { describe, it, expect, beforeEach, jest } from '@jest/globals'
 import { mockDeep } from 'jest-mock-extended'
 import { PrismaClient } from '@prisma/client'
 
-// Factory mocks keep the infinization-backed provisioning/cleanup modules out
-// of the import graph — checkOutDesktopForUser never reaches them in these
-// tests, and loading the real ones would require the built infinization pkg.
+// Controllable boot result for the checkout power-on step.
+const mockStartMachine = jest.fn<(...args: any[]) => Promise<{ success: boolean, error?: string }>>()
+
+// Factory mocks keep the infinization-backed modules out of the import graph
+// and let us drive the boot deterministically. A spawned machine comes back
+// from the (mocked) lifecycle service so the on-demand path can be exercised.
 jest.mock('@services/machineLifecycleService', () => ({
-  MachineLifecycleService: class { createMachine = jest.fn() }
+  MachineLifecycleService: class { createMachine = jest.fn(async () => ({ id: 'spawned-1', userId: null })) }
 }))
 jest.mock('@services/cleanup/machineCleanupServiceV2', () => ({
   MachineCleanupServiceV2: class { cleanupVM = jest.fn() }
+}))
+jest.mock('@services/VMOperationsService', () => ({
+  VMOperationsService: class { startMachine = (...args: any[]) => mockStartMachine(...args) }
 }))
 jest.mock('@services/EventManager', () => ({
   getEventManager: jest.fn(() => ({ dispatchEvent: jest.fn() }))
@@ -42,7 +48,15 @@ describe('PoolService.checkOutDesktopForUser', () => {
     jest.clearAllMocks()
     prisma = mockDeep<PrismaClient>()
     service = new PoolService(prisma)
+
+    mockStartMachine.mockResolvedValue({ success: true })
+    prisma.machine.update.mockResolvedValue({} as any)
+    prisma.machine.count.mockResolvedValue(0)
+    // Used by provisionOne on the on-demand spawn path.
+    prisma.machineTemplate.findUnique.mockResolvedValue({ id: 't', name: 'ubuntu', description: '' } as any)
   })
+
+  // ── claim / TOCTOU ────────────────────────────────────────────────────────
 
   it('returns an idle desktop after winning the atomic claim (non-persistent)', async () => {
     prisma.pool.findUnique.mockResolvedValue(pool() as any)
@@ -98,7 +112,7 @@ describe('PoolService.checkOutDesktopForUser', () => {
 
   it('returns the already-assigned machine for a persistent pool without claiming', async () => {
     prisma.pool.findUnique.mockResolvedValue(pool({ type: 'persistent' }) as any)
-    prisma.machine.findFirst.mockResolvedValue({ id: 'assigned-1' } as any)
+    prisma.machine.findFirst.mockResolvedValue({ id: 'assigned-1', status: 'running' } as any)
 
     const result = await service.checkOutDesktopForUser('pool-1', 'user-1')
 
@@ -119,5 +133,50 @@ describe('PoolService.checkOutDesktopForUser', () => {
     prisma.machine.count.mockResolvedValue(2) // already at sizeMax
 
     await expect(service.checkOutDesktopForUser('pool-1', 'user-1')).rejects.toThrow('capacity')
+  })
+
+  // ── boot (6.F completion) ─────────────────────────────────────────────────
+
+  it('powers on a freshly claimed desktop', async () => {
+    prisma.pool.findUnique.mockResolvedValue(pool() as any)
+    prisma.machine.findFirst.mockResolvedValue({ id: 'm-1' } as any)
+    prisma.machine.updateMany.mockResolvedValue({ count: 1 })
+    prisma.machine.findUnique.mockResolvedValue({ id: 'm-1', status: 'starting' } as any)
+
+    const result = await service.checkOutDesktopForUser('pool-1', 'user-1')
+
+    expect(result.id).toBe('m-1')
+    expect(mockStartMachine).toHaveBeenCalledWith('m-1')
+  })
+
+  it('releases the reservation back to off and throws when the boot fails', async () => {
+    prisma.pool.findUnique.mockResolvedValue(pool() as any)
+    prisma.machine.findFirst.mockResolvedValue({ id: 'm-1' } as any)
+    prisma.machine.updateMany.mockResolvedValue({ count: 1 })
+    prisma.machine.findUnique.mockResolvedValue({ id: 'm-1', status: 'starting' } as any)
+    mockStartMachine.mockResolvedValueOnce({ success: false, error: 'boom' })
+
+    await expect(service.checkOutDesktopForUser('pool-1', 'user-1')).rejects.toThrow('Failed to start')
+    expect(prisma.machine.update).toHaveBeenCalledWith({ where: { id: 'm-1' }, data: { status: 'off' } })
+  })
+
+  it('does not power on an already-running assigned desktop', async () => {
+    prisma.pool.findUnique.mockResolvedValue(pool({ type: 'persistent' }) as any)
+    prisma.machine.findFirst.mockResolvedValue({ id: 'assigned-1', status: 'running' } as any)
+
+    await service.checkOutDesktopForUser('pool-1', 'user-1')
+
+    expect(mockStartMachine).not.toHaveBeenCalled()
+  })
+
+  it('does not power on an on-demand spawned desktop (the create pipeline boots it)', async () => {
+    prisma.pool.findUnique.mockResolvedValue(pool() as any)
+    prisma.machine.findFirst.mockResolvedValue(null) // nothing idle → spawn
+    prisma.machine.count.mockResolvedValue(0) // under capacity
+
+    const result = await service.checkOutDesktopForUser('pool-1', 'user-1')
+
+    expect(result.id).toBe('spawned-1')
+    expect(mockStartMachine).not.toHaveBeenCalled()
   })
 })

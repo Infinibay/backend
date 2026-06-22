@@ -23,6 +23,7 @@ import logger from '@main/logger'
 import { SafeUser } from '../utils/context'
 import { MachineLifecycleService } from './machineLifecycleService'
 import { MachineCleanupServiceV2 } from './cleanup/machineCleanupServiceV2'
+import { VMOperationsService } from './VMOperationsService'
 import { getEventManager, type EventAction } from './EventManager'
 import { OsEnum } from '../graphql/resolvers/machine/type'
 
@@ -280,31 +281,39 @@ export class PoolService {
   // -------------------------------------------------------------------
 
   /**
-   * Find a desktop from the pool for the given user. For persistent
-   * pools: return the user's assigned machine if any. For non-
-   * persistent: any idle (stopped/off) machine. Spawns on-demand up to
-   * sizeMax when nothing idle is available.
+   * Check out a desktop for the user and ensure it is powered on. For
+   * persistent pools: the user's assigned machine if any, else a freshly
+   * claimed idle one. For non-persistent: any idle machine. Spawns on-demand
+   * up to sizeMax when nothing idle is available.
    */
   async checkOutDesktopForUser (poolId: string, userId: string): Promise<Machine> {
     const pool = await this.prisma.pool.findUnique({ where: { id: poolId } })
     if (!pool) throw new Error(`Pool not found: ${poolId}`)
     if (pool.draining) throw new Error('Pool is draining — no new connections')
 
-    // Claim an idle desktop atomically. findFirst + hand-out is a read-modify-
-    // write, so two users racing for the same idle machine could both get it.
-    // Guard with a bounded retry: each round picks a candidate and claims it
-    // with a conditional updateMany that only lands if the row is STILL idle
-    // (and, for persistent pools, still unassigned). Winner gets count 1; the
-    // loser gets count 0 and retries a different candidate. Flipping to
-    // 'starting' removes the machine from the idle set so it can't be
-    // double-handed-out.
-    //
-    // The claimed machine is left in 'starting' for the caller (pool
-    // connection-routing, 6.F) to power on; on a failed connect the caller
-    // must release it back to 'off'. Failing closed (a stuck 'starting') is
-    // intentional — never hand the same, or a non-reset, desktop to two users.
+    const { machine, outcome } = await this.acquireDesktop(pool, userId)
+    return await this.ensureBooted(machine, outcome)
+  }
+
+  /**
+   * Resolve a desktop for the user WITHOUT booting it. Returns the machine and
+   * how it was obtained so the caller knows whether it still needs powering on
+   * and whether a freshly-taken reservation must be released on failure.
+   *
+   * Claims an idle desktop atomically: findFirst + hand-out is a read-modify-
+   * write, so two users racing for the same idle machine could both get it.
+   * The bounded retry picks a candidate and claims it with a conditional
+   * updateMany that only lands if the row is STILL idle (and, for persistent
+   * pools, still unassigned). Winner gets count 1; the loser gets count 0 and
+   * retries a different candidate. Flipping to 'starting' removes the machine
+   * from the idle set so it can't be double-handed-out.
+   */
+  private async acquireDesktop (
+    pool: Pool,
+    userId: string
+  ): Promise<{ machine: Machine, outcome: 'assigned' | 'claimed' | 'spawned' }> {
     const idleWhere: Prisma.MachineWhereInput = {
-      poolId,
+      poolId: pool.id,
       status: { in: ['off', 'stopped', 'paused'] },
       ...(pool.type === 'persistent' ? { userId: null } : {})
     }
@@ -313,9 +322,9 @@ export class PoolService {
       // persistent pool may have just assigned them one.
       if (pool.type === 'persistent') {
         const assigned = await this.prisma.machine.findFirst({
-          where: { poolId, userId, status: { not: 'archived' } }
+          where: { poolId: pool.id, userId, status: { not: 'archived' } }
         })
-        if (assigned) return assigned
+        if (assigned) return { machine: assigned, outcome: 'assigned' }
       }
 
       const candidate = await this.prisma.machine.findFirst({
@@ -333,19 +342,51 @@ export class PoolService {
       })
       if (claim.count === 1) {
         const machine = await this.prisma.machine.findUnique({ where: { id: candidate.id } })
-        if (machine) return machine
+        if (machine) return { machine, outcome: 'claimed' }
       }
       // Lost to a concurrent checkout — loop and try another candidate.
     }
 
     // Spawn on-demand
     const current = await this.prisma.machine.count({
-      where: { poolId, status: { not: 'archived' } }
+      where: { poolId: pool.id, status: { not: 'archived' } }
     })
     if (current >= pool.sizeMax) {
       throw new Error('Pool at capacity — try again later or ask the operator to scale up')
     }
-    return await this.provisionOne(pool, pool.type === 'persistent' ? userId : undefined)
+    const machine = await this.provisionOne(pool, pool.type === 'persistent' ? userId : undefined)
+    return { machine, outcome: 'spawned' }
+  }
+
+  /**
+   * Power on the checked-out desktop so the user gets a running machine —
+   * completing the reservation taken in acquireDesktop. Skips machines that are
+   * already running (persistent reconnect) or were just spawned (the create
+   * pipeline launches QEMU itself). If the boot fails and we had freshly
+   * claimed an idle desktop, release it back to 'off' so it rejoins the pool
+   * instead of leaking in 'starting'.
+   */
+  private async ensureBooted (
+    machine: Machine,
+    outcome: 'assigned' | 'claimed' | 'spawned'
+  ): Promise<Machine> {
+    if (outcome === 'spawned') return machine
+    if (machine.status === 'running') return machine
+
+    const result = await new VMOperationsService(this.prisma).startMachine(machine.id)
+    if (!result.success) {
+      if (outcome === 'claimed') {
+        await this.prisma.machine
+          .update({ where: { id: machine.id }, data: { status: 'off' } })
+          .catch((err) => {
+            this.debug.warn(`failed to release machine=${machine.id} after boot failure: ${(err as Error).message}`)
+          })
+      }
+      throw new Error(`Failed to start pooled desktop ${machine.id}: ${result.error ?? 'unknown error'}`)
+    }
+    // The successful start emits its own vms:power_on event via infinization's
+    // QMP handler, so there's nothing to broadcast here.
+    return machine
   }
 
   // -------------------------------------------------------------------

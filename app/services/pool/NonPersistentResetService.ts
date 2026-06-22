@@ -22,9 +22,10 @@
  *     'error' rather than 'off', keeping a broken disk out of the pool.
  *   - No-ops silently (with a log line) if preconditions fail.
  *
- * NOTE: once the pool connection-routing path (6.F) powers VMs on at checkout,
- * that path must also refuse to start a machine in REBUILDING to fully close
- * the boot-during-reset window.
+ * The pool checkout path (PoolService.ensureBooted) only powers on desktops it
+ * claimed from the idle set (off/stopped/paused), so it never starts a machine
+ * mid-REBUILD — that, together with this lock, closes the boot-during-reset
+ * window from both sides.
  */
 
 import fs from 'fs/promises'
