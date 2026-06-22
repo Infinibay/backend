@@ -18,7 +18,7 @@
  */
 
 import { Logger } from 'winston'
-import { PrismaClient, Pool, Machine } from '@prisma/client'
+import { PrismaClient, Pool, Machine, Prisma } from '@prisma/client'
 import logger from '@main/logger'
 import { SafeUser } from '../utils/context'
 import { MachineLifecycleService } from './machineLifecycleService'
@@ -290,30 +290,52 @@ export class PoolService {
     if (!pool) throw new Error(`Pool not found: ${poolId}`)
     if (pool.draining) throw new Error('Pool is draining — no new connections')
 
-    if (pool.type === 'persistent') {
-      const assigned = await this.prisma.machine.findFirst({
-        where: { poolId, userId, status: { not: 'archived' } }
-      })
-      if (assigned) return assigned
+    // Claim an idle desktop atomically. findFirst + hand-out is a read-modify-
+    // write, so two users racing for the same idle machine could both get it.
+    // Guard with a bounded retry: each round picks a candidate and claims it
+    // with a conditional updateMany that only lands if the row is STILL idle
+    // (and, for persistent pools, still unassigned). Winner gets count 1; the
+    // loser gets count 0 and retries a different candidate. Flipping to
+    // 'starting' removes the machine from the idle set so it can't be
+    // double-handed-out.
+    //
+    // The claimed machine is left in 'starting' for the caller (pool
+    // connection-routing, 6.F) to power on; on a failed connect the caller
+    // must release it back to 'off'. Failing closed (a stuck 'starting') is
+    // intentional — never hand the same, or a non-reset, desktop to two users.
+    const idleWhere: Prisma.MachineWhereInput = {
+      poolId,
+      status: { in: ['off', 'stopped', 'paused'] },
+      ...(pool.type === 'persistent' ? { userId: null } : {})
     }
-
-    // Try idle
-    const idle = await this.prisma.machine.findFirst({
-      where: {
-        poolId,
-        status: { in: ['off', 'stopped', 'paused'] },
-        ...(pool.type === 'persistent' ? { userId: null } : {})
-      },
-      orderBy: { createdAt: 'asc' }
-    })
-    if (idle) {
+    for (let attempt = 0; attempt < 5; attempt++) {
+      // Re-check inside the loop: a concurrent checkout for THIS user on a
+      // persistent pool may have just assigned them one.
       if (pool.type === 'persistent') {
-        await this.prisma.machine.update({
-          where: { id: idle.id },
-          data: { userId }
+        const assigned = await this.prisma.machine.findFirst({
+          where: { poolId, userId, status: { not: 'archived' } }
         })
+        if (assigned) return assigned
       }
-      return idle
+
+      const candidate = await this.prisma.machine.findFirst({
+        where: idleWhere,
+        orderBy: { createdAt: 'asc' }
+      })
+      if (!candidate) break // nothing idle → fall through to on-demand spawn
+
+      const claim = await this.prisma.machine.updateMany({
+        where: { id: candidate.id, ...idleWhere },
+        data: {
+          status: 'starting',
+          ...(pool.type === 'persistent' ? { userId } : {})
+        }
+      })
+      if (claim.count === 1) {
+        const machine = await this.prisma.machine.findUnique({ where: { id: candidate.id } })
+        if (machine) return machine
+      }
+      // Lost to a concurrent checkout — loop and try another candidate.
     }
 
     // Spawn on-demand
