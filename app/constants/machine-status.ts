@@ -15,6 +15,10 @@ export const SUSPENDED_STATUS = 'suspended' as const
 export const PAUSED_STATUS = 'paused' as const
 export const UPDATING_HARDWARE_STATUS = 'updating_hardware' as const
 export const POWERING_OFF_UPDATE_STATUS = 'powering_off_update' as const
+// Transient lock held by NonPersistentResetService while a pool desktop's
+// qcow2 delta is being wiped + rebuilt from its golden image. Excluded from
+// the pool checkout path so a half-rebuilt disk is never handed to a user.
+export const REBUILDING_STATUS = 'rebuilding' as const
 export const ERROR_STATUS = 'error' as const
 
 export type MachineStatusValue =
@@ -25,6 +29,7 @@ export type MachineStatusValue =
   | typeof PAUSED_STATUS
   | typeof UPDATING_HARDWARE_STATUS
   | typeof POWERING_OFF_UPDATE_STATUS
+  | typeof REBUILDING_STATUS
   | typeof ERROR_STATUS
 
 const ALL_STATUSES: MachineStatusValue[] = [
@@ -35,6 +40,7 @@ const ALL_STATUSES: MachineStatusValue[] = [
   PAUSED_STATUS,
   UPDATING_HARDWARE_STATUS,
   POWERING_OFF_UPDATE_STATUS,
+  REBUILDING_STATUS,
   ERROR_STATUS
 ]
 

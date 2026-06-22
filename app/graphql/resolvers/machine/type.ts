@@ -214,6 +214,10 @@ export enum MachineStatus {
     PAUSED = 'paused',
     UPDATING_HARDWARE = 'updating_hardware',
     POWERING_OFF_UPDATE = 'powering_off_update',
+    // Transient: a non-persistent pool desktop is being re-baselined to its
+    // golden image after logoff. Held while the qcow2 delta is wiped + rebuilt
+    // so the machine stays out of the pool checkout pool until it's clean.
+    REBUILDING = 'rebuilding',
     ERROR = 'error'
 }
 

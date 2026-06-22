@@ -11,11 +11,20 @@
  *      starts it again when a user connects.
  *
  * Safety:
- *   - Runs only when `Machine.status === 'off'` AND the QEMU process is
- *     not alive (double-checked via infinization).
- *   - No-ops silently (with a log line) if preconditions fail. A future
- *     run on the same event is safe — recreating a qcow2 that already
- *     matches the backing state is idempotent.
+ *   - Runs only once the QEMU process is confirmed not alive (checked via
+ *     infinization) — the 'vm:off' event can fire before the process actually
+ *     releases the qcow2.
+ *   - Takes an atomic REBUILDING lock before touching the disk: the desktop
+ *     drops out of PoolService.checkOutDesktopForUser (which only picks
+ *     off/stopped/paused) so a user can never be handed a half-rebuilt disk,
+ *     and concurrent shutdown handlers for the same VM are serialised.
+ *   - On success the machine returns to 'off'; on failure it is parked in
+ *     'error' rather than 'off', keeping a broken disk out of the pool.
+ *   - No-ops silently (with a log line) if preconditions fail.
+ *
+ * NOTE: once the pool connection-routing path (6.F) powers VMs on at checkout,
+ * that path must also refuse to start a machine in REBUILDING to fully close
+ * the boot-during-reset window.
  */
 
 import fs from 'fs/promises'
@@ -24,6 +33,10 @@ import { Logger } from 'winston'
 import { PrismaClient } from '@prisma/client'
 import logger from '@main/logger'
 import { getInfinization } from '@services/InfinizationService'
+import { OFF_STATUS, ERROR_STATUS, REBUILDING_STATUS } from '../../constants/machine-status'
+
+// Pool-internal pseudo-status for archived/cleaned-up members (see PoolService).
+const ARCHIVED_STATUS = 'archived'
 
 export class NonPersistentResetService {
   private prisma: PrismaClient
@@ -80,20 +93,64 @@ export class NonPersistentResetService {
       return
     }
 
+    // Atomic claim — the lock that closes the race window. Until now the
+    // machine is still `off`, which means PoolService.checkOutDesktopForUser
+    // (it only ever picks off/stopped/paused) could hand it to a user while
+    // we wipe its disk. Flip it to REBUILDING first: that status is outside
+    // the checkout set, so the desktop drops out of the pool until it's clean.
+    //
+    // The conditional WHERE also serialises concurrent shutdown handlers — two
+    // 'off' events for the same VM race here, the first wins (count 1) and the
+    // second sees REBUILDING and bails (count 0), so unlink/create never run
+    // twice on the same delta. We claim from any non-terminal status (not just
+    // 'off') because QEMU is already confirmed dead above, so re-baselining is
+    // safe regardless of a stale DB label.
+    const claim = await this.prisma.machine.updateMany({
+      where: { id: machineId, status: { notIn: [REBUILDING_STATUS, ARCHIVED_STATUS] } },
+      data: { status: REBUILDING_STATUS }
+    })
+    if (claim.count !== 1) {
+      this.debug.info(
+        `machine=${machineId} already claimed (rebuilding/archived) — skipping duplicate reset`
+      )
+      return
+    }
+
     this.debug.info(
       `resetting non-persistent desktop machine=${machineId} ` +
       `(delta=${deltaPath} backing=${backingPath})`
     )
 
-    // Unlink the stale delta (if present) then create a fresh thin clone.
-    await fs.unlink(deltaPath).catch((err) => {
-      if (err?.code !== 'ENOENT') {
-        this.debug.warn(`unlink delta failed: ${err.message}`)
-      }
-    })
-    await qemuImgCreateBacked(backingPath, deltaPath)
+    try {
+      // Unlink the stale delta (if present) then create a fresh thin clone.
+      await fs.unlink(deltaPath).catch((err) => {
+        if (err?.code !== 'ENOENT') {
+          this.debug.warn(`unlink delta failed: ${err.message}`)
+        }
+      })
+      await qemuImgCreateBacked(backingPath, deltaPath)
 
-    this.debug.info(`machine=${machineId} reset to golden-image baseline`)
+      // Release the lock — the desktop is clean and can be handed out again.
+      await this.prisma.machine.update({
+        where: { id: machineId },
+        data: { status: OFF_STATUS }
+      })
+      this.debug.info(`machine=${machineId} reset to golden-image baseline`)
+    } catch (err) {
+      // The delta may now be missing or half-written. Do NOT release to 'off'
+      // (that would hand a broken disk to the next user). Park in 'error' so it
+      // stays out of the checkout pool until an operator — or a later shutdown
+      // event — recovers it.
+      this.debug.error(
+        `machine=${machineId} reset failed: ${(err as Error).message} — parking in error`
+      )
+      await this.prisma.machine.update({
+        where: { id: machineId },
+        data: { status: ERROR_STATUS }
+      }).catch((e) => {
+        this.debug.warn(`failed to mark machine=${machineId} as error: ${(e as Error).message}`)
+      })
+    }
   }
 }
 

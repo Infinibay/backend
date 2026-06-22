@@ -160,7 +160,8 @@ model Machine {
   id                 String                @id @default(uuid())
   name               String
   internalName       String
-  /// QEMU process state. Allowed values: off | starting | running | suspended | paused | updating_hardware | powering_off_update | error.
+  /// QEMU process state. Allowed values: off | starting | running | suspended | paused | updating_hardware | powering_off_update | rebuilding | error.
+  /// 'rebuilding' is a transient lock set while a non-persistent pool desktop is re-baselined to its golden image (see NonPersistentResetService).
   /// Independent from MachineConfiguration.setupComplete (whether OS install + first infiniservice handshake completed).
   status             String
   userId             String?
