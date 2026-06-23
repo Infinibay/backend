@@ -1,11 +1,11 @@
 import logger from '@main/logger'
-import { Resolver, Query, Ctx, Authorized } from 'type-graphql'
+import { Resolver, Query, Ctx } from 'type-graphql'
 import * as si from 'systeminformation'
 import * as fs from 'fs'
 import * as path from 'path'
 import { SystemResources, GPU } from './type'
 import { InfinibayContext } from '../../../utils/context'
-import { assertCanAccessResource } from '../../utils/auth'
+import { Can } from '@main/permissions'
 
 /**
  * Mirrors CreateMachineServiceV2.validateGpuPassthrough. Returns a non-null
@@ -53,11 +53,10 @@ function checkGpuPassthrough (pciBus: string): { ready: boolean, reason: string 
 @Resolver(() => SystemResources)
 export class SystemResolver {
   @Query(() => SystemResources)
-  @Authorized('ADMIN')
+  @Can('system:view')
   async getSystemResources (
     @Ctx() context: InfinibayContext
   ): Promise<SystemResources> {
-    await assertCanAccessResource(context, 'infrastructure')
     try {
       // Get CPU information
       const cpuData = await si.cpu()
@@ -135,9 +134,8 @@ export class SystemResolver {
   }
 
   @Query(() => [GPU])
-  @Authorized('ADMIN')
+  @Can('system:view')
   async getGraphics (@Ctx() context: InfinibayContext): Promise<GPU[]> {
-    await assertCanAccessResource(context, 'infrastructure')
     try {
       // Fetch already assigned GPU buses
       const assignments = await context.prisma.machineConfiguration.findMany({

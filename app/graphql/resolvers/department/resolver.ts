@@ -1,6 +1,6 @@
 import logger from '@main/logger'
 import { PrismaClient } from '@prisma/client'
-import { Resolver, Query, Mutation, Arg, Ctx, Authorized, Int } from 'type-graphql'
+import { Resolver, Query, Mutation, Arg, Ctx, Int } from 'type-graphql'
 import { UserInputError } from '../../../utils/errors'
 import { DepartmentType, UpdateDepartmentNameInput, UpdateDepartmentNetworkInput, CreateDepartmentFirewallInput, UpdateDepartmentFirewallPolicyInput, DepartmentNetworkDiagnosticsType, DhcpTrafficCaptureType } from './type'
 import { InfinibayContext } from '../../../utils/context'
@@ -12,12 +12,12 @@ import { FirewallPolicyService } from '../../../services/firewall/FirewallPolicy
 import { FirewallOrchestrationService } from '../../../services/firewall/FirewallOrchestrationService'
 import { FirewallValidationService } from '../../../services/firewall/FirewallValidationService'
 import { InfinizationFirewallService } from '../../../services/firewall/InfinizationFirewallService'
-import { assertCanAccessResource } from '../../utils/auth'
+import { Can } from '@main/permissions'
 
 @Resolver(DepartmentType)
 export class DepartmentResolver {
   @Query(() => [DepartmentType])
-  @Authorized('USER')
+  @Can('department:view')
   async departments (
     @Ctx() { prisma }: InfinibayContext
   ): Promise<DepartmentType[]> {
@@ -46,7 +46,7 @@ export class DepartmentResolver {
   }
 
   @Query(() => DepartmentType, { nullable: true })
-  @Authorized('USER')
+  @Can('department:view', { id: (a) => a.id })
   async department (
     @Arg('id') id: string,
     @Ctx() { prisma }: InfinibayContext
@@ -78,13 +78,12 @@ export class DepartmentResolver {
   }
 
   @Mutation(() => DepartmentType)
-  @Authorized('ADMIN')
+  @Can('department:create')
   async createDepartment (
     @Arg('name') name: string,
     @Arg('firewallConfig', { nullable: true }) firewallConfig: CreateDepartmentFirewallInput,
     @Ctx() context: InfinibayContext
   ): Promise<DepartmentType> {
-    await assertCanAccessResource(context, 'departments')
     const { prisma, user } = context
     // Validate name is not empty
     const trimmedName = name.trim()
@@ -223,12 +222,11 @@ export class DepartmentResolver {
 
   // Destroy department
   @Mutation(() => DepartmentType)
-  @Authorized('ADMIN')
+  @Can('department:delete', { id: (a) => a.id })
   async destroyDepartment (
     @Arg('id') id: string,
     @Ctx() context: InfinibayContext
   ): Promise<DepartmentType> {
-    await assertCanAccessResource(context, 'departments')
     const { prisma, user } = context
     // Check if deparment exist, if not, error, if yes, dlete it
     const department = await prisma.department.findUnique({
@@ -277,12 +275,11 @@ export class DepartmentResolver {
   }
 
   @Mutation(() => DepartmentType)
-  @Authorized('ADMIN')
+  @Can('department:edit', { id: (a) => a.input.id })
   async updateDepartmentName (
     @Arg('input') input: UpdateDepartmentNameInput,
     @Ctx() context: InfinibayContext
   ): Promise<DepartmentType> {
-    await assertCanAccessResource(context, 'departments')
     const { prisma, user } = context
     const { id, name } = input
 
@@ -369,7 +366,7 @@ export class DepartmentResolver {
 
   // find deparment by name
   @Query(() => DepartmentType, { nullable: true })
-  @Authorized('USER')
+  @Can('department:view')
   async findDepartmentByName (
     @Arg('name') name: string,
     @Ctx() { prisma }: InfinibayContext
@@ -404,12 +401,11 @@ export class DepartmentResolver {
   }
 
   @Mutation(() => DepartmentType)
-  @Authorized('ADMIN')
+  @Can('department:edit', { id: (a) => a.input.id })
   async updateDepartmentNetwork (
     @Arg('input') input: UpdateDepartmentNetworkInput,
     @Ctx() context: InfinibayContext
   ): Promise<DepartmentType> {
-    await assertCanAccessResource(context, 'infrastructure')
     const { prisma, user } = context
     const { id, dnsServers, ntpServers } = input
 
@@ -504,13 +500,12 @@ export class DepartmentResolver {
    * will be restarted to apply the new firewall rules.
    */
   @Mutation(() => DepartmentType)
-  @Authorized('ADMIN')
+  @Can('department:manageFirewall', { id: (a) => a.departmentId })
   async updateDepartmentFirewallPolicy (
     @Arg('departmentId', () => String) departmentId: string,
     @Arg('input') input: UpdateDepartmentFirewallPolicyInput,
     @Ctx() context: InfinibayContext
   ): Promise<DepartmentType> {
-    await assertCanAccessResource(context, 'firewall')
     const { prisma, user } = context
     const { firewallPolicy, firewallDefaultConfig, firewallCustomRules } = input
     const id = departmentId
@@ -634,12 +629,11 @@ export class DepartmentResolver {
    * Checks bridge, dnsmasq, br_netfilter, and NAT status.
    */
   @Query(() => DepartmentNetworkDiagnosticsType)
-  @Authorized('ADMIN')
+  @Can('department:view', { id: (a) => a.departmentId })
   async departmentNetworkDiagnostics (
     @Arg('departmentId') departmentId: string,
     @Ctx() context: InfinibayContext
   ): Promise<DepartmentNetworkDiagnosticsType> {
-    await assertCanAccessResource(context, 'infrastructure')
     const { prisma } = context
     const networkService = new DepartmentNetworkService(prisma)
 
@@ -656,13 +650,12 @@ export class DepartmentResolver {
    * Returns captured packets with summary statistics.
    */
   @Query(() => DhcpTrafficCaptureType)
-  @Authorized('ADMIN')
+  @Can('department:view', { id: (a) => a.departmentId })
   async captureDepartmentDhcpTraffic (
     @Arg('departmentId') departmentId: string,
     @Arg('durationSeconds', () => Int, { defaultValue: 30 }) durationSeconds: number,
     @Ctx() context: InfinibayContext
   ): Promise<DhcpTrafficCaptureType> {
-    await assertCanAccessResource(context, 'infrastructure')
     const { prisma } = context
     // Validate duration
     if (durationSeconds < 5 || durationSeconds > 120) {

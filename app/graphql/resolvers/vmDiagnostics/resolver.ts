@@ -1,6 +1,7 @@
 import logger from '@main/logger'
 import { Resolver, Query, Arg, Ctx } from 'type-graphql'
 import { InfinibayContext } from '@main/utils/context'
+import { Can } from '@main/permissions'
 import { getQemuGuestAgentService } from '@services/QemuGuestAgentService'
 import { getVirtioSocketWatcherService } from '@services/VirtioSocketWatcherService'
 import { VmDiagnostics, SocketConnectionStats, VmConnectionInfo } from './type'
@@ -38,6 +39,7 @@ export class VmDiagnosticsResolver {
   @Query(() => VmDiagnostics, {
     description: 'Get comprehensive diagnostics for VM socket connection issues'
   })
+  @Can('vmHealth:view', { id: (a) => a.vmId, scopeVia: 'vm' })
   async vmSocketDiagnostics (
     @Arg('vmId') vmId: string,
     @Ctx() { prisma }: InfinibayContext
@@ -118,6 +120,7 @@ export class VmDiagnosticsResolver {
     description: 'Get current socket connection statistics for all VMs',
     nullable: true
   })
+  @Can('vmHealth:view')
   async socketConnectionStats (): Promise<SocketConnectionStats | null> {
     try {
       const socketWatcher = getVirtioSocketWatcherService()

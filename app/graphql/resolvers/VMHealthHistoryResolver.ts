@@ -1,8 +1,8 @@
-import { Arg, Authorized, Ctx, Query, Resolver, ObjectType, Field, ID, Int } from 'type-graphql'
+import { Arg, Ctx, Query, Resolver, ObjectType, Field, ID, Int } from 'type-graphql'
 import { GraphQLJSONObject } from 'graphql-type-json'
 import { TaskStatus, TaskPriority, HealthCheckType } from '@prisma/client'
 import { InfinibayContext } from '@utils/context'
-import { assertCanAccessResource } from '../utils/auth'
+import { Can } from '@main/permissions'
 
 @ObjectType()
 export class VMHealthSnapshotType {
@@ -154,28 +154,13 @@ export class QueueStatsType {
 @Resolver()
 export class VMHealthHistoryResolver {
   @Query(() => [VMHealthSnapshotType])
-  @Authorized(['USER'])
+  @Can('vmHealth:view', { id: (a) => a.machineId, scopeVia: 'vm' })
   async vmHealthHistory (
     @Arg('machineId', () => ID) machineId: string,
     @Arg('limit', () => Int, { nullable: true, defaultValue: 20 }) limit: number,
     @Arg('offset', () => Int, { nullable: true, defaultValue: 0 }) offset: number,
     @Ctx() context: InfinibayContext
   ): Promise<VMHealthSnapshotType[]> {
-    // Check if user has access to this machine
-    const machine = await context.prisma.machine.findUnique({
-      where: { id: machineId },
-      select: { id: true, userId: true }
-    })
-
-    if (!machine) {
-      throw new Error('Machine not found')
-    }
-
-    // Regular users can only see their own machines
-    if ((context.user?.role !== 'ADMIN' && context.user?.role !== 'SUPER_ADMIN') && machine.userId !== context.user?.id) {
-      throw new Error('Access denied')
-    }
-
     const snapshots = await context.prisma.vMHealthSnapshot.findMany({
       where: { machineId },
       orderBy: { snapshotDate: 'desc' },
@@ -187,26 +172,11 @@ export class VMHealthHistoryResolver {
   }
 
   @Query(() => VMHealthSnapshotType, { nullable: true })
-  @Authorized(['USER'])
+  @Can('vmHealth:view', { id: (a) => a.machineId, scopeVia: 'vm' })
   async latestVMHealthSnapshot (
     @Arg('machineId', () => ID) machineId: string,
     @Ctx() context: InfinibayContext
   ): Promise<VMHealthSnapshotType | null> {
-    // Check if user has access to this machine
-    const machine = await context.prisma.machine.findUnique({
-      where: { id: machineId },
-      select: { id: true, userId: true }
-    })
-
-    if (!machine) {
-      throw new Error('Machine not found')
-    }
-
-    // Regular users can only see their own machines
-    if ((context.user?.role !== 'ADMIN' && context.user?.role !== 'SUPER_ADMIN') && machine.userId !== context.user?.id) {
-      throw new Error('Access denied')
-    }
-
     const snapshot = await context.prisma.vMHealthSnapshot.findFirst({
       where: { machineId },
       orderBy: { snapshotDate: 'desc' }
@@ -216,7 +186,7 @@ export class VMHealthHistoryResolver {
   }
 
   @Query(() => [VMHealthCheckQueueType])
-  @Authorized(['USER'])
+  @Can('vmHealth:view')
   async vmHealthCheckQueue (
     @Ctx() context: InfinibayContext,
     @Arg('machineId', () => ID, { nullable: true }) machineId?: string,
@@ -233,23 +203,21 @@ export class VMHealthHistoryResolver {
     if (machineId) {
       const machine = await context.prisma.machine.findUnique({
         where: { id: machineId },
-        select: { id: true, userId: true }
+        select: { id: true, userId: true, departmentId: true }
       })
 
       if (!machine) {
         throw new Error('Machine not found')
       }
 
-      // Regular users can only see their own machines
-      if ((context.user?.role !== 'ADMIN' && context.user?.role !== 'SUPER_ADMIN') && machine.userId !== context.user?.id) {
-        throw new Error('Access denied')
-      }
+      await context.assertCan!('vmHealth:view', machine)
 
       where.machineId = machineId
-    } else if ((context.user?.role !== 'ADMIN' && context.user?.role !== 'SUPER_ADMIN')) {
-      // Regular users can only see their own machines' queues
+    } else {
+      // Limit to machines the caller can view
+      const machineWhere = await context.scopedWhere!('vmHealth:view')
       const userMachines = await context.prisma.machine.findMany({
-        where: { userId: context.user?.id },
+        where: machineWhere,
         select: { id: true }
       })
       where.machineId = { in: userMachines.map(m => m.id) }
@@ -270,26 +238,11 @@ export class VMHealthHistoryResolver {
   }
 
   @Query(() => VMHealthSnapshotType, { nullable: true })
-  @Authorized(['USER'])
+  @Can('vmHealth:view', { id: (a) => a.machineId, scopeVia: 'vm' })
   async getLatestVMHealth (
     @Arg('machineId', () => ID) machineId: string,
     @Ctx() context: InfinibayContext
   ): Promise<VMHealthSnapshotType | null> {
-    // Check if user has access to this machine
-    const machine = await context.prisma.machine.findUnique({
-      where: { id: machineId },
-      select: { id: true, userId: true }
-    })
-
-    if (!machine) {
-      throw new Error('Machine not found')
-    }
-
-    // Regular users can only see their own machines
-    if ((context.user?.role !== 'ADMIN' && context.user?.role !== 'SUPER_ADMIN') && machine.userId !== context.user?.id) {
-      throw new Error('Access denied')
-    }
-
     const snapshot = await context.prisma.vMHealthSnapshot.findFirst({
       where: { machineId },
       orderBy: { snapshotDate: 'desc' }
@@ -299,26 +252,11 @@ export class VMHealthHistoryResolver {
   }
 
   @Query(() => VMHealthStatsType)
-  @Authorized(['USER'])
+  @Can('vmHealth:view', { id: (a) => a.machineId, scopeVia: 'vm' })
   async vmHealthStats (
     @Arg('machineId', () => ID) machineId: string,
     @Ctx() context: InfinibayContext
   ): Promise<VMHealthStatsType> {
-    // Check if user has access to this machine
-    const machine = await context.prisma.machine.findUnique({
-      where: { id: machineId },
-      select: { id: true, userId: true }
-    })
-
-    if (!machine) {
-      throw new Error('Machine not found')
-    }
-
-    // Regular users can only see their own machines
-    if ((context.user?.role !== 'ADMIN' && context.user?.role !== 'SUPER_ADMIN') && machine.userId !== context.user?.id) {
-      throw new Error('Access denied')
-    }
-
     const [
       totalSnapshots,
       healthySnapshots,
@@ -356,9 +294,8 @@ export class VMHealthHistoryResolver {
   }
 
   @Query(() => QueueStatsType)
-  @Authorized(['ADMIN'])
+  @Can('vmHealth:view')
   async healthCheckQueueStats (@Ctx() context: InfinibayContext): Promise<QueueStatsType> {
-    await assertCanAccessResource(context, 'infrastructure')
     const today = new Date()
     today.setHours(0, 0, 0, 0)
 

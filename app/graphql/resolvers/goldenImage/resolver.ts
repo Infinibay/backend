@@ -1,4 +1,4 @@
-import { Arg, Authorized, Ctx, ID, Mutation, Query, Resolver } from 'type-graphql'
+import { Arg, Ctx, ID, Mutation, Query, Resolver } from 'type-graphql'
 
 import {
   GoldenImage as GoldenImageGql,
@@ -14,7 +14,7 @@ import { getVirtioSocketWatcherService } from '@services/VirtioSocketWatcherServ
 import { InfinibayContext } from '@utils/context'
 import { UserInputError } from '@utils/errors'
 import { GoldenImage as PrismaGoldenImage } from '@prisma/client'
-import { assertCanAccessResource } from '../../utils/auth'
+import { Can } from '@main/permissions'
 
 function getService (ctx: InfinibayContext): GoldenImageService {
   if (!ctx.prisma) throw new UserInputError('Database context not available')
@@ -53,7 +53,7 @@ export class GoldenImageResolver {
   // -------------------------------------------------------------------------
 
   @Query(() => [GoldenImageGql])
-  @Authorized(['USER'])
+  @Can('goldenImage:view')
   async goldenImages (@Ctx() ctx?: InfinibayContext): Promise<GoldenImageGql[]> {
     if (!ctx) throw new UserInputError('Context not available')
     const rows = await getService(ctx).list()
@@ -61,7 +61,7 @@ export class GoldenImageResolver {
   }
 
   @Query(() => GoldenImageGql, { nullable: true })
-  @Authorized(['USER'])
+  @Can('goldenImage:view', { id: (a) => a.id })
   async goldenImage (
     @Arg('id', () => ID) id: string,
     @Ctx() ctx?: InfinibayContext
@@ -78,13 +78,12 @@ export class GoldenImageResolver {
   @Mutation(() => GoldenImageResult, {
     description: 'Build a sealed golden image from a blueprint (long-running).'
   })
-  @Authorized(['ADMIN'])
+  @Can('goldenImage:create')
   async createGoldenImageFromTemplate (
     @Arg('input') input: CreateGoldenImageFromTemplateInput,
     @Ctx() ctx?: InfinibayContext
   ): Promise<GoldenImageResult> {
     if (!ctx) throw new UserInputError('Context not available')
-    await assertCanAccessResource(ctx, 'blueprints')
     try {
       const row = await getService(ctx).buildAutomated({
         templateId: input.templateId,
@@ -103,13 +102,12 @@ export class GoldenImageResolver {
   @Mutation(() => GoldenImageResult, {
     description: 'Seal an existing VM into a new golden image (long-running).'
   })
-  @Authorized(['ADMIN'])
+  @Can('goldenImage:create')
   async captureGoldenImageFromMachine (
     @Arg('input') input: CaptureGoldenImageFromMachineInput,
     @Ctx() ctx?: InfinibayContext
   ): Promise<GoldenImageResult> {
     if (!ctx) throw new UserInputError('Context not available')
-    await assertCanAccessResource(ctx, 'blueprints')
     try {
       const row = await getService(ctx).captureFromMachine({
         machineId: input.machineId,
@@ -132,13 +130,12 @@ export class GoldenImageResolver {
   // -------------------------------------------------------------------------
 
   @Mutation(() => GoldenImageResult)
-  @Authorized(['ADMIN'])
+  @Can('goldenImage:publish', { id: (a) => a.id })
   async publishGoldenImage (
     @Arg('id', () => ID) id: string,
     @Ctx() ctx?: InfinibayContext
   ): Promise<GoldenImageResult> {
     if (!ctx) throw new UserInputError('Context not available')
-    await assertCanAccessResource(ctx, 'blueprints')
     try {
       const row = await getService(ctx).publish(id)
       return { success: true, image: toGql(row) }
@@ -148,13 +145,12 @@ export class GoldenImageResolver {
   }
 
   @Mutation(() => GoldenImageResult)
-  @Authorized(['ADMIN'])
+  @Can('goldenImage:deprecate', { id: (a) => a.id })
   async deprecateGoldenImage (
     @Arg('id', () => ID) id: string,
     @Ctx() ctx?: InfinibayContext
   ): Promise<GoldenImageResult> {
     if (!ctx) throw new UserInputError('Context not available')
-    await assertCanAccessResource(ctx, 'blueprints')
     try {
       const row = await getService(ctx).deprecate(id)
       return { success: true, image: toGql(row) }
@@ -166,13 +162,12 @@ export class GoldenImageResolver {
   @Mutation(() => GoldenImageResult, {
     description: 'Retry a failed golden image build. Only works for automated (template-based) builds.'
   })
-  @Authorized(['ADMIN'])
+  @Can('goldenImage:create', { id: (a) => a.id })
   async retryBuildGoldenImage (
     @Arg('id', () => ID) id: string,
     @Ctx() ctx?: InfinibayContext
   ): Promise<GoldenImageResult> {
     if (!ctx) throw new UserInputError('Context not available')
-    await assertCanAccessResource(ctx, 'blueprints')
     try {
       const row = await getService(ctx).retryBuild(id)
       return { success: true, image: toGql(row) }
@@ -182,13 +177,12 @@ export class GoldenImageResolver {
   }
 
   @Mutation(() => Boolean)
-  @Authorized(['ADMIN'])
+  @Can('goldenImage:delete', { id: (a) => a.id })
   async deleteGoldenImage (
     @Arg('id', () => ID) id: string,
     @Ctx() ctx?: InfinibayContext
   ): Promise<boolean> {
     if (!ctx) throw new UserInputError('Context not available')
-    await assertCanAccessResource(ctx, 'blueprints')
     return await getService(ctx).delete(id)
   }
 }

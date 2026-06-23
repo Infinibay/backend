@@ -1,5 +1,6 @@
-import { Resolver, Query, Mutation, Arg, ID, Authorized, Ctx } from 'type-graphql'
+import { Resolver, Query, Mutation, Arg, ID, Ctx } from 'type-graphql'
 import { getVirtioSocketWatcherService, VirtioSocketWatcherService } from '@services/VirtioSocketWatcherService'
+import { Can } from '@main/permissions'
 import { InfinibayContext } from '@utils/context'
 import { parseInfiniServiceTimestamp, InfiniServiceTimestamp } from '@utils/dateHelpers'
 import {
@@ -125,28 +126,12 @@ export class AutoCheckResolver {
   @Query(() => HealthCheckStatus, {
     description: 'Get comprehensive health check status for a VM'
   })
-  @Authorized('USER')
+  @Can('vmHealth:view', { id: (a) => a.vmId, scopeVia: 'vm' })
   async getVMHealthStatus (
     @Arg('vmId', () => ID) vmId: string,
-    @Ctx() { prisma, user }: InfinibayContext
+    @Ctx() _ctx: InfinibayContext
   ): Promise<HealthCheckStatus> {
     try {
-      // Check user access to machine
-      const machine = await prisma.machine.findUnique({
-        where: { id: vmId }
-      })
-
-      if (!machine) {
-        throw new Error('Machine not found')
-      }
-
-      const isAdmin = (user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN')
-      const isOwner = machine.userId === user?.id
-
-      if (!isAdmin && !isOwner) {
-        throw new Error('Access denied to this machine')
-      }
-
       const result = await this.getVirtioSocketService().sendSafeCommand(
         vmId,
         { action: 'RunAllHealthChecks' },
@@ -205,29 +190,13 @@ export class AutoCheckResolver {
   @Query(() => GenericHealthCheckResponse, {
     description: 'Run a specific health check on a VM'
   })
-  @Authorized('USER')
+  @Can('vmHealth:view', { id: (a) => a.vmId, scopeVia: 'vm' })
   async runHealthCheck (
     @Arg('vmId', () => ID) vmId: string,
     @Arg('checkName', () => HealthCheckName) checkName: HealthCheckName,
-    @Ctx() { prisma, user }: InfinibayContext
+    @Ctx() _ctx: InfinibayContext
   ): Promise<GenericHealthCheckResponse> {
     try {
-      // Check user access to machine
-      const machine = await prisma.machine.findUnique({
-        where: { id: vmId }
-      })
-
-      if (!machine) {
-        throw new Error('Machine not found')
-      }
-
-      const isAdmin = (user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN')
-      const isOwner = machine.userId === user?.id
-
-      if (!isAdmin && !isOwner) {
-        throw new Error('Access denied to this machine')
-      }
-
       const result = await this.getVirtioSocketService().sendSafeCommand(
         vmId,
         { action: 'RunHealthCheck', params: { check_name: checkName } },
@@ -269,30 +238,14 @@ export class AutoCheckResolver {
   @Query(() => DiskSpaceInfo, {
     description: 'Check disk space status for a VM'
   })
-  @Authorized('USER')
+  @Can('vmHealth:view', { id: (a) => a.vmId, scopeVia: 'vm' })
   async checkVMDiskSpace (
     @Arg('vmId', () => ID) vmId: string,
-    @Ctx() { prisma, user }: InfinibayContext,
+    @Ctx() _ctx: InfinibayContext,
     @Arg('warningThreshold', () => Number, { nullable: true }) warningThreshold?: number,
     @Arg('criticalThreshold', () => Number, { nullable: true }) criticalThreshold?: number
   ): Promise<DiskSpaceInfo> {
     try {
-      // Check user access to machine
-      const machine = await prisma.machine.findUnique({
-        where: { id: vmId }
-      })
-
-      if (!machine) {
-        throw new Error('Machine not found')
-      }
-
-      const isAdmin = (user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN')
-      const isOwner = machine.userId === user?.id
-
-      if (!isAdmin && !isOwner) {
-        throw new Error('Access denied to this machine')
-      }
-
       const params: Record<string, unknown> = {}
       if (warningThreshold !== undefined) {
         params.warning_threshold = warningThreshold
@@ -353,29 +306,13 @@ export class AutoCheckResolver {
   @Query(() => ResourceOptimizationInfo, {
     description: 'Check resource optimization opportunities for a VM'
   })
-  @Authorized('USER')
+  @Can('vmHealth:view', { id: (a) => a.vmId, scopeVia: 'vm' })
   async checkResourceOptimization (
     @Arg('vmId', () => ID) vmId: string,
-    @Ctx() { prisma, user }: InfinibayContext,
+    @Ctx() _ctx: InfinibayContext,
     @Arg('evaluationWindowDays', () => Number, { nullable: true }) evaluationWindowDays?: number
   ): Promise<ResourceOptimizationInfo> {
     try {
-      // Check user access to machine
-      const machine = await prisma.machine.findUnique({
-        where: { id: vmId }
-      })
-
-      if (!machine) {
-        throw new Error('Machine not found')
-      }
-
-      const isAdmin = (user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN')
-      const isOwner = machine.userId === user?.id
-
-      if (!isAdmin && !isOwner) {
-        throw new Error('Access denied to this machine')
-      }
-
       const params: Record<string, unknown> = {}
       if (evaluationWindowDays !== undefined) {
         params.evaluation_window_days = evaluationWindowDays
@@ -432,28 +369,12 @@ export class AutoCheckResolver {
   @Query(() => WindowsUpdateInfo, {
     description: 'Check Windows Updates status for a VM'
   })
-  @Authorized('USER')
+  @Can('vmHealth:view', { id: (a) => a.vmId, scopeVia: 'vm' })
   async checkWindowsUpdates (
     @Arg('vmId', () => ID) vmId: string,
-    @Ctx() { prisma, user }: InfinibayContext
+    @Ctx() _ctx: InfinibayContext
   ): Promise<WindowsUpdateInfo> {
     try {
-      // Check user access to machine
-      const machine = await prisma.machine.findUnique({
-        where: { id: vmId }
-      })
-
-      if (!machine) {
-        throw new Error('Machine not found')
-      }
-
-      const isAdmin = (user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN')
-      const isOwner = machine.userId === user?.id
-
-      if (!isAdmin && !isOwner) {
-        throw new Error('Access denied to this machine')
-      }
-
       const result = await this.getVirtioSocketService().sendSafeCommand(
         vmId,
         { action: 'CheckWindowsUpdates' },
@@ -511,29 +432,13 @@ export class AutoCheckResolver {
   @Query(() => WindowsUpdateHistory, {
     description: 'Get Windows Update history for a VM'
   })
-  @Authorized('USER')
+  @Can('vmHealth:view', { id: (a) => a.vmId, scopeVia: 'vm' })
   async getWindowsUpdateHistory (
     @Arg('vmId', () => ID) vmId: string,
-    @Ctx() { prisma, user }: InfinibayContext,
+    @Ctx() _ctx: InfinibayContext,
     @Arg('days', () => Number, { nullable: true }) days?: number
   ): Promise<WindowsUpdateHistory> {
     try {
-      // Check user access to machine
-      const machine = await prisma.machine.findUnique({
-        where: { id: vmId }
-      })
-
-      if (!machine) {
-        throw new Error('Machine not found')
-      }
-
-      const isAdmin = (user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN')
-      const isOwner = machine.userId === user?.id
-
-      if (!isAdmin && !isOwner) {
-        throw new Error('Access denied to this machine')
-      }
-
       const params: Record<string, unknown> = {}
       if (days !== undefined) {
         params.days = days
@@ -585,28 +490,12 @@ export class AutoCheckResolver {
   @Query(() => WindowsDefenderStatus, {
     description: 'Check Windows Defender status for a VM'
   })
-  @Authorized('USER')
+  @Can('vmHealth:view', { id: (a) => a.vmId, scopeVia: 'vm' })
   async checkWindowsDefender (
     @Arg('vmId', () => ID) vmId: string,
-    @Ctx() { prisma, user }: InfinibayContext
+    @Ctx() _ctx: InfinibayContext
   ): Promise<WindowsDefenderStatus> {
     try {
-      // Check user access to machine
-      const machine = await prisma.machine.findUnique({
-        where: { id: vmId }
-      })
-
-      if (!machine) {
-        throw new Error('Machine not found')
-      }
-
-      const isAdmin = (user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN')
-      const isOwner = machine.userId === user?.id
-
-      if (!isAdmin && !isOwner) {
-        throw new Error('Access denied to this machine')
-      }
-
       const result = await this.getVirtioSocketService().sendSafeCommand(
         vmId,
         { action: 'CheckWindowsDefender' },
@@ -663,28 +552,12 @@ export class AutoCheckResolver {
   @Query(() => ApplicationInventory, {
     description: 'Get installed applications inventory for a VM'
   })
-  @Authorized('USER')
+  @Can('vmHealth:view', { id: (a) => a.vmId, scopeVia: 'vm' })
   async getVMApplicationInventory (
     @Arg('vmId', () => ID) vmId: string,
-    @Ctx() { prisma, user }: InfinibayContext
+    @Ctx() _ctx: InfinibayContext
   ): Promise<ApplicationInventory> {
     try {
-      // Check user access to machine
-      const machine = await prisma.machine.findUnique({
-        where: { id: vmId }
-      })
-
-      if (!machine) {
-        throw new Error('Machine not found')
-      }
-
-      const isAdmin = (user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN')
-      const isOwner = machine.userId === user?.id
-
-      if (!isAdmin && !isOwner) {
-        throw new Error('Access denied to this machine')
-      }
-
       const result = await this.getVirtioSocketService().sendSafeCommand(
         vmId,
         { action: 'GetInstalledApplicationsWMI' },
@@ -730,28 +603,12 @@ export class AutoCheckResolver {
   @Query(() => ApplicationUpdates, {
     description: 'Check for application updates on a VM'
   })
-  @Authorized('USER')
+  @Can('vmHealth:view', { id: (a) => a.vmId, scopeVia: 'vm' })
   async checkApplicationUpdates (
     @Arg('vmId', () => ID) vmId: string,
-    @Ctx() { prisma, user }: InfinibayContext
+    @Ctx() _ctx: InfinibayContext
   ): Promise<ApplicationUpdates> {
     try {
-      // Check user access to machine
-      const machine = await prisma.machine.findUnique({
-        where: { id: vmId }
-      })
-
-      if (!machine) {
-        throw new Error('Machine not found')
-      }
-
-      const isAdmin = (user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN')
-      const isOwner = machine.userId === user?.id
-
-      if (!isAdmin && !isOwner) {
-        throw new Error('Access denied to this machine')
-      }
-
       const result = await this.getVirtioSocketService().sendSafeCommand(
         vmId,
         { action: 'CheckApplicationUpdates' },
@@ -839,28 +696,12 @@ export class AutoCheckResolver {
   @Mutation(() => DefenderScanResult, {
     description: 'Run Windows Defender quick scan on a VM'
   })
-  @Authorized('USER')
+  @Can('vmHealth:execute', { id: (a) => a.vmId, scopeVia: 'vm' })
   async runDefenderQuickScan (
     @Arg('vmId', () => ID) vmId: string,
-    @Ctx() { prisma, user }: InfinibayContext
+    @Ctx() _ctx: InfinibayContext
   ): Promise<DefenderScanResult> {
     try {
-      // Check user access to machine
-      const machine = await prisma.machine.findUnique({
-        where: { id: vmId }
-      })
-
-      if (!machine) {
-        throw new Error('Machine not found')
-      }
-
-      const isAdmin = (user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN')
-      const isOwner = machine.userId === user?.id
-
-      if (!isAdmin && !isOwner) {
-        throw new Error('Access denied to this machine')
-      }
-
       const result = await this.getVirtioSocketService().sendSafeCommand(
         vmId,
         { action: 'RunDefenderQuickScan' },
@@ -896,30 +737,14 @@ export class AutoCheckResolver {
   @Mutation(() => DiskCleanupResult, {
     description: 'Perform disk cleanup on a VM'
   })
-  @Authorized('USER')
+  @Can('vmHealth:execute', { id: (a) => a.vmId, scopeVia: 'vm' })
   async performDiskCleanup (
     @Arg('vmId', () => ID) vmId: string,
     @Arg('drive', () => String) drive: string,
-    @Ctx() { prisma, user }: InfinibayContext,
+    @Ctx() _ctx: InfinibayContext,
     @Arg('targets', () => [String], { nullable: true }) targets?: string[]
   ): Promise<DiskCleanupResult> {
     try {
-      // Check user access to machine
-      const machine = await prisma.machine.findUnique({
-        where: { id: vmId }
-      })
-
-      if (!machine) {
-        throw new Error('Machine not found')
-      }
-
-      const isAdmin = (user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN')
-      const isOwner = machine.userId === user?.id
-
-      if (!isAdmin && !isOwner) {
-        throw new Error('Access denied to this machine')
-      }
-
       const targetsToProcess = targets || ['temp_files', 'browser_cache', 'system_cache', 'recycle_bin']
       const result = await this.getVirtioSocketService().sendSafeCommand(
         vmId,

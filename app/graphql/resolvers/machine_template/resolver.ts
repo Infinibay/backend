@@ -1,7 +1,6 @@
 import { PrismaClient, Prisma } from '@prisma/client'
 import {
   Arg,
-  Authorized,
   Mutation,
   Query,
   Resolver,
@@ -11,7 +10,7 @@ import { InfinibayContext } from '@utils/context'
 import { UserInputError } from '@utils/errors'
 import { MachineTemplateType, MachineTemplateOrderBy, MachineTemplateInputType } from './type'
 import { PaginationInputType } from '@utils/pagination'
-import { assertCanAccessResource } from '../../utils/auth'
+import { Can } from '@main/permissions'
 
 export interface MachineTemplateResolverInterface {
   machineTemplates(pagination: PaginationInputType | undefined, orderBy: MachineTemplateOrderBy | undefined, ctx: InfinibayContext): Promise<MachineTemplateType[]>
@@ -39,12 +38,11 @@ export class MachineTemplateResolver implements MachineTemplateResolverInterface
    * @returns {Promise<MachineTemplateType | null>} The machine template object or null if not found.
    */
   @Query(() => MachineTemplateType, { nullable: true })
-  @Authorized('ADMIN')
+  @Can('machineTemplate:view', { id: (a) => a.id })
   async machineTemplate (
     @Arg('id', { nullable: false }) id: string,
     @Ctx() ctx: InfinibayContext
   ): Promise<MachineTemplateType | null> {
-    await assertCanAccessResource(ctx, 'blueprints')
     const machineTemplate = await ctx.prisma.machineTemplate.findUnique({
       where: { id },
       include: {
@@ -85,13 +83,12 @@ export class MachineTemplateResolver implements MachineTemplateResolverInterface
    * @returns {Promise<MachineTemplateType[]>} - An array of machine template objects.
    */
   @Query(() => [MachineTemplateType])
-  @Authorized('ADMIN')
+  @Can('machineTemplate:view')
   async machineTemplates (
     @Arg('pagination', { nullable: true }) pagination: PaginationInputType,
     @Arg('orderBy', { nullable: true }) orderBy: MachineTemplateOrderBy,
     @Ctx() ctx: InfinibayContext
   ): Promise<MachineTemplateType[]> {
-    await assertCanAccessResource(ctx, 'blueprints')
     const { prisma } = ctx
     const order = this.resolveOrder(orderBy)
     const skip = this.resolveSkip(pagination)
@@ -163,12 +160,11 @@ export class MachineTemplateResolver implements MachineTemplateResolverInterface
    * @returns {Promise<MachineTemplateType>} - The created machine template
    */
   @Mutation(() => MachineTemplateType)
-  @Authorized('ADMIN')
+  @Can('machineTemplate:create')
   async createMachineTemplate (
     @Arg('input', { nullable: false }) input: MachineTemplateInputType,
     @Ctx() ctx: InfinibayContext
   ): Promise<MachineTemplateType> {
-    await assertCanAccessResource(ctx, 'blueprints')
     const { prisma } = ctx
 
     await this.checkMachineTemplateExistence(input.name, prisma)
@@ -240,13 +236,12 @@ export class MachineTemplateResolver implements MachineTemplateResolverInterface
    * @throws {UserInputError} - If the machine template with the specified ID is not found.
    */
   @Mutation(() => MachineTemplateType)
-  @Authorized('ADMIN')
+  @Can('machineTemplate:edit', { id: (a) => a.id })
   async updateMachineTemplate (
     @Arg('id', { nullable: false }) id: string,
     @Arg('input', { nullable: false }) input: MachineTemplateInputType,
     @Ctx() ctx: InfinibayContext
   ): Promise<MachineTemplateType> {
-    await assertCanAccessResource(ctx, 'blueprints')
     const { prisma } = ctx
 
     // Ensure the machine template exists before updating
@@ -334,12 +329,11 @@ export class MachineTemplateResolver implements MachineTemplateResolverInterface
    * @returns {Promise<boolean>} - True if deletion was successful, throws error otherwise
    */
   @Mutation(() => Boolean)
-  @Authorized('ADMIN')
+  @Can('machineTemplate:delete', { id: (a) => a.id })
   async destroyMachineTemplate (
     @Arg('id', { nullable: false }) id: string,
     @Ctx() ctx: InfinibayContext
   ): Promise<boolean> {
-    await assertCanAccessResource(ctx, 'blueprints')
     const { prisma } = ctx
 
     // Check if template exists
@@ -376,12 +370,11 @@ export class MachineTemplateResolver implements MachineTemplateResolverInterface
    * @returns {Promise<boolean>} - True if deletion was successful, throws error otherwise
    */
   @Mutation(() => Boolean)
-  @Authorized('ADMIN')
+  @Can('machineTemplateCategory:delete', { id: (a) => a.id })
   async destroyMachineTemplateCategory (
     @Arg('id', { nullable: false }) id: string,
     @Ctx() ctx: InfinibayContext
   ): Promise<boolean> {
-    await assertCanAccessResource(ctx, 'blueprints')
     const { prisma } = ctx
 
     // Check if category exists

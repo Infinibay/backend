@@ -1,8 +1,8 @@
-import { Resolver, Query, Mutation, Arg, Authorized, Ctx } from 'type-graphql'
+import { Resolver, Query, Mutation, Arg, Ctx } from 'type-graphql'
 import { DepartmentNetworkService } from '@services/network/DepartmentNetworkService'
 import { InfinibayContext } from '@main/utils/context'
 import { Network, IpRangeInput, NetworkIpInput, BridgeNameInput, NetworkBridge, NetworkIp, NetworkDhcp, NetworkDhcpRange, CreateNetworkInput, DeleteNetworkInput } from './types'
-import { assertCanAccessResource } from '../../utils/auth'
+import { Can } from '@main/permissions'
 
 type NetworkXml = {
   $?: Record<string, string>
@@ -79,7 +79,7 @@ export class NetworkResolver {
   }
 
   @Query(() => [Network])
-  @Authorized('USER')
+  @Can('network:view')
   async networks (): Promise<Network[]> {
     // Department networks are managed per-department, not as global libvirt networks
     // Return empty array — network info is now available via department resolvers
@@ -87,58 +87,53 @@ export class NetworkResolver {
   }
 
   @Query(() => Network)
-  @Authorized('USER')
+  @Can('network:view')
   async network (@Arg('name') name: string): Promise<Network> {
     throw new Error(`Network '${name}' not found. Network management is now handled per-department via DepartmentNetworkService.`)
   }
 
   @Mutation(() => Boolean)
-  @Authorized('ADMIN')
+  @Can('network:create')
   async createNetwork (
     @Arg('input') _input: CreateNetworkInput,
     @Ctx() ctx: InfinibayContext
   ): Promise<boolean> {
-    await assertCanAccessResource(ctx, 'infrastructure')
     throw new Error('Global network creation is deprecated. Create networks via department management.')
   }
 
   @Mutation(() => Boolean)
-  @Authorized('ADMIN')
+  @Can('network:edit')
   async setNetworkIpRange (
     @Arg('input') _input: IpRangeInput,
     @Ctx() ctx: InfinibayContext
   ): Promise<boolean> {
-    await assertCanAccessResource(ctx, 'infrastructure')
     throw new Error('Global network IP range management is deprecated. Use department network settings.')
   }
 
   @Mutation(() => Boolean)
-  @Authorized('ADMIN')
+  @Can('network:edit')
   async setNetworkIp (
     @Arg('input') _input: NetworkIpInput,
     @Ctx() ctx: InfinibayContext
   ): Promise<boolean> {
-    await assertCanAccessResource(ctx, 'infrastructure')
     throw new Error('Global network IP management is deprecated. Use department network settings.')
   }
 
   @Mutation(() => Boolean)
-  @Authorized('ADMIN')
+  @Can('network:edit')
   async setNetworkBridgeName (
     @Arg('input') _input: BridgeNameInput,
     @Ctx() ctx: InfinibayContext
   ): Promise<boolean> {
-    await assertCanAccessResource(ctx, 'infrastructure')
     throw new Error('Global network bridge management is deprecated. Use department network settings.')
   }
 
   @Mutation(() => Boolean)
-  @Authorized('ADMIN')
+  @Can('network:delete')
   async deleteNetwork (
     @Arg('input') _input: DeleteNetworkInput,
     @Ctx() ctx: InfinibayContext
   ): Promise<boolean> {
-    await assertCanAccessResource(ctx, 'infrastructure')
     throw new Error('Global network deletion is deprecated. Delete networks via department management.')
   }
 }

@@ -22,6 +22,7 @@ import {
   createMachine,
   createHealthSnapshot
 } from '../setup/db-factories'
+import { seedSystemRoles } from '../setup/permission-factories'
 
 // PackageManager touches DB in its constructor; mock it out — unrelated to the
 // query/authz paths we actually care about here.
@@ -94,6 +95,9 @@ describe('Recommendation API E2E — real database', () => {
   })
 
   beforeEach(async () => {
+    // Action/verb RBAC: seed system roles so each user's enum role resolves to
+    // its grants (USER → recommendation:view@OWN, ADMIN → recommendation:manage).
+    await seedSystemRoles(prisma)
     const department = await createDepartment(prisma)
     userRow = await createUser(prisma, { email: `e2e-user-${Date.now()}@test.infinibay` })
     adminRow = await createAdmin(prisma, { email: `e2e-admin-${Date.now()}@test.infinibay` })
@@ -207,7 +211,7 @@ describe('Recommendation API E2E — real database', () => {
         variables: { vmId: otherUserMachine.id }
       })
       expect(res.body.errors).toBeDefined()
-      expect(res.body.errors[0].message).toBe('Access denied')
+      expect(res.body.errors[0].message).toMatch(/not authorized|access denied|requires recommendation:view/i)
     })
 
     it('lets an admin read any machine recommendations', async () => {

@@ -8,6 +8,17 @@ import { InfinibayContext } from '@utils/context'
 import { mockPrisma } from './jest.setup'
 import { createMockUser, createMockAdminUser, createMockMachine } from './mock-factories'
 
+// Permissive permission helpers for DIRECT-CALL resolver tests (which bypass the
+// @Can middleware). They make ctx behave as fully authorized so unit tests keep
+// exercising business logic; real permission enforcement is covered by the
+// schema-execution tests in tests/integration/permissions/.
+const MOCK_PERMISSION_HELPERS = {
+  can: async () => true,
+  assertCan: async () => {},
+  scopedWhere: async (_permission: string, baseWhere: Record<string, unknown> = {}) => baseWhere,
+  permissionGrants: async () => new Map<string, any>()
+}
+
 // JWT token generation for testing
 export function generateTestToken (userId: string, role: string = 'USER'): string {
   return jwt.sign(
@@ -102,7 +113,8 @@ export function createMockContext (options: { user?: User | null; prisma?: Prism
     user,
     setupMode: false,
     virtioSocketWatcher: undefined,
-    eventManager: undefined
+    eventManager: undefined,
+    ...MOCK_PERMISSION_HELPERS
   }
 }
 
@@ -865,7 +877,8 @@ export async function withComplexTransaction (
       res: {} as any,
       setupMode: false,
       virtioSocketWatcher: undefined,
-      eventManager: undefined
+      eventManager: undefined,
+      ...MOCK_PERMISSION_HELPERS
     }
 
     const adminContext: InfinibayContext = {
@@ -875,7 +888,8 @@ export async function withComplexTransaction (
       res: {} as any,
       setupMode: false,
       virtioSocketWatcher: undefined,
-      eventManager: undefined
+      eventManager: undefined,
+      ...MOCK_PERMISSION_HELPERS
     }
 
     jest.clearAllMocks()
@@ -1128,7 +1142,8 @@ export async function withTransaction (
       res: {} as any,
       setupMode: false,
       virtioSocketWatcher: undefined,
-      eventManager: undefined
+      eventManager: undefined,
+      ...MOCK_PERMISSION_HELPERS
     }
 
     const adminContext: InfinibayContext = {
@@ -1138,7 +1153,8 @@ export async function withTransaction (
       res: {} as any,
       setupMode: false,
       virtioSocketWatcher: undefined,
-      eventManager: undefined
+      eventManager: undefined,
+      ...MOCK_PERMISSION_HELPERS
     }
 
     // Clear all mocks

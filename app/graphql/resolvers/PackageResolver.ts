@@ -1,6 +1,7 @@
 import logger from '@main/logger'
-import { Resolver, Query, Mutation, Arg, Ctx, Authorized, ID } from 'type-graphql'
+import { Resolver, Query, Mutation, Arg, Ctx, ID } from 'type-graphql'
 import { InfinibayContext } from '@utils/context'
+import { Can } from '@main/permissions'
 import {
   DirectPackageManager,
   getDirectPackageManager,
@@ -58,30 +59,12 @@ export class PackageResolver {
   @Query(() => [PackageInfo], {
     description: 'List all installed packages on a virtual machine'
   })
-  @Authorized('USER')
+  @Can('vmPackage:view', { id: (a) => a.machineId, scopeVia: 'vm' })
   async listInstalledPackages (
     @Arg('machineId', () => ID) machineId: string,
     @Ctx() ctx: InfinibayContext
   ): Promise<PackageInfo[]> {
     try {
-      // Check if user has access to this machine
-      const machine = await ctx.prisma.machine.findUnique({
-        where: { id: machineId },
-        select: { id: true, userId: true }
-      })
-
-      if (!machine) {
-        throw new Error('Machine not found')
-      }
-
-      // Check permissions
-      const isAdmin = (ctx.user?.role === 'ADMIN' || ctx.user?.role === 'SUPER_ADMIN')
-      const isOwner = machine.userId === ctx.user?.id
-
-      if (!isAdmin && !isOwner) {
-        throw new Error('Access denied to this machine')
-      }
-
       const packageManager = this.getPackageManager(ctx)
       const internalPackages = await packageManager.listPackages(machineId)
       // Map internal types to GraphQL types
@@ -107,31 +90,13 @@ export class PackageResolver {
   @Query(() => [PackageInfo], {
     description: 'Search for available packages on a virtual machine'
   })
-  @Authorized('USER')
+  @Can('vmPackage:view', { id: (a) => a.machineId, scopeVia: 'vm' })
   async searchPackages (
     @Arg('machineId', () => ID) machineId: string,
     @Arg('query', () => String) query: string,
     @Ctx() ctx: InfinibayContext
   ): Promise<PackageInfo[]> {
     try {
-      // Check if user has access to this machine
-      const machine = await ctx.prisma.machine.findUnique({
-        where: { id: machineId },
-        select: { id: true, userId: true }
-      })
-
-      if (!machine) {
-        throw new Error('Machine not found')
-      }
-
-      // Check permissions
-      const isAdmin = (ctx.user?.role === 'ADMIN' || ctx.user?.role === 'SUPER_ADMIN')
-      const isOwner = machine.userId === ctx.user?.id
-
-      if (!isAdmin && !isOwner) {
-        throw new Error('Access denied to this machine')
-      }
-
       const packageManager = this.getPackageManager(ctx)
       const internalPackages = await packageManager.searchPackages(machineId, query)
       // Map internal types to GraphQL types
@@ -157,13 +122,13 @@ export class PackageResolver {
   @Mutation(() => PackageManagementResult, {
     description: 'Install, remove, or update a package on a virtual machine'
   })
-  @Authorized('USER')
+  @Can('vmPackage:manage', { id: (a) => a.input.machineId, scopeVia: 'vm' })
   async managePackage (
     @Arg('input') input: PackageManagementInput,
     @Ctx() ctx: InfinibayContext
   ): Promise<PackageManagementResult> {
     try {
-      // Check if user has access to this machine
+      // Look up the machine for event metadata
       const machine = await ctx.prisma.machine.findUnique({
         where: { id: input.machineId },
         select: { id: true, userId: true, name: true }
@@ -174,18 +139,6 @@ export class PackageResolver {
           success: false,
           message: 'Machine not found',
           error: 'Machine not found'
-        }
-      }
-
-      // Check permissions
-      const isAdmin = (ctx.user?.role === 'ADMIN' || ctx.user?.role === 'SUPER_ADMIN')
-      const isOwner = machine.userId === ctx.user?.id
-
-      if (!isAdmin && !isOwner) {
-        return {
-          success: false,
-          message: 'Access denied',
-          error: 'You do not have permission to manage packages on this machine'
         }
       }
 
@@ -258,14 +211,14 @@ export class PackageResolver {
   @Mutation(() => CommandResult, {
     description: 'Install a package on a virtual machine (legacy compatibility)'
   })
-  @Authorized('USER')
+  @Can('vmPackage:install', { id: (a) => a.machineId, scopeVia: 'vm' })
   async installPackage (
     @Arg('machineId', () => ID) machineId: string,
     @Arg('packageName', () => String) packageName: string,
     @Ctx() ctx: InfinibayContext
   ): Promise<CommandResult> {
     try {
-      // Check if user has access to this machine
+      // Look up the machine for event metadata
       const machine = await ctx.prisma.machine.findUnique({
         where: { id: machineId },
         select: { id: true, userId: true }
@@ -275,17 +228,6 @@ export class PackageResolver {
         return {
           success: false,
           error: 'Machine not found'
-        }
-      }
-
-      // Check permissions
-      const isAdmin = (ctx.user?.role === 'ADMIN' || ctx.user?.role === 'SUPER_ADMIN')
-      const isOwner = machine.userId === ctx.user?.id
-
-      if (!isAdmin && !isOwner) {
-        return {
-          success: false,
-          error: 'Access denied to this machine'
         }
       }
 
@@ -339,14 +281,14 @@ export class PackageResolver {
   @Mutation(() => CommandResult, {
     description: 'Remove a package from a virtual machine (legacy compatibility)'
   })
-  @Authorized('USER')
+  @Can('vmPackage:remove', { id: (a) => a.machineId, scopeVia: 'vm' })
   async removePackage (
     @Arg('machineId', () => ID) machineId: string,
     @Arg('packageName', () => String) packageName: string,
     @Ctx() ctx: InfinibayContext
   ): Promise<CommandResult> {
     try {
-      // Check if user has access to this machine
+      // Look up the machine for event metadata
       const machine = await ctx.prisma.machine.findUnique({
         where: { id: machineId },
         select: { id: true, userId: true }
@@ -356,17 +298,6 @@ export class PackageResolver {
         return {
           success: false,
           error: 'Machine not found'
-        }
-      }
-
-      // Check permissions
-      const isAdmin = (ctx.user?.role === 'ADMIN' || ctx.user?.role === 'SUPER_ADMIN')
-      const isOwner = machine.userId === ctx.user?.id
-
-      if (!isAdmin && !isOwner) {
-        return {
-          success: false,
-          error: 'Access denied to this machine'
         }
       }
 
@@ -420,14 +351,14 @@ export class PackageResolver {
   @Mutation(() => CommandResult, {
     description: 'Update a package on a virtual machine (legacy compatibility)'
   })
-  @Authorized('USER')
+  @Can('vmPackage:update', { id: (a) => a.machineId, scopeVia: 'vm' })
   async updatePackage (
     @Arg('machineId', () => ID) machineId: string,
     @Arg('packageName', () => String) packageName: string,
     @Ctx() ctx: InfinibayContext
   ): Promise<CommandResult> {
     try {
-      // Check if user has access to this machine
+      // Look up the machine for event metadata
       const machine = await ctx.prisma.machine.findUnique({
         where: { id: machineId },
         select: { id: true, userId: true }
@@ -437,17 +368,6 @@ export class PackageResolver {
         return {
           success: false,
           error: 'Machine not found'
-        }
-      }
-
-      // Check permissions
-      const isAdmin = (ctx.user?.role === 'ADMIN' || ctx.user?.role === 'SUPER_ADMIN')
-      const isOwner = machine.userId === ctx.user?.id
-
-      if (!isAdmin && !isOwner) {
-        return {
-          success: false,
-          error: 'Access denied to this machine'
         }
       }
 

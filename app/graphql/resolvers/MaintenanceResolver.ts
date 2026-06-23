@@ -2,7 +2,7 @@ import { Resolver, Query, Mutation, Arg, Ctx, ID } from 'type-graphql'
 import { MaintenanceTaskType, MaintenanceStatus, MaintenanceTrigger, Prisma } from '@prisma/client'
 import { InfinibayContext, requireUser } from '@utils/context'
 import { MaintenanceService } from '@services/MaintenanceService'
-import { assertCanAccessResource, assertCanManageVM, assertCanManageMaintenanceTask } from '@graphql/utils/auth'
+import { Can } from '@main/permissions'
 import {
   MaintenanceTask,
   MaintenanceHistory,
@@ -20,13 +20,12 @@ export class MaintenanceResolver {
    * Get all maintenance tasks for a specific VM
    */
   @Query(() => [MaintenanceTask])
+  @Can('maintenanceTask:view', { id: (a) => a.machineId, scopeVia: 'vm' })
   async maintenanceTasks (
     @Arg('machineId', () => ID) machineId: string,
     @Arg('status', () => String, { nullable: true }) status: 'enabled' | 'disabled' | undefined,
     @Ctx() ctx: InfinibayContext
   ): Promise<MaintenanceTask[]> {
-    // Check authorization
-    await assertCanManageVM(ctx, machineId)
     // Create MaintenanceService instance for this request
     const maintenanceService = new MaintenanceService(ctx.prisma)
     const tasks = await maintenanceService.getTasksForVM(machineId, status)
@@ -56,13 +55,11 @@ export class MaintenanceResolver {
    * Get maintenance task by ID
    */
   @Query(() => MaintenanceTask, { nullable: true })
+  @Can('maintenanceTask:view', { id: (a) => a.id })
   async maintenanceTask (
     @Arg('id', () => ID) id: string,
     @Ctx() ctx: InfinibayContext
   ): Promise<MaintenanceTask | null> {
-    // Check authorization first
-    await assertCanManageMaintenanceTask(ctx, id)
-
     const task = await ctx.prisma.maintenanceTask.findUnique({
       where: { id }
     })
@@ -94,6 +91,7 @@ export class MaintenanceResolver {
    * Get maintenance execution history for a VM
    */
   @Query(() => [MaintenanceHistory])
+  @Can('maintenanceTask:view', { id: (a) => a.machineId, scopeVia: 'vm' })
   async maintenanceHistory (
     @Arg('machineId', () => ID) machineId: string,
     @Arg('limit', { nullable: true, defaultValue: 50 }) limit: number,
@@ -101,9 +99,6 @@ export class MaintenanceResolver {
     @Arg('status', () => MaintenanceStatus, { nullable: true }) status: MaintenanceStatus | undefined,
     @Ctx() ctx: InfinibayContext
   ): Promise<MaintenanceHistory[]> {
-    // Check authorization
-    await assertCanManageVM(ctx, machineId)
-
     const where: { machineId: string; taskType?: MaintenanceTaskType; status?: MaintenanceStatus } = { machineId }
 
     if (taskType) where.taskType = taskType
@@ -136,13 +131,11 @@ export class MaintenanceResolver {
    * Get maintenance statistics for a VM
    */
   @Query(() => MaintenanceStats)
+  @Can('maintenanceTask:view', { id: (a) => a.machineId, scopeVia: 'vm' })
   async maintenanceStats (
     @Arg('machineId', () => ID) machineId: string,
     @Ctx() ctx: InfinibayContext
   ): Promise<MaintenanceStats> {
-    // Check authorization
-    await assertCanManageVM(ctx, machineId)
-
     const [
       totalTasks,
       enabledTasks,
@@ -211,15 +204,13 @@ export class MaintenanceResolver {
    * Create a new maintenance task
    */
   @Mutation(() => MaintenanceTaskResponse)
+  @Can('maintenanceTask:create', { id: (a) => a.input.machineId, scopeVia: 'vm' })
   async createMaintenanceTask (
     @Arg('input') input: CreateMaintenanceTaskInput,
     @Ctx() ctx: InfinibayContext
   ): Promise<MaintenanceTaskResponse> {
     try {
       const user = requireUser(ctx)
-      // Check authorization
-      await assertCanManageVM(ctx, input.machineId)
-
       // Create MaintenanceService instance for this request
       const maintenanceService = new MaintenanceService(ctx.prisma)
 
@@ -269,13 +260,12 @@ export class MaintenanceResolver {
    * Update an existing maintenance task
    */
   @Mutation(() => MaintenanceTaskResponse)
+  @Can('maintenanceTask:edit', { id: (a) => a.input.id })
   async updateMaintenanceTask (
     @Arg('input') input: UpdateMaintenanceTaskInput,
     @Ctx() ctx: InfinibayContext
   ): Promise<MaintenanceTaskResponse> {
     try {
-      // Check authorization
-      await assertCanManageMaintenanceTask(ctx, input.id)
       const updateData: Prisma.MaintenanceTaskUpdateInput = {}
       if (input.name !== undefined) updateData.name = input.name
       if (input.description !== undefined) updateData.description = input.description
@@ -326,13 +316,12 @@ export class MaintenanceResolver {
    * Delete a maintenance task
    */
   @Mutation(() => MaintenanceTaskResponse)
+  @Can('maintenanceTask:delete', { id: (a) => a.id })
   async deleteMaintenanceTask (
     @Arg('id', () => ID) id: string,
     @Ctx() ctx: InfinibayContext
   ): Promise<MaintenanceTaskResponse> {
     try {
-      // Check authorization
-      await assertCanManageMaintenanceTask(ctx, id)
       await ctx.prisma.maintenanceTask.delete({
         where: { id }
       })
@@ -353,14 +342,13 @@ export class MaintenanceResolver {
    * Execute a maintenance task immediately
    */
   @Mutation(() => MaintenanceExecutionResponse)
+  @Can('maintenanceTask:execute', { id: (a) => a.taskId })
   async executeMaintenanceTask (
     @Arg('taskId', () => ID) taskId: string,
     @Ctx() ctx: InfinibayContext
   ): Promise<MaintenanceExecutionResponse> {
     try {
       const user = requireUser(ctx)
-      // Check authorization
-      await assertCanManageMaintenanceTask(ctx, taskId)
       // Create MaintenanceService instance for this request
       const maintenanceService = new MaintenanceService(ctx.prisma)
 
@@ -389,14 +377,13 @@ export class MaintenanceResolver {
    * Execute immediate maintenance without creating a task
    */
   @Mutation(() => MaintenanceExecutionResponse)
+  @Can('maintenanceTask:execute', { id: (a) => a.input.machineId, scopeVia: 'vm' })
   async executeImmediateMaintenance (
     @Arg('input') input: ExecuteMaintenanceInput,
     @Ctx() ctx: InfinibayContext
   ): Promise<MaintenanceExecutionResponse> {
     const user = requireUser(ctx)
     try {
-      // Check authorization
-      await assertCanManageVM(ctx, input.machineId)
       // Create MaintenanceService instance for this request
       const maintenanceService = new MaintenanceService(ctx.prisma)
 
@@ -427,14 +414,13 @@ export class MaintenanceResolver {
    * Enable or disable a maintenance task
    */
   @Mutation(() => MaintenanceTaskResponse)
+  @Can('maintenanceTask:edit', { id: (a) => a.id })
   async toggleMaintenanceTask (
     @Arg('id', () => ID) id: string,
     @Arg('enabled', () => Boolean) enabled: boolean,
     @Ctx() ctx: InfinibayContext
   ): Promise<MaintenanceTaskResponse> {
     try {
-      // Check authorization
-      await assertCanManageMaintenanceTask(ctx, id)
       const task = await ctx.prisma.maintenanceTask.update({
         where: { id },
         data: { isEnabled: enabled }
@@ -474,11 +460,10 @@ export class MaintenanceResolver {
    * Get all due maintenance tasks across all VMs (for cron processing)
    */
   @Query(() => [MaintenanceTask])
+  @Can('maintenanceTask:view')
   async dueMaintenanceTasks (
     @Ctx() ctx: InfinibayContext
   ): Promise<MaintenanceTask[]> {
-    await assertCanAccessResource(ctx, 'infrastructure')
-
     // Create MaintenanceService instance for this request
     const maintenanceService = new MaintenanceService(ctx.prisma)
     const tasks = await maintenanceService.getDueTasks()

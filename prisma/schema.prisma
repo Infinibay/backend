@@ -34,9 +34,13 @@ model User {
   recommendationResolutions   RecommendationResolution[]
   departmentMemberships       DepartmentMembership[]
   policyAuditLogs             PolicyAuditLog[]           @relation("PolicyAuditActor")
+  roleId                      String?
+  customRole                  Role?                      @relation(fields: [roleId], references: [id])
+  permissionOverrides         UserPermissionOverride[]
 
   @@unique([identityProviderId, externalId])
   @@index([identityProviderId])
+  @@index([roleId])
 }
 
 model IdentityProvider {
@@ -102,17 +106,48 @@ model IdentitySyncRun {
   @@index([status])
 }
 
-model RolePermission {
-  id        String           @id @default(uuid())
-  role      UserRole
-  resource  String
-  effect    PermissionEffect
-  createdAt DateTime         @default(now())
-  updatedAt DateTime         @updatedAt
+// Action/verb-based RBAC. A Role is a named bundle of permission grants
+// (system presets SUPER_ADMIN/ADMIN/USER + user-created custom roles). A grant
+// is a `resource:verb` (or grouping `resource:manage` / `*`) at a scope.
+model Role {
+  id          String           @id @default(uuid())
+  key         String           @unique // 'SUPER_ADMIN'|'ADMIN'|'USER' or a custom slug
+  name        String
+  description String?
+  isSystem    Boolean          @default(false)
+  priority    Int              @default(0)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  permissions RolePermission[]
+  users       User[]
+}
 
-  @@unique([role, resource])
-  @@index([role])
-  @@index([resource])
+model RolePermission {
+  id         String          @id @default(uuid())
+  roleId     String
+  role       Role            @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission String          // 'vm:edit' | 'vm:manage' | '*'
+  scope      PermissionScope @default(ANY)
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
+
+  @@unique([roleId, permission])
+  @@index([roleId])
+}
+
+// Per-user grant/deny override layered on top of the user's role. DENY wins.
+model UserPermissionOverride {
+  id         String          @id @default(uuid())
+  userId     String
+  user       User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  permission String
+  scope      PermissionScope @default(ANY)
+  effect     GrantEffect     @default(ALLOW)
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
+
+  @@unique([userId, permission])
+  @@index([userId])
 }
 
 model Node {
@@ -256,10 +291,18 @@ enum IdentitySyncStatus {
   ERROR
 }
 
-enum PermissionEffect {
+// Scope axis for instance-bearing verbs. Global verbs (create/list/settings)
+// ignore scope. Ordering: ANY ⊇ DEPARTMENT ⊇ OWN.
+enum PermissionScope {
+  OWN
+  DEPARTMENT
+  ANY
+}
+
+// Effect for per-user overrides only (role grants are always additive/ALLOW).
+enum GrantEffect {
   ALLOW
   DENY
-  INHERIT
 }
 
 model MachineConfiguration {

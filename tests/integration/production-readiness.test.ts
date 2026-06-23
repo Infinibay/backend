@@ -1,9 +1,7 @@
 import 'reflect-metadata'
-import { PermissionEffect, UserRole } from '@prisma/client'
 import { testPrisma } from '../setup/jest.setup'
 import { NodePlacementService } from '@services/node/NodePlacementService'
 import { VMMigrationService } from '@services/node/VMMigrationService'
-import { RolePermissionService } from '@services/policy/RolePermissionService'
 
 describe('Production readiness flows — real database', () => {
   const prisma = testPrisma.prisma
@@ -113,21 +111,7 @@ describe('Production readiness flows — real database', () => {
     expect(unchanged.nodeId).toBe(source.id)
   })
 
-  it('persists enterprise permission overrides and restores inherited defaults', async () => {
-    const service = new RolePermissionService(prisma)
-
-    await expect(service.canAccess(UserRole.USER, 'desktops')).resolves.toBe(false)
-
-    await service.setPermission(UserRole.USER, 'desktops', PermissionEffect.ALLOW)
-    await expect(service.canAccess(UserRole.USER, 'desktops')).resolves.toBe(true)
-    await expect(prisma.rolePermission.count({
-      where: { role: UserRole.USER, resource: 'desktops' }
-    })).resolves.toBe(1)
-
-    await service.setPermission(UserRole.USER, 'desktops', PermissionEffect.INHERIT)
-    await expect(service.canAccess(UserRole.USER, 'desktops')).resolves.toBe(false)
-    await expect(prisma.rolePermission.count({
-      where: { role: UserRole.USER, resource: 'desktops' }
-    })).resolves.toBe(0)
-  })
+  // NOTE: the former "enterprise permission overrides" test was removed — it
+  // exercised the deleted RolePermissionService / role↔resource matrix. The
+  // action/verb RBAC is covered by tests/integration/permissions/*.
 })

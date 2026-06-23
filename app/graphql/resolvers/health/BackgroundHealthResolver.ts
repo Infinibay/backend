@@ -1,12 +1,12 @@
 import logger from '@main/logger'
-import { Resolver, Query, Mutation, Authorized, Ctx, ObjectType, Field, Int } from 'type-graphql'
+import { Resolver, Query, Mutation, Ctx, ObjectType, Field, Int } from 'type-graphql'
 import { InfinibayContext } from '@utils/context'
 import { BackgroundHealthService } from '@services/BackgroundHealthService'
 import { VMHealthQueueManager } from '@services/VMHealthQueueManager'
 import { BackgroundTaskService } from '@services/BackgroundTaskService'
 import { createEventManager } from '@services/EventManager'
 import { getSocketService } from '@services/SocketService'
-import { assertCanAccessResource } from '../../utils/auth'
+import { Can } from '@main/permissions'
 
 /**
  * Background Health Service Status Type
@@ -106,11 +106,10 @@ export class BackgroundHealthResolver {
    * Get background health service status
    */
   @Query(() => BackgroundHealthServiceStatus)
-  @Authorized(['ADMIN'])
+  @Can('vmHealth:view')
   async backgroundHealthServiceStatus (
     @Ctx() context: InfinibayContext
   ): Promise<BackgroundHealthServiceStatus> {
-    await assertCanAccessResource(context, 'infrastructure')
     const service = this.getBackgroundHealthService(context)
     const status = service.getStatus()
 
@@ -143,11 +142,10 @@ export class BackgroundHealthResolver {
    * Get queue statistics
    */
   @Query(() => QueueStatistics)
-  @Authorized(['ADMIN'])
+  @Can('vmHealth:view')
   async healthQueueStatistics (
     @Ctx() context: InfinibayContext
   ): Promise<QueueStatistics> {
-    await assertCanAccessResource(context, 'infrastructure')
     const today = new Date()
     today.setHours(0, 0, 0, 0)
 
@@ -188,11 +186,10 @@ export class BackgroundHealthResolver {
    * Manually trigger a health check round
    */
   @Mutation(() => HealthCheckRoundResult)
-  @Authorized(['ADMIN'])
+  @Can('vmHealth:execute', { minScope: 'ANY' })
   async triggerHealthCheckRound (
     @Ctx() context: InfinibayContext
   ): Promise<HealthCheckRoundResult> {
-    await assertCanAccessResource(context, 'infrastructure')
     try {
       const service = this.getBackgroundHealthService(context)
       const taskId = await service.triggerHealthCheckRound()
@@ -219,11 +216,10 @@ export class BackgroundHealthResolver {
    * Queue health checks for all VMs
    */
   @Mutation(() => HealthCheckRoundResult)
-  @Authorized(['ADMIN'])
+  @Can('vmHealth:execute', { minScope: 'ANY' })
   async queueAllVMHealthChecks (
     @Ctx() context: InfinibayContext
   ): Promise<HealthCheckRoundResult> {
-    await assertCanAccessResource(context, 'infrastructure')
     try {
       if (!this.queueManager) {
         this.getBackgroundHealthService(context) // Initialize services

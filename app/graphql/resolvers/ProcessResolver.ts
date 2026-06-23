@@ -1,10 +1,10 @@
 import logger from '@main/logger'
-import { Resolver, Mutation, Arg, Int, Ctx, Authorized } from 'type-graphql'
+import { Resolver, Mutation, Arg, Int, Ctx } from 'type-graphql'
 import { ProcessManager, InternalProcessControlResult } from '@services/ProcessManager'
 import { ProcessControlResult } from '../types/ProcessType'
 import { VirtioSocketWatcherService } from '@services/VirtioSocketWatcherService'
 import { getSocketService } from '@services/SocketService'
-import { assertCanManageVM } from '../utils/auth'
+import { Can } from '@main/permissions'
 import { InfinibayContext } from '@utils/context'
 
 type Context = InfinibayContext & {
@@ -33,7 +33,7 @@ export class ProcessResolver {
    * Kill a process on a VM
    */
   @Mutation(() => ProcessControlResult)
-  @Authorized()
+  @Can('vmProcess:kill', { id: (a) => a.machineId, scopeVia: 'vm' })
   async killProcess (
     @Arg('machineId') machineId: string,
     @Arg('pid', () => Int) pid: number,
@@ -44,7 +44,6 @@ export class ProcessResolver {
       if (!ctx) {
         throw new Error('Context not available')
       }
-      await assertCanManageVM(ctx, machineId)
 
       logger.debug(`Killing process ${pid} on machine ${machineId} (force: ${force})`)
 
@@ -93,7 +92,7 @@ export class ProcessResolver {
    * Kill multiple processes on a VM
    */
   @Mutation(() => [ProcessControlResult])
-  @Authorized()
+  @Can('vmProcess:kill', { id: (a) => a.machineId, scopeVia: 'vm' })
   async killProcesses (
     @Arg('machineId') machineId: string,
     @Arg('pids', () => [Int]) pids: number[],
@@ -104,7 +103,6 @@ export class ProcessResolver {
       if (!ctx) {
         throw new Error('Context not available')
       }
-      await assertCanManageVM(ctx, machineId)
 
       logger.debug(`Killing ${pids.length} processes on machine ${machineId} (force: ${force})`)
 

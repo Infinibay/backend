@@ -1,5 +1,5 @@
 import logger from '@main/logger'
-import { Resolver, Query, Mutation, Arg, Ctx, ID, Int, Authorized } from 'type-graphql';
+import { Resolver, Query, Mutation, Arg, Ctx, ID, Int } from 'type-graphql';
 import { UserInputError } from '@utils/errors';
 import { ScriptManager } from '../../../services/scripts/ScriptManager';
 import { ScriptExecutor } from '../../../services/scripts/ScriptExecutor';
@@ -25,7 +25,7 @@ import {
 } from './type';
 import { InfinibayContext, requireUser } from '../../../utils/context';
 import { ExecutionStatus, ExecutionType } from '@prisma/client';
-import { assertCanAccessResource, isOperatorRole } from '../../utils/auth';
+import { Can } from '@main/permissions';
 
 // Helper function to extract request metadata
 function extractRequestMetadata(ctx: InfinibayContext): { ipAddress?: string; userAgent?: string } {
@@ -82,7 +82,7 @@ export class ScriptResolver {
    * Query: Get all scripts with optional filters
    */
   @Query(() => [ScriptType])
-  @Authorized('USER')
+  @Can('script:view')
   async scripts(
     @Arg('filters', () => ScriptFiltersInput, { nullable: true }) filters: ScriptFiltersInput | null,
     @Ctx() ctx: InfinibayContext
@@ -105,7 +105,7 @@ export class ScriptResolver {
    * Query: Get a single script by ID with full details
    */
   @Query(() => ScriptType, { nullable: true })
-  @Authorized('USER')
+  @Can('script:view', { id: (a) => a.id })
   async script(
     @Arg('id', () => ID) id: string,
     @Ctx() ctx: InfinibayContext
@@ -131,7 +131,7 @@ export class ScriptResolver {
    * Query: Get scripts assigned to a department
    */
   @Query(() => [ScriptType])
-  @Authorized('USER')
+  @Can('script:view')
   async departmentScripts(
     @Arg('departmentId', () => ID) departmentId: string,
     @Ctx() ctx: InfinibayContext
@@ -153,7 +153,7 @@ export class ScriptResolver {
    * Query: Get script executions for a machine
    */
   @Query(() => [ScriptExecutionType])
-  @Authorized('USER')
+  @Can('script:view', { id: (a) => a.machineId, scopeVia: 'vm' })
   async scriptExecutions(
     @Arg('machineId', () => ID) machineId: string,
     @Arg('status', () => ExecutionStatus, { nullable: true }) status: ExecutionStatus | null,
@@ -210,7 +210,7 @@ export class ScriptResolver {
    * Query: Get script executions with advanced filtering and pagination
    */
   @Query(() => ScriptExecutionsResponseType)
-  @Authorized('USER')
+  @Can('script:view')
   async scriptExecutionsFiltered(
     @Arg('filters', () => ScriptExecutionsFiltersInput) filters: ScriptExecutionsFiltersInput,
     @Ctx() ctx: InfinibayContext
@@ -284,59 +284,43 @@ export class ScriptResolver {
       };
     }
 
-    const isAdmin = isOperatorRole(ctx.user.role);
+    // Verify the caller's scope covers the requested filter target(s).
+    // (`@Can('script:view')` gates the operation; here we narrow to the
+    //  specific scriptId/machineId/departmentId the caller asked for.)
+    const emptyResult = {
+      executions: [],
+      total: 0,
+      hasMore: false,
+      offset: filters.offset,
+      limit: filters.limit
+    };
 
-    // If not admin, verify user has access
-    if (!isAdmin) {
-      if (filters.scriptId) {
-        const script = await ctx.prisma.script.findUnique({
-          where: { id: filters.scriptId },
-          select: { createdById: true }
-        });
-        if (!script || script.createdById !== ctx.user.id) {
-          return {
-            executions: [],
-            total: 0,
-            hasMore: false,
-            offset: filters.offset,
-            limit: filters.limit
-          };
-        }
+    if (filters.scriptId) {
+      const script = await ctx.prisma.script.findUnique({
+        where: { id: filters.scriptId },
+        select: { createdById: true }
+      });
+      if (!script || !(await ctx.can!('script:view', { ownerId: script.createdById, departmentId: null }))) {
+        return emptyResult;
       }
+    }
 
-      if (filters.machineId) {
-        const machine = await ctx.prisma.machine.findUnique({
-          where: { id: filters.machineId },
-          select: { userId: true }
-        });
-        if (!machine || machine.userId !== ctx.user.id) {
-          return {
-            executions: [],
-            total: 0,
-            hasMore: false,
-            offset: filters.offset,
-            limit: filters.limit
-          };
-        }
+    if (filters.machineId) {
+      const machine = await ctx.prisma.machine.findUnique({
+        where: { id: filters.machineId },
+        select: { userId: true, departmentId: true }
+      });
+      if (!machine || !(await ctx.can!('script:view', { ownerId: machine.userId, departmentId: machine.departmentId }))) {
+        return emptyResult;
       }
+    }
 
-      if (filters.departmentId) {
-        // Check if user has access to any machines in the department
-        const machineCount = await ctx.prisma.machine.count({
-          where: {
-            departmentId: filters.departmentId,
-            userId: ctx.user.id
-          }
-        });
-        if (machineCount === 0) {
-          return {
-            executions: [],
-            total: 0,
-            hasMore: false,
-            offset: filters.offset,
-            limit: filters.limit
-          };
-        }
+    if (filters.departmentId) {
+      // Restrict the result set to the caller's accessible machines in the department.
+      const accessibleWhere = await ctx.scopedWhere!('script:view', { departmentId: filters.departmentId });
+      const machineCount = await ctx.prisma.machine.count({ where: accessibleWhere });
+      if (machineCount === 0) {
+        return emptyResult;
       }
     }
 
@@ -407,7 +391,7 @@ export class ScriptResolver {
    * Query: Get a single script execution by ID
    */
   @Query(() => ScriptExecutionType, { nullable: true })
-  @Authorized('USER')
+  @Can('script:view', { id: (a) => a.id, scopeVia: 'scriptExecution' })
   async scriptExecution(
     @Arg('id', () => ID) id: string,
     @Ctx() ctx: InfinibayContext
@@ -453,13 +437,12 @@ export class ScriptResolver {
    * Query: Get list of users on a VM for "Run As" selection
    */
   @Query(() => [String])
-  @Authorized('USER')
+  @Can('vm:view', { id: (a) => a.machineId, scopeVia: 'vm' })
   async vmUsers(
     @Arg('machineId', () => ID) machineId: string,
     @Ctx() ctx: InfinibayContext
   ): Promise<string[]> {
     // Initialize with Windows defaults (fallback)
-    const user = requireUser(ctx)
     let defaultUsers: string[] = ['administrator', 'system']
 
     try {
@@ -476,13 +459,6 @@ export class ScriptResolver {
 
       if (!machine) {
         throw new Error('Machine not found')
-      }
-
-      const isOwner = machine.userId === user.id
-      const isAdmin = isOperatorRole(user.role)
-
-      if (!isOwner && !isAdmin) {
-        throw new Error('Access denied')
       }
 
       // Determine OS-aware defaults
@@ -527,13 +503,12 @@ export class ScriptResolver {
    * Mutation: Create a new script
    */
   @Mutation(() => ScriptResponseType)
-  @Authorized('ADMIN')
+  @Can('script:create')
   async createScript(
     @Arg('input', () => CreateScriptInput) input: CreateScriptInput,
     @Ctx() ctx: InfinibayContext
   ): Promise<ScriptResponseType> {
     try {
-      await assertCanAccessResource(ctx, 'scripts')
       const { ipAddress, userAgent } = extractRequestMetadata(ctx)
       const user = requireUser(ctx)
       const scriptManager = new ScriptManager(ctx.prisma);
@@ -565,13 +540,12 @@ export class ScriptResolver {
    * Mutation: Update an existing script
    */
   @Mutation(() => ScriptResponseType)
-  @Authorized('ADMIN')
+  @Can('script:edit', { id: (a) => a.input.id })
   async updateScript(
     @Arg('input', () => UpdateScriptInput) input: UpdateScriptInput,
     @Ctx() ctx: InfinibayContext
   ): Promise<ScriptResponseType> {
     try {
-      await assertCanAccessResource(ctx, 'scripts')
       const { ipAddress, userAgent } = extractRequestMetadata(ctx)
       const user = requireUser(ctx)
       const scriptManager = new ScriptManager(ctx.prisma);
@@ -604,14 +578,13 @@ export class ScriptResolver {
    * Mutation: Delete a script
    */
   @Mutation(() => ScriptResponseType)
-  @Authorized('ADMIN')
+  @Can('script:delete', { id: (a) => a.id })
   async deleteScript(
     @Arg('id', () => ID) id: string,
     @Arg('force', { nullable: true, defaultValue: false }) force: boolean,
     @Ctx() ctx: InfinibayContext
   ): Promise<ScriptResponseType> {
     try {
-      await assertCanAccessResource(ctx, 'scripts')
       // Check for active schedules before deletion
       const user = requireUser(ctx)
       const scheduler = new ScriptScheduler(ctx.prisma);
@@ -670,13 +643,12 @@ export class ScriptResolver {
    * Mutation: Assign a script to a department
    */
   @Mutation(() => Boolean)
-  @Authorized('ADMIN')
+  @Can('script:assign', { id: (a) => a.scriptId, scopeVia: 'script' })
   async assignScriptToDepartment(
     @Arg('scriptId', () => ID) scriptId: string,
     @Arg('departmentId', () => ID) departmentId: string,
     @Ctx() ctx: InfinibayContext
   ): Promise<boolean> {
-    await assertCanAccessResource(ctx, 'scripts')
     const scriptManager = new ScriptManager(ctx.prisma);
     const user = requireUser(ctx)
     await scriptManager.assignScriptToDepartment(scriptId, departmentId, user.id);
@@ -687,13 +659,12 @@ export class ScriptResolver {
    * Mutation: Unassign a script from a department
    */
   @Mutation(() => Boolean)
-  @Authorized('ADMIN')
+  @Can('script:assign', { id: (a) => a.scriptId, scopeVia: 'script' })
   async unassignScriptFromDepartment(
     @Arg('scriptId', () => ID) scriptId: string,
     @Arg('departmentId', () => ID) departmentId: string,
     @Ctx() ctx: InfinibayContext
   ): Promise<boolean> {
-    await assertCanAccessResource(ctx, 'scripts')
     const scriptManager = new ScriptManager(ctx.prisma);
     await scriptManager.unassignScriptFromDepartment(scriptId, departmentId);
     return true;
@@ -703,13 +674,12 @@ export class ScriptResolver {
    * Mutation: Execute a script on a machine
    */
   @Mutation(() => ScriptExecutionResponseType)
-  @Authorized('USER')
+  @Can('script:execute', { id: (a) => a.input.machineId, scopeVia: 'vm' })
   async executeScript(
     @Arg('input', () => ExecuteScriptInput) input: ExecuteScriptInput,
     @Ctx() ctx: InfinibayContext
   ): Promise<ScriptExecutionResponseType> {
     try {
-      // Check user access to machine (owner or admin)
       const user = requireUser(ctx)
       const machine = await ctx.prisma.machine.findUnique({
         where: { id: input.machineId },
@@ -720,16 +690,6 @@ export class ScriptResolver {
         return {
           success: false,
           error: 'Machine not found'
-        };
-      }
-
-      const isOwner = machine.userId === user.id;
-      const isAdmin = isOperatorRole(user.role);
-
-      if (!isOwner && !isAdmin) {
-        return {
-          success: false,
-          error: 'You do not have permission to execute scripts on this machine'
         };
       }
 
@@ -829,14 +789,13 @@ export class ScriptResolver {
    * Mutation: Cancel a running or pending script execution
    */
   @Mutation(() => ScriptExecutionResponseType)
-  @Authorized('USER')
+  @Can('script:manageExecutions', { id: (a) => a.id, scopeVia: 'scriptExecution' })
   async cancelScriptExecution(
     @Arg('id', () => ID) id: string,
     @Ctx() ctx: InfinibayContext
   ): Promise<ScriptExecutionResponseType> {
     try {
-      // Query execution to check ownership
-      const user = requireUser(ctx)
+      // Query execution to verify it exists
       const execution = await ctx.prisma.scriptExecution.findUnique({
         where: { id },
         include: {
@@ -850,18 +809,6 @@ export class ScriptResolver {
         return {
           success: false,
           error: 'Execution not found'
-        };
-      }
-
-      // Check permissions: triggeredBy, machine owner, or admin
-      const isTriggeredBy = execution.triggeredById === user.id;
-      const isOwner = execution.machine.userId === user.id;
-      const isAdmin = isOperatorRole(user.role);
-
-      if (!isTriggeredBy && !isOwner && !isAdmin) {
-        return {
-          success: false,
-          error: 'You do not have permission to cancel this execution'
         };
       }
 
@@ -960,7 +907,7 @@ export class ScriptResolver {
    * Query: Get scheduled scripts with filters
    */
   @Query(() => [ScheduledScriptType])
-  @Authorized('USER')
+  @Can('script:view')
   async scheduledScripts(
     @Arg('filters', () => ScheduledScriptsFiltersInput, { nullable: true }) filters: ScheduledScriptsFiltersInput | null,
     @Ctx() ctx: InfinibayContext
@@ -988,12 +935,11 @@ export class ScriptResolver {
    * Query: Get a single scheduled script by execution ID
    */
   @Query(() => ScheduledScriptType, { nullable: true })
-  @Authorized('USER')
+  @Can('script:view', { id: (a) => a.id, scopeVia: 'scriptExecution' })
   async scheduledScript(
     @Arg('id', () => ID) id: string,
     @Ctx() ctx: InfinibayContext
   ): Promise<any | null> {
-    const user = requireUser(ctx)
     const execution = await ctx.prisma.scriptExecution.findUnique({
       where: { id },
       include: {
@@ -1033,15 +979,6 @@ export class ScriptResolver {
       return null;
     }
 
-    // Check permissions: triggeredBy, machine owner, or admin
-    const isTriggeredBy = execution.triggeredById === user.id;
-    const isOwner = execution.machine && execution.machine.userId === user.id;
-    const isAdmin = isOperatorRole(user.role);
-
-    if (!isTriggeredBy && !isOwner && !isAdmin) {
-      return null;
-    }
-
     return {
       ...normalizeExecution(execution),
       scheduleType: this.computeScheduleType(execution),
@@ -1054,7 +991,7 @@ export class ScriptResolver {
    * Mutation: Schedule a script for execution
    */
   @Mutation(() => ScheduleScriptResponseType)
-  @Authorized('USER')
+  @Can('script:schedule', { id: (a) => a.input.scriptId, scopeVia: 'script' })
   async scheduleScript(
     @Arg('input', () => ScheduleScriptInput) input: ScheduleScriptInput,
     @Ctx() ctx: InfinibayContext
@@ -1103,12 +1040,8 @@ export class ScriptResolver {
         };
       }
 
-      const isScriptCreator = script.createdById === user.id;
-      const isAdmin = isOperatorRole(user.role);
-
-      // If departmentId provided, verify user has access to department
+      // If departmentId provided, verify user has access to schedule for the department.
       if (input.departmentId) {
-        await assertCanAccessResource(ctx, 'scripts')
         const department = await ctx.prisma.department.findUnique({
           where: { id: input.departmentId }
         });
@@ -1120,22 +1053,21 @@ export class ScriptResolver {
           };
         }
 
-        // Only admin can schedule for department-wide
-        if (!isAdmin) {
+        // The caller's script:schedule scope must cover the target department
+        // (DEPARTMENT scope over this department, or ANY).
+        if (!(await ctx.can!('script:schedule', { departmentId: input.departmentId }))) {
           return {
             success: false,
-            error: 'Only administrators can schedule scripts for departments'
+            error: 'You do not have permission to schedule scripts for this department'
           };
         }
       }
 
       // If machineIds provided, verify user has access to all machines (batch query to avoid N+1)
-      let hasAccessToAllMachines = false;
       if (input.machineIds && input.machineIds.length > 0) {
-        hasAccessToAllMachines = true;
         const machines = await ctx.prisma.machine.findMany({
           where: { id: { in: input.machineIds } },
-          select: { id: true, userId: true }
+          select: { id: true, userId: true, departmentId: true }
         });
 
         // Verify all requested machines exist
@@ -1148,25 +1080,15 @@ export class ScriptResolver {
           };
         }
 
-        // Verify user owns all machines (unless admin)
-        if (!isAdmin) {
-          const unauthorized = machines.some(m => m.userId !== user.id);
-          if (unauthorized) {
-            hasAccessToAllMachines = false;
+        // Verify the caller's script:schedule scope covers every target machine.
+        for (const m of machines) {
+          if (!(await ctx.can!('script:schedule', { ownerId: m.userId, departmentId: m.departmentId }))) {
             return {
               success: false,
               error: 'You do not have permission to schedule scripts on one or more of the specified machines'
             };
           }
         }
-      }
-
-      // Combined permission check: admin OR script creator OR has access to all target machines
-      if (!isAdmin && !isScriptCreator && !hasAccessToAllMachines) {
-        return {
-          success: false,
-          error: 'You do not have permission to schedule this script'
-        };
       }
 
       // Create scheduler instance
@@ -1274,7 +1196,7 @@ export class ScriptResolver {
    * Mutation: Update a scheduled script
    */
   @Mutation(() => ScheduleScriptResponseType)
-  @Authorized('USER')
+  @Can('script:schedule', { id: (a) => a.input.executionId, scopeVia: 'scriptExecution' })
   async updateScheduledScript(
     @Arg('input', () => UpdateScheduledScriptInput) input: UpdateScheduledScriptInput,
     @Ctx() ctx: InfinibayContext
@@ -1302,18 +1224,6 @@ export class ScriptResolver {
         return {
           success: false,
           error: `Cannot update execution with status ${execution.status}. Only PENDING executions can be updated.`
-        };
-      }
-
-      // Verify user has permission (triggeredBy, machine owner, or admin)
-      const isTriggeredBy = execution.triggeredById === user.id;
-      const isOwner = execution.machine.userId === user.id;
-      const isAdmin = isOperatorRole(user.role);
-
-      if (!isTriggeredBy && !isOwner && !isAdmin) {
-        return {
-          success: false,
-          error: 'You do not have permission to update this scheduled script'
         };
       }
 
@@ -1390,13 +1300,13 @@ export class ScriptResolver {
    * Mutation: Cancel a scheduled script
    */
   @Mutation(() => ScheduleScriptResponseType)
-  @Authorized('USER')
+  @Can('script:schedule', { id: (a) => a.executionId, scopeVia: 'scriptExecution' })
   async cancelScheduledScript(
     @Arg('executionId', () => ID) executionId: string,
     @Ctx() ctx: InfinibayContext
   ): Promise<ScheduleScriptResponseType> {
     try {
-      // Query execution to verify exists and check permissions
+      // Query execution to verify it exists and is cancellable
       const user = requireUser(ctx)
       const execution = await ctx.prisma.scriptExecution.findUnique({
         where: { id: executionId },
@@ -1418,18 +1328,6 @@ export class ScriptResolver {
         return {
           success: false,
           error: `Cannot cancel execution with status ${execution.status}`
-        };
-      }
-
-      // Verify user has permission
-      const isTriggeredBy = execution.triggeredById === user.id;
-      const isOwner = execution.machine.userId === user.id;
-      const isAdmin = isOperatorRole(user.role);
-
-      if (!isTriggeredBy && !isOwner && !isAdmin) {
-        return {
-          success: false,
-          error: 'You do not have permission to cancel this scheduled script'
         };
       }
 

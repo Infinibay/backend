@@ -1,6 +1,7 @@
 import logger from '@main/logger'
-import { Resolver, Query, Ctx, ObjectType, Field, Authorized, GraphQLISODateTime, Int } from 'type-graphql'
+import { Resolver, Query, Ctx, ObjectType, Field, GraphQLISODateTime, Int } from 'type-graphql'
 import { InfinibayContext } from '../../utils/context'
+import { Can } from '@main/permissions'
 
 @ObjectType()
 export class EntityVersion {
@@ -32,7 +33,7 @@ export class DataVersions {
 @Resolver()
 export class DataVersionResolver {
   @Query(() => DataVersions)
-  @Authorized('USER')
+  @Can('system:view')
   async dataVersions (
     @Ctx() { prisma }: InfinibayContext
   ): Promise<DataVersions> {

@@ -1,9 +1,9 @@
-import { Arg, Authorized, Ctx, ID, Mutation, Query, Resolver } from 'type-graphql'
+import { Arg, Ctx, ID, Mutation, Query, Resolver } from 'type-graphql'
 import { Disk, Node } from '@prisma/client'
 
 import { InfinibayContext } from '@utils/context'
 import { NodeInventorySummary, NodeType } from './type'
-import { assertCanAccessResource } from '../../utils/auth'
+import { Can } from '@main/permissions'
 import { calculateNodeCapacity, nodeHealth } from '../../../services/node/NodeCapacity'
 
 type NodeWithDisks = Node & { disks: Disk[] }
@@ -53,10 +53,9 @@ function toGraphql (node: NodeWithInventory, now = new Date()): NodeType {
 @Resolver(() => NodeType)
 export class NodeResolver {
   @Query(() => [NodeType])
-  @Authorized('ADMIN')
+  @Can('node:view')
   async nodes (@Ctx() context: InfinibayContext): Promise<NodeType[]> {
     const { prisma } = context
-    await assertCanAccessResource(context, 'infrastructure')
     const now = new Date()
     const nodes = await prisma.node.findMany({
       include: {
@@ -77,13 +76,12 @@ export class NodeResolver {
   }
 
   @Query(() => NodeType, { nullable: true })
-  @Authorized('ADMIN')
+  @Can('node:view', { id: (a) => a.id })
   async node (
     @Arg('id', () => ID) id: string,
       @Ctx() context: InfinibayContext
   ): Promise<NodeType | null> {
     const { prisma } = context
-    await assertCanAccessResource(context, 'infrastructure')
     const node = await prisma.node.findUnique({
       where: { id },
       include: {
@@ -103,10 +101,9 @@ export class NodeResolver {
   }
 
   @Query(() => NodeInventorySummary)
-  @Authorized('ADMIN')
+  @Can('node:view')
   async nodeInventorySummary (@Ctx() context: InfinibayContext): Promise<NodeInventorySummary> {
     const { prisma } = context
-    await assertCanAccessResource(context, 'infrastructure')
     const now = new Date()
     const nodes = await prisma.node.findMany({
       include: {
@@ -134,14 +131,13 @@ export class NodeResolver {
   }
 
   @Mutation(() => NodeType)
-  @Authorized('ADMIN')
+  @Can('node:edit', { id: (a) => a.id })
   async setNodeMaintenanceMode (
     @Arg('id', () => ID) id: string,
       @Arg('enabled', () => Boolean) enabled: boolean,
       @Ctx() context: InfinibayContext
   ): Promise<NodeType> {
     const { prisma } = context
-    await assertCanAccessResource(context, 'infrastructure')
     const node = await prisma.node.update({
       where: { id },
       data: { maintenanceMode: enabled },

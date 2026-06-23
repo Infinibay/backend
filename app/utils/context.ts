@@ -78,6 +78,21 @@ export interface InfinibayContext {
   auth?: AuthenticationMetadata
   /** User validation helper methods */
   userHelpers?: UserValidationHelpers
+  // ── Action/verb permission helpers (attached by @Can / context setup) ──
+  /** Permission evaluator bound to this request's prisma. */
+  permissions?: import('../permissions/PermissionService').PermissionService
+  /** Memoised effective grants for the request user. */
+  permissionGrants?: () => Promise<Map<string, import('../permissions/registry').Scope>>
+  /** True if the user holds `permission` (and its scope covers `instance`). */
+  can?: (permission: string, instance?: unknown) => Promise<boolean>
+  /** Throws ForbiddenError unless the user holds `permission` for `instance`. */
+  assertCan?: (permission: string, instance?: unknown) => Promise<void>
+  /** Prisma WHERE narrowing a list query to the user's scope for `permission`. */
+  scopedWhere?: (
+    permission: string,
+    baseWhere?: Record<string, unknown>,
+    opts?: { ownerField?: string, deptField?: string }
+  ) => Promise<Record<string, unknown>>
 }
 
 /**

@@ -2,6 +2,7 @@ import { Prisma, PrismaClient, RecommendationResolution, ResolutionStatus, VMRec
 import logger from '@main/logger'
 import { Logger } from 'winston'
 import { getResolutionHandler, ResolutionHandler, ResolutionHandlerContext } from './handlers'
+import { PermissionService } from '@main/permissions'
 
 export interface ResolveOptions {
   recommendationId: string
@@ -32,7 +33,7 @@ export class RecommendationResolverService {
     const rec = await this.prisma.vMRecommendation.findUnique({
       where: { id: recommendationId },
       include: {
-        machine: { select: { id: true, userId: true, name: true, os: true } },
+        machine: { select: { id: true, userId: true, departmentId: true, name: true, os: true } },
         activeResolution: true
       }
     })
@@ -41,9 +42,12 @@ export class RecommendationResolverService {
       throw new Error('Recommendation not found')
     }
 
-    if (userRole !== 'ADMIN' && userRole !== 'SUPER_ADMIN' && rec.machine.userId !== userId) {
-      throw new Error('Access denied')
-    }
+    // Scope check via grants (the decorator already verified verb possession).
+    const resolveAllowed = await new PermissionService(this.prisma).can(userId, 'recommendation:resolve', {
+      ownerId: rec.machine.userId,
+      departmentId: rec.machine.departmentId
+    })
+    if (!resolveAllowed) throw new Error('Access denied')
 
     // Idempotency: if a non-terminal resolution is already tracked, return it
     if (rec.activeResolution && !isTerminalStatus(rec.activeResolution.status)) {
@@ -92,12 +96,14 @@ export class RecommendationResolverService {
   async cancel (resolutionId: string, userId: string, userRole: string): Promise<RecommendationResolution> {
     const resolution = await this.prisma.recommendationResolution.findUnique({
       where: { id: resolutionId },
-      include: { recommendation: { include: { machine: { select: { userId: true } } } } }
+      include: { recommendation: { include: { machine: { select: { userId: true, departmentId: true } } } } }
     })
     if (!resolution) throw new Error('Resolution not found')
-    if (userRole !== 'ADMIN' && userRole !== 'SUPER_ADMIN' && resolution.recommendation.machine.userId !== userId) {
-      throw new Error('Access denied')
-    }
+    const cancelAllowed = await new PermissionService(this.prisma).can(userId, 'recommendation:cancel', {
+      ownerId: resolution.recommendation.machine.userId,
+      departmentId: resolution.recommendation.machine.departmentId
+    })
+    if (!cancelAllowed) throw new Error('Access denied')
     if (isTerminalStatus(resolution.status)) return resolution
 
     return this.prisma.recommendationResolution.update({

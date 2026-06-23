@@ -1,7 +1,6 @@
 import { PrismaClient } from '@prisma/client'
 import {
   Arg,
-  Authorized,
   Ctx,
   Mutation,
   Query,
@@ -10,7 +9,7 @@ import {
 import { InfinibayContext } from '@utils/context'
 import { UserInputError } from '@utils/errors'
 import { MachineTemplateCategoryType, MachineTemplateCategoryInputType } from './type'
-import { assertCanAccessResource } from '../../utils/auth'
+import { Can } from '@main/permissions'
 
 export interface MachineTemplateCategoryResolverInterface {
   machineTemplateCategories(ctx: InfinibayContext): Promise<MachineTemplateCategoryType[]>
@@ -28,11 +27,10 @@ export class MachineTemplateCategoryResolver implements MachineTemplateCategoryR
    * @returns {Promise<MachineTemplateCategoryType[]>} An array of machine template category objects.
    */
   @Query(() => [MachineTemplateCategoryType])
-  @Authorized('ADMIN')
+  @Can('machineTemplateCategory:view')
   async machineTemplateCategories (
     @Ctx() ctx: InfinibayContext
   ): Promise<MachineTemplateCategoryType[]> {
-    await assertCanAccessResource(ctx, 'blueprints')
     const { prisma } = ctx
     const categories = await prisma.machineTemplateCategory.findMany()
 
@@ -72,12 +70,11 @@ export class MachineTemplateCategoryResolver implements MachineTemplateCategoryR
    * @returns {Promise<MachineTemplateCategoryType | null>} The machine template category object or null if not found.
    */
   @Query(() => MachineTemplateCategoryType, { nullable: true })
-  @Authorized('ADMIN')
+  @Can('machineTemplateCategory:view', { id: (a) => a.id })
   async machineTemplateCategory (
     @Arg('id', { nullable: false }) id: string,
     @Ctx() ctx: InfinibayContext
   ): Promise<MachineTemplateCategoryType | null> {
-    await assertCanAccessResource(ctx, 'blueprints')
     const { prisma } = ctx
     const category = await prisma.machineTemplateCategory.findUnique({
       where: { id }
@@ -115,12 +112,11 @@ export class MachineTemplateCategoryResolver implements MachineTemplateCategoryR
    * @returns {Promise<MachineTemplateCategoryType>} The created machine template category.
    */
   @Mutation(() => MachineTemplateCategoryType)
-  @Authorized('ADMIN')
+  @Can('machineTemplateCategory:create')
   async createMachineTemplateCategory (
     @Arg('input', () => MachineTemplateCategoryInputType) input: MachineTemplateCategoryInputType,
     @Ctx() ctx: InfinibayContext
   ): Promise<MachineTemplateCategoryType> {
-    await assertCanAccessResource(ctx, 'blueprints')
     const { prisma } = ctx
 
     await this.checkCategoryExistence(input.name, prisma)
@@ -145,13 +141,12 @@ export class MachineTemplateCategoryResolver implements MachineTemplateCategoryR
    * @returns {Promise<MachineTemplateCategoryType>} The updated machine template category.
    */
   @Mutation(() => MachineTemplateCategoryType)
-  @Authorized('ADMIN')
+  @Can('machineTemplateCategory:edit', { id: (a) => a.id })
   async updateMachineTemplateCategory (
     @Arg('id', { nullable: false }) id: string,
     @Arg('input', () => MachineTemplateCategoryInputType) input: MachineTemplateCategoryInputType,
     @Ctx() ctx: InfinibayContext
   ): Promise<MachineTemplateCategoryType> {
-    await assertCanAccessResource(ctx, 'blueprints')
     const { prisma } = ctx
 
     const exists = await this.categoryExists(prisma, id)

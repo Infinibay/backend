@@ -1,6 +1,7 @@
-import { Arg, Authorized, Ctx, ID, Mutation, Query, Resolver } from 'type-graphql'
+import { Arg, Ctx, ID, Mutation, Query, Resolver } from 'type-graphql'
 
 import logger from '@main/logger'
+import { Can } from '@main/permissions'
 import {
   Backup as BackupGql,
   BackupDiskInfo,
@@ -23,7 +24,6 @@ import { getBackupService } from '@services/BackupService'
 import { getBackupScheduleService } from '@services/BackupScheduleService'
 import { InfinibayContext } from '@utils/context'
 import { UserInputError } from '@utils/errors'
-import { assertCanAccessResource } from '../utils/auth'
 
 @Resolver()
 export class BackupResolver {
@@ -32,7 +32,7 @@ export class BackupResolver {
   // -------------------------------------------------------------------------
 
   @Query(() => BackupListResult, { description: 'List all backups for a VM' })
-  @Authorized(['USER'])
+  @Can('backup:view', { id: (a) => a.vmId, scopeVia: 'vm' })
   async backups (
     @Arg('vmId') vmId: string,
     @Ctx() ctx?: InfinibayContext
@@ -49,7 +49,7 @@ export class BackupResolver {
   }
 
   @Query(() => BackupGql, { nullable: true, description: 'Get a single backup by its database ID' })
-  @Authorized(['USER'])
+  @Can('backup:view', { id: (a) => a.id })
   async backup (
     @Arg('id', () => ID) id: string,
     @Ctx() ctx?: InfinibayContext
@@ -64,13 +64,12 @@ export class BackupResolver {
   // -------------------------------------------------------------------------
 
   @Mutation(() => BackupResult, { description: 'Create a backup of a VM' })
-  @Authorized(['ADMIN'])
+  @Can('backup:create', { id: (a) => a.input.vmId, scopeVia: 'vm' })
   async createBackup (
     @Arg('input') input: CreateBackupInput,
     @Ctx() ctx?: InfinibayContext
   ): Promise<BackupResult> {
     if (!ctx?.prisma) throw new UserInputError('Database context not available')
-    await assertCanAccessResource(ctx, 'desktops')
 
     try {
       const service = getBackupService(ctx.prisma)
@@ -105,13 +104,12 @@ export class BackupResolver {
   }
 
   @Mutation(() => BackupRestoreResult, { description: 'Restore a VM from a backup' })
-  @Authorized(['ADMIN'])
+  @Can('backup:restore', { id: (a) => a.input.vmId, scopeVia: 'vm' })
   async restoreBackup (
     @Arg('input') input: RestoreBackupInput,
     @Ctx() ctx?: InfinibayContext
   ): Promise<BackupRestoreResult> {
     if (!ctx?.prisma) throw new UserInputError('Database context not available')
-    await assertCanAccessResource(ctx, 'desktops')
 
     try {
       const service = getBackupService(ctx.prisma)
@@ -137,13 +135,12 @@ export class BackupResolver {
   }
 
   @Mutation(() => SuccessType, { description: 'Delete a backup' })
-  @Authorized(['ADMIN'])
+  @Can('backup:delete', { id: (a) => a.input.backupId })
   async deleteBackup (
     @Arg('input') input: DeleteBackupInput,
     @Ctx() ctx?: InfinibayContext
   ): Promise<SuccessType> {
     if (!ctx?.prisma) throw new UserInputError('Database context not available')
-    await assertCanAccessResource(ctx, 'desktops')
 
     try {
       const service = getBackupService(ctx.prisma)
@@ -161,7 +158,7 @@ export class BackupResolver {
   // -------------------------------------------------------------------------
 
   @Query(() => ScheduleListResult, { description: 'List backup schedules for a VM (or all if vmId omitted)' })
-  @Authorized(['USER'])
+  @Can('backup:view')
   async backupSchedules (
     @Arg('vmId', () => String, { nullable: true }) vmId: string | undefined,
     @Ctx() ctx?: InfinibayContext
@@ -183,13 +180,12 @@ export class BackupResolver {
   // -------------------------------------------------------------------------
 
   @Mutation(() => BackupScheduleGql, { description: 'Create a backup schedule' })
-  @Authorized(['ADMIN'])
+  @Can('backup:schedule', { id: (a) => a.input.vmId, scopeVia: 'vm' })
   async createBackupSchedule (
     @Arg('input') input: CreateScheduleInput,
     @Ctx() ctx?: InfinibayContext
   ): Promise<BackupScheduleGql> {
     if (!ctx?.prisma) throw new UserInputError('Database context not available')
-    await assertCanAccessResource(ctx, 'desktops')
 
     try {
       const backupService = getBackupService(ctx.prisma)
@@ -212,14 +208,13 @@ export class BackupResolver {
   }
 
   @Mutation(() => BackupScheduleGql, { description: 'Update a backup schedule' })
-  @Authorized(['ADMIN'])
+  @Can('backup:schedule', { id: (a) => a.id, scopeVia: 'backupSchedule' })
   async updateBackupSchedule (
     @Arg('id', () => ID) id: string,
     @Arg('input') input: UpdateScheduleInput,
     @Ctx() ctx?: InfinibayContext
   ): Promise<BackupScheduleGql> {
     if (!ctx?.prisma) throw new UserInputError('Database context not available')
-    await assertCanAccessResource(ctx, 'desktops')
 
     try {
       const backupService = getBackupService(ctx.prisma)
@@ -241,13 +236,12 @@ export class BackupResolver {
   }
 
   @Mutation(() => SuccessType, { description: 'Delete a backup schedule' })
-  @Authorized(['ADMIN'])
+  @Can('backup:schedule', { id: (a) => a.id, scopeVia: 'backupSchedule' })
   async deleteBackupSchedule (
     @Arg('id', () => ID) id: string,
     @Ctx() ctx?: InfinibayContext
   ): Promise<SuccessType> {
     if (!ctx?.prisma) throw new UserInputError('Database context not available')
-    await assertCanAccessResource(ctx, 'desktops')
 
     try {
       const backupService = getBackupService(ctx.prisma)

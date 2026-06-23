@@ -4,8 +4,11 @@ import { IdentityProviderResolver } from '@resolvers/identity/resolver'
 import { IdentityProviderKind } from '@resolvers/identity/type'
 import { UserRole } from '@resolvers/user/type'
 import { InfinibayContext } from '@utils/context'
+import { graphql } from 'graphql'
 import { testPrisma } from '../setup/jest.setup'
 import { createAdmin, createUser } from '../setup/db-factories'
+import { getTestSchema, permissionContext } from '../setup/permission-harness'
+import { seedSystemRoles, createNoPermsUser } from '../setup/permission-factories'
 
 describe('Identity provider management — real database', () => {
   const prisma = testPrisma.prisma
@@ -143,16 +146,20 @@ describe('Identity provider management — real database', () => {
     })).resolves.toBe(1)
   })
 
-  it('denies identity management when role permissions revoke identity access', async () => {
-    const user = await createUser(prisma)
-    const ctx: InfinibayContext = {
-      req: {} as never,
-      res: {} as never,
-      user,
-      prisma,
-      setupMode: false
-    }
+  it('denies identity access to a user without identity grants (via @Can)', async () => {
+    // Authorization now lives in the @Can decorator, which only fires through the
+    // schema — a direct resolver call bypasses it. A grant-less user is denied.
+    const schema = await getTestSchema()
+    await seedSystemRoles(prisma)
+    const noPerms = await createNoPermsUser(prisma)
 
-    await expect(resolver.identityProviders(ctx)).rejects.toThrow('Not authorized to access identity')
+    const result = await graphql({
+      schema,
+      source: 'query { identityProviders { id } }',
+      contextValue: permissionContext(prisma, noPerms)
+    })
+
+    expect(result.errors).toBeDefined()
+    expect(result.errors![0].message).toMatch(/not authorized|requires identityProvider:/i)
   })
 })

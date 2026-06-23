@@ -1,6 +1,7 @@
-import { Arg, Authorized, Ctx, Query, Mutation, Resolver, ID, Int } from 'type-graphql'
+import { Arg, Ctx, Query, Mutation, Resolver, ID, Int } from 'type-graphql'
 import { GraphQLError } from 'graphql'
 import { InfinibayContext } from '../../utils/context'
+import { Can } from '@main/permissions'
 import {
   VMRecommendationType,
   RecommendationFilterInput,
@@ -15,7 +16,7 @@ export class VMRecommendationResolver {
   @Query(() => [VMRecommendationType], {
     description: 'Get automated recommendations for VM optimization, security, and maintenance based on system analysis. Returns up to 20 recommendations by default to prevent over-fetch. Use pagination for more results.'
   })
-  @Authorized(['USER'])
+  @Can('recommendation:view', { id: (a) => a.vmId, scopeVia: 'vm' })
   async getVMRecommendations(
     @Arg('vmId', () => ID, { description: 'ID of the virtual machine to get recommendations for' }) vmId: string,
     @Ctx() context: InfinibayContext,
@@ -38,13 +39,6 @@ export class VMRecommendationResolver {
     if (!machine) {
       throw new GraphQLError('Machine not found', {
         extensions: { code: 'NOT_FOUND' }
-      })
-    }
-
-    // Regular users can only see their own machines
-    if ((context.user?.role !== 'ADMIN' && context.user?.role !== 'SUPER_ADMIN') && machine.userId !== context.user?.id) {
-      throw new GraphQLError('Access denied', {
-        extensions: { code: 'FORBIDDEN' }
       })
     }
 
@@ -74,13 +68,13 @@ export class VMRecommendationResolver {
   @Query(() => Int, {
     description: 'Get the count of pending (non-dismissed, non-snoozed) recommendations across all VMs'
   })
-  @Authorized(['USER'])
+  @Can('recommendation:view')
   async pendingRecommendationCount(
     @Ctx() context: InfinibayContext
   ): Promise<number> {
     const now = new Date()
 
-    // Build where clause based on user role
+    // Build where clause; narrow rows to the recommendations the caller may view
     const whereClause: any = {
       dismissedAt: null,
       OR: [
@@ -89,10 +83,8 @@ export class VMRecommendationResolver {
       ]
     }
 
-    // Regular users can only see recommendations for their own machines
-    if ((context.user?.role !== 'ADMIN' && context.user?.role !== 'SUPER_ADMIN')) {
-      whereClause.machine = { userId: context.user?.id }
-    }
+    // Restrict to machines the caller can access (own/department/any)
+    whereClause.machine = await context.scopedWhere!('recommendation:view', {})
 
     return context.prisma.vMRecommendation.count({
       where: whereClause
@@ -102,14 +94,14 @@ export class VMRecommendationResolver {
   @Query(() => [GlobalRecommendationType], {
     description: 'Get all pending recommendations across all VMs the user has access to'
   })
-  @Authorized(['USER'])
+  @Can('recommendation:view')
   async globalPendingRecommendations(
     @Ctx() context: InfinibayContext,
     @Arg('limit', () => Int, { nullable: true, defaultValue: 50 }) limit?: number
   ): Promise<GlobalRecommendationType[]> {
     const now = new Date()
 
-    // Build where clause based on user role
+    // Build where clause; narrow rows to the recommendations the caller may view
     const whereClause: any = {
       dismissedAt: null,
       OR: [
@@ -118,10 +110,8 @@ export class VMRecommendationResolver {
       ]
     }
 
-    // Regular users can only see recommendations for their own machines
-    if ((context.user?.role !== 'ADMIN' && context.user?.role !== 'SUPER_ADMIN')) {
-      whereClause.machine = { userId: context.user?.id }
-    }
+    // Restrict to machines the caller can access (own/department/any)
+    whereClause.machine = await context.scopedWhere!('recommendation:view', {})
 
     const recommendations = await context.prisma.vMRecommendation.findMany({
       where: whereClause,
@@ -173,24 +163,23 @@ export class VMRecommendationResolver {
   @Mutation(() => DismissRecommendationResult, {
     description: 'Dismiss a single recommendation'
   })
-  @Authorized(['USER'])
+  @Can('recommendation:dismiss')
   async dismissRecommendation(
     @Arg('id', () => ID) id: string,
     @Ctx() context: InfinibayContext
   ): Promise<DismissRecommendationResult> {
-    // Verify access
+    // Load the recommendation to scope-check the owning machine
     const rec = await context.prisma.vMRecommendation.findUnique({
       where: { id },
-      include: { machine: { select: { userId: true } } }
+      include: { machine: { select: { userId: true, departmentId: true } } }
     })
 
     if (!rec) {
       return { success: false, error: 'Recommendation not found' }
     }
 
-    if ((context.user?.role !== 'ADMIN' && context.user?.role !== 'SUPER_ADMIN') && rec.machine.userId !== context.user?.id) {
-      return { success: false, error: 'Access denied' }
-    }
+    // Enforce scope against the owning machine (own/department/any)
+    await context.assertCan!('recommendation:dismiss', rec.machine)
 
     await context.prisma.vMRecommendation.update({
       where: { id },
@@ -203,13 +192,13 @@ export class VMRecommendationResolver {
   @Mutation(() => DismissRecommendationResult, {
     description: 'Dismiss all pending recommendations the user has access to'
   })
-  @Authorized(['USER'])
+  @Can('recommendation:dismiss')
   async dismissAllRecommendations(
     @Ctx() context: InfinibayContext
   ): Promise<DismissRecommendationResult> {
     const now = new Date()
 
-    // Build where clause based on user role
+    // Build where clause; narrow rows to the recommendations the caller may dismiss
     const whereClause: any = {
       dismissedAt: null,
       OR: [
@@ -218,9 +207,8 @@ export class VMRecommendationResolver {
       ]
     }
 
-    if ((context.user?.role !== 'ADMIN' && context.user?.role !== 'SUPER_ADMIN')) {
-      whereClause.machine = { userId: context.user?.id }
-    }
+    // Restrict to machines the caller can access (own/department/any)
+    whereClause.machine = await context.scopedWhere!('recommendation:dismiss', {})
 
     const result = await context.prisma.vMRecommendation.updateMany({
       where: whereClause,
@@ -233,25 +221,24 @@ export class VMRecommendationResolver {
   @Mutation(() => SnoozeRecommendationResult, {
     description: 'Snooze a single recommendation for a duration (ISO 8601 duration format: PT1H, P1D, etc.)'
   })
-  @Authorized(['USER'])
+  @Can('recommendation:dismiss')
   async snoozeRecommendation(
     @Arg('id', () => ID) id: string,
     @Arg('duration', () => String) duration: string,
     @Ctx() context: InfinibayContext
   ): Promise<SnoozeRecommendationResult> {
-    // Verify access
+    // Load the recommendation to scope-check the owning machine
     const rec = await context.prisma.vMRecommendation.findUnique({
       where: { id },
-      include: { machine: { select: { userId: true } } }
+      include: { machine: { select: { userId: true, departmentId: true } } }
     })
 
     if (!rec) {
       return { success: false, error: 'Recommendation not found' }
     }
 
-    if ((context.user?.role !== 'ADMIN' && context.user?.role !== 'SUPER_ADMIN') && rec.machine.userId !== context.user?.id) {
-      return { success: false, error: 'Access denied' }
-    }
+    // Enforce scope against the owning machine (own/department/any)
+    await context.assertCan!('recommendation:dismiss', rec.machine)
 
     const snoozedUntil = this.parseDuration(duration)
 
@@ -266,7 +253,7 @@ export class VMRecommendationResolver {
   @Mutation(() => SnoozeRecommendationResult, {
     description: 'Snooze all pending recommendations for a duration (ISO 8601 duration format: PT1H, P1D, etc.)'
   })
-  @Authorized(['USER'])
+  @Can('recommendation:dismiss')
   async snoozeAllRecommendations(
     @Arg('duration', () => String) duration: string,
     @Ctx() context: InfinibayContext
@@ -274,7 +261,7 @@ export class VMRecommendationResolver {
     const now = new Date()
     const snoozedUntil = this.parseDuration(duration)
 
-    // Build where clause based on user role
+    // Build where clause; narrow rows to the recommendations the caller may snooze
     const whereClause: any = {
       dismissedAt: null,
       OR: [
@@ -283,9 +270,8 @@ export class VMRecommendationResolver {
       ]
     }
 
-    if ((context.user?.role !== 'ADMIN' && context.user?.role !== 'SUPER_ADMIN')) {
-      whereClause.machine = { userId: context.user?.id }
-    }
+    // Restrict to machines the caller can access (own/department/any)
+    whereClause.machine = await context.scopedWhere!('recommendation:dismiss', {})
 
     const result = await context.prisma.vMRecommendation.updateMany({
       where: whereClause,

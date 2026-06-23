@@ -9,6 +9,7 @@ import createApplications from './seeds/applications'
 import createScripts from './seeds/scripts'
 
 import installCallbacks from '../app/utils/modelsCallbacks'
+import { applyRolePresets } from '../app/permissions/presets'
 
 // Register path mappings for ts-node to resolve @utils and other aliases
 register({
@@ -154,6 +155,9 @@ async function main () {
     await prisma.$transaction(async (transactionPrisma) => {
       // Create admin user and departments
       await createAdminUser()
+      // Seed system roles (SUPER_ADMIN/ADMIN/USER) + their verb grants, and
+      // backfill roleId for the admin (and any pre-existing users).
+      await applyRolePresets(prisma)
       await createDefaultDepartment()
       const defaultCategory = await createDefaultMachineTemplateCategory()
       if (defaultCategory) {

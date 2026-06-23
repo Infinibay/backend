@@ -1,5 +1,6 @@
-import { Arg, Authorized, Ctx, ID, Mutation, Query, Resolver } from 'type-graphql'
+import { Arg, Ctx, ID, Mutation, Query, Resolver } from 'type-graphql'
 import { GraphQLError } from 'graphql'
+import { Can } from '@main/permissions'
 import { InfinibayContext } from '../../utils/context'
 import { RecommendationResolutionType, ResolveRecommendationParamsInput } from '../types/RecommendationResolutionTypes'
 import { RecommendationResolverService } from '../../services/recommendations/RecommendationResolverService'
@@ -29,7 +30,7 @@ export class RecommendationResolutionResolver {
   @Mutation(() => RecommendationResolutionType, {
     description: 'Trigger auto-resolution for a recommendation. Idempotent: returns the in-flight resolution if one is already running.'
   })
-  @Authorized(['USER'])
+  @Can('recommendation:resolve')
   async resolveRecommendation (
     @Arg('id', () => ID) id: string,
     @Arg('actionKey', () => String) actionKey: string,
@@ -64,7 +65,7 @@ export class RecommendationResolutionResolver {
   @Mutation(() => RecommendationResolutionType, {
     description: 'Cancel a pending or running resolution. No-op on terminal resolutions.'
   })
-  @Authorized(['USER'])
+  @Can('recommendation:cancel')
   async cancelResolution (
     @Arg('id', () => ID) id: string,
     @Ctx() context: InfinibayContext
@@ -81,30 +82,27 @@ export class RecommendationResolutionResolver {
     nullable: true,
     description: 'Fetch a single resolution. Poll this query to track progress.'
   })
-  @Authorized(['USER'])
+  @Can('recommendation:view')
   async recommendationResolution (
     @Arg('id', () => ID) id: string,
     @Ctx() context: InfinibayContext
   ): Promise<RecommendationResolutionType | null> {
     const resolution = await context.prisma.recommendationResolution.findUnique({
       where: { id },
-      include: { recommendation: { include: { machine: { select: { userId: true } } } } }
+      include: { recommendation: { include: { machine: { select: { userId: true, departmentId: true } } } } }
     })
     if (!resolution) return null
-    if (
-      context.user?.role !== 'ADMIN' &&
-      context.user?.role !== 'SUPER_ADMIN' &&
-      resolution.recommendation.machine.userId !== context.user?.id
-    ) {
-      throw new GraphQLError('Access denied', { extensions: { code: 'FORBIDDEN' } })
-    }
+    await context.assertCan!('recommendation:view', {
+      userId: resolution.recommendation.machine.userId,
+      departmentId: resolution.recommendation.machine.departmentId
+    })
     return toGql(resolution)
   }
 
   @Query(() => [RecommendationResolutionType], {
     description: 'Return active (non-terminal) resolutions for a machine'
   })
-  @Authorized(['USER'])
+  @Can('recommendation:view', { id: (a) => a.machineId, scopeVia: 'vm' })
   async activeResolutionsForMachine (
     @Arg('machineId', () => ID) machineId: string,
     @Ctx() context: InfinibayContext
@@ -115,13 +113,6 @@ export class RecommendationResolutionResolver {
     })
     if (!machine) {
       throw new GraphQLError('Machine not found', { extensions: { code: 'NOT_FOUND' } })
-    }
-    if (
-      context.user?.role !== 'ADMIN' &&
-      context.user?.role !== 'SUPER_ADMIN' &&
-      machine.userId !== context.user?.id
-    ) {
-      throw new GraphQLError('Access denied', { extensions: { code: 'FORBIDDEN' } })
     }
     const rows = await context.prisma.recommendationResolution.findMany({
       where: {

@@ -1,30 +1,28 @@
 import logger from '@main/logger'
-import { Arg, Authorized, Ctx, Mutation, Query, Resolver } from 'type-graphql'
+import { Arg, Ctx, Mutation, Query, Resolver } from 'type-graphql'
 import { ApplicationType, CreateApplicationInputType } from './type'
 import { InfinibayContext } from '@main/utils/context'
 import { Application } from '@prisma/client'
 import { getEventManager } from '../../../services/EventManager'
-import { assertCanAccessResource } from '../../utils/auth'
+import { Can } from '@main/permissions'
 
 @Resolver()
 export class ApplicationQueries {
   @Query(() => [ApplicationType])
-  @Authorized('USER')
+  @Can('application:view')
   async applications (
     @Ctx() context: InfinibayContext
   ): Promise<Application[]> {
-    await assertCanAccessResource(context, 'applications')
     const { prisma } = context
     return prisma.application.findMany()
   }
 
   @Query(() => ApplicationType, { nullable: true })
-  @Authorized('USER')
+  @Can('application:view', { id: (a) => a.id })
   async application (
     @Arg('id') id: string,
     @Ctx() context: InfinibayContext
   ): Promise<Application | null> {
-    await assertCanAccessResource(context, 'applications')
     const { prisma } = context
     return prisma.application.findUnique({
       where: { id }
@@ -35,12 +33,11 @@ export class ApplicationQueries {
 @Resolver()
 export class ApplicationMutations {
   @Mutation(() => ApplicationType)
-  @Authorized('ADMIN')
+  @Can('application:create')
   async createApplication (
     @Arg('input') input: CreateApplicationInputType,
     @Ctx() context: InfinibayContext
   ): Promise<Application> {
-    await assertCanAccessResource(context, 'applications')
     const { prisma, user } = context
     const application = await prisma.application.create({
       data: {
@@ -66,13 +63,12 @@ export class ApplicationMutations {
   }
 
   @Mutation(() => ApplicationType)
-  @Authorized('ADMIN')
+  @Can('application:edit', { id: (a) => a.id })
   async updateApplication (
     @Arg('id') id: string,
     @Arg('input') input: CreateApplicationInputType,
     @Ctx() context: InfinibayContext
   ): Promise<Application> {
-    await assertCanAccessResource(context, 'applications')
     const { prisma, user } = context
     const application = await prisma.application.update({
       where: { id },
@@ -99,12 +95,11 @@ export class ApplicationMutations {
   }
 
   @Mutation(() => Boolean)
-  @Authorized('ADMIN')
+  @Can('application:delete', { id: (a) => a.id })
   async deleteApplication (
     @Arg('id') id: string,
     @Ctx() context: InfinibayContext
   ): Promise<boolean> {
-    await assertCanAccessResource(context, 'applications')
     const { prisma, user } = context
     try {
       await prisma.application.delete({

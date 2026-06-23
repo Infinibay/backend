@@ -1,5 +1,6 @@
-import { Arg, Authorized, Ctx, ID, Mutation, Query, Resolver, Int } from 'type-graphql'
+import { Arg, Ctx, ID, Mutation, Query, Resolver, Int } from 'type-graphql'
 
+import { Can } from '@main/permissions'
 import {
   Pool as PoolGql,
   PoolType as PoolTypeGql,
@@ -11,7 +12,6 @@ import { PoolService } from '@services/PoolService'
 import { InfinibayContext } from '@utils/context'
 import { UserInputError } from '@utils/errors'
 import type { Pool as PrismaPool } from '@prisma/client'
-import { assertCanAccessResource } from '../../utils/auth'
 
 function getService (ctx: InfinibayContext): PoolService {
   if (!ctx.prisma) throw new UserInputError('Database context not available')
@@ -44,7 +44,7 @@ export class PoolResolver {
   // -----------------------------------------------------------------------
 
   @Query(() => [PoolGql])
-  @Authorized(['USER'])
+  @Can('pool:view')
   async pools (@Ctx() ctx?: InfinibayContext): Promise<PoolGql[]> {
     if (!ctx) throw new UserInputError('Context not available')
     const rows = await getService(ctx).list()
@@ -52,7 +52,7 @@ export class PoolResolver {
   }
 
   @Query(() => PoolGql, { nullable: true })
-  @Authorized(['USER'])
+  @Can('pool:view', { id: (a) => a.id })
   async pool (
     @Arg('id', () => ID) id: string,
     @Ctx() ctx?: InfinibayContext
@@ -67,13 +67,12 @@ export class PoolResolver {
   // -----------------------------------------------------------------------
 
   @Mutation(() => PoolResult)
-  @Authorized(['ADMIN'])
+  @Can('pool:create')
   async createPool (
     @Arg('input') input: CreatePoolInput,
     @Ctx() ctx?: InfinibayContext
   ): Promise<PoolResult> {
     if (!ctx) throw new UserInputError('Context not available')
-    await assertCanAccessResource(ctx, 'desktops')
     try {
       const pool = await getService(ctx).create({
         name: input.name,
@@ -94,14 +93,13 @@ export class PoolResolver {
   }
 
   @Mutation(() => PoolResult)
-  @Authorized(['ADMIN'])
+  @Can('pool:edit', { id: (a) => a.id })
   async updatePool (
     @Arg('id', () => ID) id: string,
     @Arg('input') input: UpdatePoolInput,
     @Ctx() ctx?: InfinibayContext
   ): Promise<PoolResult> {
     if (!ctx) throw new UserInputError('Context not available')
-    await assertCanAccessResource(ctx, 'desktops')
     try {
       await getService(ctx).update(id, input)
       const row = await getService(ctx).byId(id)
@@ -112,14 +110,13 @@ export class PoolResolver {
   }
 
   @Mutation(() => PoolResult)
-  @Authorized(['ADMIN'])
+  @Can('pool:scale', { id: (a) => a.id })
   async scalePool (
     @Arg('id', () => ID) id: string,
     @Arg('targetSize', () => Int) targetSize: number,
     @Ctx() ctx?: InfinibayContext
   ): Promise<PoolResult> {
     if (!ctx) throw new UserInputError('Context not available')
-    await assertCanAccessResource(ctx, 'desktops')
     try {
       await getService(ctx).scale(id, targetSize)
       const row = await getService(ctx).byId(id)
@@ -130,13 +127,12 @@ export class PoolResolver {
   }
 
   @Mutation(() => PoolResult)
-  @Authorized(['ADMIN'])
+  @Can('pool:drain', { id: (a) => a.id })
   async drainPool (
     @Arg('id', () => ID) id: string,
     @Ctx() ctx?: InfinibayContext
   ): Promise<PoolResult> {
     if (!ctx) throw new UserInputError('Context not available')
-    await assertCanAccessResource(ctx, 'desktops')
     try {
       await getService(ctx).drain(id)
       const row = await getService(ctx).byId(id)
@@ -147,13 +143,12 @@ export class PoolResolver {
   }
 
   @Mutation(() => PoolResult)
-  @Authorized(['ADMIN'])
+  @Can('pool:drain', { id: (a) => a.id })
   async undrainPool (
     @Arg('id', () => ID) id: string,
     @Ctx() ctx?: InfinibayContext
   ): Promise<PoolResult> {
     if (!ctx) throw new UserInputError('Context not available')
-    await assertCanAccessResource(ctx, 'desktops')
     try {
       await getService(ctx).undrain(id)
       const row = await getService(ctx).byId(id)
@@ -164,13 +159,12 @@ export class PoolResolver {
   }
 
   @Mutation(() => Boolean)
-  @Authorized(['ADMIN'])
+  @Can('pool:delete', { id: (a) => a.id })
   async deletePool (
     @Arg('id', () => ID) id: string,
     @Ctx() ctx?: InfinibayContext
   ): Promise<boolean> {
     if (!ctx) throw new UserInputError('Context not available')
-    await assertCanAccessResource(ctx, 'desktops')
     return await getService(ctx).delete(id)
   }
 
@@ -179,7 +173,7 @@ export class PoolResolver {
   // -----------------------------------------------------------------------
 
   @Mutation(() => ID, { description: 'Check out a desktop from the pool for the current user. Returns Machine.id.' })
-  @Authorized(['USER'])
+  @Can('pool:connect', { id: (a) => a.poolId })
   async connectToPool (
     @Arg('poolId', () => ID) poolId: string,
     @Ctx() ctx?: InfinibayContext

@@ -1,4 +1,4 @@
-import { Arg, Authorized, Ctx, ID, Mutation, Query, Resolver } from 'type-graphql'
+import { Arg, Ctx, ID, Mutation, Query, Resolver } from 'type-graphql'
 import { IdentityGroupRoleMapping, IdentityProvider as PrismaIdentityProvider, IdentitySyncRun, PrismaClient } from '@prisma/client'
 import { UserInputError } from '@utils/errors'
 import { InfinibayContext } from '@utils/context'
@@ -16,7 +16,7 @@ import {
 } from './type'
 import { UserRole } from '../user/type'
 import { IdentityProviderService } from '../../../services/identity/IdentityProviderService'
-import { assertCanAccessResource } from '../../utils/auth'
+import { Can } from '@main/permissions'
 
 function toIdentityProviderType (provider: PrismaIdentityProvider): IdentityProviderType {
   return {
@@ -83,12 +83,11 @@ export class IdentityProviderResolver {
   }
 
   @Query(() => [IdentityProviderType])
-  @Authorized('ADMIN')
+  @Can('identityProvider:view')
   async identityProviders (
     @Ctx() context: InfinibayContext
   ): Promise<IdentityProviderType[]> {
     const { prisma } = context
-    await assertCanAccessResource(context, 'identity')
     const providers = await prisma.identityProvider.findMany({
       orderBy: [{ enabled: 'desc' }, { name: 'asc' }]
     })
@@ -96,25 +95,23 @@ export class IdentityProviderResolver {
   }
 
   @Query(() => IdentityProviderType, { nullable: true })
-  @Authorized('ADMIN')
+  @Can('identityProvider:view', { id: (a) => a.id })
   async identityProvider (
     @Arg('id', () => ID) id: string,
     @Ctx() context: InfinibayContext
   ): Promise<IdentityProviderType | null> {
     const { prisma } = context
-    await assertCanAccessResource(context, 'identity')
     const provider = await prisma.identityProvider.findUnique({ where: { id } })
     return provider ? toIdentityProviderType(provider) : null
   }
 
   @Query(() => [IdentitySyncRunType])
-  @Authorized('ADMIN')
+  @Can('identityProvider:view', { id: (a) => a.providerId })
   async identitySyncRuns (
     @Arg('providerId', () => ID) providerId: string,
     @Ctx() context: InfinibayContext
   ): Promise<IdentitySyncRunType[]> {
     const { prisma } = context
-    await assertCanAccessResource(context, 'identity')
     const provider = await prisma.identityProvider.findUnique({
       where: { id: providerId },
       select: { id: true }
@@ -130,13 +127,12 @@ export class IdentityProviderResolver {
   }
 
   @Query(() => [IdentityGroupRoleMappingType])
-  @Authorized('ADMIN')
+  @Can('identityProvider:view', { id: (a) => a.providerId })
   async identityGroupRoleMappings (
     @Arg('providerId', () => ID) providerId: string,
     @Ctx() context: InfinibayContext
   ): Promise<IdentityGroupRoleMappingType[]> {
     const { prisma } = context
-    await assertCanAccessResource(context, 'identity')
     const mappings = await prisma.identityGroupRoleMapping.findMany({
       where: { providerId },
       orderBy: { groupName: 'asc' }
@@ -145,13 +141,12 @@ export class IdentityProviderResolver {
   }
 
   @Mutation(() => IdentityProviderType)
-  @Authorized('ADMIN')
+  @Can('identityProvider:create')
   async createIdentityProvider (
     @Arg('input') input: CreateIdentityProviderInput,
     @Ctx() context: InfinibayContext
   ): Promise<IdentityProviderType> {
     const { prisma } = context
-    await assertCanAccessResource(context, 'identity')
     try {
       const provider = await prisma.identityProvider.create({
         data: this.service(prisma).buildCreateData(input)
@@ -163,14 +158,13 @@ export class IdentityProviderResolver {
   }
 
   @Mutation(() => IdentityProviderType)
-  @Authorized('ADMIN')
+  @Can('identityProvider:edit', { id: (a) => a.id })
   async updateIdentityProvider (
     @Arg('id', () => ID) id: string,
     @Arg('input') input: UpdateIdentityProviderInput,
     @Ctx() context: InfinibayContext
   ): Promise<IdentityProviderType> {
     const { prisma } = context
-    await assertCanAccessResource(context, 'identity')
     try {
       const provider = await prisma.identityProvider.update({
         where: { id },
@@ -183,25 +177,23 @@ export class IdentityProviderResolver {
   }
 
   @Mutation(() => Boolean)
-  @Authorized('ADMIN')
+  @Can('identityProvider:delete', { id: (a) => a.id })
   async deleteIdentityProvider (
     @Arg('id', () => ID) id: string,
     @Ctx() context: InfinibayContext
   ): Promise<boolean> {
     const { prisma } = context
-    await assertCanAccessResource(context, 'identity')
     await prisma.identityProvider.delete({ where: { id } })
     return true
   }
 
   @Mutation(() => IdentityGroupRoleMappingType)
-  @Authorized('ADMIN')
+  @Can('identityProvider:assign', { id: (a) => a.input.providerId })
   async upsertIdentityGroupRoleMapping (
     @Arg('input') input: UpsertIdentityGroupRoleMappingInput,
     @Ctx() context: InfinibayContext
   ): Promise<IdentityGroupRoleMappingType> {
     const { prisma, user } = context
-    await assertCanAccessResource(context, 'identity')
 
     const groupDn = input.groupDn.trim()
     if (!groupDn) throw new UserInputError('Group DN is required')
@@ -238,25 +230,23 @@ export class IdentityProviderResolver {
   }
 
   @Mutation(() => Boolean)
-  @Authorized('ADMIN')
+  @Can('identityProvider:assign')
   async deleteIdentityGroupRoleMapping (
     @Arg('id', () => ID) id: string,
     @Ctx() context: InfinibayContext
   ): Promise<boolean> {
     const { prisma } = context
-    await assertCanAccessResource(context, 'identity')
     await prisma.identityGroupRoleMapping.delete({ where: { id } })
     return true
   }
 
   @Mutation(() => IdentityProviderConnectionResultType)
-  @Authorized('ADMIN')
+  @Can('identityProvider:test', { id: (a) => a.id })
   async testIdentityProvider (
     @Arg('id', () => ID) id: string,
     @Ctx() context: InfinibayContext
   ): Promise<IdentityProviderConnectionResultType> {
     const { prisma } = context
-    await assertCanAccessResource(context, 'identity')
     const provider = await prisma.identityProvider.findUnique({ where: { id } })
     if (!provider) throw new UserInputError('Identity provider not found')
 
@@ -281,13 +271,12 @@ export class IdentityProviderResolver {
   }
 
   @Mutation(() => IdentityProviderConnectionResultType)
-  @Authorized('ADMIN')
+  @Can('identityProvider:test')
   async testIdentityProviderConfig (
     @Arg('input') input: CreateIdentityProviderInput,
     @Ctx() context: InfinibayContext
   ): Promise<IdentityProviderConnectionResultType> {
     const { prisma } = context
-    await assertCanAccessResource(context, 'identity')
     try {
       const data = this.service(prisma).buildCreateData(input)
       return this.service(prisma).testConnection({
@@ -304,13 +293,12 @@ export class IdentityProviderResolver {
   }
 
   @Mutation(() => IdentityProviderSyncResultType)
-  @Authorized('ADMIN')
+  @Can('identityProvider:test', { id: (a) => a.id })
   async syncIdentityProvider (
     @Arg('id', () => ID) id: string,
     @Ctx() context: InfinibayContext
   ): Promise<IdentityProviderSyncResultType> {
     const { prisma } = context
-    await assertCanAccessResource(context, 'identity')
     const result = await this.service(prisma).syncProvider(id)
     const provider = await prisma.identityProvider.findUnique({ where: { id } })
 

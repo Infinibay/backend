@@ -4,7 +4,6 @@ import bcrypt from 'bcrypt'
 import jwt from 'jsonwebtoken'
 import {
   Arg,
-  Authorized,
   Ctx,
   Mutation,
   Query,
@@ -15,7 +14,7 @@ import { UserType, LoginResponse, UserOrderByInputType, CreateUserInputType, Upd
 import { PaginationInputType } from '@utils/pagination'
 import { InfinibayContext } from '@utils/context'
 import { getEventManager } from '../../../services/EventManager'
-import { assertCanAccessResource } from '../../utils/auth'
+import { Can } from '@main/permissions'
 import { IdentityProviderService } from '../../../services/identity/IdentityProviderService'
 
 export interface UserResolverInterface {
@@ -41,7 +40,7 @@ export interface UserResolverInterface {
 @Resolver(() => UserType)
 export class UserResolver implements UserResolverInterface {
   @Query(() => UserType, { nullable: true })
-  @Authorized('USER')
+  @Can('user:view')
   async currentUser (@Ctx() context: InfinibayContext): Promise<UserType | null> {
     if (!context.user) {
       // This shouldn't happen if @Authorized decorator works correctly
@@ -66,12 +65,11 @@ export class UserResolver implements UserResolverInterface {
   Require auth('ADMIN')
   */
   @Query(() => UserType)
-  @Authorized('ADMIN')
+  @Can('user:view', { id: (a) => a.id })
   async user (
     @Arg('id') id: string,
     @Ctx() context: InfinibayContext
   ): Promise<UserType | null> {
-    await assertCanAccessResource(context, 'users')
     const prisma = context.prisma
     const user = await prisma.user.findUnique({ where: { id } })
     // thrwo exception if user not found
@@ -90,13 +88,12 @@ export class UserResolver implements UserResolverInterface {
   Require auth('ADMIN')
   */
   @Query(() => [UserType])
-  @Authorized('ADMIN')
+  @Can('user:view')
   async users (
     @Arg('orderBy', { nullable: true }) orderBy: UserOrderByInputType,
     @Arg('pagination', { nullable: true }) pagination: PaginationInputType,
     @Ctx() context: InfinibayContext
   ): Promise<UserType[]> {
-    await assertCanAccessResource(context, 'users')
     const prisma = context.prisma
     // Check if pagination is valid
     if (pagination.take < 0 || pagination.skip < 0) {
@@ -176,12 +173,11 @@ export class UserResolver implements UserResolverInterface {
   Require auth('ADMIN)
   */
   @Mutation(() => UserType)
-  @Authorized('ADMIN')
+  @Can('user:create')
   async createUser (
     @Arg('input', { nullable: false }) input: CreateUserInputType,
     @Ctx() context: InfinibayContext
   ): Promise<UserType> {
-    await assertCanAccessResource(context, 'users')
     const prisma = context.prisma
 
     // Protection: Only SUPER_ADMIN can create SUPER_ADMIN users
@@ -203,6 +199,10 @@ export class UserResolver implements UserResolverInterface {
     // Encrypt the password with bcrypt
     const hashedPassword = await bcrypt.hash(input.password, parseInt(process.env.BCRYPT_ROUNDS || '10'))
 
+    // Link the user to the system role matching their enum so authorization
+    // (roleId → grants) is consistent from creation (fix for #1).
+    const sysRole = await prisma.role.findUnique({ where: { key: input.role }, select: { id: true } })
+
     // Create the user with the hashed password
     const user = await prisma.user.create({
       data: {
@@ -211,6 +211,7 @@ export class UserResolver implements UserResolverInterface {
         firstName: input.firstName,
         lastName: input.lastName,
         role: input.role,
+        roleId: sysRole?.id,
         deleted: false
       }
     })
@@ -245,7 +246,7 @@ export class UserResolver implements UserResolverInterface {
   - Current password required for self-updates when changing password
   */
   @Mutation(() => UserType)
-  @Authorized('USER', 'ADMIN')
+  @Can('user:edit', { id: (a) => a.id })
   async updateUser (
     @Arg('id') id: string,
     @Arg('input', { nullable: false }) input: UpdateUserInputType,
@@ -273,13 +274,6 @@ export class UserResolver implements UserResolverInterface {
 
     // Check if this is a self-update
     const isSelfUpdate = context.user?.id === id
-    const isPrivileged = context.user?.role === 'ADMIN' || context.user?.role === 'SUPER_ADMIN'
-    if (!isSelfUpdate || input.role !== undefined) {
-      await assertCanAccessResource(context, 'users')
-    }
-    if (!isSelfUpdate && !isPrivileged) {
-      throw new AuthenticationError('Not authorized to update this user')
-    }
 
     // Self-update restrictions
     if (isSelfUpdate && input.role !== undefined) {
@@ -334,6 +328,15 @@ export class UserResolver implements UserResolverInterface {
     }
     if (input.role !== undefined) {
       updateData.role = input.role
+      // Keep authorization (roleId → grants) in sync with the identity enum, so a
+      // role change here actually changes permissions (fix for #1). Only re-point
+      // roleId when the role ACTUALLY changes, so editing an unrelated profile
+      // field never silently resets a user's (possibly custom) role to a system
+      // preset. Finer/custom assignment uses assignUserRole.
+      if (input.role !== user.role) {
+        const sysRole = await prisma.role.findUnique({ where: { key: input.role }, select: { id: true } })
+        updateData.customRole = sysRole ? { connect: { id: sysRole.id } } : { disconnect: true }
+      }
     }
 
     logger.info('📦 Final update data to be sent to database:', updateData)

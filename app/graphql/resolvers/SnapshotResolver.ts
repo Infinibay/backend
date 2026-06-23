@@ -1,5 +1,5 @@
 import logger from '@main/logger'
-import { Resolver, Query, Mutation, Arg, Authorized, Ctx } from 'type-graphql'
+import { Resolver, Query, Mutation, Arg, Ctx } from 'type-graphql'
 import {
   Snapshot,
   SnapshotResult,
@@ -14,12 +14,12 @@ import { VMOperationsService } from '@services/VMOperationsService'
 import { UserInputError } from '@utils/errors'
 import { getSocketService } from '@services/SocketService'
 import { InfinibayContext } from '@utils/context'
-import { assertCanManageVM } from '../utils/auth'
+import { Can } from '@main/permissions'
 
 @Resolver()
 export class SnapshotResolver {
   @Mutation(() => SnapshotResult, { description: 'Create a snapshot of a virtual machine' })
-  @Authorized()
+  @Can('snapshot:create', { id: (a) => a.input.machineId, scopeVia: 'vm' })
   async createSnapshot (
     @Arg('input') input: CreateSnapshotInput,
     @Ctx() ctx?: InfinibayContext
@@ -27,7 +27,6 @@ export class SnapshotResolver {
     if (!ctx?.prisma) {
       throw new UserInputError('Database context not available')
     }
-    await assertCanManageVM(ctx, input.machineId)
 
     try {
       const snapshotService = getSnapshotServiceV2(ctx.prisma)
@@ -111,7 +110,7 @@ export class SnapshotResolver {
   }
 
   @Mutation(() => SuccessType, { description: 'Restore a virtual machine to a snapshot' })
-  @Authorized()
+  @Can('snapshot:restore', { id: (a) => a.input.machineId, scopeVia: 'vm' })
   async restoreSnapshot (
     @Arg('input') input: RestoreSnapshotInput,
     @Ctx() ctx?: InfinibayContext
@@ -119,7 +118,6 @@ export class SnapshotResolver {
     if (!ctx?.prisma) {
       throw new UserInputError('Database context not available')
     }
-    await assertCanManageVM(ctx, input.machineId)
 
     try {
       const snapshotService = getSnapshotServiceV2(ctx.prisma)
@@ -181,7 +179,7 @@ export class SnapshotResolver {
   }
 
   @Mutation(() => SuccessType, { description: 'Delete a snapshot from a virtual machine' })
-  @Authorized()
+  @Can('snapshot:delete', { id: (a) => a.input.machineId, scopeVia: 'vm' })
   async deleteSnapshot (
     @Arg('input') input: DeleteSnapshotInput,
     @Ctx() ctx?: InfinibayContext
@@ -189,7 +187,6 @@ export class SnapshotResolver {
     if (!ctx?.prisma) {
       throw new UserInputError('Database context not available')
     }
-    await assertCanManageVM(ctx, input.machineId)
 
     try {
       const snapshotService = getSnapshotServiceV2(ctx.prisma)
@@ -251,7 +248,7 @@ export class SnapshotResolver {
   }
 
   @Query(() => SnapshotListResult, { description: 'List all snapshots for a virtual machine' })
-  @Authorized()
+  @Can('snapshot:view', { id: (a) => a.machineId, scopeVia: 'vm' })
   async machineSnapshots (
     @Arg('machineId') machineId: string,
     @Ctx() ctx?: InfinibayContext
@@ -259,7 +256,6 @@ export class SnapshotResolver {
     if (!ctx?.prisma) {
       throw new UserInputError('Database context not available')
     }
-    await assertCanManageVM(ctx, machineId)
 
     try {
       const snapshotService = getSnapshotServiceV2(ctx.prisma)
@@ -320,7 +316,7 @@ export class SnapshotResolver {
   }
 
   @Query(() => Snapshot, { nullable: true, description: 'Get the current snapshot of a virtual machine' })
-  @Authorized()
+  @Can('snapshot:view', { id: (a) => a.machineId, scopeVia: 'vm' })
   async currentSnapshot (
     @Arg('machineId') machineId: string,
     @Ctx() ctx?: InfinibayContext
@@ -328,7 +324,6 @@ export class SnapshotResolver {
     if (!ctx?.prisma) {
       throw new UserInputError('Database context not available')
     }
-    await assertCanManageVM(ctx, machineId)
 
     try {
       const snapshotService = getSnapshotServiceV2(ctx.prisma)
@@ -373,7 +368,7 @@ export class SnapshotResolver {
   }
 
   @Mutation(() => SuccessType, { description: 'Force power off and restore snapshot (emergency recovery)' })
-  @Authorized()
+  @Can('snapshot:restore', { id: (a) => a.input.machineId, scopeVia: 'vm' })
   async forceRestoreSnapshot (
     @Arg('input') input: RestoreSnapshotInput,
     @Ctx() ctx?: InfinibayContext
@@ -381,7 +376,6 @@ export class SnapshotResolver {
     if (!ctx?.prisma) {
       throw new UserInputError('Database context not available')
     }
-    await assertCanManageVM(ctx, input.machineId)
 
     try {
       const snapshotService = getSnapshotServiceV2(ctx.prisma)

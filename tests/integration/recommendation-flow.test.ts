@@ -15,6 +15,7 @@ import {
   createMachine,
   createHealthSnapshot
 } from '../setup/db-factories'
+import { seedSystemRoles } from '../setup/permission-factories'
 
 // PackageManager touches the DB in its constructor via loadAll(); mock it out —
 // it's unrelated to the recommendation service under test.
@@ -61,9 +62,17 @@ describe('Recommendation flow — real database', () => {
     jest.useRealTimers()
     resolver = new VMRecommendationResolver()
 
+    // Action/verb RBAC: seed the system roles and link each test user so their
+    // effective grants resolve (owner/stranger → USER own-scope, admin → ADMIN).
+    await seedSystemRoles(prisma)
+    const userRole = await prisma.role.findUnique({ where: { key: 'USER' } })
+    const adminRole = await prisma.role.findUnique({ where: { key: 'ADMIN' } })
     owner = await createUser(prisma)
+    await prisma.user.update({ where: { id: owner.id }, data: { roleId: userRole!.id } })
     admin = await createAdmin(prisma)
+    await prisma.user.update({ where: { id: admin.id }, data: { roleId: adminRole!.id } })
     stranger = await createUser(prisma)
+    await prisma.user.update({ where: { id: stranger.id }, data: { roleId: userRole!.id } })
     department = await createDepartment(prisma)
     machine = await createMachine(prisma, {
       userId: owner.id,
@@ -137,16 +146,29 @@ describe('Recommendation flow — real database', () => {
       expect(result.length).toBeGreaterThan(0)
     })
 
-    it('strangers cannot read another user\'s VM recommendations', async () => {
-      await expect(
-        resolver.getVMRecommendations(machine.id, makeContext(stranger))
-      ).rejects.toThrow('Access denied')
+    // Authorization now lives in the @Can decorator (middleware), which only
+    // fires through the schema — a direct resolver call bypasses it. So the
+    // denial paths are asserted end-to-end via graphql().
+    it('strangers cannot read another user\'s VM recommendations (denied by @Can scope)', async () => {
+      const result = await graphql({
+        schema,
+        source: RECOMMENDATION_TEST_QUERIES.GET_VM_RECOMMENDATIONS,
+        variableValues: { vmId: machine.id, refresh: false },
+        contextValue: makeContext(stranger)
+      })
+      expect(result.errors).toBeDefined()
+      expect(result.errors![0].message).toMatch(/not authorized|requires recommendation:view/i)
     })
 
     it('rejects unauthenticated requests', async () => {
-      await expect(
-        resolver.getVMRecommendations(machine.id, makeContext(null))
-      ).rejects.toThrow('Access denied')
+      const result = await graphql({
+        schema,
+        source: RECOMMENDATION_TEST_QUERIES.GET_VM_RECOMMENDATIONS,
+        variableValues: { vmId: machine.id, refresh: false },
+        contextValue: makeContext(null)
+      })
+      expect(result.errors).toBeDefined()
+      expect(result.errors![0].message).toMatch(/authentication required|not authorized/i)
     })
 
     it('throws when the machine does not exist', async () => {
@@ -183,7 +205,7 @@ describe('Recommendation flow — real database', () => {
       })
 
       expect(result.errors).toBeDefined()
-      expect(result.errors![0].message).toContain('Access denied')
+      expect(result.errors![0].message).toMatch(/authentication required|not authorized/i)
     })
 
     it('errors when the machine does not exist', async () => {

@@ -1,10 +1,10 @@
 import logger from '@main/logger'
-import { Arg, Authorized, Ctx, ID, Mutation, Query, Resolver } from 'type-graphql'
+import { Arg, Ctx, ID, Mutation, Query, Resolver } from 'type-graphql'
 import { UserInputError } from '@utils/errors'
 
 import { getEventManager } from '@services/EventManager'
 import { InfinibayContext } from '@utils/context'
-import { assertCanAccessResource } from '@main/graphql/utils/auth'
+import { Can } from '@main/permissions'
 
 import { FirewallOrchestrationService } from '@services/firewall/FirewallOrchestrationService'
 import { FirewallRuleService } from '@services/firewall/FirewallRuleService'
@@ -90,7 +90,7 @@ export class FirewallResolver {
   // ============================================================================
 
   @Query(() => FirewallRuleSetType, { nullable: true })
-  @Authorized('USER')
+  @Can('department:manageFirewall', { id: (a) => a.departmentId, scopeVia: 'department' })
   async getDepartmentFirewallRules (
     @Arg('departmentId', () => ID) departmentId: string,
     @Ctx() ctx: InfinibayContext
@@ -107,7 +107,7 @@ export class FirewallResolver {
   }
 
   @Query(() => FirewallRuleSetType, { nullable: true })
-  @Authorized('USER')
+  @Can('firewallRule:view', { id: (a) => a.vmId, scopeVia: 'vm' })
   async getVMFirewallRules (
     @Arg('vmId', () => ID) vmId: string,
     @Ctx() ctx: InfinibayContext
@@ -124,7 +124,7 @@ export class FirewallResolver {
   }
 
   @Query(() => EffectiveRuleSetType)
-  @Authorized('USER')
+  @Can('firewallRule:view', { id: (a) => a.vmId, scopeVia: 'vm' })
   async getEffectiveFirewallRules (
     @Arg('vmId', () => ID) vmId: string,
     @Ctx() ctx: InfinibayContext
@@ -172,7 +172,7 @@ export class FirewallResolver {
   }
 
   @Query(() => ValidationResultType)
-  @Authorized('USER')
+  @Can('firewallRule:view')
   async validateFirewallRule (
     @Arg('input') input: CreateFirewallRuleInput,
     @Ctx() ctx: InfinibayContext
@@ -206,11 +206,10 @@ export class FirewallResolver {
   }
 
   @Query(() => [NftablesChainInfoType])
-  @Authorized('ADMIN')
+  @Can('firewallRule:view')
   async listInfinibayFilters (
     @Ctx() ctx: InfinibayContext
   ): Promise<NftablesChainInfoType[]> {
-    await assertCanAccessResource(ctx, 'firewall')
     const { infinizationService } = await this.getServices(ctx)
 
     const vmChains = await infinizationService.listVMChains()
@@ -229,13 +228,12 @@ export class FirewallResolver {
   // ============================================================================
 
   @Mutation(() => FirewallRuleType)
-  @Authorized('ADMIN')
+  @Can('department:manageFirewall', { id: (a) => a.departmentId, scopeVia: 'department' })
   async createDepartmentFirewallRule (
     @Arg('departmentId', () => ID) departmentId: string,
     @Arg('input') input: CreateFirewallRuleInput,
     @Ctx() ctx: InfinibayContext
   ): Promise<FirewallRuleType> {
-    await assertCanAccessResource(ctx, 'firewall')
     const { ruleService, validationService, orchestrationService } = await this.getServices(ctx)
 
     // Check if department exists
@@ -324,13 +322,12 @@ export class FirewallResolver {
   }
 
   @Mutation(() => FirewallRuleType)
-  @Authorized('ADMIN')
+  @Can('firewallRule:create', { id: (a) => a.vmId, scopeVia: 'vm' })
   async createVMFirewallRule (
     @Arg('vmId', () => ID) vmId: string,
     @Arg('input') input: CreateFirewallRuleInput,
     @Ctx() ctx: InfinibayContext
   ): Promise<FirewallRuleType> {
-    await assertCanAccessResource(ctx, 'firewall')
     const { ruleService, validationService, orchestrationService } = await this.getServices(ctx)
 
     // Check if VM exists
@@ -428,13 +425,12 @@ export class FirewallResolver {
   }
 
   @Mutation(() => FirewallRuleType)
-  @Authorized('ADMIN')
+  @Can('firewallRule:edit', { id: (a) => a.ruleId, scopeVia: 'firewallRule' })
   async updateFirewallRule (
     @Arg('ruleId', () => ID) ruleId: string,
     @Arg('input') input: UpdateFirewallRuleInput,
     @Ctx() ctx: InfinibayContext
   ): Promise<FirewallRuleType> {
-    await assertCanAccessResource(ctx, 'firewall')
     const { ruleService, orchestrationService } = await this.getServices(ctx)
 
     // Get existing rule to find associated VM/Department
@@ -481,12 +477,11 @@ export class FirewallResolver {
   }
 
   @Mutation(() => Boolean)
-  @Authorized('ADMIN')
+  @Can('firewallRule:delete', { id: (a) => a.ruleId, scopeVia: 'firewallRule' })
   async deleteFirewallRule (
     @Arg('ruleId', () => ID) ruleId: string,
     @Ctx() ctx: InfinibayContext
   ): Promise<boolean> {
-    await assertCanAccessResource(ctx, 'firewall')
     const { ruleService, orchestrationService } = await this.getServices(ctx)
 
     // Get existing rule to find associated VM/Department
@@ -533,12 +528,11 @@ export class FirewallResolver {
   }
 
   @Mutation(() => FlushResultType)
-  @Authorized('ADMIN')
+  @Can('firewallRule:apply', { id: (a) => a.vmId, scopeVia: 'vm' })
   async flushFirewallRules (
     @Arg('vmId', () => ID) vmId: string,
     @Ctx() ctx: InfinibayContext
   ): Promise<FlushResultType> {
-    await assertCanAccessResource(ctx, 'firewall')
     const { orchestrationService } = await this.getServices(ctx)
 
     const result = await orchestrationService.applyVMRules(vmId)
@@ -555,11 +549,10 @@ export class FirewallResolver {
   }
 
   @Mutation(() => SyncResultType)
-  @Authorized('ADMIN')
+  @Can('firewallRule:apply', { minScope: 'ANY' })
   async syncFirewallToLibvirt (
     @Ctx() ctx: InfinibayContext
   ): Promise<SyncResultType> {
-    await assertCanAccessResource(ctx, 'firewall')
     const { orchestrationService } = await this.getServices(ctx)
 
     const result = await orchestrationService.syncAllToNftables()
@@ -576,11 +569,10 @@ export class FirewallResolver {
   }
 
   @Mutation(() => CleanupResultType)
-  @Authorized('ADMIN')
+  @Can('firewallRule:delete', { minScope: 'ANY' })
   async cleanupInfinibayFirewall (
     @Ctx() ctx: InfinibayContext
   ): Promise<CleanupResultType> {
-    await assertCanAccessResource(ctx, 'firewall')
     const { infinizationService } = await this.getServices(ctx)
 
     const vmChains = await infinizationService.listVMChains()
