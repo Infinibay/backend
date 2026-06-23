@@ -169,7 +169,7 @@ export class PolicyResolver {
   @Query(() => [PolicyAuditEntryType])
   @Authorized('ADMIN')
   async policyAuditLog (
-    @Arg('input', { nullable: true }) input: PolicyAuditQueryInput | undefined,
+    @Arg('input', () => PolicyAuditQueryInput, { nullable: true }) input: PolicyAuditQueryInput | undefined,
     @Ctx() context: InfinibayContext
   ): Promise<PolicyAuditEntryType[]> {
     await assertCanAccessResource(context, 'policies')
