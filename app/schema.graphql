@@ -457,6 +457,16 @@ input DeleteSnapshotInput {
   snapshotName: String!
 }
 
+type DepartmentMemberType {
+  departmentId: String!
+  id: ID!
+  role: DepartmentRole!
+  userEmail: String!
+  userGlobalRole: UserRole!
+  userId: String!
+  userName: String!
+}
+
 type DepartmentNetworkDiagnosticsType {
   brNetfilter: BrNetfilterDiagnosticsType!
   bridge: BridgeDiagnosticsType!
@@ -467,6 +477,12 @@ type DepartmentNetworkDiagnosticsType {
   nat: NatDiagnosticsType!
   recommendations: [String!]!
   timestamp: Timestamp!
+}
+
+"""Role a user holds within a single department"""
+enum DepartmentRole {
+  MANAGER
+  MEMBER
 }
 
 type DepartmentType {
@@ -564,6 +580,13 @@ type DnsmasqDiagnosticsType {
   pid: Int
   pidMatches: Boolean!
   recentLogLines: [String!]
+}
+
+type DomainJoinResultType {
+  domain: String
+  error: String
+  message: String
+  success: Boolean!
 }
 
 type DyummyType {
@@ -978,6 +1001,16 @@ The `JSONObject` scalar type represents JSON objects as specified by [ECMA-404](
 """
 scalar JSONObject
 
+input JoinDomainInput {
+  computerName: String
+  identityProviderId: String! = ""
+  machineId: String! = ""
+  ou: String
+  password: String
+  restartAfter: Boolean
+  username: String
+}
+
 """Keep-alive heartbeat metrics for a VM connection"""
 type KeepAliveMetrics {
   """Average round-trip time in milliseconds"""
@@ -1377,6 +1410,7 @@ type Mutation {
 
   """Install a package on a virtual machine (legacy compatibility)"""
   installPackage(machineId: ID!, packageName: String!): CommandResult!
+  joinVmToDomain(input: JoinDomainInput!): DomainJoinResultType!
   killProcess(force: Boolean! = false, machineId: String!, pid: Int!): ProcessControlResult!
   killProcesses(force: Boolean! = false, machineId: String!, pids: [Int!]!): [ProcessControlResult!]!
   login(email: String!, password: String!): LoginResponse
@@ -1395,6 +1429,7 @@ type Mutation {
 
   """Register uploaded ISO"""
   registerISO(filename: String!, os: String!, path: String!, size: Float!): ISO!
+  removeDepartmentMember(departmentId: String!, userId: String!): Boolean!
 
   """Remove ISO file"""
   removeISO(isoId: String!): Boolean!
@@ -1424,6 +1459,7 @@ type Mutation {
   runDefenderQuickScan(vmId: ID!): DefenderScanResult!
   scalePool(id: ID!, targetSize: Int!): PoolResult!
   scheduleScript(input: ScheduleScriptInput!): ScheduleScriptResponseType!
+  setDepartmentMember(input: SetDepartmentMemberInput!): DepartmentMemberType!
   setNetworkBridgeName(input: BridgeNameInput!): Boolean!
   setNetworkIp(input: NetworkIpInput!): Boolean!
   setNetworkIpRange(input: IpRangeInput!): Boolean!
@@ -1743,6 +1779,22 @@ type PermissionResourceType {
   label: String!
 }
 
+type PolicyAuditEntryType {
+  action: String!
+  actorId: String
+  actorName: String
+  createdAt: DateTimeISO!
+  id: ID!
+  metadata: JSONObject
+  summary: String!
+  targetId: String
+  targetType: String!
+}
+
+input PolicyAuditQueryInput {
+  limit: Int = 100
+}
+
 type Pool {
   createdAt: DateTimeISO!
 
@@ -1833,6 +1885,7 @@ type Query {
   currentSnapshot(machineId: String!): Snapshot
   currentUser: UserType
   department(id: String!): DepartmentType
+  departmentMembers(departmentId: String!): [DepartmentMemberType!]!
   departmentNetworkDiagnostics(departmentId: String!): DepartmentNetworkDiagnosticsType!
   departmentScripts(departmentId: ID!): [ScriptType!]!
   departments: [DepartmentType!]!
@@ -1925,6 +1978,7 @@ type Query {
   Get the count of pending (non-dismissed, non-snoozed) recommendations across all VMs
   """
   pendingRecommendationCount: Int!
+  policyAuditLog(input: PolicyAuditQueryInput): [PolicyAuditEntryType!]!
   pool(id: ID!): Pool
   pools: [Pool!]!
 
@@ -2336,6 +2390,12 @@ type ScriptType {
   shell: ShellType!
   tags: [String!]!
   updatedAt: DateTimeISO!
+}
+
+input SetDepartmentMemberInput {
+  departmentId: String! = ""
+  role: DepartmentRole! = MEMBER
+  userId: String! = ""
 }
 
 input SetRolePermissionInput {
