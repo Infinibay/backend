@@ -23,6 +23,9 @@ export class UserType {
   @Field({ nullable: false })
     role: string = ''
 
+  @Field(() => ID, { nullable: true, description: 'Assigned role id (custom or system preset); null falls back to the `role` enum tier' })
+    roleId?: string
+
   @Field({ nullable: false })
     email: string = ''
 
@@ -49,6 +52,24 @@ export class LoginResponse {
 
   @Field({ nullable: false })
     token: string = ''
+
+  @Field({ nullable: false, description: 'Refresh token used to obtain a new access token' })
+    refreshToken: string = ''
+
+  @Field(() => Int, { nullable: false, description: 'Access token lifetime in seconds' })
+    expiresIn: number = 0
+}
+
+@ObjectType({ description: 'Response from refreshing an access token' })
+export class RefreshAuthResponse {
+  @Field({ nullable: false })
+    token: string = ''
+
+  @Field({ nullable: false, description: 'Rotated refresh token to use for the next refresh' })
+    refreshToken: string = ''
+
+  @Field(() => Int, { nullable: false, description: 'Access token lifetime in seconds' })
+    expiresIn: number = 0
 }
 
 // UserOrderByField enum

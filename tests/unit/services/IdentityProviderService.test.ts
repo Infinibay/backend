@@ -29,6 +29,9 @@ describe('IdentityProviderService', () => {
     prisma = mockDeep<PrismaClient>()
     service = new IdentityProviderService(prisma)
     mockUnbind.mockResolvedValue(undefined as never)
+    // syncProvider's deprovision pass queries linked users; default to none so
+    // tests that drive a sync don't trip over an unmocked findMany.
+    prisma.user.findMany.mockResolvedValue([] as never)
   })
 
   it('validates saved providers with strict bind credentials', async () => {

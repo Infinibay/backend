@@ -1,6 +1,7 @@
 import logger from '@main/logger'
 import { Request, Response, NextFunction } from 'express'
 import jwt from 'jsonwebtoken'
+import { getJWTSecret } from '@utils/jwtAuth'
 
 const debug = logger.child({ module: 'adminAuth' })
 
@@ -10,7 +11,9 @@ interface DecodedToken {
 }
 
 export const adminAuthMiddleware = async (req: Request, res: Response, next: NextFunction) => {
-  const token = req.headers.authorization
+  const raw = req.headers.authorization || ''
+  const m = raw.match(/^\s*Bearer\s+(.+)$/i)
+  const token = (m ? m[1] : raw).trim()
 
   if (!token) {
     debug.debug('No token found.')
@@ -18,7 +21,7 @@ export const adminAuthMiddleware = async (req: Request, res: Response, next: Nex
   }
 
   try {
-    const decoded = jwt.verify(token, process.env.TOKENKEY || 'secret') as DecodedToken
+    const decoded = jwt.verify(token, getJWTSecret()) as DecodedToken
 
     if (decoded.userRole !== 'ADMIN' && decoded.userRole !== 'SUPER_ADMIN') {
       debug.debug('Access denied for non-admin user.')

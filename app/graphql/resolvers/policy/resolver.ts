@@ -14,6 +14,7 @@ import { InfinibayContext, requireUser } from '@utils/context'
 import { UserInputError } from '@utils/errors'
 import { PolicyAuditService } from '../../../services/policy/PolicyAuditService'
 import { DepartmentMembershipService } from '../../../services/policy/DepartmentMembershipService'
+import { getEventManager } from '@services/EventManager'
 import {
   AssignUserRoleInput,
   CreateRoleInput,
@@ -57,6 +58,22 @@ function toRoleDto (role: RoleWithRels): RoleType {
 
 function slugify (name: string): string {
   return name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48) || 'role'
+}
+
+// Best-effort real-time fan-out of a governance change to connected admins, so
+// every open "Roles & Permissions" view refreshes the affected slice. `data`
+// carries `kind` ('role' | 'userRole' | 'override' | 'member') plus the relevant
+// id, which the frontend uses to refetch just that query.
+function emitPolicyEvent (
+  ctx: InfinibayContext,
+  action: 'create' | 'update' | 'delete',
+  data: Record<string, unknown>
+): void {
+  try {
+    void getEventManager().dispatchEvent('policy', action, data, ctx.user?.id)
+  } catch {
+    // A mutation must never fail because the websocket fan-out is unavailable.
+  }
 }
 
 function validatePermission (permission: string): void {
@@ -158,6 +175,7 @@ export class PolicyResolver {
       actorId: ctx.user?.id, action: 'role.create', targetType: 'role', targetId: role.id,
       summary: `Created role "${role.name}"`, metadata: { key: role.key, permissions: input.permissions }
     })
+    emitPolicyEvent(ctx, 'create', { kind: 'role', roleId: role.id })
     return toRoleDto(role)
   }
 
@@ -180,6 +198,7 @@ export class PolicyResolver {
       actorId: ctx.user?.id, action: 'role.update', targetType: 'role', targetId: role.id,
       summary: `Updated role "${role.name}"`, metadata: { name: input.name, description: input.description }
     })
+    emitPolicyEvent(ctx, 'update', { kind: 'role', roleId: role.id })
     return toRoleDto(role)
   }
 
@@ -195,6 +214,7 @@ export class PolicyResolver {
       actorId: ctx.user?.id, action: 'role.delete', targetType: 'role', targetId: id,
       summary: `Deleted role "${role.name}"`, metadata: { key: role.key }
     })
+    emitPolicyEvent(ctx, 'delete', { kind: 'role', roleId: id })
     return true
   }
 
@@ -218,6 +238,7 @@ export class PolicyResolver {
       summary: `Granted ${input.permission} (${input.scope}) to "${role.name}"`,
       metadata: { permission: input.permission, scope: input.scope }
     })
+    emitPolicyEvent(ctx, 'update', { kind: 'role', roleId: input.roleId })
     const updated = await ctx.prisma.role.findUnique({ where: { id: input.roleId }, include: ROLE_INCLUDE })
     return toRoleDto(updated as RoleWithRels)
   }
@@ -234,6 +255,7 @@ export class PolicyResolver {
       actorId: ctx.user?.id, action: 'role_permission.remove', targetType: 'role', targetId: input.roleId,
       summary: `Revoked ${input.permission} from "${role.name}"`, metadata: { permission: input.permission }
     })
+    emitPolicyEvent(ctx, 'update', { kind: 'role', roleId: input.roleId })
     const updated = await ctx.prisma.role.findUnique({ where: { id: input.roleId }, include: ROLE_INCLUDE })
     return toRoleDto(updated as RoleWithRels)
   }
@@ -253,6 +275,7 @@ export class PolicyResolver {
       actorId: ctx.user?.id, action: 'role.reset', targetType: 'role', targetId: roleId,
       summary: `Reset role "${role.name}" to default permissions`, metadata: { key: role.key }
     })
+    emitPolicyEvent(ctx, 'update', { kind: 'role', roleId })
     const updated = await ctx.prisma.role.findUnique({ where: { id: roleId }, include: ROLE_INCLUDE })
     return toRoleDto(updated as RoleWithRels)
   }
@@ -293,6 +316,7 @@ export class PolicyResolver {
       actorId: ctx.user?.id, action: 'user_role.assign', targetType: 'user', targetId: input.userId,
       summary: `Assigned role "${role.name}" to ${user.email}`, metadata: { roleId: role.id, roleKey: role.key }
     })
+    emitPolicyEvent(ctx, 'update', { kind: 'userRole', userId: input.userId })
     return true
   }
 
@@ -318,6 +342,7 @@ export class PolicyResolver {
       summary: `${input.effect} ${input.permission} (${input.scope}) for ${user.email}`,
       metadata: { permission: input.permission, scope: input.scope, effect: input.effect }
     })
+    emitPolicyEvent(ctx, 'update', { kind: 'override', userId: input.userId })
     return { id: override.id, userId: override.userId, permission: override.permission, scope: override.scope, effect: override.effect }
   }
 
@@ -334,6 +359,7 @@ export class PolicyResolver {
         actorId: ctx.user?.id, action: 'user_override.clear', targetType: 'user', targetId: userId,
         summary: `Cleared override ${permission} for user ${userId}`, metadata: { permission }
       })
+      emitPolicyEvent(ctx, 'update', { kind: 'override', userId })
     }
     return res.count > 0
   }
@@ -375,6 +401,7 @@ export class PolicyResolver {
       summary: `Set ${member.user.email} as ${input.role} in department ${input.departmentId}`,
       metadata: { departmentId: input.departmentId, userId: input.userId, role: input.role }
     })
+    emitPolicyEvent(ctx, 'update', { kind: 'member', departmentId: input.departmentId })
     return toMemberDto(member)
   }
 
@@ -391,6 +418,7 @@ export class PolicyResolver {
         actorId: ctx.user?.id, action: 'department_member.remove', targetType: 'department', targetId: departmentId,
         summary: `Removed user ${userId} from department ${departmentId}`, metadata: { departmentId, userId }
       })
+      emitPolicyEvent(ctx, 'delete', { kind: 'member', departmentId })
     }
     return removed
   }

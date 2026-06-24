@@ -96,7 +96,7 @@ export const RESOURCES: ResourceDef[] = [
   { key: 'user', label: 'Users', group: 'Governance', scoped: true, nav: 'users',
     verbs: ['view', 'create', 'edit', 'delete'] },
   { key: 'identityProvider', label: 'Identity providers', group: 'Identity', scoped: false, nav: 'identity',
-    verbs: ['view', 'create', 'edit', 'delete', 'assign', 'test'] },
+    verbs: ['view', 'create', 'edit', 'delete', 'assign', 'test', 'sync', 'use'] },
 
   // ── Governance (SUPER_ADMIN) ────────────────────────────────────────────
   { key: 'role', label: 'Roles', group: 'Governance', scoped: false, nav: 'policies',
@@ -110,7 +110,9 @@ export const RESOURCES: ResourceDef[] = [
   { key: 'appSettings', label: 'App settings', group: 'System', scoped: false, nav: 'settings',
     verbs: ['view', 'edit'] },
   { key: 'pluginPackage', label: 'Plugins', group: 'System', scoped: false, nav: 'settings',
-    verbs: ['view', 'edit', 'remove'] }
+    verbs: ['view', 'edit', 'remove'] },
+  { key: 'featureFlag', label: 'Feature flags', group: 'System', scoped: false, nav: 'settings',
+    verbs: ['view', 'set'] }
 ]
 
 export const RESOURCE_BY_KEY: Record<string, ResourceDef> = Object.fromEntries(

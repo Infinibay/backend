@@ -22,7 +22,8 @@ model User {
   externalId                  String?
   externalDn                  String?
   lastDirectorySyncAt         DateTime?
-  identityProvider            IdentityProvider?           @relation(fields: [identityProviderId], references: [id], onDelete: SetNull)
+  tokenInvalidatedAt          DateTime?
+  identityProvider            IdentityProvider?          @relation(fields: [identityProviderId], references: [id], onDelete: SetNull)
   VM                          Machine[]
   maintenanceHistory          MaintenanceHistory[]
   maintenanceTasks            MaintenanceTask[]
@@ -37,51 +38,82 @@ model User {
   roleId                      String?
   customRole                  Role?                      @relation(fields: [roleId], references: [id])
   permissionOverrides         UserPermissionOverride[]
+  refreshTokens               RefreshToken[]
 
   @@unique([identityProviderId, externalId])
   @@index([identityProviderId])
   @@index([roleId])
 }
 
+// Opaque refresh tokens for session rotation. The raw token is shown to the
+// client once; only its sha256 hash is stored. Rotation revokes the old row and
+// issues a new one. Access-token (JWT) revocation is handled separately via
+// User.tokenInvalidatedAt — any access token whose iat predates that instant is
+// rejected at verification time.
+model RefreshToken {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+// Backend-driven feature flags. Only the on/off OVERRIDE is stored here, keyed
+// by the flag's stable `key`; the label/description/default live in the code
+// registry (app/featureFlags/registry.ts). The featureFlags query merges the
+// registry defaults with these overrides. Absent row => the registry default.
+model FeatureFlag {
+  key         String   @id
+  enabled     Boolean  @default(false)
+  updatedAt   DateTime @updatedAt
+  updatedById String?
+}
+
 model IdentityProvider {
-  id                 String                 @id @default(uuid())
-  name               String                 @unique
-  providerType       IdentityProviderType
-  status             IdentityProviderStatus @default(DISCONNECTED)
-  enabled            Boolean                @default(true)
-  domain             String?
-  host               String
-  port               Int                    @default(389)
-  useTls             Boolean                @default(false)
-  baseDn             String
-  bindDn             String?
-  bindPasswordSecret String?
-  userFilter         String?
-  groupFilter        String?
-  attributes         Json?
-  lastTestAt         DateTime?
-  lastSyncAt         DateTime?
-  lastError          String?                @db.Text
-  createdAt          DateTime               @default(now())
-  updatedAt          DateTime               @updatedAt
-  syncRuns           IdentitySyncRun[]
-  users              User[]
-  groupRoleMappings  IdentityGroupRoleMapping[]
-  domainJoinedMachines MachineConfiguration[] @relation("VMDomainProvider")
+  id                    String                     @id @default(uuid())
+  name                  String                     @unique
+  providerType          IdentityProviderType
+  status                IdentityProviderStatus     @default(DISCONNECTED)
+  enabled               Boolean                    @default(true)
+  domain                String?
+  host                  String
+  port                  Int                        @default(389)
+  useTls                Boolean                    @default(false)
+  tlsCa                 String?                    @db.Text
+  tlsInsecureSkipVerify Boolean                    @default(false)
+  baseDn                String
+  bindDn                String?
+  bindPasswordSecret    String?
+  userFilter            String?
+  groupFilter           String?
+  attributes            Json?
+  lastTestAt            DateTime?
+  lastSyncAt            DateTime?
+  lastError             String?                    @db.Text
+  createdAt             DateTime                   @default(now())
+  updatedAt             DateTime                   @updatedAt
+  syncRuns              IdentitySyncRun[]
+  users                 User[]
+  groupRoleMappings     IdentityGroupRoleMapping[]
+  domainJoinedMachines  MachineConfiguration[]     @relation("VMDomainProvider")
 
   @@index([providerType])
   @@index([status])
 }
 
 model IdentityGroupRoleMapping {
-  id            String           @id @default(uuid())
-  providerId    String
-  groupDn       String
-  groupName     String
-  role          UserRole
-  createdAt     DateTime         @default(now())
-  updatedAt     DateTime         @updatedAt
-  provider      IdentityProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  id         String           @id @default(uuid())
+  providerId String
+  groupDn    String
+  groupName  String
+  role       UserRole
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+  provider   IdentityProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
 
   @@unique([providerId, groupDn])
   @@index([providerId])
@@ -126,7 +158,7 @@ model RolePermission {
   id         String          @id @default(uuid())
   roleId     String
   role       Role            @relation(fields: [roleId], references: [id], onDelete: Cascade)
-  permission String          // 'vm:edit' | 'vm:manage' | '*'
+  permission String // 'vm:edit' | 'vm:manage' | '*'
   scope      PermissionScope @default(ANY)
   createdAt  DateTime        @default(now())
   updatedAt  DateTime        @updatedAt
@@ -151,18 +183,18 @@ model UserPermissionOverride {
 }
 
 model Node {
-  id          String   @id @default(uuid())
-  name        String
-  currentRaid String
-  nextRaid    String?
-  cpuFlags    Json
-  ram         Int
-  cores       Int
-  maintenanceMode Boolean @default(false)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  disks       Disk[]
-  machines    Machine[]
+  id              String    @id @default(uuid())
+  name            String
+  currentRaid     String
+  nextRaid        String?
+  cpuFlags        Json
+  ram             Int
+  cores           Int
+  maintenanceMode Boolean   @default(false)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  disks           Disk[]
+  machines        Machine[]
 }
 
 model Disk {
@@ -249,18 +281,18 @@ model Machine {
 /// Structured event/log entry forwarded by the in-VM agent (infiniservice).
 /// Used to surface guest-side errors that previously only existed in agent logs.
 model AgentEvent {
-  id          String           @id @default(uuid())
+  id          String             @id @default(uuid())
   machineId   String
   severity    AgentEventSeverity
   source      String
-  message     String           @db.Text
+  message     String             @db.Text
   executionId String?
   context     Json?
   /// Timestamp claimed by the agent (may differ slightly from createdAt due to drift).
   occurredAt  DateTime
-  createdAt   DateTime         @default(now())
-  machine     Machine          @relation(fields: [machineId], references: [id], onDelete: Cascade)
-  execution   ScriptExecution? @relation(fields: [executionId], references: [id], onDelete: SetNull)
+  createdAt   DateTime           @default(now())
+  machine     Machine            @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  execution   ScriptExecution?   @relation(fields: [executionId], references: [id], onDelete: SetNull)
 
   @@index([machineId, createdAt])
   @@index([executionId])
@@ -369,7 +401,7 @@ model MachineConfiguration {
 
   // Last error captured by backgroundCode rollback. Surfaces failure reasons
   // (e.g. "GPU bound to nvidia, not vfio-pci") to the UI instead of bare 'error'.
-  lastError     String?
+  lastError String?
 
   // GPU configuration (ADDITIONAL)
   // Path to GPU ROM file for passthrough (needed for some GPUs)
@@ -437,13 +469,13 @@ model MachineConfiguration {
   // Set by DomainJoinService when a VM is joined to an AD/LDAP domain via the
   // in-VM agent (JoinDomain command). All nullable for backward compatibility.
   // 'PENDING' | 'JOINED' | 'FAILED'
-  domainJoinStatus     String?
+  domainJoinStatus         String?
   // The domain the VM was last (attempted to be) joined to, e.g. corp.example.com.
-  domainName           String?
+  domainName               String?
   // Timestamp of the last successful join.
-  domainJoinedAt       DateTime?
+  domainJoinedAt           DateTime?
   // Error message from the last failed join attempt.
-  domainJoinError      String?
+  domainJoinError          String?
   // The IdentityProvider whose domain/credentials were used for the join.
   // SetNull on delete: removing a directory must not delete VM config rows nor
   // leave a dangling reference — the join state stays, the provider link clears.
@@ -671,14 +703,14 @@ model Notification {
 }
 
 model Department {
-  id                String             @id @default(uuid())
+  id                String                 @id @default(uuid())
   name              String
-  createdAt         DateTime           @default(now())
+  createdAt         DateTime               @default(now())
   internetSpeed     Int?
   ipSubnet          String?
-  updatedAt         DateTime           @updatedAt
-  firewallRuleSetId String?            @unique
-  firewallRuleSet   FirewallRuleSet?   @relation(fields: [firewallRuleSetId], references: [id], onDelete: SetNull)
+  updatedAt         DateTime               @updatedAt
+  firewallRuleSetId String?                @unique
+  firewallRuleSet   FirewallRuleSet?       @relation(fields: [firewallRuleSetId], references: [id], onDelete: SetNull)
   machines          Machine[]
   scriptAssignments DepartmentScript[]
   pools             Pool[]
@@ -1291,7 +1323,7 @@ model ScriptExecution {
   executedAs            String?
   // Execution order — propagated from MachineTemplateScript.order for blueprints.
   // Lower values execute first. Default 0 preserves FIFO for non-blueprint scripts.
-  order                  Int             @default(0)
+  order                 Int             @default(0)
   // Scheduling fields for immediate, scheduled, and repeating executions
   scheduledFor          DateTime? // When script should execute (NULL or past = immediate)
   repeatIntervalMinutes Int? // Interval in minutes for repeating scripts (NULL = one-time)

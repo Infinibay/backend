@@ -49,7 +49,8 @@ describe('JWT Authentication Security Tests', () => {
       // Arrange
       const token = jwt.sign(
         { userId: mockSafeUser.id, userRole: mockSafeUser.role },
-        testSecret
+        testSecret,
+        { expiresIn: '1h' }
       )
 
       const mockRequest = {
@@ -109,7 +110,8 @@ describe('JWT Authentication Security Tests', () => {
       // Arrange
       const token = jwt.sign(
         { userId: mockSafeUser.id, userRole: mockSafeUser.role },
-        testSecret
+        testSecret,
+        { expiresIn: '1h' }
       )
 
       const mockRequest = {
@@ -151,6 +153,7 @@ describe('JWT Authentication Security Tests', () => {
         externalId: null,
         externalDn: null,
         lastDirectorySyncAt: null,
+        tokenInvalidatedAt: null,
         roleId: null,
         createdAt: new Date(),
         updatedAt: new Date()

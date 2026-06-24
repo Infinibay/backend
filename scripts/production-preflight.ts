@@ -79,6 +79,32 @@ async function checkEnvironment (): Promise<void> {
     addResult('pass', 'IDENTITY_SECRET_KEY', 'IDENTITY_SECRET_KEY is configured')
   }
 
+  if (process.env.IDENTITY_SECRET_KEY && process.env.IDENTITY_SECRET_KEY === process.env.TOKENKEY) {
+    addResult(
+      strictStatus(),
+      'Secret separation',
+      'IDENTITY_SECRET_KEY must differ from TOKENKEY so a single leak does not compromise both JWT signing and directory secret encryption'
+    )
+  } else {
+    addResult('pass', 'Secret separation', 'IDENTITY_SECRET_KEY and TOKENKEY are distinct')
+  }
+
+  addResult(
+    'pass',
+    'Access token TTL',
+    'ACCESS_TOKEN_TTL controls access-token lifetime (default 1h); REFRESH_TOKEN_TTL_DAYS controls refresh-token lifetime (default 30 days)',
+    {
+      accessTokenTtl: process.env.ACCESS_TOKEN_TTL || '1h',
+      refreshTokenTtlDays: process.env.REFRESH_TOKEN_TTL_DAYS || '30'
+    }
+  )
+
+  addResult(
+    'pass',
+    'Directory TLS validation',
+    'Per-provider tlsInsecureSkipVerify is ignored in production; certificate validation is always enforced when NODE_ENV=production'
+  )
+
   if (!SHARED_STORAGE_VALUES.has((process.env.INFINIBAY_SHARED_STORAGE || '').toLowerCase())) {
     addResult(
       strictStatus(),

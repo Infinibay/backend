@@ -17,6 +17,8 @@ import {
 import { UserRole } from '../user/type'
 import { IdentityProviderService } from '../../../services/identity/IdentityProviderService'
 import { Can } from '@main/permissions'
+import { BackgroundTaskService } from '@services/BackgroundTaskService'
+import logger from '@main/logger'
 
 function toIdentityProviderType (provider: PrismaIdentityProvider): IdentityProviderType {
   return {
@@ -29,6 +31,8 @@ function toIdentityProviderType (provider: PrismaIdentityProvider): IdentityProv
     host: provider.host,
     port: provider.port,
     useTls: provider.useTls,
+    tlsCa: provider.tlsCa,
+    tlsInsecureSkipVerify: provider.tlsInsecureSkipVerify,
     baseDn: provider.baseDn,
     bindDn: provider.bindDn,
     hasBindPassword: !!provider.bindPasswordSecret,
@@ -147,13 +151,15 @@ export class IdentityProviderResolver {
     @Ctx() context: InfinibayContext
   ): Promise<IdentityProviderType> {
     const { prisma } = context
+    // buildCreateData throws validation errors that are safe to surface verbatim.
+    const data = this.service(prisma).buildCreateData(input)
     try {
-      const provider = await prisma.identityProvider.create({
-        data: this.service(prisma).buildCreateData(input)
-      })
+      const provider = await prisma.identityProvider.create({ data })
       return toIdentityProviderType(provider)
     } catch (error) {
-      throw new UserInputError((error as Error).message)
+      // Don't echo raw directory/database errors to the client; log them instead.
+      logger.error(`Failed to create identity provider: ${(error as Error).message}`)
+      throw new UserInputError('Unable to create the identity provider. Please verify the configuration.')
     }
   }
 
@@ -250,11 +256,7 @@ export class IdentityProviderResolver {
     const provider = await prisma.identityProvider.findUnique({ where: { id } })
     if (!provider) throw new UserInputError('Identity provider not found')
 
-    const result = await this.service(prisma).testConnection({
-      host: provider.host,
-      port: provider.port,
-      useTls: provider.useTls
-    })
+    const result = await this.service(prisma).testSavedProvider(id, { requireBind: true })
     const updatedProvider = await prisma.identityProvider.update({
       where: { id },
       data: {
@@ -263,6 +265,18 @@ export class IdentityProviderResolver {
         lastError: result.success ? null : result.message
       }
     })
+
+    if (!result.success) {
+      // Keep the detailed directory/bind error in provider.lastError and logs only;
+      // return a generic message to the GraphQL client.
+      logger.error(`Identity provider test failed for ${id}: ${result.message}`)
+      return {
+        success: false,
+        message: 'Unable to validate directory connection. Check the provider configuration.',
+        latencyMs: result.latencyMs,
+        provider: toIdentityProviderType(updatedProvider)
+      }
+    }
 
     return {
       ...result,
@@ -279,12 +293,25 @@ export class IdentityProviderResolver {
     const { prisma } = context
     try {
       const data = this.service(prisma).buildCreateData(input)
-      return this.service(prisma).testConnection({
+      const result = await this.service(prisma).testConnection({
         host: data.host,
         port: data.port ?? (data.useTls ? 636 : 389),
-        useTls: data.useTls ?? false
+        useTls: data.useTls ?? false,
+        tlsCa: data.tlsCa ?? null,
+        tlsInsecureSkipVerify: data.tlsInsecureSkipVerify ?? false
       })
+      if (!result.success) {
+        // Don't echo raw directory/socket errors to the client; log them instead.
+        logger.error(`Identity provider config test failed for ${data.host}: ${result.message}`)
+        return {
+          success: false,
+          message: 'Unable to reach the directory endpoint. Check the host, port and TLS settings.',
+          latencyMs: result.latencyMs
+        }
+      }
+      return result
     } catch (error) {
+      // buildCreateData throws validation errors that are safe to surface verbatim.
       return {
         success: false,
         message: (error as Error).message
@@ -293,18 +320,46 @@ export class IdentityProviderResolver {
   }
 
   @Mutation(() => IdentityProviderSyncResultType)
-  @Can('identityProvider:test', { id: (a) => a.id })
+  @Can('identityProvider:sync', { id: (a) => a.id })
   async syncIdentityProvider (
     @Arg('id', () => ID) id: string,
     @Ctx() context: InfinibayContext
   ): Promise<IdentityProviderSyncResultType> {
     const { prisma } = context
-    const result = await this.service(prisma).syncProvider(id)
     const provider = await prisma.identityProvider.findUnique({ where: { id } })
+    if (!provider) throw new UserInputError('Identity provider not found')
+
+    // Enqueue the heavy directory walk as a background task and return immediately.
+    // The frontend polls identitySyncRuns for progress.
+    if (context.eventManager) {
+      const backgroundTasks = new BackgroundTaskService(prisma, context.eventManager)
+      await backgroundTasks.queueTask(
+        `identity-sync-${id}`,
+        async () => {
+          await this.service(prisma).syncProvider(id)
+        },
+        {
+          onError: async (error: Error) => {
+            logger.error(`Identity provider sync failed for ${id}: ${error.message}`)
+          }
+        }
+      )
+    } else {
+      // Fallback: fire-and-forget if no event manager is available on the context.
+      void this.service(prisma).syncProvider(id).catch((error) => {
+        logger.error(`Identity provider sync failed for ${id}: ${(error as Error).message}`)
+      })
+    }
 
     return {
-      ...result,
-      provider: provider ? toIdentityProviderType(provider) : null
+      success: true,
+      message: 'Directory sync started',
+      syncRunId: '',
+      usersCreated: 0,
+      usersUpdated: 0,
+      usersDisabled: 0,
+      groupsSeen: 0,
+      provider: toIdentityProviderType(provider)
     }
   }
 }

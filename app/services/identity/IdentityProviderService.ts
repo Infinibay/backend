@@ -1,6 +1,7 @@
 import crypto from 'crypto'
 import net from 'net'
 import tls from 'tls'
+import dns from 'dns'
 import bcrypt from 'bcrypt'
 import { Client, Entry } from 'ldapts'
 import { IdentityGroupRoleMapping, IdentityProvider, Prisma, PrismaClient, UserRole } from '@prisma/client'
@@ -19,6 +20,8 @@ export interface IdentityProviderConfig {
   userFilter?: string | null
   groupFilter?: string | null
   attributes?: Prisma.InputJsonObject | null
+  tlsCa?: string | null
+  tlsInsecureSkipVerify?: boolean
 }
 
 export interface IdentityProviderPatch {
@@ -35,6 +38,8 @@ export interface IdentityProviderPatch {
   userFilter?: string | null
   groupFilter?: string | null
   attributes?: Prisma.InputJsonObject | null
+  tlsCa?: string | null
+  tlsInsecureSkipVerify?: boolean
 }
 
 export interface IdentityConnectionResult {
@@ -113,6 +118,64 @@ function directoryUrl (provider: Pick<IdentityProvider, 'host' | 'port' | 'useTl
   return `${provider.useTls ? 'ldaps' : 'ldap'}://${provider.host}:${provider.port}`
 }
 
+// Single source of truth for directory TLS options. tlsInsecureSkipVerify is
+// honored ONLY outside production, so a misconfigured prod connector can never
+// silently disable certificate validation.
+function resolveTlsOptions (p: { tlsCa?: string | null, tlsInsecureSkipVerify?: boolean }): { rejectUnauthorized: boolean, ca?: string } {
+  const insecure = p.tlsInsecureSkipVerify === true && process.env.NODE_ENV !== 'production'
+  return { rejectUnauthorized: !insecure, ca: p.tlsCa || undefined }
+}
+
+// SSRF guard: returns true when the address belongs to a private/loopback/
+// link-local range that an attacker could use to pivot into the internal
+// network. Kept deliberately simple — string-prefix checks over the parsed octets.
+function isPrivateAddress (address: string, family: number): boolean {
+  if (family === 6) {
+    const lower = address.toLowerCase()
+    if (lower === '::1') return true
+    // fc00::/7 (unique local) covers fc.. and fd.. prefixes
+    if (lower.startsWith('fc') || lower.startsWith('fd')) return true
+    // link-local fe80::/10
+    if (lower.startsWith('fe8') || lower.startsWith('fe9') || lower.startsWith('fea') || lower.startsWith('feb')) return true
+    // IPv4-mapped IPv6 (::ffff:a.b.c.d) — re-check the embedded v4 address
+    const mapped = lower.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/)
+    if (mapped) return isPrivateAddress(mapped[1], 4)
+    return false
+  }
+
+  const octets = address.split('.').map(part => parseInt(part, 10))
+  if (octets.length !== 4 || octets.some(part => Number.isNaN(part))) return false
+  const [a, b] = octets
+  if (a === 127) return true // 127.0.0.0/8 loopback
+  if (a === 10) return true // 10.0.0.0/8
+  if (a === 172 && b >= 16 && b <= 31) return true // 172.16.0.0/12
+  if (a === 192 && b === 168) return true // 192.168.0.0/16
+  if (a === 169 && b === 254) return true // 169.254.0.0/16 link-local
+  return false
+}
+
+// Resolve every address a host maps to and block the request when any of them
+// is private/loopback/link-local. Disabled outside production so local dev and
+// test environments can still reach internal directory servers.
+async function isHostAllowed (host: string): Promise<boolean> {
+  if (process.env.NODE_ENV !== 'production') return true
+  if (process.env.IDENTITY_ALLOW_PRIVATE_TARGETS === 'true') return true
+
+  try {
+    const addresses = await new Promise<dns.LookupAddress[]>((resolve, reject) => {
+      dns.lookup(host, { all: true }, (error, result) => {
+        if (error) reject(error)
+        else resolve(result)
+      })
+    })
+    if (addresses.length === 0) return false
+    return !addresses.some(addr => isPrivateAddress(addr.address, addr.family))
+  } catch {
+    // Fail closed: if we cannot resolve the host we cannot prove it is safe.
+    return false
+  }
+}
+
 function valueToString (value: Buffer | Buffer[] | string[] | string | undefined): string | null {
   if (value == null) return null
   if (Buffer.isBuffer(value)) return value.toString('hex')
@@ -168,19 +231,20 @@ function directoryExternalId (entry: Entry, map: DirectoryAttributeMap): string 
   return entry.dn
 }
 
+const ROLE_PRIORITY: Record<UserRole, number> = {
+  [UserRole.USER]: 1,
+  [UserRole.ADMIN]: 2,
+  [UserRole.SUPER_ADMIN]: 3
+}
+
 function resolveRoleFromGroups (memberOf: string[], mappings: IdentityGroupRoleMapping[]): UserRole {
   const normalizedGroups = new Set(memberOf.map(group => group.toLowerCase()))
-  const priority = {
-    [UserRole.USER]: 1,
-    [UserRole.ADMIN]: 2,
-    [UserRole.SUPER_ADMIN]: 3
-  }
 
   return mappings.reduce<UserRole>((selected, mapping) => {
     const matches = normalizedGroups.has(mapping.groupDn.toLowerCase()) ||
       normalizedGroups.has(mapping.groupName.toLowerCase())
     if (!matches) return selected
-    return priority[mapping.role] > priority[selected] ? mapping.role : selected
+    return ROLE_PRIORITY[mapping.role] > ROLE_PRIORITY[selected] ? mapping.role : selected
   }, UserRole.USER)
 }
 
@@ -212,7 +276,9 @@ export class IdentityProviderService {
       bindPasswordSecret: bindPassword ? encryptSecret(bindPassword) : undefined,
       userFilter: cleanString(input.userFilter) || '(objectClass=user)',
       groupFilter: cleanString(input.groupFilter) || '(objectClass=group)',
-      attributes: input.attributes === null ? undefined : input.attributes as Prisma.InputJsonValue | undefined
+      attributes: input.attributes === null ? undefined : input.attributes as Prisma.InputJsonValue | undefined,
+      tlsCa: cleanString(input.tlsCa),
+      tlsInsecureSkipVerify: input.tlsInsecureSkipVerify ?? false
     }
   }
 
@@ -249,12 +315,22 @@ export class IdentityProviderService {
     if (input.attributes !== undefined) {
       data.attributes = input.attributes === null ? Prisma.JsonNull : input.attributes as Prisma.InputJsonValue
     }
+    if (input.tlsCa !== undefined) data.tlsCa = cleanString(input.tlsCa)
+    if (input.tlsInsecureSkipVerify !== undefined) data.tlsInsecureSkipVerify = input.tlsInsecureSkipVerify ?? false
 
     return data
   }
 
-  async testConnection (config: { host: string, port: number, useTls: boolean }): Promise<IdentityConnectionResult> {
+  async testConnection (config: { host: string, port: number, useTls: boolean, tlsCa?: string | null, tlsInsecureSkipVerify?: boolean }): Promise<IdentityConnectionResult> {
     const startedAt = Date.now()
+
+    // SSRF guard: do not let a connector probe internal hosts in production.
+    const allowed = await isHostAllowed(config.host)
+    if (!allowed) {
+      return { success: false, message: 'Target host is not allowed', latencyMs: Date.now() - startedAt }
+    }
+
+    const tlsOptions = resolveTlsOptions(config)
 
     return new Promise((resolve) => {
       let settled = false
@@ -270,12 +346,18 @@ export class IdentityProviderService {
           host: config.host,
           port: config.port,
           servername: config.host,
-          rejectUnauthorized: false
+          rejectUnauthorized: tlsOptions.rejectUnauthorized,
+          ca: tlsOptions.ca
         })
         : net.connect({ host: config.host, port: config.port })
 
       socket.setTimeout(5000)
-      socket.once('connect', () => finish(true, 'Directory endpoint is reachable'))
+      // For TLS we only consider the endpoint reachable once the handshake
+      // completes ('secureConnect'); resolving on 'connect' would mask a failed
+      // certificate validation and falsely report an unreachable/insecure host as ok.
+      if (!config.useTls) {
+        socket.once('connect', () => finish(true, 'Directory endpoint is reachable'))
+      }
       socket.once('secureConnect', () => finish(true, 'Directory endpoint is reachable over TLS'))
       socket.once('timeout', () => finish(false, 'Connection timed out'))
       socket.once('error', (error) => finish(false, error.message))
@@ -290,7 +372,9 @@ export class IdentityProviderService {
     const endpoint = await this.testConnection({
       host: provider.host,
       port: provider.port,
-      useTls: provider.useTls
+      useTls: provider.useTls,
+      tlsCa: provider.tlsCa,
+      tlsInsecureSkipVerify: provider.tlsInsecureSkipVerify
     })
     if (!endpoint.success || !options.requireBind) return endpoint
 
@@ -302,7 +386,7 @@ export class IdentityProviderService {
       url: directoryUrl(provider),
       timeout: 10000,
       connectTimeout: 5000,
-      tlsOptions: { rejectUnauthorized: false }
+      tlsOptions: resolveTlsOptions(provider)
     })
 
     try {
@@ -325,7 +409,9 @@ export class IdentityProviderService {
   }
 
   async authenticateUser (providerId: string, userDn: string, password: string): Promise<boolean> {
-    if (!password) return false
+    // Reject empty userDn as well as empty password: an empty bind is treated by
+    // most directories as an anonymous (unauthenticated) bind and would succeed.
+    if (!password || !userDn) return false
 
     const provider = await this.prisma.identityProvider.findUnique({ where: { id: providerId } })
     if (!provider || !provider.enabled) return false
@@ -334,7 +420,7 @@ export class IdentityProviderService {
       url: directoryUrl(provider),
       timeout: 10000,
       connectTimeout: 5000,
-      tlsOptions: { rejectUnauthorized: false }
+      tlsOptions: resolveTlsOptions(provider)
     })
 
     try {
@@ -369,7 +455,7 @@ export class IdentityProviderService {
       url: directoryUrl(provider),
       timeout: 30000,
       connectTimeout: 5000,
-      tlsOptions: { rejectUnauthorized: false }
+      tlsOptions: resolveTlsOptions(provider)
     })
 
     try {
@@ -391,6 +477,7 @@ export class IdentityProviderService {
         'memberOf',
         'mail',
         'userPrincipalName',
+        'userAccountControl',
         ...map.externalIdCandidates
       ]))
 
@@ -404,6 +491,10 @@ export class IdentityProviderService {
 
       let usersCreated = 0
       let usersUpdated = 0
+      let usersDisabled = 0
+      let usersFailed = 0
+      let usersConflicted = 0
+      const seenExternalIds = new Set<string>()
       const now = new Date()
       const placeholderPassword = await bcrypt.hash(
         crypto.randomBytes(32).toString('hex'),
@@ -411,53 +502,124 @@ export class IdentityProviderService {
       )
 
       for (const entry of userSearch.searchEntries) {
-        const email = directoryEmail(entry, map)
-        if (!email) continue
+        // Per-entry resilience: a single malformed/conflicting entry (e.g. a
+        // P2002 unique-email collision) must not abort the whole run. Each entry
+        // is isolated in its own try/catch and only bumps a failure counter.
+        try {
+          const email = directoryEmail(entry, map)
+          if (!email) continue
 
-        const externalId = directoryExternalId(entry, map)
-        const firstName = entryValue(entry, map.firstName) || entryValue(entry, 'displayName') || entryValue(entry, 'cn') || email
-        const lastName = entryValue(entry, map.lastName) || ''
-        const role = resolveRoleFromGroups(valuesToStrings(entry.memberOf), groupRoleMappings)
-        const existingLinked = await this.prisma.user.findFirst({
-          where: { identityProviderId: providerId, externalId }
+          const externalId = directoryExternalId(entry, map)
+          seenExternalIds.add(externalId)
+
+          const firstName = entryValue(entry, map.firstName) || entryValue(entry, 'displayName') || entryValue(entry, 'cn') || email
+          const lastName = entryValue(entry, map.lastName) || ''
+
+          // Did the directory authoritatively report group membership this run?
+          const memberOf = valuesToStrings(entry.memberOf)
+          const hasMemberOf = memberOf.length > 0
+          const computedRole = resolveRoleFromGroups(memberOf, groupRoleMappings)
+
+          // AD ACCOUNTDISABLE bit (0x2) — a disabled directory account must be
+          // soft-deleted locally so it can no longer authenticate.
+          const uacRaw = entryValue(entry, 'userAccountControl')
+          const uac = uacRaw != null ? parseInt(uacRaw, 10) : NaN
+          const directoryDisabled = Number.isFinite(uac) && (uac & 0x2) === 0x2
+
+          const existingLinked = await this.prisma.user.findFirst({
+            where: { identityProviderId: providerId, externalId }
+          })
+          const existingByEmail = existingLinked
+            ? null
+            : await this.prisma.user.findUnique({ where: { email } })
+
+          // Email-hijack guard: an email-matched row may only be ADOPTED when it
+          // is currently unlinked. If it is already linked (to any provider, or
+          // to this provider under a different externalId) we must never re-point
+          // its identity via the email key — treat it as a conflict and skip.
+          if (!existingLinked && existingByEmail) {
+            const isUnlinked = existingByEmail.identityProviderId == null && existingByEmail.externalId == null
+            if (!isUnlinked) {
+              usersConflicted++
+              continue
+            }
+          }
+
+          const existingUser = existingLinked || existingByEmail
+          if (existingUser) {
+            // Role-downgrade guard: never silently lower an existing user's role.
+            // Only write 'role' when the directory authoritatively reported group
+            // membership, OR a mapping raised the role above the current one.
+            // Otherwise (no memberOf and the computed role would be lower) keep
+            // the current role and leave it untouched.
+            const raisesRole = ROLE_PRIORITY[computedRole] > ROLE_PRIORITY[existingUser.role]
+            const writeRole = hasMemberOf || raisesRole
+
+            const updateData: Prisma.UserUncheckedUpdateInput = {
+              email,
+              firstName,
+              lastName,
+              deleted: directoryDisabled,
+              identityProviderId: providerId,
+              externalId,
+              externalDn: entry.dn,
+              lastDirectorySyncAt: now
+            }
+            if (writeRole) updateData.role = computedRole
+
+            await this.prisma.user.update({
+              where: { id: existingUser.id },
+              data: updateData
+            })
+            if (directoryDisabled) usersDisabled++
+            else usersUpdated++
+          } else {
+            // Newly-created users keep the computed role.
+            await this.prisma.user.create({
+              data: {
+                email,
+                password: placeholderPassword,
+                firstName,
+                lastName,
+                role: computedRole,
+                deleted: directoryDisabled,
+                identityProviderId: providerId,
+                externalId,
+                externalDn: entry.dn,
+                lastDirectorySyncAt: now
+              }
+            })
+            if (directoryDisabled) usersDisabled++
+            else usersCreated++
+          }
+        } catch (entryError) {
+          usersFailed++
+          const reason = entryError instanceof Error ? entryError.message : String(entryError)
+          console.error(`[identity-sync] failed to process directory entry ${entry.dn}: ${reason}`)
+        }
+      }
+
+      // Deprovision pass: soft-delete locally-linked users whose externalId was
+      // NOT seen this run. Guarded by a non-empty result set so a transient empty
+      // search never mass-disables the whole directory.
+      if (userSearch.searchEntries.length > 0) {
+        const linkedUsers = await this.prisma.user.findMany({
+          where: { identityProviderId: providerId, deleted: false },
+          select: { id: true, externalId: true }
         })
-        const existingByEmail = existingLinked
-          ? null
-          : await this.prisma.user.findUnique({ where: { email } })
-
-        const existingUser = existingLinked || existingByEmail
-        if (existingUser) {
-          await this.prisma.user.update({
-            where: { id: existingUser.id },
-            data: {
-              email,
-              firstName,
-              lastName,
-              deleted: false,
-              role,
-              identityProviderId: providerId,
-              externalId,
-              externalDn: entry.dn,
-              lastDirectorySyncAt: now
-            }
-          })
-          usersUpdated++
-        } else {
-          await this.prisma.user.create({
-            data: {
-              email,
-              password: placeholderPassword,
-              firstName,
-              lastName,
-              role,
-              deleted: false,
-              identityProviderId: providerId,
-              externalId,
-              externalDn: entry.dn,
-              lastDirectorySyncAt: now
-            }
-          })
-          usersCreated++
+        for (const linked of linkedUsers) {
+          if (linked.externalId && seenExternalIds.has(linked.externalId)) continue
+          try {
+            await this.prisma.user.update({
+              where: { id: linked.id },
+              data: { deleted: true, lastDirectorySyncAt: now }
+            })
+            usersDisabled++
+          } catch (disableError) {
+            usersFailed++
+            const reason = disableError instanceof Error ? disableError.message : String(disableError)
+            console.error(`[identity-sync] failed to deprovision user ${linked.id}: ${reason}`)
+          }
         }
       }
 
@@ -472,7 +634,15 @@ export class IdentityProviderService {
         groupsSeen = groupSearch.searchEntries.length
       }
 
-      const message = `Directory sync finished: ${usersCreated} created, ${usersUpdated} updated`
+      // Aggregate per-entry failures and conflicts into the run message. The run
+      // still completes as SUCCESS when only individual entries failed — only a
+      // thrown directory-level error (caught below) marks the whole run ERROR.
+      let message = `Directory sync finished: ${usersCreated} created, ${usersUpdated} updated, ${usersDisabled} disabled`
+      const notes: string[] = []
+      if (usersConflicted > 0) notes.push(`${usersConflicted} skipped (email already linked to another account)`)
+      if (usersFailed > 0) notes.push(`${usersFailed} failed`)
+      if (notes.length > 0) message += ` (${notes.join('; ')})`
+
       await this.prisma.identitySyncRun.update({
         where: { id: syncRun.id },
         data: {
@@ -480,9 +650,10 @@ export class IdentityProviderService {
           finishedAt: new Date(),
           usersCreated,
           usersUpdated,
-          usersDisabled: 0,
+          usersDisabled,
           groupsSeen,
-          message
+          message,
+          error: notes.length > 0 ? notes.join('; ') : null
         }
       })
       await this.prisma.identityProvider.update({
@@ -500,7 +671,7 @@ export class IdentityProviderService {
         syncRunId: syncRun.id,
         usersCreated,
         usersUpdated,
-        usersDisabled: 0,
+        usersDisabled,
         groupsSeen
       }
     } catch (error) {

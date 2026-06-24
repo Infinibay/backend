@@ -57,6 +57,10 @@ export class DomainJoinService {
     if (!machine.configuration.setupComplete) {
       return { success: false, error: 'VM has not finished initial setup yet' }
     }
+    // A PENDING status means this same method already started a join for this VM.
+    if (machine.configuration.domainJoinStatus === 'PENDING') {
+      return { success: false, error: 'A domain join is already in progress for this VM' }
+    }
 
     // The agent must be reachable, which requires the VM to be running.
     const vmOps = new VMOperationsService(this.prisma)
@@ -122,7 +126,7 @@ export class DomainJoinService {
       const response = await virtio.sendSafeCommand(params.machineId, command, JOIN_COMMAND_TIMEOUT_MS)
       if (!response.success) {
         const error = response.error || response.stderr || 'Domain join failed'
-        await this.persistState(params.machineId, {
+        await this.persistFinalState(params.machineId, {
           domainJoinStatus: 'FAILED',
           domainJoinError: error
         })
@@ -130,7 +134,7 @@ export class DomainJoinService {
         return { success: false, error, domain }
       }
 
-      await this.persistState(params.machineId, {
+      await this.persistFinalState(params.machineId, {
         domainJoinStatus: 'JOINED',
         domainJoinedAt: new Date(),
         domainJoinError: null
@@ -140,12 +144,33 @@ export class DomainJoinService {
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err)
       logger.error(`domain-join failed for VM ${params.machineId}: ${error}`)
-      await this.persistState(params.machineId, {
+      await this.persistFinalState(params.machineId, {
         domainJoinStatus: 'FAILED',
         domainJoinError: error
       })
       this.emitUpdate(params.machineId)
       return { success: false, error, domain }
+    }
+  }
+
+  /**
+   * Persist a terminal status (JOINED/FAILED). Unlike the best-effort PENDING
+   * write, a lost terminal status is operationally serious, so persistState
+   * logs at error level and rethrows; we catch here so the join still returns
+   * its real outcome, but the error is loud enough for operators to detect.
+   */
+  private async persistFinalState (
+    machineId: string,
+    data: {
+      domainJoinStatus?: string
+      domainJoinedAt?: Date
+      domainJoinError?: string | null
+    }
+  ): Promise<void> {
+    try {
+      await this.persistState(machineId, data, true)
+    } catch {
+      // Already logged at error level inside persistState.
     }
   }
 
@@ -157,7 +182,10 @@ export class DomainJoinService {
       domainJoinedAt?: Date
       domainJoinError?: string | null
       domainIdentityProviderId?: string
-    }
+    },
+    // Terminal state writes (JOINED/FAILED) must not be silently lost: log at
+    // error level and rethrow so the caller/operators can detect the failure.
+    terminal = false
   ): Promise<void> {
     try {
       await this.prisma.machineConfiguration.update({
@@ -165,7 +193,12 @@ export class DomainJoinService {
         data
       })
     } catch (err) {
-      logger.warn(`domain-join: could not persist state for VM ${machineId}: ${err instanceof Error ? err.message : String(err)}`)
+      const message = err instanceof Error ? err.message : String(err)
+      if (terminal) {
+        logger.error(`domain-join: FAILED to persist terminal state '${data.domainJoinStatus}' for VM ${machineId}: ${message}`)
+        throw err
+      }
+      logger.warn(`domain-join: could not persist state for VM ${machineId}: ${message}`)
     }
   }
 

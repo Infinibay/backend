@@ -66,6 +66,12 @@ export class IdentityProviderType {
   @Field()
     useTls: boolean = false
 
+  @Field(() => String, { nullable: true })
+    tlsCa?: string | null
+
+  @Field()
+    tlsInsecureSkipVerify: boolean = false
+
   @Field()
     baseDn: string = ''
 
@@ -240,6 +246,12 @@ export class CreateIdentityProviderInput {
   @Field(() => Boolean, { nullable: true })
     useTls?: boolean
 
+  @Field(() => String, { nullable: true })
+    tlsCa?: string
+
+  @Field(() => Boolean, { nullable: true })
+    tlsInsecureSkipVerify?: boolean
+
   @Field()
     baseDn: string = ''
 
@@ -281,6 +293,12 @@ export class UpdateIdentityProviderInput {
 
   @Field(() => Boolean, { nullable: true })
     useTls?: boolean
+
+  @Field(() => String, { nullable: true })
+    tlsCa?: string
+
+  @Field(() => Boolean, { nullable: true })
+    tlsInsecureSkipVerify?: boolean
 
   @Field(() => String, { nullable: true })
     baseDn?: string

@@ -109,6 +109,11 @@ function validateTokenPayload (decoded: any): DecodedToken {
     throw new JWTAuthError('invalid_payload_role', 'Invalid token payload: missing or invalid userRole/role')
   }
 
+  // Require an expiration claim - reject tokens that never expire
+  if (!decoded.exp || typeof decoded.exp !== 'number') {
+    throw new JWTAuthError('invalid_payload_exp', 'Invalid token payload: missing expiration')
+  }
+
   // Token expiration validation
   if (decoded.exp && Date.now() >= decoded.exp * 1000) {
     throw new JWTAuthError('token_expired', 'Token has expired')
@@ -137,7 +142,9 @@ async function fetchAndValidateUser (decoded: DecodedToken, debugAuth?: boolean)
       lastName: true,
       role: true,
       createdAt: true,
-      updatedAt: true
+      updatedAt: true,
+      tokenInvalidatedAt: true,
+      identityProviderId: true
       // Explicitly exclude 'password' and 'token' fields for security
     }
   })
@@ -160,8 +167,31 @@ async function fetchAndValidateUser (decoded: DecodedToken, debugAuth?: boolean)
     throw new JWTAuthError('role_mismatch', 'Token role does not match user role')
   }
 
+  // Token revocation - reject access tokens issued before the revocation cutoff
+  if (user.tokenInvalidatedAt && decoded.iat && (decoded.iat * 1000) < user.tokenInvalidatedAt.getTime()) {
+    throw new JWTAuthError('token_revoked', 'Token has been revoked')
+  }
+
+  // Provider disabled - reject if the user's identity provider is missing or disabled
+  if (user.identityProviderId) {
+    const provider = await prisma.identityProvider.findUnique({
+      where: { id: user.identityProviderId },
+      select: {
+        id: true,
+        enabled: true
+      }
+    })
+
+    if (!provider || provider.enabled === false) {
+      throw new JWTAuthError('provider_disabled', 'Identity provider is disabled')
+    }
+  }
+
+  // Strip the extra fields used only for validation so they don't leak in SafeUser
+  const { tokenInvalidatedAt, identityProviderId, ...safeUser } = user
+
   // Return user as SafeUser type (password and token fields are already excluded by Prisma select)
-  return user as SafeUser
+  return safeUser as SafeUser
 }
 
 /**
@@ -257,6 +287,9 @@ export async function verifyRequestAuth (
     case 'invalid_payload_format':
     case 'invalid_payload_userid':
     case 'invalid_payload_role':
+    case 'invalid_payload_exp':
+    case 'token_revoked':
+    case 'provider_disabled':
     case 'not_active':
       status = 'token_invalid'
       break

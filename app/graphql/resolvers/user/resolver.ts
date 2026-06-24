@@ -1,5 +1,5 @@
 import logger from '@main/logger'
-import { Prisma, PrismaClient } from '@prisma/client'
+import { Prisma } from '@prisma/client'
 import bcrypt from 'bcrypt'
 import jwt from 'jsonwebtoken'
 import {
@@ -10,12 +10,24 @@ import {
   Resolver
 } from 'type-graphql'
 import { UserInputError, AuthenticationError } from '@utils/errors'
-import { UserType, LoginResponse, UserOrderByInputType, CreateUserInputType, UpdateUserInputType, UserRole } from './type'
+import { UserType, LoginResponse, RefreshAuthResponse, UserOrderByInputType, CreateUserInputType, UpdateUserInputType, UserRole } from './type'
 import { PaginationInputType } from '@utils/pagination'
 import { InfinibayContext } from '@utils/context'
 import { getEventManager } from '../../../services/EventManager'
 import { Can } from '@main/permissions'
 import { IdentityProviderService } from '../../../services/identity/IdentityProviderService'
+import { getJWTSecret } from '@utils/jwtAuth'
+import { checkLoginAllowed, recordLoginFailure, recordLoginSuccess } from '@utils/loginRateLimiter'
+import {
+  ACCESS_TOKEN_TTL_SECONDS,
+  issueRefreshToken,
+  rotateRefreshToken,
+  revokeAllForUser
+} from '@services/auth/RefreshTokenService'
+
+// Constant bcrypt hash used to perform a dummy comparison for unknown users so
+// login timing does not reveal whether an account exists (user-enumeration fix).
+const DUMMY_PASSWORD_HASH = '$2b$10$CwTycUXWue0Thq9StjUM0uJ8DiZ8oP0K1g5sQ9qXp3Z5Z5Z5Z5Z5'
 
 export interface UserResolverInterface {
   currentUser(context: InfinibayContext): Promise<UserType | null>;
@@ -25,7 +37,9 @@ export interface UserResolverInterface {
     pagination: PaginationInputType,
     context: InfinibayContext
   ): Promise<UserType[]>;
-  login(email: string, password: string): Promise<LoginResponse | null>;
+  login(email: string, password: string, context: InfinibayContext): Promise<LoginResponse | null>;
+  refreshToken(refreshToken: string, context: InfinibayContext): Promise<RefreshAuthResponse>;
+  logout(context: InfinibayContext): Promise<boolean>;
   createUser(
     input: CreateUserInputType,
     context: InfinibayContext
@@ -117,25 +131,44 @@ export class UserResolver implements UserResolverInterface {
         firstName: true,
         lastName: true,
         role: true,
+        roleId: true,
         createdAt: true
       }
     })
     return (users || []) as unknown as UserType[]
   }
 
-  // Login mutation, requires email and password, returns { user, token }
+  // Login mutation, requires email and password, returns { user, token, refreshToken, expiresIn }
   @Mutation(() => LoginResponse, { nullable: true })
   async login (
     @Arg('email') email: string,
-    @Arg('password') password: string
+    @Arg('password') password: string,
+    @Ctx() context: InfinibayContext
   ): Promise<LoginResponse | null> {
-    const prisma = new PrismaClient()
+    // Use the pooled prisma singleton from context (avoids per-request PrismaClient leak, #4)
+    const { prisma } = context
+
+    // Rate-limit by email + client IP so brute force against one account (or from
+    // one source) is throttled without locking out everyone.
+    const ip = context.req?.ip || context.req?.socket?.remoteAddress || 'unknown'
+    const key = `${email}|${ip}`
+    if (!checkLoginAllowed(key).allowed) {
+      throw new AuthenticationError('Too many login attempts, try again later')
+    }
+
     const user = await prisma.user.findFirst({ where: { email, deleted: false } })
     if (!user) {
+      // Perform a dummy compare so an unknown account is indistinguishable from a
+      // wrong password by timing (user-enumeration fix). Keep the message identical.
+      await bcrypt.compare(password, DUMMY_PASSWORD_HASH)
+      recordLoginFailure(key)
       throw new AuthenticationError('Invalid credentials')
     }
-    let passwordMatch = await bcrypt.compare(password, user.password)
-    if (!passwordMatch && user.identityProviderId && user.externalDn) {
+
+    let passwordMatch = false
+    if (user.identityProviderId && user.externalDn) {
+      // Directory (bind-authoritative) user: authenticate ONLY against the provider,
+      // never against the local password hash.
       passwordMatch = await new IdentityProviderService(prisma).authenticateUser(
         user.identityProviderId,
         user.externalDn,
@@ -147,18 +180,85 @@ export class UserResolver implements UserResolverInterface {
           data: { lastDirectorySyncAt: new Date() }
         })
       }
+    } else {
+      // Local-only user: verify against the bcrypt hash.
+      passwordMatch = await bcrypt.compare(password, user.password)
     }
+
     if (!passwordMatch) {
+      recordLoginFailure(key)
       throw new AuthenticationError('Invalid credentials')
     }
-    // Now that we know the user is valid, we can generate a token
-    const token = jwt.sign({ userId: user.id, userRole: user.role }, process.env.TOKENKEY ?? 'secret')
 
-    // Return both user data and token
+    // Credentials are valid: clear failure counters and mint tokens.
+    recordLoginSuccess(key)
+
+    // Sign the access JWT with the canonical secret + bounded lifetime.
+    const token = jwt.sign({ userId: user.id, userRole: user.role }, getJWTSecret(), { expiresIn: ACCESS_TOKEN_TTL_SECONDS })
+
+    // Issue a refresh token for obtaining future access tokens without re-login.
+    const refresh = await issueRefreshToken(prisma, user.id)
+
     return {
       user: user as unknown as UserType,
-      token
+      token,
+      refreshToken: refresh.token,
+      expiresIn: ACCESS_TOKEN_TTL_SECONDS
     }
+  }
+
+  // refreshToken mutation: exchange a valid refresh token for a fresh access token.
+  // Public (no @Can), like login — the refresh token itself is the credential.
+  @Mutation(() => RefreshAuthResponse)
+  async refreshToken (
+    @Arg('refreshToken') refreshToken: string,
+    @Ctx() context: InfinibayContext
+  ): Promise<RefreshAuthResponse> {
+    const { prisma } = context
+
+    // Rotate atomically: the old token is revoked and a new one returned, or null
+    // when the supplied token is invalid/expired/revoked.
+    const rotated = await rotateRefreshToken(prisma, refreshToken)
+    if (!rotated) {
+      throw new AuthenticationError('Invalid refresh token')
+    }
+
+    // Load the user so the new access token carries the current role.
+    const user = await prisma.user.findFirst({ where: { id: rotated.userId, deleted: false } })
+    if (!user) {
+      throw new AuthenticationError('Invalid refresh token')
+    }
+
+    const token = jwt.sign({ userId: user.id, userRole: user.role }, getJWTSecret(), { expiresIn: ACCESS_TOKEN_TTL_SECONDS })
+
+    return {
+      token,
+      refreshToken: rotated.token,
+      expiresIn: ACCESS_TOKEN_TTL_SECONDS
+    }
+  }
+
+  // logout mutation: invalidate the current user's outstanding access + refresh tokens.
+  @Mutation(() => Boolean)
+  @Can('user:view')
+  async logout (
+    @Ctx() context: InfinibayContext
+  ): Promise<boolean> {
+    // Requires an authenticated user; unauthenticated callers get a no-op false.
+    if (!context.user) {
+      return false
+    }
+
+    const { prisma } = context
+
+    // Set the access-token revocation cutoff and revoke every refresh token.
+    await prisma.user.update({
+      where: { id: context.user.id },
+      data: { tokenInvalidatedAt: new Date() }
+    })
+    await revokeAllForUser(prisma, context.user.id)
+
+    return true
   }
 
   /*

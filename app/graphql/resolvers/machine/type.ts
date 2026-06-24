@@ -72,6 +72,9 @@ export class Machine {
     @Field(() => String, { nullable: true })
       templateId: string | null = null
 
+    @Field(() => ID, { nullable: true, description: 'Pool this desktop belongs to, if any (VDI pool membership).' })
+      poolId: string | null = null
+
     @Field(() => Date, { nullable: true })
       createdAt: Date | null = null
 

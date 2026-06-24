@@ -119,7 +119,7 @@ describe('UserResolver — real database', () => {
       const password = 'password123'
       const user = await createUser(prisma, { password: bcrypt.hashSync(password, 4) })
 
-      const result = await resolver.login(user.email, password)
+      const result = await resolver.login(user.email, password, adminContext)
       expect(result).not.toBeNull()
       expect(result?.token).toMatch(/^[\w-]+\.[\w-]+\.[\w-]+$/)
 
@@ -128,13 +128,13 @@ describe('UserResolver — real database', () => {
     })
 
     it('throws for an unknown email', async () => {
-      await expect(resolver.login('no-such-user@test.infinibay', 'password'))
+      await expect(resolver.login('no-such-user@test.infinibay', 'password', adminContext))
         .rejects.toThrow('Invalid credentials')
     })
 
     it('throws for an incorrect password', async () => {
       const user = await createUser(prisma, { password: bcrypt.hashSync('correct', 4) })
-      await expect(resolver.login(user.email, 'wrong-password'))
+      await expect(resolver.login(user.email, 'wrong-password', adminContext))
         .rejects.toThrow('Invalid credentials')
     })
 
@@ -145,7 +145,7 @@ describe('UserResolver — real database', () => {
         password: bcrypt.hashSync(password, 4)
       })
 
-      await expect(resolver.login(user.email, password))
+      await expect(resolver.login(user.email, password, adminContext))
         .rejects.toThrow('Invalid credentials')
     })
   })

@@ -25,6 +25,7 @@ import { RecommendationResolutionResolver } from './RecommendationResolutionReso
 import '../types/RecommendationTypes'
 import '../types/RecommendationResolutionTypes'
 import { AppSettingsResolver } from './AppSettingsResolver'
+import { FeatureFlagResolver } from './FeatureFlagResolver'
 import { FirewallResolver } from './firewall/resolver'
 import { ScriptResolver } from './scripts/resolver'
 import { PluginPackageResolver } from './plugin-package'
@@ -60,6 +61,7 @@ const resolvers: NonEmptyArray<ClassType> = [
   BackgroundHealthResolver,
   MaintenanceResolver,
   AppSettingsResolver,
+  FeatureFlagResolver,
   FirewallResolver,
   ScriptResolver,
   PluginPackageResolver,

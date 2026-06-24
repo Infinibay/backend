@@ -385,6 +385,13 @@ export class MachineMutations {
     @Arg('input') input: JoinDomainInput,
     @Ctx() context: InfinibayContext
   ): Promise<DomainJoinResultType> {
+    // When the caller doesn't supply BOTH username and password, the join falls
+    // back to the IdentityProvider's stored bind secret — gate that on 'use'.
+    const usesStoredBindSecret = !(input.username && input.password)
+    if (usesStoredBindSecret) {
+      await context.assertCan!('identityProvider:use')
+    }
+
     const service = new DomainJoinService(context.prisma)
     const result = await service.joinMachineToDomain({
       machineId: input.machineId,
