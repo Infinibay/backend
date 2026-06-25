@@ -70,13 +70,15 @@ export class SnapshotResolver {
       const snapshot: Snapshot = {
         id: input.name,
         name: input.name,
-        description: input.description,
+        // qemu-img stores no description/parent/current-flag for internal
+        // snapshots, so these are reported honestly rather than fabricated.
+        description: undefined,
         vmId: input.machineId,
         vmName: machine.name,
         createdAt: result.snapshot?.createdAt || new Date(),
-        isCurrent: true,
+        isCurrent: false,
         parentId: undefined,
-        hasMetadata: true,
+        hasMetadata: false,
         state: result.snapshot?.state || 'shutoff'
       }
 
@@ -289,13 +291,13 @@ export class SnapshotResolver {
       const snapshots: Snapshot[] = result.snapshots.map(snap => ({
         id: snap.name,
         name: snap.name,
-        description: snap.description,
+        description: snap.description, // always undefined — qemu-img has no description store
         vmId: machineId,
         vmName: machine.name,
         createdAt: snap.createdAt,
-        isCurrent: snap.isCurrent,
-        parentId: snap.parentName,
-        hasMetadata: true,
+        isCurrent: snap.isCurrent, // always false — qemu-img has no current-snapshot concept
+        parentId: undefined, // qemu-img internal snapshots have no parent chain
+        hasMetadata: false,
         state: snap.state
       }))
 
@@ -338,8 +340,10 @@ export class SnapshotResolver {
         throw new UserInputError(`Virtual machine with ID ${machineId} not found`)
       }
 
-      // Get current snapshot from service
-      const currentSnap = await snapshotService.getCurrentSnapshot(machineId)
+      // qemu-img has no "current/active" snapshot for an offline qcow2; the best
+      // we can honestly return is the most recent one (callers must not treat it
+      // as the active snapshot).
+      const currentSnap = await snapshotService.getMostRecentSnapshot(machineId)
 
       if (!currentSnap) {
         return null
@@ -348,13 +352,13 @@ export class SnapshotResolver {
       const result: Snapshot = {
         id: currentSnap.name,
         name: currentSnap.name,
-        description: currentSnap.description,
+        description: undefined,
         vmId: machineId,
         vmName: machine.name,
         createdAt: currentSnap.createdAt,
-        isCurrent: true,
-        parentId: currentSnap.parentName,
-        hasMetadata: true,
+        isCurrent: false,
+        parentId: undefined,
+        hasMetadata: false,
         state: currentSnap.state
       }
 

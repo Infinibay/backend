@@ -146,6 +146,7 @@ describe('SocketService', () => {
         externalDn: null,
         lastDirectorySyncAt: null,
         roleId: null,
+        tokenInvalidatedAt: null,
         createdAt: new Date(),
         updatedAt: new Date()
       }

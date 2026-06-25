@@ -463,6 +463,13 @@ model MachineConfiguration {
   // false/null = VM still in building/installation phase
   setupComplete Boolean? @default(false)
 
+  // Wall-clock anchor for the unattended OS install: set when the install VM is
+  // first booted (qemuPid written by CreateMachineServiceV2). The stuck-install
+  // detector compares (now - installStartedAt) against getInstallationTimeout(os)
+  // to fail a hung install. A dedicated column (not updatedAt) so unrelated
+  // config writes during install don't reset the clock.
+  installStartedAt DateTime?
+
   // ============================================================================
   // ACTIVE DIRECTORY DOMAIN JOIN STATE
   // ============================================================================

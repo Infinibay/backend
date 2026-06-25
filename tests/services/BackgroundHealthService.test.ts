@@ -141,7 +141,7 @@ describe('BackgroundHealthService', () => {
 
       // Verify the task was executed and proper database query was made
       expect(mockPrisma.machine.findMany).toHaveBeenCalledWith({
-        where: { status: RUNNING_STATUS },
+        where: { status: RUNNING_STATUS, configuration: { setupComplete: true } },
         select: {
           id: true,
           name: true,

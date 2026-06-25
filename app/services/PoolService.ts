@@ -224,6 +224,9 @@ export class PoolService {
   }
 
   async delete (id: string): Promise<boolean> {
+    // Stop refill (filters draining:false) and checkout (throws on draining) from
+    // racing the teardown before we archive the members below.
+    await this.prisma.pool.update({ where: { id }, data: { draining: true } }).catch(() => {})
     const machines = await this.prisma.machine.findMany({
       where: { poolId: id, status: { not: 'archived' } }
     })
@@ -254,7 +257,11 @@ export class PoolService {
           where: { poolId: pool.id, status: { not: 'archived' } }
         })
         if (current >= pool.sizeMin) continue
-        const toAdd = Math.min(pool.sizeMin - current, cap)
+        // Never exceed sizeMax, even if sizeMin was misconfigured > sizeMax or an
+        // in-flight checkout already spawned a desktop on-demand.
+        const ceiling = Math.max(0, pool.sizeMax - current)
+        const toAdd = Math.min(pool.sizeMin - current, cap, ceiling)
+        if (toAdd <= 0) continue
         for (let i = 0; i < toAdd; i++) {
           await this.provisionOne(pool)
         }
@@ -270,7 +277,7 @@ export class PoolService {
     const current = await this.prisma.machine.count({
       where: { poolId: pool.id, status: { not: 'archived' } }
     })
-    const toAdd = Math.max(0, pool.sizeMin - current)
+    const toAdd = Math.max(0, Math.min(pool.sizeMin, pool.sizeMax) - current)
     for (let i = 0; i < toAdd; i++) {
       await this.provisionOne(pool)
     }
@@ -347,14 +354,27 @@ export class PoolService {
       // Lost to a concurrent checkout — loop and try another candidate.
     }
 
-    // Spawn on-demand
-    const current = await this.prisma.machine.count({
+    // Spawn on-demand. The plain count->provision has a TOCTOU gap: N concurrent
+    // checkouts can each pass the pre-check and overshoot sizeMax. We keep the
+    // cheap pre-check for the common fast-reject, then re-check AFTER creating and
+    // compensate (archive our just-created machine) if a concurrent spawn pushed
+    // us over capacity — bounding overshoot to a single transient extra.
+    const before = await this.prisma.machine.count({
       where: { poolId: pool.id, status: { not: 'archived' } }
     })
-    if (current >= pool.sizeMax) {
+    if (before >= pool.sizeMax) {
       throw new Error('Pool at capacity — try again later or ask the operator to scale up')
     }
     const machine = await this.provisionOne(pool, pool.type === 'persistent' ? userId : undefined)
+    const after = await this.prisma.machine.count({
+      where: { poolId: pool.id, status: { not: 'archived' } }
+    })
+    if (after > pool.sizeMax) {
+      await this.archiveMachine(machine.id).catch((err) =>
+        this.debug.warn(`failed to roll back overshoot machine=${machine.id}: ${(err as Error).message}`)
+      )
+      throw new Error('Pool at capacity — try again later or ask the operator to scale up')
+    }
     return { machine, outcome: 'spawned' }
   }
 
@@ -373,6 +393,9 @@ export class PoolService {
     if (outcome === 'spawned') return machine
     if (machine.status === 'running') return machine
 
+    // A crash between the acquireDesktop claim ('starting') and a successful start
+    // strands the desktop in 'starting'. That is recovered at the next boot by
+    // reconcilePoolStatusesOnStartup (stale 'starting' past STARTING_TTL -> 'off').
     const result = await new VMOperationsService(this.prisma).startMachine(machine.id)
     if (!result.success) {
       if (outcome === 'claimed') {

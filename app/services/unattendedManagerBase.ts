@@ -7,6 +7,7 @@ import * as fs from 'fs'
 import * as os from 'os'
 import * as path from 'path'
 import { promises as fsPromises } from 'fs'
+import { randomUUID } from 'crypto'
 
 
 export class UnattendedManagerBase {
@@ -46,7 +47,7 @@ export class UnattendedManagerBase {
       }
       this.debug.debug('Generating config')
       const configContent = await this.generateConfig()
-      this.debug.debug(configContent)
+      this.debug.debug(this.redactConfigForLog(configContent))
 
       // Validate the generated configuration
       this.debug.debug('Validating generated configuration')
@@ -73,7 +74,9 @@ export class UnattendedManagerBase {
       if (this.configFileName) {
         this.debug.debug('Adding autoinstall config file')
         logger.info('Adding autoinstall config file')
-        logger.info(configContent)
+        // Log a redacted copy only; addAutonistallConfigFile still gets the raw
+        // config (the credential must be present in the ISO that is written).
+        logger.info(this.redactConfigForLog(configContent))
         await this.addAutonistallConfigFile(configContent, extractDir, this.configFileName)
       } else {
         this.debug.debug('Error: configFileName is not set')
@@ -124,7 +127,10 @@ export class UnattendedManagerBase {
    * @returns {string} The random file name.
    */
   protected generateRandomFileName (): string {
-    return Math.random().toString(36).substring(2, 15) + '.iso'
+    // randomUUID is collision-proof, unlike Math.random().toString(36) whose
+    // short body can clash between concurrent creates in the SHARED temp dir —
+    // a clash would let one VM boot another VM's autounattend (its credentials).
+    return randomUUID() + '.iso'
   }
 
   /**
@@ -154,6 +160,27 @@ export class UnattendedManagerBase {
 
     // Ensure we have a valid result
     return sanitized.length > 0 ? sanitized : 'script'
+  }
+
+  /**
+   * Returns a redacted copy of a rendered unattended config safe for logging.
+   *
+   * Generated configs embed the guest password (and product key) in cleartext —
+   * Windows autounattend puts them in `<Value>`/`<Password>` elements (AutoLogon,
+   * LocalAccount), Ubuntu/RHEL in YAML `password:`/`passwd:`/`rootpw` lines.
+   * This masks them structurally (no need to know the literal secret), so the
+   * logged copy never leaks credentials. ONLY the logged copy is redacted — the
+   * config actually written to the ISO is unchanged.
+   */
+  protected redactConfigForLog (configContent: string): string {
+    return configContent
+      // Windows autounattend: <Value>...</Value> (covers Password.Value etc.).
+      // Over-redacts non-secret <Value> settings, which is acceptable for a log.
+      .replace(/(<Value>)[\s\S]*?(<\/Value>)/gi, '$1**redacted**$2')
+      // Explicit <Password>/<PlainText> elements.
+      .replace(/(<(?:Password|PlainText)>)[\s\S]*?(<\/(?:Password|PlainText)>)/gi, '$1**redacted**$2')
+      // YAML / kickstart credential lines.
+      .replace(/^(\s*(?:password|passwd|plain_text_passwd|rootpw)\s*[:=]\s*).*$/gim, '$1**redacted**')
   }
 
   /**

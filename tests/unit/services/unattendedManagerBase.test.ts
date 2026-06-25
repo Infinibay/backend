@@ -113,9 +113,10 @@ describe('UnattendedManagerBase', () => {
   describe('generateRandomFileName', () => {
     it('should generate a random filename with .iso extension', () => {
       const fileName = manager.testGenerateRandomFileName()
-      expect(fileName).toMatch(/^[a-z0-9]+\.iso$/)
+      // Filenames are now randomUUID()-based (hex + dashes), e.g. "<uuid>.iso".
+      expect(fileName).toMatch(/^[a-f0-9-]+\.iso$/)
       expect(fileName.length).toBeGreaterThan(5)
-      expect(fileName.length).toBeLessThan(30)
+      expect(fileName.length).toBeLessThan(50)
     })
 
     it('should generate unique filenames on consecutive calls', () => {

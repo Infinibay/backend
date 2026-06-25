@@ -24,17 +24,19 @@ import fs from 'fs'
 import { Logger } from 'winston'
 import logger from '@main/logger'
 import { getInfinization } from '@services/InfinizationService'
+import { assertVmStopped } from '@utils/assertVmStopped'
 
 /**
  * Snapshot information compatible with the original SnapshotService interface.
  */
 export interface SnapshotInfo {
   name: string
+  /** Always undefined: qemu-img internal snapshots store no description. Would require a future Snapshot DB model. */
   description?: string
   createdAt: Date
   state: string
+  /** qemu-img has no current/active-snapshot concept for an offline qcow2; always false. */
   isCurrent: boolean
-  parentName?: string
   /** Size in bytes (from qemu-img) */
   vmSize?: number
 }
@@ -79,7 +81,9 @@ export class SnapshotServiceV2 {
    *
    * @param vmId - VM UUID
    * @param name - Snapshot name (alphanumeric, hyphens, underscores only)
-   * @param description - Optional description (stored in database, not in qcow2)
+   * @param description - Currently NOT persisted: qemu-img has no description
+   *   support and there is no Snapshot DB model, so this is only logged. Kept for
+   *   forward-compat; will require a dedicated Snapshot model to actually store.
    * @returns SnapshotResult
    */
   async createSnapshot (
@@ -96,13 +100,17 @@ export class SnapshotServiceV2 {
         return { success: false, message: `VM ${vmId} not found` }
       }
 
-      // Check if VM is stopped (required for qemu-img snapshots)
+      // Check if VM is stopped (required for qemu-img snapshots).
+      // The DB column is a cheap early-out; the authoritative gate is the live
+      // process probe below (the DB status can be stale).
       if (vm.status !== 'off' && vm.status !== 'error') {
         return {
           success: false,
           message: 'VM must be stopped before creating a snapshot. Please shut down the VM first.'
         }
       }
+      // Authoritative fail-closed gate against the live process (qcow2 write lock).
+      await assertVmStopped(this.prisma, vmId)
 
       // Get disk path
       const diskPath = this.getDiskPath(vm.internalName)
@@ -121,18 +129,17 @@ export class SnapshotServiceV2 {
 
       this.debug.debug(`Snapshot '${name}' created successfully`)
 
-      // Store snapshot metadata in database (optional, for description tracking)
-      await this.storeSnapshotMetadata(vmId, name, description)
-
       return {
         success: true,
         message: `Snapshot '${name}' created successfully`,
         snapshot: {
           name,
-          description,
+          // qemu-img persists neither a description nor a current-snapshot flag,
+          // so we don't echo back values that won't survive a subsequent list.
+          description: undefined,
           createdAt: new Date(),
           state: 'shutoff',
-          isCurrent: true
+          isCurrent: false
         }
       }
     } catch (error: any) {
@@ -166,21 +173,19 @@ export class SnapshotServiceV2 {
         return { success: true, snapshots: [], message: 'No disk image found' }
       }
 
-      // List snapshots via SnapshotManager
+      // List snapshots via SnapshotManager. We surface ONLY what qemu-img truly
+      // reports: name, date, size. There is no description store and no
+      // current-snapshot concept, so we don't fabricate either (the old code
+      // inferred 'isCurrent' from list order and looked up an always-empty map).
       const infinizationSnapshots = await this.snapshotManager.listSnapshots(diskPath)
 
-      // Get metadata from database for descriptions
-      const metadataMap = await this.getSnapshotMetadataMap(vmId)
-
-      // Convert to our interface
-      const snapshots: SnapshotInfo[] = infinizationSnapshots.map((snap, index) => {
-        const metadata = metadataMap.get(snap.name)
+      const snapshots: SnapshotInfo[] = infinizationSnapshots.map((snap) => {
         return {
           name: snap.name,
-          description: metadata?.description,
+          description: undefined,
           createdAt: snap.date ? new Date(snap.date) : new Date(),
           state: 'shutoff', // qemu-img snapshots are always from shutoff state
-          isCurrent: index === infinizationSnapshots.length - 1, // Last snapshot is "current"
+          isCurrent: false,
           vmSize: snap.vmSize
         }
       })
@@ -213,13 +218,15 @@ export class SnapshotServiceV2 {
         return { success: false, message: `VM ${vmId} not found` }
       }
 
-      // Check if VM is stopped
+      // Check if VM is stopped (cheap early-out; authoritative gate is below).
       if (vm.status !== 'off' && vm.status !== 'error') {
         return {
           success: false,
           message: 'VM must be stopped before restoring a snapshot. Please shut down the VM first.'
         }
       }
+      // Reverting a running VM's disk via qemu-img corrupts the guest FS.
+      await assertVmStopped(this.prisma, vmId)
 
       const diskPath = this.getDiskPath(vm.internalName)
       if (!fs.existsSync(diskPath)) {
@@ -278,9 +285,6 @@ export class SnapshotServiceV2 {
       // Delete snapshot (handles non-existent gracefully)
       await this.snapshotManager.deleteSnapshot(diskPath, snapshotName)
 
-      // Remove metadata from database
-      await this.deleteSnapshotMetadata(vmId, snapshotName)
-
       this.debug.debug(`Snapshot '${snapshotName}' deleted from VM ${vmId}`)
       return {
         success: true,
@@ -298,24 +302,27 @@ export class SnapshotServiceV2 {
   }
 
   /**
-   * Gets the current (most recent) snapshot for a VM.
+   * Returns the most RECENT snapshot (by qemu-img list order), or null.
+   *
+   * NOTE: qemu-img exposes no "current/active" snapshot for an offline qcow2, so
+   * this is explicitly "most recent", NOT "current" — callers must not treat the
+   * result as the active snapshot. The previous implementation presented the last
+   * list entry as the current snapshot, which was fictional.
    *
    * @param vmId - VM UUID
-   * @returns SnapshotInfo or null
+   * @returns the most recent SnapshotInfo, or null if there are none
    */
-  async getCurrentSnapshot (vmId: string): Promise<SnapshotInfo | null> {
-    this.debug.debug(`Getting current snapshot for VM ${vmId}`)
+  async getMostRecentSnapshot (vmId: string): Promise<SnapshotInfo | null> {
+    this.debug.debug(`Getting most recent snapshot for VM ${vmId}`)
 
     try {
       const result = await this.listSnapshots(vmId)
       if (!result.success || result.snapshots.length === 0) {
         return null
       }
-
-      // Return the last snapshot (most recent)
       return result.snapshots[result.snapshots.length - 1]
     } catch (error: any) {
-      this.debug.error(`Failed to get current snapshot: ${error.message}`)
+      this.debug.error(`Failed to get most recent snapshot: ${error.message}`)
       return null
     }
   }
@@ -394,42 +401,12 @@ export class SnapshotServiceV2 {
     return path.join(diskDir, `${internalName}.qcow2`)
   }
 
-  /**
-   * Stores snapshot metadata in database for description tracking.
-   * Note: qemu-img doesn't store descriptions, so we track them separately.
-   */
-  private async storeSnapshotMetadata (
-    vmId: string,
-    name: string,
-    description?: string
-  ): Promise<void> {
-    // Check if SnapshotMetadata table exists (optional feature)
-    // For now, log only - can be extended to use a dedicated table
-    if (description) {
-      this.debug.debug(`Snapshot metadata: VM=${vmId}, name=${name}, desc=${description}`)
-    }
-  }
-
-  /**
-   * Gets snapshot metadata map for a VM.
-   */
-  private async getSnapshotMetadataMap (
-    vmId: string
-  ): Promise<Map<string, { description?: string }>> {
-    // Placeholder - can be extended to use a dedicated table
-    return new Map()
-  }
-
-  /**
-   * Deletes snapshot metadata from database.
-   */
-  private async deleteSnapshotMetadata (
-    vmId: string,
-    snapshotName: string
-  ): Promise<void> {
-    // Placeholder - can be extended to use a dedicated table
-    this.debug.debug(`Removed metadata for snapshot '${snapshotName}' of VM ${vmId}`)
-  }
+  // NOTE: there is intentionally no snapshot-metadata store. qemu-img internal
+  // snapshots carry no description/parent/current-flag, and there is no Snapshot
+  // DB model. The previous storeSnapshotMetadata/getSnapshotMetadataMap/
+  // deleteSnapshotMetadata helpers were no-ops that created the illusion of one
+  // (descriptions were silently dropped); they were removed. Adding real
+  // descriptions would require a dedicated `Snapshot` Prisma model.
 }
 
 // Singleton instance

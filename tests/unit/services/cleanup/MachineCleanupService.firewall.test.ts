@@ -137,7 +137,7 @@ describe('MachineCleanupServiceV2 - Firewall Cleanup', () => {
       expect(mockPrisma.firewallRuleSet.delete).not.toHaveBeenCalled()
     })
 
-    it('should complete VM deletion even if infinization cleanup fails', async () => {
+    it('FAILS CLOSED: preserves the DB row (does not delete) when physical teardown fails', async () => {
       const vmId = 'test-vm-fail-infini'
       const mockVM = {
         id: vmId,
@@ -157,13 +157,12 @@ describe('MachineCleanupServiceV2 - Firewall Cleanup', () => {
         destroyVM: jest.fn().mockResolvedValue({ success: false, error: 'Process not found' })
       })
 
-      // Should not throw - cleanup should continue
-      await expect(service.cleanupVM(vmId)).resolves.not.toThrow()
+      // When destroyVM fails, the host still owns QEMU/TAP/firewall/disk resources, so
+      // deleting the row would orphan them. cleanupVM now throws and KEEPS the row
+      // (parked in DELETE_FAILED for retry) instead of silently deleting.
+      await expect(service.cleanupVM(vmId)).rejects.toThrow(/physical teardown failed/)
 
-      // VM should still be deleted from database
-      expect(mockPrisma.machine.delete).toHaveBeenCalledWith({
-        where: { id: vmId }
-      })
+      expect(mockPrisma.machine.delete).not.toHaveBeenCalled()
     })
 
     it('should delete machine applications before VM', async () => {

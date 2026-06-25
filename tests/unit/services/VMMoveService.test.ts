@@ -38,6 +38,15 @@ describe('VMMoveService', () => {
     prisma = mockDeep<PrismaClient>()
     firewallOrchestration = mockDeep<FirewallOrchestrationService>()
 
+    // The move now (a) atomically claims the row as 'moving' and (b) writes
+    // departmentId + bridge inside a single $transaction. Provide both so the
+    // happy path proceeds; the callback runs against the same deep mock so the
+    // existing machine.update / machineConfiguration.update assertions still hold.
+    prisma.machine.updateMany.mockResolvedValue({ count: 1 } as any)
+    prisma.$transaction.mockImplementation(async (fn: any) =>
+      typeof fn === 'function' ? fn(prisma) : fn
+    )
+
     moveService = new VMMoveService(prisma, firewallOrchestration)
 
     debugLogSpy = jest.spyOn(logger, 'info').mockImplementation(() => undefined as any)
@@ -128,6 +137,26 @@ describe('VMMoveService', () => {
 
         tapDetachSpy.mockRestore()
         tapAttachSpy.mockRestore()
+      })
+
+      it('rejects a concurrent move when the atomic claim is lost (count 0)', async () => {
+        // Another move/delete/rebuild already holds the row: the 'moving' claim
+        // matches nothing, so this move must bail BEFORE mutating anything.
+        prisma.machine.findUnique.mockResolvedValueOnce({
+          ...mockVM,
+          configuration: mockConfig,
+          department: mockOldDept
+        } as any)
+        prisma.department.findUnique.mockResolvedValueOnce(mockNewDept)
+        prisma.machine.updateMany.mockResolvedValue({ count: 0 } as any)
+
+        const result = await moveService.moveVMToDepartment('vm-123', 'dept-new')
+
+        expect(result.success).toBe(false)
+        expect(result.error).toMatch(/busy/i)
+        // No DB mutation of departmentId/bridge happened.
+        expect(prisma.machine.update).not.toHaveBeenCalled()
+        expect(prisma.$transaction).not.toHaveBeenCalled()
       })
 
       it('should update database only when VM is stopped', async () => {
@@ -332,7 +361,10 @@ describe('VMMoveService', () => {
         expect(result.error).toBe('Database error')
       })
 
-      it('should not block move if firewall application fails', async () => {
+      it('fails the move and rolls back when firewall application fails', async () => {
+        // A running VM moved to the new bridge MUST carry the new firewall; if the
+        // apply fails we must NOT report success (that would leave it unprotected).
+        // The move throws -> rollback re-attaches the TAP to the old bridge.
         mockGetVMStatusResult = { processAlive: true }
         jest.spyOn(logger, 'info').mockImplementation(() => undefined as any)
         jest.spyOn(logger, 'warn').mockImplementation(() => undefined as any)
@@ -359,9 +391,10 @@ describe('VMMoveService', () => {
 
         const result = await moveService.moveVMToDepartment('vm-123', 'dept-new')
 
-        expect(result.success).toBe(true)
-        expect(result.firewallChanged).toBe(false)
-        expect(result.error).toBeUndefined()
+        expect(result.success).toBe(false)
+        expect(result.error).toBeDefined()
+        // Rollback returned the TAP to the old department's bridge.
+        expect(TapDeviceManager.prototype.attachToBridge).toHaveBeenCalledWith('tap123', 'br-old')
 
         tapDetachSpy.mockRestore()
         tapAttachSpy.mockRestore()

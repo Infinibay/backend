@@ -4,11 +4,14 @@ import {
   NftablesService,
   type FirewallRuleInput,
   type FirewallApplyResult,
-  type ConnectionStateConfig,
+  type FirewallDefaultAction,
   type NftablesError,
-  VM_CHAIN_PREFIX
+  VM_CHAIN_PREFIX,
+  generateVMChainName
 } from '@infinibay/infinization'
 import logger from '@main/logger'
+import { getInfinization } from '@services/InfinizationService'
+import { prismaRulesToFirewallInput } from './firewallRuleConversion'
 const debug = logger.child({ module: 'service:firewall:infinization' })
 
 /**
@@ -28,10 +31,16 @@ const debug = logger.child({ module: 'service:firewall:infinization' })
  * await service.applyVMRules(vmId, departmentRules, vmRules)
  */
 export class InfinizationFirewallService {
-  private nftablesService: NftablesService
+  constructor (private prisma: PrismaClient) {}
 
-  constructor (private prisma: PrismaClient) {
-    this.nftablesService = new NftablesService()
+  /**
+   * Returns the SINGLE shared NftablesService (the same instance that drives the VM
+   * lifecycle), rather than constructing a fresh one per call. Sharing one instance
+   * is what makes the per-chain mutex and the rule-hash cache actually effective
+   * across every firewall entrypoint (I1/I2) — separate instances cannot coordinate.
+   */
+  private async getNftables (): Promise<NftablesService> {
+    return (await getInfinization()).getNftablesService()
   }
 
   // ============================================================================
@@ -49,7 +58,7 @@ export class InfinizationFirewallService {
     debug.debug('Initializing InfinizationFirewallService')
 
     try {
-      await this.nftablesService.initialize()
+      await (await this.getNftables()).initialize()
       debug.info('InfinizationFirewallService initialized successfully')
     } catch (error) {
       const nftError = error as NftablesError | Error | unknown
@@ -82,7 +91,8 @@ export class InfinizationFirewallService {
   async applyVMRules (
     vmId: string,
     departmentRules: FirewallRuleInput[],
-    vmRules: FirewallRuleInput[]
+    vmRules: FirewallRuleInput[],
+    defaultAction: FirewallDefaultAction = 'drop'
   ): Promise<FirewallApplyResult> {
     if (!vmId) {
       throw new Error('VM ID is required')
@@ -90,15 +100,16 @@ export class InfinizationFirewallService {
 
     const tapDeviceName = await this.getTapDeviceName(vmId)
 
-    debug.debug(`Applying firewall rules for VM ${vmId} (TAP: ${tapDeviceName})`)
+    debug.debug(`Applying firewall rules for VM ${vmId} (TAP: ${tapDeviceName}, defaultAction: ${defaultAction})`)
     debug.debug(`Department rules: ${departmentRules.length}, VM rules: ${vmRules.length}`)
 
     try {
-      const result = await this.nftablesService.applyRules(
+      const result = await (await this.getNftables()).applyRules(
         vmId,
         tapDeviceName,
         departmentRules,
-        vmRules
+        vmRules,
+        defaultAction
       )
 
       debug.info(`Applied ${result.appliedRules}/${result.totalRules} rules to VM ${vmId}`)
@@ -134,12 +145,17 @@ export class InfinizationFirewallService {
    *
    * @param departmentId - The department identifier
    * @param departmentRules - Rules to apply to all VMs in the department
-   * @returns Object containing total VMs count, count of updated VMs, and any errors
+   * @returns Structured per-category counts. `vmsSkippedNoTap` (VM not running / no TAP
+   *   yet — a benign deferral, rules apply on next start) is reported SEPARATELY from
+   *   `vmsFailed` (apply genuinely failed) so callers never have to string-match error
+   *   messages to tell "skipped" from "broken". A VM with partial rule failures counts
+   *   as failed, not updated.
    */
   async applyDepartmentRules (
     departmentId: string,
-    departmentRules: FirewallRuleInput[]
-  ): Promise<{ totalVms: number; vmsUpdated: number; errors: string[] }> {
+    departmentRules: FirewallRuleInput[],
+    defaultAction: FirewallDefaultAction = 'drop'
+  ): Promise<{ totalVms: number; vmsUpdated: number; vmsSkippedNoTap: number; vmsFailed: number; errors: string[] }> {
     if (!departmentId) {
       throw new Error('Department ID is required')
     }
@@ -157,14 +173,16 @@ export class InfinizationFirewallService {
     debug.debug(`Applying department rules to ${machines.length} VMs in department ${departmentId}`)
 
     let vmsUpdated = 0
+    let vmsSkippedNoTap = 0
+    let vmsFailed = 0
     const errors: string[] = []
 
     for (const machine of machines) {
-      // Skip VMs without TAP device configured
+      // A VM with no TAP device is not running (or its network isn't up yet). Its
+      // rules will be applied when it starts — this is a deferral, not a failure.
       if (!machine.configuration?.tapDeviceName) {
-        const errorMsg = `VM ${machine.id} (${machine.name}) has no TAP device configured, skipping`
-        debug.warn(errorMsg)
-        errors.push(errorMsg)
+        vmsSkippedNoTap++
+        debug.warn(`VM ${machine.id} (${machine.name}) has no TAP device (not running), deferring firewall apply`)
         continue
       }
 
@@ -174,42 +192,37 @@ export class InfinizationFirewallService {
         const vmRulesInput = this.convertPrismaRulesToInput(vmRules)
 
         // Apply rules via nftables
-        const result = await this.nftablesService.applyRules(
+        const result = await (await this.getNftables()).applyRules(
           machine.id,
           machine.configuration.tapDeviceName,
           departmentRules,
-          vmRulesInput
+          vmRulesInput,
+          defaultAction
         )
 
-        // VM was processed successfully (even if some rules failed)
-        vmsUpdated++
-
-        // Log and track partial failures
         if (result.failedRules > 0) {
+          // Partial apply is a FAILURE for this VM (its policy is incomplete).
+          vmsFailed++
           debug.warn(`VM ${machine.id} (${machine.name}): ${result.failedRules}/${result.totalRules} rules failed to apply`)
-
           for (const failure of result.failures) {
             debug.warn(`  Rule "${failure.ruleName}": ${failure.error}`)
           }
-
-          // Add summarized message to errors for caller visibility
-          errors.push(`VM ${machine.id} (${machine.name}): ${result.failedRules}/${result.totalRules} rules failed (partial success)`)
+          errors.push(`VM ${machine.id} (${machine.name}): ${result.failedRules}/${result.totalRules} rules failed (partial apply)`)
+        } else {
+          vmsUpdated++
         }
       } catch (error) {
         // Hard failure - the entire operation for this VM failed
+        vmsFailed++
         const errorMsg = `Failed to apply rules to VM ${machine.id} (${machine.name}): ${error instanceof Error ? error.message : String(error)}`
         debug.error(errorMsg)
         errors.push(errorMsg)
       }
     }
 
-    debug.info(`Department rules applied to ${vmsUpdated}/${machines.length} VMs`)
+    debug.info(`Department rules: ${vmsUpdated} applied, ${vmsSkippedNoTap} deferred (no TAP), ${vmsFailed} failed (of ${machines.length})`)
 
-    if (errors.length > 0) {
-      debug.warn(`${errors.length} VMs failed to update`)
-    }
-
-    return { totalVms: machines.length, vmsUpdated, errors }
+    return { totalVms: machines.length, vmsUpdated, vmsSkippedNoTap, vmsFailed, errors }
   }
 
   /**
@@ -229,9 +242,30 @@ export class InfinizationFirewallService {
 
     debug.debug(`Removing firewall for VM ${vmId}`)
 
-    await this.nftablesService.removeVMChain(vmId)
+    await (await this.getNftables()).removeVMChain(vmId)
 
     debug.info(`Firewall removed for VM ${vmId}`)
+  }
+
+  /**
+   * Removes a VM firewall chain BY CHAIN NAME.
+   *
+   * Cleanup/reconciliation paths enumerate chains via listVMChains() and must remove
+   * them by name — chain names are a non-invertible hash of the vmId, so re-deriving
+   * the chain from a recovered "vmId" would target the WRONG chain.
+   *
+   * @param chainName - The nftables chain name to remove
+   */
+  async removeVMChainByName (chainName: string): Promise<void> {
+    if (!chainName) {
+      throw new Error('Chain name is required')
+    }
+
+    debug.debug(`Removing firewall chain by name: ${chainName}`)
+
+    await (await this.getNftables()).removeVMChainByName(chainName)
+
+    debug.info(`Firewall chain removed: ${chainName}`)
   }
 
   /**
@@ -240,23 +274,33 @@ export class InfinizationFirewallService {
    *
    * @returns Array of objects containing chain name and extracted VM ID
    */
-  async listVMChains (): Promise<Array<{ chainName: string; vmId: string }>> {
+  async listVMChains (): Promise<Array<{ chainName: string; vmId?: string }>> {
     debug.debug('Listing VM firewall chains')
 
     try {
-      const allChains = await this.nftablesService.listChains()
+      const allChains = await (await this.getNftables()).listChains()
+      const vmChainNames = allChains.filter(chain => chain.startsWith(VM_CHAIN_PREFIX))
 
-      // Filter for VM chains (those starting with VM_CHAIN_PREFIX)
-      const vmChains = allChains
-        .filter(chain => chain.startsWith(VM_CHAIN_PREFIX))
-        .map(chainName => ({
-          chainName,
-          // Extract VM ID by removing the prefix
-          // Note: The VM ID is sanitized (first 8 chars, alphanumeric only)
-          vmId: chainName.substring(VM_CHAIN_PREFIX.length)
-        }))
+      if (vmChainNames.length === 0) {
+        return []
+      }
 
-      debug.info(`Found ${vmChains.length} VM firewall chains`)
+      // Chain names are a non-invertible SHA-256 hash of the vmId, so we cannot parse
+      // the vmId back out of the name. Instead, reverse-map via the DB: compute the
+      // expected chain name for every machine and match. Chains with no matching
+      // machine (vmId undefined) are orphans — safe to clean up.
+      const machines = await this.prisma.machine.findMany({ select: { id: true } })
+      const chainToVmId = new Map<string, string>()
+      for (const machine of machines) {
+        chainToVmId.set(generateVMChainName(machine.id), machine.id)
+      }
+
+      const vmChains = vmChainNames.map(chainName => ({
+        chainName,
+        vmId: chainToVmId.get(chainName)
+      }))
+
+      debug.info(`Found ${vmChains.length} VM firewall chains (${vmChains.filter(c => !c.vmId).length} orphaned)`)
 
       return vmChains
     } catch (error) {
@@ -270,29 +314,15 @@ export class InfinizationFirewallService {
    * Converts Prisma FirewallRule models to FirewallRuleInput format.
    * This is the format expected by NftablesService.
    *
+   * Delegates to the shared converter (firewallRuleConversion) which is the single
+   * source of truth — it normalizes the connectionState shape so the translator
+   * actually emits `ct state` tokens (the old inline cast silently dropped them).
+   *
    * @param rules - Array of Prisma FirewallRule objects
    * @returns Array of FirewallRuleInput objects
    */
   convertPrismaRulesToInput (rules: PrismaFirewallRule[]): FirewallRuleInput[] {
-    return rules.map(rule => ({
-      id: rule.id,
-      name: rule.name,
-      description: rule.description,
-      action: rule.action as 'ACCEPT' | 'DROP' | 'REJECT',
-      direction: rule.direction as 'IN' | 'OUT' | 'INOUT',
-      priority: rule.priority,
-      protocol: rule.protocol,
-      srcPortStart: rule.srcPortStart,
-      srcPortEnd: rule.srcPortEnd,
-      dstPortStart: rule.dstPortStart,
-      dstPortEnd: rule.dstPortEnd,
-      srcIpAddr: rule.srcIpAddr,
-      srcIpMask: rule.srcIpMask,
-      dstIpAddr: rule.dstIpAddr,
-      dstIpMask: rule.dstIpMask,
-      connectionState: rule.connectionState as ConnectionStateConfig | null,
-      overridesDept: rule.overridesDept
-    }))
+    return prismaRulesToFirewallInput(rules)
   }
 
   // ============================================================================
@@ -338,8 +368,15 @@ export class InfinizationFirewallService {
       throw new Error(`TAP device name not found for VM: ${vmId}. The VM may not be running or network is not configured.`)
     }
 
-    debug.debug(`Retrieved TAP device name for VM ${vmId}: ${machine.configuration.tapDeviceName}`)
+    // Defense-in-depth: this DB-sourced name is interpolated into nft rule tokens, so
+    // validate it against the Linux interface-name charset/length before use (M1).
+    const tapDeviceName = machine.configuration.tapDeviceName
+    if (!/^[a-zA-Z0-9_-]{1,15}$/.test(tapDeviceName)) {
+      throw new Error(`Invalid TAP device name for VM ${vmId}: "${tapDeviceName}"`)
+    }
 
-    return machine.configuration.tapDeviceName
+    debug.debug(`Retrieved TAP device name for VM ${vmId}: ${tapDeviceName}`)
+
+    return tapDeviceName
   }
 }

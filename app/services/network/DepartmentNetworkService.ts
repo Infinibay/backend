@@ -17,6 +17,7 @@ import { PrismaClient, Department, RuleSetType } from '@prisma/client'
 import { BridgeManager, DepartmentNatService, TapDeviceManager } from '@infinibay/infinization'
 import { exec, spawn } from 'child_process'
 import { promisify } from 'util'
+import { createHash } from 'crypto'
 
 const execAsync = promisify(exec)
 
@@ -255,6 +256,20 @@ export class DepartmentNetworkService {
       config.mtu = department.mtu ?? undefined
     }
 
+    // B5: ensure the bridge name is unique across departments (the base name is only
+    // 6 hex of the department id, so two departments could otherwise collide and a
+    // teardown of one would clobber the other's bridge/NAT/dnsmasq).
+    config.bridgeName = await this.resolveUniqueBridgeName(departmentId, config.bridgeName)
+
+    // I12: persist the chosen bridge name + subnet BEFORE creating any kernel
+    // resources. If the process crashes mid-setup, destroyNetwork()/restoreAllNetworks()
+    // can still find and clean the bridge/NAT/dnsmasq via this DB pointer instead of
+    // leaking them with no record (the final update below fills in the rest).
+    await this.prisma.department.update({
+      where: { id: departmentId },
+      data: { ipSubnet: subnet, bridgeName: config.bridgeName }
+    })
+
     // 2. Create directories
     await this.ensureDirectories()
 
@@ -347,7 +362,7 @@ export class DepartmentNetworkService {
 
     // 2. Stop dnsmasq (try stored PID first, then fallback to pkill by bridge name)
     if (department.dnsmasqPid) {
-      await this.stopDnsmasq(department.dnsmasqPid)
+      await this.stopDnsmasq(department.dnsmasqPid, bridgeName)
     }
     // Fallback: kill any dnsmasq process associated with this bridge
     // This handles cases where PID is stale (server restart) or null
@@ -521,6 +536,12 @@ export class DepartmentNetworkService {
 
     const subnet = department.ipSubnet
 
+    // 0. Validate the target config BEFORE tearing anything down. If the subnet is
+    // somehow invalid, fail fast and leave the working network intact rather than
+    // destroying it and then failing to recreate it (fail-closed restart, I13).
+    this.parseSubnet(subnet, departmentId)
+    await this.validateSubnet(subnet, departmentId)
+
     // 1. Destroy existing network
     await this.destroyNetwork(departmentId)
 
@@ -553,6 +574,8 @@ export class DepartmentNetworkService {
 
     debug.info(`Reapplying firewall rules to ${machines.length} VMs in department ${departmentId}`)
 
+    const failed: string[] = []
+
     for (const machine of machines) {
       // Skip VMs without TAP device (not running)
       if (!machine.configuration?.tapDeviceName) {
@@ -566,8 +589,15 @@ export class DepartmentNetworkService {
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error)
         debug.error(`Failed to reapply rules to VM ${machine.id} (${machine.name}): ${errorMessage}`)
-        // Continue with other VMs even if one fails
+        // Continue with the other VMs, but remember this failure.
+        failed.push(`${machine.name} (${machine.id})`)
       }
+    }
+
+    // Surface failures instead of silently swallowing them — a running VM left
+    // without reapplied rules would otherwise be unfiltered without anyone knowing.
+    if (failed.length > 0) {
+      throw new Error(`Firewall reapplication failed for ${failed.length} VM(s): ${failed.join(', ')}`)
     }
   }
 
@@ -959,11 +989,42 @@ export class DepartmentNetworkService {
   }
 
   /**
-   * Generates a unique bridge name for a department.
+   * Generates a candidate bridge name for a department.
+   * "infinibr-" (9 chars) + 6 chars = 15 chars (Linux IFNAMSIZ limit).
    */
   private generateBridgeName (departmentId: string): string {
-    // "infinibr-" (9 chars) + 6 chars from ID = 15 chars (Linux limit)
     return `${BRIDGE_PREFIX}${departmentId.substring(0, 6)}`
+  }
+
+  /**
+   * Generates an alternate bridge name for a department by salting the hash — used to
+   * resolve a collision when the primary candidate is already taken by another dept.
+   */
+  private saltedBridgeName (departmentId: string, salt: number): string {
+    const hash = createHash('sha256').update(`${departmentId}:${salt}`).digest('hex').substring(0, 6)
+    return `${BRIDGE_PREFIX}${hash}`
+  }
+
+  /**
+   * Resolves a bridge name that is unique across departments. Tries the deterministic
+   * candidate first, then salted variants, checking each against the DB. Throws if it
+   * cannot find a free name (astronomically unlikely). The 6-hex suffix only carries
+   * 24 bits, so without this guard two departments can share a name and tearing one
+   * down would destroy the other's bridge/NAT/dnsmasq (B5).
+   */
+  private async resolveUniqueBridgeName (departmentId: string, candidate: string): Promise<string> {
+    for (let attempt = 0; attempt < 16; attempt++) {
+      const name = attempt === 0 ? candidate : this.saltedBridgeName(departmentId, attempt)
+      const clash = await this.prisma.department.findFirst({
+        where: { bridgeName: name, id: { not: departmentId } },
+        select: { id: true }
+      })
+      if (!clash) {
+        return name
+      }
+      debug.warn(`Bridge name ${name} already used by another department, trying another`)
+    }
+    throw new Error(`Could not allocate a unique bridge name for department ${departmentId}`)
   }
 
   /**
@@ -1445,9 +1506,31 @@ log-queries
   }
 
   /**
-   * Stops a dnsmasq process.
+   * Verifies that a PID actually belongs to a dnsmasq process for the given bridge,
+   * by inspecting /proc/<pid>/cmdline. Guards against PID reuse: after a host
+   * reboot/crash the OS recycles PIDs, so a stored dnsmasqPid may now name an
+   * unrelated process. Returns false if the process is gone or isn't our dnsmasq.
    */
-  private async stopDnsmasq (pid: number): Promise<void> {
+  private async pidIsDnsmasqForBridge (pid: number, bridgeName: string): Promise<boolean> {
+    try {
+      const cmdline = (await fs.readFile(`/proc/${pid}/cmdline`, 'utf8')).replace(/\0/g, ' ')
+      return cmdline.includes('dnsmasq') && cmdline.includes(bridgeName)
+    } catch {
+      // /proc entry missing => process not running (or not accessible).
+      return false
+    }
+  }
+
+  /**
+   * Stops a dnsmasq process. When `bridgeName` is provided, the PID is only signalled
+   * if it is verifiably OUR dnsmasq for that bridge (I11) — never a recycled PID.
+   */
+  private async stopDnsmasq (pid: number, bridgeName?: string | null): Promise<void> {
+    if (bridgeName && !(await this.pidIsDnsmasqForBridge(pid, bridgeName))) {
+      debug.warn(`PID ${pid} is not dnsmasq for ${bridgeName} (likely a recycled PID); refusing to kill`)
+      return
+    }
+
     try {
       process.kill(pid, 'SIGTERM')
       // Wait for process to exit
@@ -1483,7 +1566,7 @@ log-queries
 
     // Stop existing dnsmasq if running
     if (dept.dnsmasqPid) {
-      await this.stopDnsmasq(dept.dnsmasqPid)
+      await this.stopDnsmasq(dept.dnsmasqPid, dept.bridgeName)
     }
 
     // Build config with updated DNS/NTP/MTU settings
@@ -1511,12 +1594,13 @@ log-queries
   private async ensureDnsmasqRunning (dept: Department): Promise<void> {
     if (!dept.dnsmasqPid || !dept.bridgeName || !dept.ipSubnet) return
 
-    // Check if process is running
-    try {
-      process.kill(dept.dnsmasqPid, 0)
+    // Verify the stored PID is still OUR dnsmasq (not a recycled PID) — a bare
+    // process.kill(pid, 0) would treat ANY live process on that PID as "running" and
+    // never restart DHCP, leaving the department's VMs unable to get a lease (I11).
+    if (await this.pidIsDnsmasqForBridge(dept.dnsmasqPid, dept.bridgeName)) {
       debug.info(`dnsmasq already running for ${dept.bridgeName} (PID: ${dept.dnsmasqPid})`)
-    } catch {
-      // Process not running, restart it
+    } else {
+      // Process not running (or PID recycled), restart it
       debug.info(`Restarting dnsmasq for ${dept.bridgeName}`)
       const config = this.parseSubnet(dept.ipSubnet, dept.id)
       config.bridgeName = dept.bridgeName
@@ -1850,7 +1934,7 @@ log-queries
     try {
       // Try graceful stop first
       if (department.dnsmasqPid) {
-        await this.stopDnsmasq(department.dnsmasqPid)
+        await this.stopDnsmasq(department.dnsmasqPid, bridgeName)
       }
       // Then force kill by name
       try {

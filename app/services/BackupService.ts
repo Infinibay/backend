@@ -31,7 +31,7 @@ import type { PrismaClient, Backup as PrismaBackup } from '@prisma/client'
 
 import logger from '@main/logger'
 import { getEventManager } from '@services/EventManager'
-import { VMOperationsService } from '@services/VMOperationsService'
+import { assertVmStopped } from '@utils/assertVmStopped'
 
 export interface CreateBackupParams {
   vmId: string
@@ -138,17 +138,23 @@ export class BackupService {
       throw new Error(`VM ${params.vmId} has no disk paths configured`)
     }
 
-    // Reject when the VM is running: qemu holds an exclusive write lock on the
-    // qcow2 and qemu-img convert cannot read it. Backups require the VM stopped.
-    const vmOps = new VMOperationsService(this.prisma)
-    const status = await vmOps.getStatus(params.vmId)
-    if (status?.processAlive) {
-      throw new Error(
-        `Cannot back up VM "${vm.name}" while it is running. Stop the VM first and retry.`
-      )
-    }
+    // Reject when the VM is running OR its liveness is unknown: qemu holds an
+    // exclusive write lock on the qcow2 and qemu-img convert cannot safely read a
+    // live image. FAIL CLOSED — a null probe must never be treated as "stopped"
+    // (the previous `status?.processAlive` check passed when the probe returned
+    // null, silently backing up a possibly-running VM).
+    await assertVmStopped(this.prisma, params.vmId, vm.name)
 
-    const destinationDir = params.destinationDir ?? path.join(this.backupRootDir, vm.id)
+    // Validate user-supplied paths before they reach qemu-img / mkdir: keep the
+    // destination within the backup root and the source disks within the disk dir
+    // (path-traversal + leading-dash arg-injection guard).
+    const destinationDir = this.assertWithinBase(
+      params.destinationDir ?? path.join(this.backupRootDir, vm.id),
+      this.backupRootDir,
+      'destinationDir'
+    )
+    const diskBaseDir = path.resolve(process.env.INFINIZATION_DISK_DIR ?? '/var/lib/infinization/disks')
+    const safeDiskPaths = diskPaths.map((p) => this.assertWithinBase(p, diskBaseDir, 'diskPath'))
     const compression = params.compression ?? DEFAULT_BACKUP_COMPRESSION
 
     // Pre-insert a row so in-flight backups are visible to the UI.
@@ -174,7 +180,7 @@ export class BackupService {
     void this.runBackupInBackground({
       pendingId: pending.id,
       vmId: vm.id,
-      diskPaths,
+      diskPaths: safeDiskPaths,
       destinationDir,
       type: params.type,
       compression,
@@ -347,12 +353,23 @@ export class BackupService {
     // Empty array means "restore every disk to its original location" — the UI
     // sends [] for a full restore. infinization requires the target list to
     // match the backup's disk count, so resolve the paths from the VM record.
-    const diskPaths = (params.diskPaths && params.diskPaths.length > 0)
+    const rawDiskPaths = (params.diskPaths && params.diskPaths.length > 0)
       ? params.diskPaths
       : this.resolveDiskPaths(vm.configuration?.diskPaths)
-    if (diskPaths.length === 0) {
+    if (rawDiskPaths.length === 0) {
       throw new Error(`VM ${params.vmId} has no disk paths configured for restore`)
     }
+    // Restore OVERWRITES these target paths — validate them (no path-traversal,
+    // no leading-dash arg-injection) before any disk is touched.
+    const diskBaseDir = path.resolve(process.env.INFINIZATION_DISK_DIR ?? '/var/lib/infinization/disks')
+    const diskPaths = rawDiskPaths.map((p) => this.assertWithinBase(p, diskBaseDir, 'diskPath'))
+
+    // Restoring over a live qcow2 corrupts it (qemu-img convert vs the VM's write
+    // lock). Gate on the live process — fail closed — BEFORE any disk is touched.
+    // NOTE: multi-disk restore is still non-atomic in infinization (a failure on
+    // disk N leaves disks 0..N-1 already overwritten); making it temp+atomic-rename
+    // is a tracked follow-up. The stopped-guard removes the dominant corruption path.
+    await assertVmStopped(this.prisma, params.vmId)
 
     // Announce the restore so the UI (and other sessions) can show activity
     // while the — potentially multi-minute — copy runs. The mutation itself
@@ -468,6 +485,25 @@ export class BackupService {
   private resolveDiskPaths (raw: unknown): string[] {
     if (Array.isArray(raw)) return raw.filter((p): p is string => typeof p === 'string')
     return []
+  }
+
+  /**
+   * Validates a client-supplied path before it reaches qemu-img: rejects names
+   * starting with '-' (would be parsed as a qemu-img option even with spawn/no
+   * shell), normalizes, and ensures it stays within `baseDir` (path-traversal
+   * guard). Returns the resolved absolute path. Reject — never silently strip —
+   * so callers get a clear error.
+   */
+  private assertWithinBase (candidate: string, baseDir: string, label: string): string {
+    if (path.basename(candidate).startsWith('-')) {
+      throw new Error(`${label} must not start with '-': ${candidate}`)
+    }
+    const resolvedBase = path.resolve(baseDir)
+    const resolved = path.resolve(candidate)
+    if (resolved !== resolvedBase && !resolved.startsWith(resolvedBase + path.sep)) {
+      throw new Error(`${label} escapes the allowed directory: ${candidate}`)
+    }
+    return resolved
   }
 
   /** Returns subdirectory names inside `dir`, or [] if it doesn't exist. */

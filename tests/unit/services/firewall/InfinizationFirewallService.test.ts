@@ -1,12 +1,22 @@
 import { PrismaClient } from '@prisma/client'
 import { mockDeep, DeepMockProxy } from 'jest-mock-extended'
 import { InfinizationFirewallService } from '@services/firewall/InfinizationFirewallService'
-import { NftablesService, type NftablesError, VM_CHAIN_PREFIX } from '@infinibay/infinization'
+import { type NftablesError, VM_CHAIN_PREFIX } from '@infinibay/infinization'
+import { getInfinization } from '@services/InfinizationService'
 
-// Mock NftablesService
+// Mock NftablesService. generateVMChainName is stubbed to a reversible form so the
+// listVMChains DB reverse-map (chain name -> vmId) is easy to assert in tests; the
+// real implementation hashes the vmId (non-invertible) — see firewall.types.
 jest.mock('@infinibay/infinization', () => ({
   NftablesService: jest.fn(),
-  VM_CHAIN_PREFIX: 'vm_'
+  VM_CHAIN_PREFIX: 'vm_',
+  generateVMChainName: (id: string) => `vm_${id}`
+}))
+
+// The service now uses the SHARED NftablesService via getInfinization() (I2) instead
+// of constructing its own — mock the accessor to hand back our mock instance.
+jest.mock('@services/InfinizationService', () => ({
+  getInfinization: jest.fn()
 }))
 
 describe('InfinizationFirewallService', () => {
@@ -41,10 +51,13 @@ describe('InfinizationFirewallService', () => {
       initialize: mockInitialize,
       applyRules: mockApplyRules,
       removeVMChain: mockRemoveVMChain,
+      removeVMChainByName: jest.fn(),
       listChains: mockListChains
     }
 
-    ;(NftablesService as jest.Mock).mockImplementation(() => mockNftablesService)
+    ;(getInfinization as jest.Mock).mockResolvedValue({
+      getNftablesService: () => mockNftablesService
+    })
 
     service = new InfinizationFirewallService(mockPrisma)
   })
@@ -59,7 +72,6 @@ describe('InfinizationFirewallService', () => {
 
       await service.initialize()
 
-      expect(NftablesService).toHaveBeenCalledTimes(1)
       expect(mockInitialize).toHaveBeenCalledTimes(1)
     })
 
@@ -127,7 +139,9 @@ describe('InfinizationFirewallService', () => {
         'vm-123',
         'tap-vm-123',
         departmentRules,
-        vmRules
+        vmRules,
+        // Terminal posture defaults to fail-closed 'drop' when no policy is threaded.
+        'drop'
       )
       expect(result).toEqual({
         appliedRules: 5,
@@ -216,19 +230,22 @@ describe('InfinizationFirewallService', () => {
       expect(result.errors).toEqual([])
     })
 
-    it('should skip VMs without TAP device and track in errors', async () => {
+    it('should DEFER (not fail) VMs without a TAP device', async () => {
       const vmWithoutTap = { ...mockVMs[0], configuration: null }
       mockPrisma.machine.findMany.mockResolvedValue([vmWithoutTap, mockVMs[1]] as any)
 
       const departmentRules = [{ name: 'Dept Rule 1' }] as any[]
       const result = await service.applyDepartmentRules('dept-123', departmentRules)
 
+      // A VM with no TAP is not running — it's a deferral counted separately, NOT an
+      // error (callers no longer string-match "no TAP device" to tell them apart).
       expect(result.vmsUpdated).toBe(1)
-      expect(result.errors.length).toBe(1)
-      expect(result.errors[0]).toContain('has no TAP device configured, skipping')
+      expect(result.vmsSkippedNoTap).toBe(1)
+      expect(result.vmsFailed).toBe(0)
+      expect(result.errors.length).toBe(0)
     })
 
-    it('should handle partial failures gracefully', async () => {
+    it('should count partial failures as FAILED, not updated', async () => {
       mockApplyRules.mockResolvedValue({
         appliedRules: 0,
         totalRules: 1,
@@ -239,7 +256,8 @@ describe('InfinizationFirewallService', () => {
       const departmentRules = [{ name: 'Dept Rule 1' }] as any[]
       const result = await service.applyDepartmentRules('dept-123', departmentRules)
 
-      expect(result.vmsUpdated).toBe(2)
+      expect(result.vmsUpdated).toBe(0)
+      expect(result.vmsFailed).toBe(2)
       expect(result.errors.length).toBe(2)
       expect(result.errors[0]).toContain('rules failed')
     })
@@ -292,6 +310,12 @@ describe('InfinizationFirewallService', () => {
         'some-other-chain'
       ]
       mockListChains.mockResolvedValue(mockChains)
+      // listVMChains reverse-maps chain names to vmIds via the DB (the name is a
+      // non-invertible hash of the id). With the stubbed generator (vm_<id>), these
+      // machines map to the listed chains.
+      mockPrisma.machine.findMany.mockResolvedValue([
+        { id: 'vm123' }, { id: 'vm456' }
+      ] as never)
 
       const result = await service.listVMChains()
 

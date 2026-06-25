@@ -47,7 +47,12 @@ export class FirewallPolicyService {
     const rules: SystemRuleData[] = []
 
     // Always add established/related connection rule (priority 50)
-    // This allows response traffic for connections initiated from the VM
+    // This allows response traffic for connections initiated from the VM.
+    //
+    // connectionState uses the canonical BOOLEAN shape understood by the nftables
+    // translator. The previous `{ states: ['ESTABLISHED', 'RELATED'] }` shape was
+    // never read by the translator, so this foundational rule silently produced no
+    // `ct state` match (fail-open). See firewallRuleConversion.normalizeConnectionState.
     rules.push({
       name: 'Allow Established Connections (System)',
       description: 'Allow traffic for established and related connections',
@@ -55,7 +60,7 @@ export class FirewallPolicyService {
       direction: RuleDirection.INOUT,
       protocol: 'all',
       priority: 50,
-      connectionState: { states: ['ESTABLISHED', 'RELATED'] },
+      connectionState: { established: true, related: true },
       isSystemGenerated: true
     })
 
@@ -162,16 +167,10 @@ export class FirewallPolicyService {
         break
 
       default:
-        debug.warn(`Unknown BLOCK_ALL config: ${defaultConfig}, defaulting to allow_outbound`)
-        rules.push({
-          name: 'Allow All Outbound (System)',
-          description: 'Allow all outbound connections',
-          action: RuleAction.ACCEPT,
-          direction: RuleDirection.OUT,
-          protocol: 'all',
-          priority: 100,
-          isSystemGenerated: true
-        })
+        // Fail CLOSED for an unknown BLOCK_ALL preset: generate NO permissive rules
+        // (complete isolation), the same as block_all. Defaulting to allow_outbound
+        // here would silently open all outbound traffic for a misconfigured policy (M11).
+        debug.warn(`Unknown BLOCK_ALL config: ${defaultConfig}; failing closed (complete isolation)`)
     }
 
     return rules
@@ -346,18 +345,27 @@ export class FirewallPolicyService {
   ): Promise<void> {
     debug.info(`Applying policy ${policy}/${defaultConfig} to rule set ${ruleSetId}`)
 
-    // 1. Delete existing system-generated rules
-    const deletedCount = await this.ruleService.deleteSystemGeneratedRules(ruleSetId)
-    debug.info(`Deleted ${deletedCount} existing system-generated rules`)
-
-    // 2. Generate new rules based on policy
+    // Generate the new rule set first (pure, no I/O).
     const newRules = this.generateDefaultRules(policy, defaultConfig)
     debug.info(`Generated ${newRules.length} new rules for policy ${policy}/${defaultConfig}`)
 
-    // 3. Create the new rules
-    for (const ruleData of newRules) {
-      await this.ruleService.createRule(ruleSetId, ruleData)
-    }
+    // Delete the old system rules and create the new ones in a SINGLE transaction.
+    // Previously these were separate awaits with no transaction, so a failure
+    // mid-way (e.g. switching ALLOW_ALL -> BLOCK_ALL) could leave the department
+    // with its old rules deleted but the new ones not yet created — i.e. no
+    // functional policy until the next manual apply.
+    await this.prisma.$transaction(async (tx) => {
+      const deleted = await tx.firewallRule.deleteMany({
+        where: { ruleSetId, isSystemGenerated: true }
+      })
+      debug.info(`Deleted ${deleted.count} existing system-generated rules`)
+
+      if (newRules.length > 0) {
+        await tx.firewallRule.createMany({
+          data: newRules.map((rule) => ({ ...rule, ruleSetId }))
+        })
+      }
+    })
 
     debug.info(`Successfully applied ${newRules.length} rules to rule set ${ruleSetId}`)
   }

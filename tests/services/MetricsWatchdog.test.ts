@@ -54,7 +54,7 @@ describe('MetricsWatchdogJob', () => {
       await checkMethod()
 
       expect(mockPrisma.machine.findMany).toHaveBeenCalledWith({
-        where: { status: 'running' },
+        where: { status: 'running', configuration: { setupComplete: true } },
         select: { id: true, name: true }
       })
 

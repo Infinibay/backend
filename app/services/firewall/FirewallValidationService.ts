@@ -1,5 +1,6 @@
 import { FirewallRule } from '@prisma/client'
 import { isIPv4, isIPv6 } from 'node:net'
+import { SUPPORTED_PROTOCOLS } from '@infinibay/infinization'
 
 export type ConflictType = 'DUPLICATE' | 'CONTRADICTORY' | 'PORT_OVERLAP' | 'PRIORITY_CONFLICT';
 
@@ -199,11 +200,25 @@ export class FirewallValidationService {
   }
 
   private normalizeConnectionState (cs: unknown): string {
-    if (cs == null) return ''
-    if (typeof cs !== 'object') return ''
-    const states = (cs as { states?: unknown }).states
-    if (!Array.isArray(states) || states.length === 0) return ''
-    return states.map(s => String(s).toUpperCase()).sort().join(',')
+    if (cs == null || typeof cs !== 'object') return ''
+
+    const obj = cs as Record<string, unknown>
+    const enabled = new Set<string>()
+
+    // Legacy array shape: { states: ['ESTABLISHED', ...] }
+    if (Array.isArray(obj.states)) {
+      for (const s of obj.states) enabled.add(String(s).toUpperCase())
+    }
+
+    // Canonical boolean shape (used by GraphQL inputs + the nftables translator):
+    // { established: true, new: true, related: true, invalid: true }. Both shapes
+    // must compare equal so dedup/overlap detection sees GraphQL-created rules and
+    // FirewallPolicyService system rules as the same predicate.
+    for (const key of ['established', 'new', 'related', 'invalid']) {
+      if (obj[key] === true) enabled.add(key.toUpperCase())
+    }
+
+    return [...enabled].sort().join(',')
   }
 
   /**
@@ -389,10 +404,38 @@ export class FirewallValidationService {
     // Validate protocol-specific constraints
     this.validateProtocolConstraints(rule, warnings)
 
+    // Reject anything the nftables enforcement layer cannot actually express, so
+    // unsupported rules are caught at creation rather than silently dropped at apply.
+    this.validateEnforceable(rule, warnings)
+
     return {
       isValid: warnings.length === 0,
       conflicts: [],
       warnings
+    }
+  }
+
+  /**
+   * Rejects rules the firewall enforcement layer (infinization's translator) cannot
+   * represent: protocols outside SUPPORTED_PROTOCOLS and IPv6 addresses. Without this
+   * the validator accepts (and the DB persists) rules that the translator then refuses
+   * to translate — and that failure is swallowed at apply time, leaving the intended
+   * traffic unfiltered. Fail at the front door instead.
+   */
+  private validateEnforceable (rule: FirewallRule, warnings: string[]): void {
+    const protocol = (rule.protocol || 'all').toLowerCase()
+    if (!(SUPPORTED_PROTOCOLS as readonly string[]).includes(protocol)) {
+      warnings.push(
+        `Protocol "${rule.protocol}" is not supported by the firewall. Supported protocols: ${SUPPORTED_PROTOCOLS.join(', ')}.`
+      )
+    }
+
+    // The bridge-family translator only emits IPv4 (`ip saddr/daddr`) matches.
+    if (rule.srcIpAddr && isIPv6(rule.srcIpAddr)) {
+      warnings.push(`Source IP "${rule.srcIpAddr}" is IPv6; the firewall only supports IPv4 addresses.`)
+    }
+    if (rule.dstIpAddr && isIPv6(rule.dstIpAddr)) {
+      warnings.push(`Destination IP "${rule.dstIpAddr}" is IPv6; the firewall only supports IPv4 addresses.`)
     }
   }
 

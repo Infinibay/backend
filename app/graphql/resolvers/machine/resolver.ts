@@ -467,14 +467,27 @@ export class MachineMutations {
       const vmOpsService = new VMOperationsService(prisma)
       const result = await vmOpsService.executeGuestCommand(id, command)
 
-      return {
-        success: result.success,
-        message: result.stdout ?? result.message ?? result.error ?? 'Command executed'
+      // The guest command actually ran iff we got an exitCode back. In that case
+      // stdout/stderr are the user's OWN command output and are safe to return.
+      const commandRan = typeof result.exitCode === 'number'
+      if (commandRan) {
+        return {
+          success: result.success,
+          message: result.success ? (result.stdout ?? '') : (result.stderr ?? ''),
+          response: result.stdout
+        }
       }
+
+      // The command did not run: result.error is an infinization/QGA/internal
+      // string (e.g. 'QGA socket error: connect ENOENT /var/lib/.../qga.sock') that
+      // discloses host paths/sockets. Log the detail server-side, return generic.
+      this.debug.error(`executeCommand infra failure for machine ${id}: ${result.error}`)
+      return { success: false, message: 'Failed to execute command on the virtual machine' }
     } catch (error) {
-      // Log the error and return a failure response
-      this.debug.debug(`Error executing command: ${error}`)
-      return { success: false, message: (error as Error).message || 'Error executing command' }
+      // Unexpected exception (infinization throw, attach failure, etc.). Never
+      // surface raw error text to the client — log it, return a generic message.
+      this.debug.error(`Error executing command on machine ${id}:`, error)
+      return { success: false, message: 'Failed to execute command on the virtual machine' }
     }
   }
 

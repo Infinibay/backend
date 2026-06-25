@@ -489,6 +489,8 @@ describe('MachineLifecycleService', () => {
       })
 
       mockPrisma.machine.findFirst.mockResolvedValue(mockMachine)
+      // Atomic claim succeeds (1 row flipped to 'deleting').
+      mockPrisma.machine.updateMany.mockResolvedValue({ count: 1 } as any)
 
       // Mock the MachineCleanupService
       const mockCleanupVM = jest.fn();
@@ -508,7 +510,33 @@ describe('MachineLifecycleService', () => {
           configuration: true
         }
       })
+      // The claim flips the row to 'deleting' within the authorized scope.
+      expect(mockPrisma.machine.updateMany).toHaveBeenCalledWith({
+        where: { id: 'machine-123', userId: mockUser?.id, status: { notIn: ['deleting', 'rebuilding'] } },
+        data: { status: 'deleting' }
+      })
       expect(mockCleanupVM).toHaveBeenCalledWith('machine-123')
+    })
+
+    it('should bail when the VM is already being deleted (claim returns 0)', async () => {
+      const mockMachine = createMockMachine({
+        id: 'machine-123',
+        userId: mockUser?.id || 'user-123'
+      })
+
+      mockPrisma.machine.findFirst.mockResolvedValue(mockMachine)
+      mockPrisma.machine.updateMany.mockResolvedValue({ count: 0 } as any)
+
+      const mockCleanupVM = jest.fn();
+      (MachineCleanupServiceV2 as unknown as jest.Mock).mockImplementation(() => ({
+        cleanupVM: mockCleanupVM
+      }))
+
+      const result = await service.destroyMachine('machine-123')
+
+      expect(result.success).toBe(false)
+      expect(result.message).toMatch(/already being deleted|cannot be deleted/i)
+      expect(mockCleanupVM).not.toHaveBeenCalled()
     })
 
     it('should return error if machine not found', async () => {
@@ -529,6 +557,7 @@ describe('MachineLifecycleService', () => {
       })
 
       mockPrisma.machine.findFirst.mockResolvedValue(mockMachine)
+      mockPrisma.machine.updateMany.mockResolvedValue({ count: 1 } as any)
 
       // Mock the MachineCleanupService to throw an error
       const mockCleanupVM = jest.fn(() => Promise.reject(new Error('Cleanup failed')));

@@ -11,7 +11,7 @@ jest.mock('@services/InfinizationService', () => ({
 }))
 
 // Disk side effects are mocked so we assert on intent, not on a real qcow2.
-jest.mock('fs/promises', () => ({ __esModule: true, default: { unlink: jest.fn() } }))
+jest.mock('fs/promises', () => ({ __esModule: true, default: { unlink: jest.fn(), rename: jest.fn() } }))
 jest.mock('child_process', () => ({ __esModule: true, execFile: jest.fn() }))
 
 import fs from 'fs/promises'
@@ -20,6 +20,7 @@ import { getInfinization } from '@services/InfinizationService'
 import { NonPersistentResetService } from '@services/pool/NonPersistentResetService'
 
 const mockedUnlink = fs.unlink as unknown as jest.Mock<(...args: any[]) => any>
+const mockedRename = fs.rename as unknown as jest.Mock<(...args: any[]) => any>
 const mockedExecFile = execFile as unknown as jest.Mock<(...args: any[]) => any>
 const mockedGetInfinization = getInfinization as unknown as jest.Mock<(...args: any[]) => any>
 
@@ -46,6 +47,7 @@ describe('NonPersistentResetService.handleShutdown', () => {
     service = new NonPersistentResetService(prisma)
 
     mockedUnlink.mockResolvedValue(undefined)
+    mockedRename.mockResolvedValue(undefined)
     // qemu-img create: invoke the trailing callback with no error (success).
     mockedExecFile.mockImplementation((...args: any[]) => args[args.length - 1](null))
     mockedGetInfinization.mockResolvedValue({
@@ -60,20 +62,24 @@ describe('NonPersistentResetService.handleShutdown', () => {
 
     await service.handleShutdown('vm-1')
 
-    // Atomic claim before any disk work, excluding terminal/locked states.
+    // Atomic claim before any disk work — only from idle/terminal disk-safe states.
     expect(prisma.machine.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: 'vm-1', status: { notIn: ['rebuilding', 'archived'] } },
+        where: { id: 'vm-1', status: { in: ['off', 'error'] } },
         data: { status: 'rebuilding' }
       })
     )
-    expect(mockedUnlink).toHaveBeenCalledWith('/disks/vm-1.qcow2')
+    // Crash-safe rebuild: build into a temp path, then atomic-rename over the live
+    // delta. unlink is the stale-temp pre-clean; qemu-img targets the temp path.
+    const tmpMatch = expect.stringMatching(/\/disks\/vm-1\.qcow2\.rebuild-.*\.tmp$/)
+    expect(mockedUnlink).toHaveBeenCalledWith(tmpMatch)
     expect(mockedExecFile).toHaveBeenCalledWith(
       'qemu-img',
-      expect.arrayContaining(['-b', '/disks/base/golden.qcow2', '/disks/vm-1.qcow2']),
+      expect.arrayContaining(['-b', '/disks/base/golden.qcow2']),
       expect.anything(),
       expect.any(Function)
     )
+    expect(mockedRename).toHaveBeenCalledWith(tmpMatch, '/disks/vm-1.qcow2')
     expect(prisma.machine.update).toHaveBeenCalledWith({ where: { id: 'vm-1' }, data: { status: 'off' } })
   })
 

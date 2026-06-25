@@ -20,6 +20,7 @@ const mockInfinization = {
 
 jest.mock('../../../app/services/InfinizationService', () => ({
   getInfinization: jest.fn(() => Promise.resolve(mockInfinization)),
+  getInfinizationConfig: jest.fn(() => ({ diskDir: '/var/lib/infinization/disks' })),
 }))
 
 jest.mock('../../../app/services/network/DepartmentNetworkService', () => ({
@@ -32,6 +33,10 @@ jest.mock('fs', () => ({
   ...jest.requireActual('fs'),
   existsSync: jest.fn().mockReturnValue(false),
   readdirSync: jest.fn().mockReturnValue([]),
+  promises: {
+    ...jest.requireActual('fs').promises,
+    unlink: jest.fn().mockResolvedValue(undefined),
+  },
 }))
 
 jest.mock('portfinder', () => ({
@@ -357,6 +362,30 @@ describe('CreateMachineServiceV2', () => {
       ).rejects.toThrow('Error creating machine')
 
       expect(mockInfinization.stopVM).toHaveBeenCalledWith('vm-1', { force: true })
+    })
+
+    it('deletes the orphaned qcow2 on failure even though diskPaths was never persisted', async () => {
+      // This is the leak fix: infinization creates the disk at a deterministic
+      // path but never persists diskPaths to the DB on failure, so rollback must
+      // unlink the computed path itself.
+      const fs = jest.requireMock('fs') as { promises: { unlink: jest.Mock } }
+      const machine = makeMachine() // internalName: 'vm-test-1'
+      const config = makeConfiguration()
+
+      mockPrisma.machineTemplate.findUnique.mockResolvedValue(makeTemplate() as any)
+      mockPrisma.machineConfiguration.findUnique.mockResolvedValue({ ...config, diskPaths: null } as any)
+      mockPrisma.machineApplication.findMany.mockResolvedValue([] as any)
+      mockPrisma.scriptExecution.findMany.mockResolvedValue([] as any)
+      mockPrisma.machine.update.mockResolvedValue(machine as any)
+      mockInfinization.createVM.mockRejectedValue(new Error('QEMU spawn failed'))
+      mockInfinization.getVMStatus.mockResolvedValue({ processAlive: false } as any)
+
+      await expect(
+        service.create(machine, 'user', 'pass', undefined, null, 'en_US.UTF-8', 'us', 'America/New_York'),
+      ).rejects.toThrow('Error creating machine')
+
+      // rollback unlinks the deterministic path: <diskDir>/<internalName>.qcow2
+      expect(fs.promises.unlink).toHaveBeenCalledWith('/var/lib/infinization/disks/vm-test-1.qcow2')
     })
   })
 

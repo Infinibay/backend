@@ -5,6 +5,7 @@ import * as unixcrypt from 'unixcrypt'
 import { Application, PrismaClient } from '@prisma/client'
 import { promises as fsPromises } from 'fs'
 import { Eta } from 'eta'
+import { randomBytes } from 'crypto'
 
 import { UnattendedManagerBase } from './unattendedManagerBase'
 
@@ -41,8 +42,15 @@ export class UnattendedUbuntuManager extends UnattendedManagerBase {
    * @returns {Promise<string>} A promise that resolves to the generated configuration file.
    */
   async generateConfig (): Promise<string> {
-    // Generate a random hostname, like ubuntu-xhsdDx
-    const hostname = 'ubuntu-' + Math.random().toString(36).substring(7)
+    // Unique, DNS-safe (RFC-1123) hostname tied to the VM id so two VMs can never
+    // clash on the department network; crypto fallback when no vmId. The old
+    // Math.random().toString(36).substring(7) yielded only a few chars (sometimes
+    // zero), making collisions easy.
+    const suffix = (this.vmId || randomBytes(6).toString('hex'))
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '')
+      .slice(0, 12)
+    const hostname = `ubuntu-${suffix}`
 
     // Create the autoinstall configuration
     const config = {

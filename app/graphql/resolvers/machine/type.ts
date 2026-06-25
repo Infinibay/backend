@@ -221,6 +221,16 @@ export enum MachineStatus {
     // golden image after logoff. Held while the qcow2 delta is wiped + rebuilt
     // so the machine stays out of the pool checkout pool until it's clean.
     REBUILDING = 'rebuilding',
+    // Transient backend "status-as-lock" markers (not QEMU states): a multi-step
+    // backend flow has claimed the row so it can't interleave with another flow
+    // or a pool checkout.
+    DELETING = 'deleting',
+    MOVING = 'moving',
+    // Pool pseudo-status for archived/scaled-down members.
+    ARCHIVED = 'archived',
+    // Terminal marker: physical teardown failed and the DB row was KEPT on
+    // purpose so an operator/cron can retry the delete. Distinct from ERROR.
+    DELETE_FAILED = 'delete_failed',
     ERROR = 'error'
 }
 

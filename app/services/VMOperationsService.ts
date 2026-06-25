@@ -26,220 +26,102 @@ export class VMOperationsService {
   }
 
   /**
-   * Restart a virtual machine (graceful shutdown then start)
+   * Shared wrapper for single-step infinization power operations. Runs `op`,
+   * maps its result to a VMOperationResult, and converts a thrown error into a
+   * failed result. Only the call-site-specific values differ between ops: the log
+   * verb, the infinization call, and the success/failure fallback text.
    */
-  async restartMachine (machineId: string): Promise<VMOperationResult> {
-    this.debug.debug(`Restarting machine ${machineId}`)
+  private async runOperation (
+    machineId: string,
+    verb: string,
+    successMessage: string,
+    failureMessage: string,
+    op: (infinization: Awaited<ReturnType<typeof getInfinization>>) => Promise<{ success: boolean, message?: string, error?: string }>
+  ): Promise<VMOperationResult> {
+    this.debug.debug(`${verb} machine ${machineId}`)
 
     try {
       const infinization = await getInfinization()
-      const result = await infinization.restartVM(machineId)
+      const result = await op(infinization)
 
       if (result.success) {
-        return {
-          success: true,
-          message: result.message || 'Machine restarted successfully'
-        }
-      } else {
-        return {
-          success: false,
-          error: result.error || 'Failed to restart machine'
-        }
+        return { success: true, message: result.message || successMessage }
       }
+      return { success: false, error: result.error || failureMessage }
     } catch (error: any) {
-      this.debug.error(`Error restarting machine: ${error.message}`)
-      return {
-        success: false,
-        error: error.message
-      }
+      this.debug.error(`Error ${verb.toLowerCase()} machine: ${error.message}`)
+      return { success: false, error: error.message }
     }
+  }
+
+  /**
+   * Restart a virtual machine (graceful shutdown then start)
+   */
+  async restartMachine (machineId: string): Promise<VMOperationResult> {
+    return this.runOperation(
+      machineId, 'Restarting', 'Machine restarted successfully', 'Failed to restart machine',
+      (infinization) => infinization.restartVM(machineId)
+    )
   }
 
   /**
    * Force power off a virtual machine (immediate destroy)
    */
   async forcePowerOff (machineId: string): Promise<VMOperationResult> {
-    this.debug.debug(`Force powering off machine ${machineId}`)
-
-    try {
-      const infinization = await getInfinization()
-      const result = await infinization.stopVM(machineId, {
-        graceful: false,
-        force: true
-      })
-
-      if (result.success) {
-        return {
-          success: true,
-          message: result.message || 'Machine forcefully powered off'
-        }
-      } else {
-        return {
-          success: false,
-          error: result.error || 'Failed to force power off machine'
-        }
-      }
-    } catch (error: any) {
-      this.debug.error(`Error force powering off machine: ${error.message}`)
-      return {
-        success: false,
-        error: error.message
-      }
-    }
+    return this.runOperation(
+      machineId, 'Force powering off', 'Machine forcefully powered off', 'Failed to force power off machine',
+      (infinization) => infinization.stopVM(machineId, { graceful: false, force: true })
+    )
   }
 
   /**
    * Graceful power off a virtual machine
    */
   async gracefulPowerOff (machineId: string): Promise<VMOperationResult> {
-    this.debug.debug(`Gracefully powering off machine ${machineId}`)
-
-    try {
-      const infinization = await getInfinization()
-      const result = await infinization.stopVM(machineId, {
-        graceful: true,
-        timeout: 120000, // 2 minutes
-        force: true // Force kill if timeout
-      })
-
-      if (result.success) {
-        return {
-          success: true,
-          message: result.message || 'Machine powered off'
-        }
-      } else {
-        return {
-          success: false,
-          error: result.error || 'Failed to power off machine'
-        }
-      }
-    } catch (error: any) {
-      this.debug.error(`Error powering off machine: ${error.message}`)
-      return {
-        success: false,
-        error: error.message
-      }
-    }
+    return this.runOperation(
+      machineId, 'Gracefully powering off', 'Machine powered off', 'Failed to power off machine',
+      (infinization) => infinization.stopVM(machineId, { graceful: true, timeout: 120000, force: true })
+    )
   }
 
   /**
    * Reset a virtual machine (hardware reset)
    */
   async resetMachine (machineId: string): Promise<VMOperationResult> {
-    this.debug.debug(`Resetting machine ${machineId}`)
-
-    try {
-      const infinization = await getInfinization()
-      const result = await infinization.resetVM(machineId)
-
-      if (result.success) {
-        return {
-          success: true,
-          message: result.message || 'Machine reset successfully'
-        }
-      } else {
-        return {
-          success: false,
-          error: result.error || 'Failed to reset machine'
-        }
-      }
-    } catch (error: any) {
-      this.debug.error(`Error resetting machine: ${error.message}`)
-      return {
-        success: false,
-        error: error.message
-      }
-    }
+    return this.runOperation(
+      machineId, 'Resetting', 'Machine reset successfully', 'Failed to reset machine',
+      (infinization) => infinization.resetVM(machineId)
+    )
   }
 
   /**
    * Start a virtual machine
    */
   async startMachine (machineId: string): Promise<VMOperationResult> {
-    this.debug.debug(`Starting machine ${machineId}`)
-
-    try {
-      const infinization = await getInfinization()
-      const result = await infinization.startVM(machineId)
-
-      if (result.success) {
-        return {
-          success: true,
-          message: result.message || 'Machine started successfully'
-        }
-      } else {
-        return {
-          success: false,
-          error: result.error || 'Failed to start machine'
-        }
-      }
-    } catch (error: any) {
-      this.debug.error(`Error starting machine: ${error.message}`)
-      return {
-        success: false,
-        error: error.message
-      }
-    }
+    return this.runOperation(
+      machineId, 'Starting', 'Machine started successfully', 'Failed to start machine',
+      (infinization) => infinization.startVM(machineId)
+    )
   }
 
   /**
    * Suspend a virtual machine
    */
   async suspendMachine (machineId: string): Promise<VMOperationResult> {
-    this.debug.debug(`Suspending machine ${machineId}`)
-
-    try {
-      const infinization = await getInfinization()
-      const result = await infinization.suspendVM(machineId)
-
-      if (result.success) {
-        return {
-          success: true,
-          message: result.message || 'Machine suspended successfully'
-        }
-      } else {
-        return {
-          success: false,
-          error: result.error || 'Failed to suspend machine'
-        }
-      }
-    } catch (error: any) {
-      this.debug.error(`Error suspending machine: ${error.message}`)
-      return {
-        success: false,
-        error: error.message
-      }
-    }
+    return this.runOperation(
+      machineId, 'Suspending', 'Machine suspended successfully', 'Failed to suspend machine',
+      (infinization) => infinization.suspendVM(machineId)
+    )
   }
 
   /**
    * Resume a suspended virtual machine
    */
   async resumeMachine (machineId: string): Promise<VMOperationResult> {
-    this.debug.debug(`Resuming machine ${machineId}`)
-
-    try {
-      const infinization = await getInfinization()
-      const result = await infinization.resumeVM(machineId)
-
-      if (result.success) {
-        return {
-          success: true,
-          message: result.message || 'Machine resumed successfully'
-        }
-      } else {
-        return {
-          success: false,
-          error: result.error || 'Failed to resume machine'
-        }
-      }
-    } catch (error: any) {
-      this.debug.error(`Error resuming machine: ${error.message}`)
-      return {
-        success: false,
-        error: error.message
-      }
-    }
+    return this.runOperation(
+      machineId, 'Resuming', 'Machine resumed successfully', 'Failed to resume machine',
+      (infinization) => infinization.resumeVM(machineId)
+    )
   }
 
   /**
@@ -247,6 +129,7 @@ export class VMOperationsService {
    */
   async getStatus (machineId: string): Promise<{
     status: string
+    qmpStatus: string | null
     processAlive: boolean
     consistent: boolean
   } | null> {
@@ -256,6 +139,7 @@ export class VMOperationsService {
 
       return {
         status: result.status,
+        qmpStatus: result.qmpStatus,
         processAlive: result.processAlive,
         consistent: result.consistent
       }
@@ -263,44 +147,6 @@ export class VMOperationsService {
       this.debug.error(`Error getting machine status: ${error.message}`)
       return null
     }
-  }
-
-  /**
-   * Perform a graceful restart with retries
-   */
-  async performGracefulRestart (
-    machineId: string,
-    maxRetries: number = 3
-  ): Promise<VMOperationResult> {
-    let retries = 0
-
-    while (retries < maxRetries) {
-      const result = await this.restartMachine(machineId)
-
-      if (result.success) {
-        return result
-      }
-
-      retries++
-      this.debug.debug(`Restart attempt ${retries} failed, retrying...`)
-
-      // Wait a bit before retrying
-      await new Promise(resolve => setTimeout(resolve, 2000))
-    }
-
-    // If all retries failed, try force power off and start
-    this.debug.debug('All restart attempts failed, trying force power off and start')
-
-    const forceOffResult = await this.forcePowerOff(machineId)
-    if (!forceOffResult.success) {
-      return forceOffResult
-    }
-
-    // Wait a bit
-    await new Promise(resolve => setTimeout(resolve, 3000))
-
-    // Try to start
-    return this.startMachine(machineId)
   }
 
   /**

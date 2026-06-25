@@ -67,10 +67,10 @@ describe('FirewallEventManager', () => {
           include: { ruleSet: true }
         })
 
-        // Should query admins
+        // Should query admins (BaseEventManager now includes SUPER_ADMIN too)
         expect(mockPrisma.user.findMany).toHaveBeenCalledWith({
           where: {
-            role: 'ADMIN',
+            role: { in: ['ADMIN', 'SUPER_ADMIN'] },
             deleted: false
           },
           select: { id: true }

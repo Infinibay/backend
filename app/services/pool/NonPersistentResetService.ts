@@ -36,9 +36,6 @@ import logger from '@main/logger'
 import { getInfinization } from '@services/InfinizationService'
 import { OFF_STATUS, ERROR_STATUS, REBUILDING_STATUS } from '../../constants/machine-status'
 
-// Pool-internal pseudo-status for archived/cleaned-up members (see PoolService).
-const ARCHIVED_STATUS = 'archived'
-
 export class NonPersistentResetService {
   private prisma: PrismaClient
   private debug: Logger
@@ -94,25 +91,25 @@ export class NonPersistentResetService {
       return
     }
 
-    // Atomic claim — the lock that closes the race window. Until now the
-    // machine is still `off`, which means PoolService.checkOutDesktopForUser
-    // (it only ever picks off/stopped/paused) could hand it to a user while
-    // we wipe its disk. Flip it to REBUILDING first: that status is outside
-    // the checkout set, so the desktop drops out of the pool until it's clean.
+    // Atomic claim — the lock that closes the race window. We re-baseline ONLY a
+    // machine already parked in 'off' or 'error': those are the safe idle states
+    // after a shutdown. We must NEVER wipe the disk of a machine that is
+    // 'starting' (mid-boot), 'running'/'paused' (in use), 'rebuilding' (already
+    // locked) or 'archived' (removed) — a stray 'off' event or stale label could
+    // otherwise corrupt a live or mid-boot QEMU. Flipping to REBUILDING drops the
+    // desktop out of PoolService.checkOutDesktopForUser (which only picks
+    // off/stopped/paused) until it's clean.
     //
     // The conditional WHERE also serialises concurrent shutdown handlers — two
     // 'off' events for the same VM race here, the first wins (count 1) and the
-    // second sees REBUILDING and bails (count 0), so unlink/create never run
-    // twice on the same delta. We claim from any non-terminal status (not just
-    // 'off') because QEMU is already confirmed dead above, so re-baselining is
-    // safe regardless of a stale DB label.
+    // second sees REBUILDING and bails (count 0), so the rebuild never runs twice.
     const claim = await this.prisma.machine.updateMany({
-      where: { id: machineId, status: { notIn: [REBUILDING_STATUS, ARCHIVED_STATUS] } },
+      where: { id: machineId, status: { in: [OFF_STATUS, ERROR_STATUS] } },
       data: { status: REBUILDING_STATUS }
     })
     if (claim.count !== 1) {
       this.debug.info(
-        `machine=${machineId} already claimed (rebuilding/archived) — skipping duplicate reset`
+        `machine=${machineId} not in a resettable state (off/error) — skipping reset`
       )
       return
     }
@@ -122,14 +119,21 @@ export class NonPersistentResetService {
       `(delta=${deltaPath} backing=${backingPath})`
     )
 
+    // Build the fresh thin clone at a temp path, then atomically rename it over
+    // the live delta. A crash mid-create can never leave a half-written file at
+    // the real delta path: deltaPath always points at either the old delta or the
+    // fully-written new one (rename(2) is all-or-nothing on the same filesystem,
+    // and tmpPath shares deltaPath's directory). Crash recovery: the row stays
+    // 'rebuilding', startup reconcile parks it 'error', and a later shutdown
+    // re-runs the rebuild cleanly.
+    const tmpPath = `${deltaPath}.rebuild-${process.pid}-${Date.now()}.tmp`
     try {
-      // Unlink the stale delta (if present) then create a fresh thin clone.
-      await fs.unlink(deltaPath).catch((err) => {
-        if (err?.code !== 'ENOENT') {
-          this.debug.warn(`unlink delta failed: ${err.message}`)
-        }
+      // Clean any leftover temp from a prior crashed attempt first.
+      await fs.unlink(tmpPath).catch((err) => {
+        if (err?.code !== 'ENOENT') this.debug.warn(`unlink stale tmp failed: ${err.message}`)
       })
-      await qemuImgCreateBacked(backingPath, deltaPath)
+      await qemuImgCreateBacked(backingPath, tmpPath)
+      await fs.rename(tmpPath, deltaPath)
 
       // Release the lock — the desktop is clean and can be handed out again.
       await this.prisma.machine.update({
@@ -138,10 +142,11 @@ export class NonPersistentResetService {
       })
       this.debug.info(`machine=${machineId} reset to golden-image baseline`)
     } catch (err) {
-      // The delta may now be missing or half-written. Do NOT release to 'off'
-      // (that would hand a broken disk to the next user). Park in 'error' so it
-      // stays out of the checkout pool until an operator — or a later shutdown
-      // event — recovers it.
+      // The new delta failed to build. The live delta is untouched (temp+rename),
+      // but the machine is still parked in 'error' so it stays out of the checkout
+      // pool until an operator — or a later shutdown event — recovers it. Clean up
+      // the orphan temp file first.
+      await fs.unlink(tmpPath).catch(() => {})
       this.debug.error(
         `machine=${machineId} reset failed: ${(err as Error).message} — parking in error`
       )

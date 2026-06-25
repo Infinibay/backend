@@ -5,7 +5,10 @@ import { mockDeep, DeepMockProxy } from 'jest-mock-extended'
 
 // Mock InfinizationService
 const mockInfinization = {
-  destroyVM: jest.fn().mockResolvedValue(undefined),
+  // Physical teardown succeeds by default. cleanupVM now treats a falsy success
+  // as a teardown failure and aborts the DB delete, so the happy path must return
+  // an explicit { success: true }.
+  destroyVM: jest.fn().mockResolvedValue({ success: true }),
   getVMStatus: jest.fn().mockResolvedValue({ processAlive: false })
 }
 
@@ -95,9 +98,11 @@ describe('MachineCleanupService - Comprehensive Tests', () => {
           where: { id: mockVMId }
         })
       )
+      // Physical teardown succeeded, so the DB row is deleted.
+      expect(prisma.machine.delete).toHaveBeenCalledWith({ where: { id: mockVMId } })
     })
 
-    it('should handle infinization errors and continue', async () => {
+    it('aborts the DB delete and marks delete_failed when physical teardown throws', async () => {
       const mockMachine = {
         id: mockVMId,
         internalName: `vm-${mockVMId}`,
@@ -117,8 +122,32 @@ describe('MachineCleanupService - Comprehensive Tests', () => {
       prisma.machine.findUnique.mockResolvedValue(mockMachine as any)
       mockInfinization.destroyVM.mockRejectedValueOnce(new Error('Failed to destroy'))
 
-      // Cleanup should complete even with infinization failures
-      await expect(service.cleanupVM(mockVMId)).resolves.toBeUndefined()
+      // The host still owns QEMU/TAP/firewall, so cleanup throws and KEEPS the row.
+      await expect(service.cleanupVM(mockVMId)).rejects.toThrow(/physical teardown failed/i)
+      expect(prisma.machine.delete).not.toHaveBeenCalled()
+      expect(prisma.machine.update).toHaveBeenCalledWith({
+        where: { id: mockVMId },
+        data: { status: 'delete_failed' }
+      })
+    })
+
+    it('aborts the DB delete when physical teardown returns success:false', async () => {
+      const mockMachine = {
+        id: mockVMId,
+        internalName: `vm-${mockVMId}`,
+        status: 'running',
+        configuration: { id: 'config-1', machineId: mockVMId, qmpSocketPath: null, qemuPid: null, tapDeviceName: null, guestAgentSocketPath: null, infiniServiceSocketPath: null, tpmSocketPath: null }
+      }
+
+      prisma.machine.findUnique.mockResolvedValue(mockMachine as any)
+      mockInfinization.destroyVM.mockResolvedValueOnce({ success: false, error: 'boom' })
+
+      await expect(service.cleanupVM(mockVMId)).rejects.toThrow(/physical teardown failed/i)
+      expect(prisma.machine.delete).not.toHaveBeenCalled()
+      expect(prisma.machine.update).toHaveBeenCalledWith({
+        where: { id: mockVMId },
+        data: { status: 'delete_failed' }
+      })
     })
 
     it('should handle missing configuration gracefully', async () => {

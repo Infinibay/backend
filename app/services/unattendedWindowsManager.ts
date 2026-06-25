@@ -11,6 +11,7 @@ import * as path from 'path'
 import { promises as fsPromises } from 'fs'
 
 import { UnattendedManagerBase } from './unattendedManagerBase'
+import { escapeForCmd, escapeForPowerShellArg } from './shellEscape'
 
 export interface ComponentConfig {
   name: string;
@@ -518,7 +519,7 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
         $: { 'wcm:action': 'add' },
         Order: 3,
         RequiresUserInput: false,
-        CommandLine: 'cmd /C wmic useraccount where name="' + this.username + '" set PasswordExpires=false',
+        CommandLine: 'cmd /C wmic useraccount where name="' + escapeForCmd(this.username) + '" set PasswordExpires=false',
         Description: 'Password Never Expires'
       },
       {
@@ -661,7 +662,7 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
         Order: idx + 8,
         Description: 'Install InfiniService',
         RequiresUserInput: false,
-        CommandLine: `powershell -ExecutionPolicy Bypass -File C:\\Temp\\InfiniService\\install-windows.ps1 -ServiceMode normal -VmId ${this.vmId}`
+        CommandLine: `powershell -ExecutionPolicy Bypass -File C:\\Temp\\InfiniService\\install-windows.ps1 -ServiceMode normal -VmId ${escapeForPowerShellArg(this.vmId)}`
       },
       {
         $: { 'wcm:action': 'add' },

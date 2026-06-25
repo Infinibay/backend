@@ -69,6 +69,27 @@ export class FirewallResolver {
     } as FirewallRule
   }
 
+  /**
+   * Overlays the defined fields of an UpdateFirewallRuleInput onto an existing rule,
+   * producing the rule as it WOULD be after the update — used to validate updates
+   * before they are persisted (fields left undefined keep their current value).
+   */
+  private mergeRuleWithUpdate (existing: FirewallRule, input: UpdateFirewallRuleInput): FirewallRule {
+    const merged: FirewallRule = { ...existing }
+    const fields: Array<keyof UpdateFirewallRuleInput & keyof FirewallRule> = [
+      'name', 'description', 'action', 'direction', 'priority', 'protocol',
+      'srcPortStart', 'srcPortEnd', 'dstPortStart', 'dstPortEnd',
+      'srcIpAddr', 'srcIpMask', 'dstIpAddr', 'dstIpMask', 'connectionState', 'overridesDept'
+    ]
+    for (const field of fields) {
+      const value = (input as Record<string, unknown>)[field]
+      if (value !== undefined) {
+        (merged as Record<string, unknown>)[field] = value
+      }
+    }
+    return merged
+  }
+
   // Initialize services
   private async getServices (ctx: InfinibayContext) {
     const ruleService = new FirewallRuleService(ctx.prisma)
@@ -431,18 +452,35 @@ export class FirewallResolver {
     @Arg('input') input: UpdateFirewallRuleInput,
     @Ctx() ctx: InfinibayContext
   ): Promise<FirewallRuleType> {
-    const { ruleService, orchestrationService } = await this.getServices(ctx)
+    const { ruleService, validationService, orchestrationService } = await this.getServices(ctx)
 
-    // Get existing rule to find associated VM/Department
+    // Get existing rule to find associated VM/Department (and sibling rules for conflict checks)
     const existingRule = await ctx.prisma.firewallRule.findUnique({
       where: { id: ruleId },
       include: {
-        ruleSet: true
+        ruleSet: { include: { rules: true } }
       }
     })
 
     if (!existingRule) {
       throw new UserInputError('Rule not found')
+    }
+
+    // Validate the UPDATE the same way create is validated. Previously updates
+    // skipped validation entirely, so a valid rule could be mutated into an
+    // out-of-range port / invalid IP / unsupported protocol that then failed (and
+    // was swallowed) at apply time, drifting the DB from the kernel.
+    const mergedRule = this.mergeRuleWithUpdate(existingRule, input)
+
+    const inputValidation = await validationService.validateRuleInput(mergedRule)
+    if (!inputValidation.isValid) {
+      throw new UserInputError(inputValidation.warnings.join('; '))
+    }
+
+    const siblingRules = existingRule.ruleSet.rules.filter(r => r.id !== ruleId)
+    const conflictValidation = await validationService.validateRuleConflicts([...siblingRules, mergedRule])
+    if (!conflictValidation.isValid) {
+      throw new UserInputError(conflictValidation.conflicts.map(c => c.message).join(' '))
     }
 
     // Update the rule
@@ -581,7 +619,9 @@ export class FirewallResolver {
     let hadErrors = false
     for (const chain of vmChains) {
       try {
-        await infinizationService.removeVMFirewall(chain.vmId)
+        // Remove by chain name — the chain name is a non-invertible hash of the
+        // vmId, so removing "by vmId" would re-derive and target the wrong chain.
+        await infinizationService.removeVMChainByName(chain.chainName)
         removed.push(chain.chainName)
       } catch (error) {
         hadErrors = true

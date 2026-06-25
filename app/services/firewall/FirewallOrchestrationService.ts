@@ -5,6 +5,7 @@ import logger from '@main/logger'
 import { FirewallRuleService } from './FirewallRuleService'
 import { FirewallValidationService } from './FirewallValidationService'
 import { InfinizationFirewallService } from './InfinizationFirewallService'
+import { firewallDefaultAction } from './firewallRuleConversion'
 
 const debug = logger.child({ module: 'infinibay:service:firewall:orchestration' })
 
@@ -157,19 +158,25 @@ export class FirewallOrchestrationService {
     const deptRulesInput = this.infinizationService.convertPrismaRulesToInput(deptRules)
     const vmRulesInput = this.infinizationService.convertPrismaRulesToInput(vmRules)
 
+    // Terminal posture comes from the VM's department policy (BLOCK_ALL => drop).
+    const defaultAction = firewallDefaultAction(vm.department.firewallPolicy)
+
     // Apply rules via nftables
     const result: FirewallApplyResult = await this.infinizationService.applyVMRules(
       vmId,
       deptRulesInput,
-      vmRulesInput
+      vmRulesInput,
+      defaultAction
     )
 
-    // Update rule set sync status (timestamp only)
-    if (vm.firewallRuleSet?.id) {
+    // Only stamp lastSyncedAt when the apply fully succeeded. If any rule failed, the
+    // kernel no longer matches the DB, so leaving lastSyncedAt stale (older than the
+    // ruleset's updatedAt) is what makes that drift detectable by a reconciler/UI.
+    if (vm.firewallRuleSet?.id && result.failedRules === 0) {
       await this.ruleService.updateRuleSetSyncTimestamp(vm.firewallRuleSet.id)
     }
 
-    debug.info(`Successfully applied firewall rules to VM ${vmId}: ${result.appliedRules}/${result.totalRules} rules (${deptRules.length} dept + ${vmRules.length} vm)`
+    debug.info(`Applied firewall rules to VM ${vmId}: ${result.appliedRules}/${result.totalRules} rules (${deptRules.length} dept + ${vmRules.length} vm), failed=${result.failedRules}`
     )
 
     return {
@@ -214,27 +221,29 @@ export class FirewallOrchestrationService {
     // Convert department rules to nftables input format
     const deptRulesInput = this.infinizationService.convertPrismaRulesToInput(deptRules)
 
+    // Terminal posture comes from the department policy (BLOCK_ALL => drop).
+    const defaultAction = firewallDefaultAction(department.firewallPolicy)
+
     // Apply rules to all VMs in the department via InfinizationFirewallService
-    const { totalVms, vmsUpdated, errors } = await this.infinizationService.applyDepartmentRules(
+    const { totalVms, vmsUpdated, vmsSkippedNoTap, vmsFailed, errors } = await this.infinizationService.applyDepartmentRules(
       deptId,
-      deptRulesInput
+      deptRulesInput,
+      defaultAction
     )
 
-    // Update rule set sync status (timestamp only)
-    if (department.firewallRuleSet?.id) {
+    // Only mark the ruleset synced when nothing actually failed. Deferred (no-TAP /
+    // not-running) VMs are benign and don't block the sync stamp; a real apply
+    // failure does, so lastSyncedAt stays honest and drift remains detectable.
+    if (department.firewallRuleSet?.id && vmsFailed === 0) {
       await this.ruleService.updateRuleSetSyncTimestamp(department.firewallRuleSet.id)
     }
 
-    debug.info(`Department rules applied: ${vmsUpdated} VMs updated, ${errors.length} errors`
-    )
-
-    // Consider success if the only errors are VMs without TAP devices (same semantics as syncAllToNftables)
-    const criticalErrors = errors.filter(e => !e.includes('no TAP device'))
+    debug.info(`Department rules: ${vmsUpdated} applied, ${vmsSkippedNoTap} deferred, ${vmsFailed} failed`)
 
     return {
-      success: criticalErrors.length === 0,
+      success: vmsFailed === 0,
       vmsProcessed: totalVms,
-      vmsSkipped: errors.filter(e => e.includes('no TAP device')).length,
+      vmsSkipped: vmsSkippedNoTap,
       vmsUpdated,
       errors
     }
@@ -268,15 +277,15 @@ export class FirewallOrchestrationService {
     let vmsProcessed = 0
     let vmsSkipped = 0
     let vmsUpdated = 0
+    let vmsFailed = 0
 
     for (const machine of machines) {
       vmsProcessed++
 
-      // Skip VMs without TAP device configured
+      // A VM with no TAP device is not running; its rules apply on next start. This
+      // is a deferral, not a failure — track it separately (no error-string matching).
       if (!machine.configuration?.tapDeviceName) {
-        const msg = `VM ${machine.id} (${machine.name}) has no TAP device configured, skipping`
-        debug.warn(msg)
-        errors.push(msg)
+        debug.warn(`VM ${machine.id} (${machine.name}) has no TAP device (not running), deferring firewall sync`)
         vmsSkipped++
         continue
       }
@@ -290,39 +299,45 @@ export class FirewallOrchestrationService {
         const deptRulesInput = this.infinizationService.convertPrismaRulesToInput(deptRules)
         const vmRulesInput = this.infinizationService.convertPrismaRulesToInput(vmRules)
 
+        // Terminal posture comes from the VM's department policy (BLOCK_ALL => drop).
+        const defaultAction = firewallDefaultAction(machine.department?.firewallPolicy)
+
         // Apply rules via nftables
         const result = await this.infinizationService.applyVMRules(
           machine.id,
           deptRulesInput,
-          vmRulesInput
+          vmRulesInput,
+          defaultAction
         )
 
-        // Update sync timestamps
-        if (machine.firewallRuleSet?.id) {
-          await this.ruleService.updateRuleSetSyncTimestamp(machine.firewallRuleSet.id)
-        }
-        if (machine.department?.firewallRuleSet?.id) {
-          await this.ruleService.updateRuleSetSyncTimestamp(machine.department.firewallRuleSet.id)
-        }
-
-        vmsUpdated++
-
         if (result.failedRules > 0) {
+          // Partial apply => the kernel doesn't match the DB; do NOT stamp lastSyncedAt.
+          vmsFailed++
           const msg = `VM ${machine.id} (${machine.name}): ${result.failedRules}/${result.totalRules} rules failed`
           debug.warn(msg)
           errors.push(msg)
+        } else {
+          // Clean apply — safe to mark this VM's rulesets as synced.
+          if (machine.firewallRuleSet?.id) {
+            await this.ruleService.updateRuleSetSyncTimestamp(machine.firewallRuleSet.id)
+          }
+          if (machine.department?.firewallRuleSet?.id) {
+            await this.ruleService.updateRuleSetSyncTimestamp(machine.department.firewallRuleSet.id)
+          }
+          vmsUpdated++
         }
       } catch (err) {
+        vmsFailed++
         const errorMsg = `Failed to sync VM ${machine.id} (${machine.name}): ${err}`
         debug.error(errorMsg)
         errors.push(errorMsg)
       }
     }
 
-    debug.info(`Sync complete: ${vmsUpdated} VMs updated, ${vmsSkipped} skipped, ${errors.length} errors`)
+    debug.info(`Sync complete: ${vmsUpdated} updated, ${vmsSkipped} deferred (no TAP), ${vmsFailed} failed`)
 
     return {
-      success: errors.filter(e => !e.includes('no TAP device')).length === 0,
+      success: vmsFailed === 0,
       vmsProcessed,
       vmsSkipped,
       vmsUpdated,

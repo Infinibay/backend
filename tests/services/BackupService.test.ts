@@ -5,9 +5,17 @@ import type { PrismaClient } from '@prisma/client'
 import { BackupService as InfinizationBackupService, BackupStatus, BackupType } from '@infinibay/infinization'
 
 import { BackupService } from '@services/BackupService'
+import { assertVmStopped, VmRunningError } from '@utils/assertVmStopped'
 
 jest.mock('@services/EventManager', () => ({
   getEventManager: () => null
+}))
+
+// The live "VM must be stopped" guard hits getInfinization, which we don't wire
+// here. Mock it: default no-op (VM stopped); individual tests can make it throw.
+jest.mock('@utils/assertVmStopped', () => ({
+  assertVmStopped: jest.fn().mockResolvedValue(undefined),
+  VmRunningError: class VmRunningError extends Error {}
 }))
 
 class FakeInfinization extends EventEmitter {
@@ -24,6 +32,9 @@ describe('BackupService (backend wrapper)', () => {
   let service: BackupService
 
   beforeEach(() => {
+    // The service validates that disk paths stay within INFINIZATION_DISK_DIR;
+    // point it at the fixtures' base so the test paths pass that guard.
+    process.env.INFINIZATION_DISK_DIR = '/disks'
     prisma = mockDeep<PrismaClient>()
     infinization = new FakeInfinization()
     service = new BackupService(prisma, infinization as unknown as InfinizationBackupService)
@@ -81,9 +92,10 @@ describe('BackupService (backend wrapper)', () => {
       expect(result.status).toBe(BackupStatus.IN_PROGRESS)
       expect(result.backupId).toBe('pending-x')
 
-      // Wait a tick for the detached background work to enqueue.
-      await new Promise((r) => setImmediate(r))
-      await new Promise((r) => setImmediate(r))
+      // The detached background work does real fs I/O (fs.stat per disk +
+      // listSubdirs) before calling infinization.createBackup, so give it real
+      // time to reach that call rather than a fixed number of microtask ticks.
+      await new Promise((r) => setTimeout(r, 50))
 
       expect(infinization.createBackup).toHaveBeenCalledWith(expect.objectContaining({
         vmId,
@@ -92,9 +104,21 @@ describe('BackupService (backend wrapper)', () => {
       }))
     })
 
+    it('fails closed: rejects and creates no backup row when the VM is not provably stopped', async () => {
+      const vmId = 'vm-1'
+      prisma.machine.findUnique.mockResolvedValue({
+        id: vmId, name: 'web-1', userId: 'user-1', configuration: { diskPaths: ['/disks/web-1.qcow2'] }
+      } as never)
+      ;(assertVmStopped as jest.Mock).mockRejectedValueOnce(new VmRunningError('VM running / unknown'))
+
+      await expect(service.createBackup({ vmId, type: BackupType.FULL })).rejects.toThrow(VmRunningError)
+      expect(prisma.backup.create).not.toHaveBeenCalled()
+      expect(infinization.createBackup).not.toHaveBeenCalled()
+    })
+
     it('marks the row as FAILED when the underlying backup throws', async () => {
       prisma.machine.findUnique.mockResolvedValue({
-        id: 'vm-1', name: 'x', userId: 'u', configuration: { diskPaths: ['/d.qcow2'] }
+        id: 'vm-1', name: 'x', userId: 'u', configuration: { diskPaths: ['/disks/d.qcow2'] }
       } as never)
       prisma.backup.create.mockResolvedValue({ id: 'db-1', backupId: 'p', vmId: 'vm-1' } as never)
       prisma.backup.update.mockResolvedValue({ id: 'db-1', status: BackupStatus.FAILED } as never)

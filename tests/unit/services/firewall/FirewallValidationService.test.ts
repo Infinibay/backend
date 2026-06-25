@@ -369,7 +369,7 @@ describe('FirewallValidationService', () => {
       expect(result.warnings).toContain('Source IP mask "999" is not valid. Use CIDR notation (0-32 for IPv4, 0-128 for IPv6)')
     })
 
-    it('should accept valid IPv6 addresses', async () => {
+    it('should reject IPv6 addresses (the bridge-family translator is IPv4-only)', async () => {
       const rule: Partial<FirewallRule> = {
         id: '1',
         name: 'IPv6',
@@ -385,8 +385,10 @@ describe('FirewallValidationService', () => {
 
       const result = await service.validateRuleInput(rule as FirewallRule)
 
-      expect(result.isValid).toBe(true)
-      expect(result.warnings).toHaveLength(0)
+      // The enforcement layer (infinization translator) cannot emit IPv6 matches, so
+      // accepting such a rule would persist a rule that is silently dropped at apply.
+      expect(result.isValid).toBe(false)
+      expect(result.warnings.some(w => w.includes('IPv6'))).toBe(true)
     })
 
     it('should accept TCP/UDP without ports for "all ports" rules', async () => {

@@ -148,7 +148,9 @@ describe('FirewallManagerV2', () => {
         'vm-123',
         'tap-vm-123',
         expect.any(Array),
-        expect.any(Array)
+        expect.any(Array),
+        // Terminal posture derived from the department firewall policy.
+        expect.any(String)
       )
     })
 

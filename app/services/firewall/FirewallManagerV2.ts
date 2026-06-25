@@ -21,6 +21,7 @@ import { NftablesService, FirewallRuleInput } from '@infinibay/infinization'
 
 import logger from '@main/logger'
 import { getInfinization } from '@services/InfinizationService'
+import { prismaRulesToFirewallInput, firewallDefaultAction } from './firewallRuleConversion'
 
 const debug = logger.child({ module: 'firewall-manager-v2' })
 
@@ -216,12 +217,13 @@ export class FirewallManagerV2 {
       // Step 5: Fetch fresh rules (in case they were just created)
       const [deptRules, vmRules] = await this.fetchRules(vmId, departmentId)
 
-      // Step 6: Apply rules via nftables
+      // Step 6: Apply rules via nftables with the department's terminal posture
       const applyResult = await nftables.applyRules(
         vmId,
         tapDeviceName,
         deptRules,
-        vmRules
+        vmRules,
+        firewallDefaultAction(vm.department.firewallPolicy)
       )
 
       result.departmentRulesApplied = deptRules.length
@@ -294,13 +296,14 @@ export class FirewallManagerV2 {
       const [deptRules, vmRules] = await this.fetchRules(vmId, vm.department.id)
       result.departmentRulesInherited = deptRules.length
 
-      // Apply via nftables (flush existing and re-apply)
+      // Apply via nftables (atomic flush + re-apply) with the department posture
       const nftables = await this.getNftables()
       const applyResult = await nftables.applyRules(
         vmId,
         tapDeviceName,
         deptRules,
-        vmRules
+        vmRules,
+        firewallDefaultAction(vm.department.firewallPolicy)
       )
 
       result.vmRulesApplied = applyResult.appliedRules
@@ -425,28 +428,10 @@ export class FirewallManagerV2 {
       include: { rules: true }
     })
 
-    // Convert to FirewallRuleInput format
-    const convertRule = (rule: any): FirewallRuleInput => ({
-      id: rule.id,
-      name: rule.name,
-      action: rule.action,
-      direction: rule.direction,
-      priority: rule.priority,
-      protocol: rule.protocol,
-      srcPortStart: rule.srcPortStart ?? undefined,
-      srcPortEnd: rule.srcPortEnd ?? undefined,
-      dstPortStart: rule.dstPortStart ?? undefined,
-      dstPortEnd: rule.dstPortEnd ?? undefined,
-      srcIpAddr: rule.srcIpAddr ?? undefined,
-      srcIpMask: rule.srcIpMask ?? undefined,
-      dstIpAddr: rule.dstIpAddr ?? undefined,
-      dstIpMask: rule.dstIpMask ?? undefined,
-      connectionState: rule.connectionState ?? undefined,
-      overridesDept: rule.overridesDept ?? false
-    })
-
-    const deptRules = (deptRuleSet?.rules ?? []).map(convertRule)
-    const vmRules = (vmRuleSet?.rules ?? []).map(convertRule)
+    // Convert to FirewallRuleInput format via the single shared converter
+    // (normalizes connectionState so stateful rules are honored).
+    const deptRules = prismaRulesToFirewallInput(deptRuleSet?.rules ?? [])
+    const vmRules = prismaRulesToFirewallInput(vmRuleSet?.rules ?? [])
 
     return [deptRules, vmRules]
   }

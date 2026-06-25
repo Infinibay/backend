@@ -60,7 +60,9 @@ describe('SnapshotServiceV2', () => {
       expect(result.message).toContain('created successfully')
       expect(result.snapshot).toBeDefined()
       expect(result.snapshot?.name).toBe('test-snapshot')
-      expect(result.snapshot?.description).toBe('Test description')
+      // qemu-img persists no description, so the service no longer echoes one back
+      // (it would not survive a subsequent list).
+      expect(result.snapshot?.description).toBeUndefined()
       expect(mockSnapshotManager.createSnapshot).toHaveBeenCalledWith({
         imagePath: expect.stringContaining('vm-test-123'),
         name: 'test-snapshot',
@@ -114,7 +116,9 @@ describe('SnapshotServiceV2', () => {
       expect(result.snapshots).toHaveLength(2)
       expect(result.snapshots[0].name).toBe('snap-1')
       expect(result.snapshots[1].name).toBe('snap-2')
-      expect(result.snapshots[1].isCurrent).toBe(true) // Last one is current
+      // We no longer infer a "current" snapshot from list order (qemu-img has no
+      // such concept) — every entry is honestly isCurrent:false.
+      expect(result.snapshots[1].isCurrent).toBe(false)
     })
 
     it('should return empty array if no snapshots', async () => {
@@ -194,26 +198,27 @@ describe('SnapshotServiceV2', () => {
     })
   })
 
-  describe('getCurrentSnapshot', () => {
-    it('should return the most recent snapshot', async () => {
+  describe('getMostRecentSnapshot', () => {
+    it('should return the most recent snapshot (honestly NOT flagged as current)', async () => {
       mockPrisma.machine.findUnique.mockResolvedValue(mockVM)
       mockSnapshotManager.listSnapshots.mockResolvedValue([
         { name: 'snap-1', date: '2024-01-01', vmSize: 1024 },
         { name: 'snap-2', date: '2024-01-02', vmSize: 2048 }
       ])
 
-      const result = await service.getCurrentSnapshot('vm-123')
+      const result = await service.getMostRecentSnapshot('vm-123')
 
       expect(result).not.toBeNull()
       expect(result?.name).toBe('snap-2')
-      expect(result?.isCurrent).toBe(true)
+      // qemu-img has no current-snapshot concept; we no longer fabricate it.
+      expect(result?.isCurrent).toBe(false)
     })
 
     it('should return null if no snapshots', async () => {
       mockPrisma.machine.findUnique.mockResolvedValue(mockVM)
       mockSnapshotManager.listSnapshots.mockResolvedValue([])
 
-      const result = await service.getCurrentSnapshot('vm-123')
+      const result = await service.getMostRecentSnapshot('vm-123')
 
       expect(result).toBeNull()
     })

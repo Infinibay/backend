@@ -84,7 +84,10 @@ describe('VMHealthQueueManager', () => {
       mockPrisma.machine.findUnique.mockResolvedValue({
         id: machineId,
         name: 'Test VM',
-        status: 'running'
+        status: 'running',
+        // queueHealthCheck now requires setup-complete; the repository reads it from
+        // the nested configuration relation (m.configuration?.setupComplete).
+        configuration: { setupComplete: true }
       } as any)
 
       // Mock per-VM config

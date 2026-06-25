@@ -16,11 +16,24 @@ const debug = logger.child({ module: 'cron:pool-refill' })
 const service = new PoolService(prisma)
 
 // Every minute. Cheap when no pools need refilling (two tiny queries).
+// node-cron fires on schedule regardless of whether the previous async callback
+// finished, so a slow QEMU spawn batch could overlap ticks and double-provision.
+// This single registered instance is the only refiller, so an in-process
+// non-reentrancy flag is sufficient (a per-pool DB lock would only be needed for
+// multi-instance deployments).
+let refillRunning = false
 const PoolRefillJob = new CronJob('*/1 * * * *', async () => {
+  if (refillRunning) {
+    debug.warn('PoolRefill tick skipped — previous tick still running')
+    return
+  }
+  refillRunning = true
   try {
     await service.runRefillTick({ maxPerPoolPerTick: 3 })
   } catch (error) {
     debug.error(`PoolRefill tick failed: ${(error as Error).message}`)
+  } finally {
+    refillRunning = false
   }
 })
 

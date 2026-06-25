@@ -716,6 +716,162 @@ export class VirtioSocketWatcherService extends EventEmitter {
   }
 
   /**
+   * Shared core for delivering PENDING first-boot/scheduled scripts to a VM:
+   * query → filter (maxExecutions / repeatInterval) → claim+prepare each in a
+   * transaction → send a `pending_scripts_response`. Both the request-driven
+   * (handleRequestPendingScripts) and proactive (pushPendingScriptsToVM) paths
+   * share this; they differ ONLY in the scheduledFor bound (passed in) plus their
+   * logging and return contract (kept at the call sites).
+   *
+   * @param now - the host "now" used for filter/transaction/response timestamps.
+   * @param scheduledForBound - upper bound for `scheduledFor` eligibility (request
+   *   path passes a clock-skew-bounded time; push path passes `now`).
+   * @returns number of scripts sent.
+   */
+  private async dispatchPendingScripts(
+    vmId: string,
+    connection: VmConnection,
+    now: Date,
+    scheduledForBound: Date
+  ): Promise<number> {
+    // Query pending script executions
+    const pendingExecutions = await this.prisma.scriptExecution.findMany({
+      where: {
+        machineId: vmId,
+        status: 'PENDING',
+        OR: [
+          { scheduledFor: null },
+          { scheduledFor: { lte: scheduledForBound } }
+        ]
+      },
+      include: {
+        script: true,
+        machine: true
+      },
+      orderBy: [
+        { order: 'asc' },
+        { createdAt: 'asc' }
+      ]
+    })
+
+    // Filter executions based on scheduling rules
+    const eligibleExecutions = pendingExecutions.filter(execution => {
+      if (execution.maxExecutions !== null && execution.executionCount >= execution.maxExecutions) {
+        setImmediate(async () => {
+          try {
+            await this.prisma.scriptExecution.update({
+              where: { id: execution.id },
+              data: { status: 'SUCCESS', completedAt: now }
+            })
+            this.debug.info(`Marked execution ${execution.id} as SUCCESS (max executions reached)`)
+          } catch (err) {
+            this.debug.error(`Failed to mark execution ${execution.id} as SUCCESS: ${err}`)
+          }
+        })
+        return false
+      }
+
+      if (execution.repeatIntervalMinutes) {
+        if (execution.lastExecutedAt === null) {
+          return true
+        }
+
+        const intervalMs = execution.repeatIntervalMinutes * 60 * 1000
+        const timeSinceLastExecution = now.getTime() - execution.lastExecutedAt.getTime()
+
+        if (timeSinceLastExecution < intervalMs) {
+          return false
+        }
+      }
+
+      return true
+    })
+
+    this.debug.info(`Found ${eligibleExecutions.length} pending scripts ready for execution`)
+
+    // Process executions in transaction
+    const scriptManager = new ScriptManager(this.prisma)
+    const templateEngine = new TemplateEngine()
+    const pendingScripts: PendingScriptInfo[] = []
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      const successfullyUpdated: string[] = []
+
+      for (const execution of eligibleExecutions) {
+        try {
+          const updated = await tx.scriptExecution.updateMany({
+            where: {
+              id: execution.id,
+              status: 'PENDING'
+            },
+            data: {
+              status: 'RUNNING',
+              startedAt: now
+            }
+          })
+
+          if (updated.count === 0) {
+            this.debug.warn(`Execution ${execution.id} was already claimed by another request`)
+            continue
+          }
+
+          successfullyUpdated.push(execution.id)
+
+          const scriptWithContent = await scriptManager.getScript(execution.scriptId)
+
+          const format = scriptWithContent.fileName.endsWith('.yaml') ? 'yaml' : 'json'
+          const { ScriptParser } = await import('./scripts/ScriptParser')
+          const parser = new ScriptParser()
+          const parsed = format === 'yaml'
+            ? parser.parseYAML(scriptWithContent.content)
+            : parser.parseJSON(scriptWithContent.content)
+
+          const interpolatedContent = templateEngine.interpolate(
+            parsed.script,
+            (execution.inputValues as Record<string, any>) || {}
+          )
+
+          pendingScripts.push({
+            execution_id: execution.id,
+            script_id: execution.scriptId,
+            script_name: scriptWithContent.name,
+            script_content: interpolatedContent,
+            shell: execution.script.shell,
+            execution_type: execution.executionType,
+            input_values: (execution.inputValues as Record<string, any>) || {},
+            timeout_seconds: 600,
+            run_as: execution.executedAs
+          })
+
+          this.debug.debug(`Script ${scriptWithContent.name} (${execution.id}) prepared for execution`)
+        } catch (error) {
+          this.debug.error(`Failed to prepare script ${execution.scriptId}: ${error}`)
+          await tx.scriptExecution.update({
+            where: { id: execution.id },
+            data: {
+              status: 'FAILED',
+              completedAt: now,
+              error: `Failed to prepare script: ${error}`
+            }
+          })
+        }
+      }
+
+      return { pendingScripts, successfullyUpdated }
+    })
+
+    // Send response to VM
+    const response: PendingScriptsResponseMessage = {
+      type: 'pending_scripts_response',
+      timestamp: now.toISOString(),
+      scripts: result.pendingScripts
+    }
+
+    this.sendMessage(connection, response)
+    return result.pendingScripts.length
+  }
+
+  /**
    * Handle request for pending script executions from InfiniService
    */
   private async handleRequestPendingScripts(vmId: string, msg: RequestPendingScriptsMessage, connection: VmConnection): Promise<void> {
@@ -734,141 +890,8 @@ export class VirtioSocketWatcherService extends EventEmitter {
       }
       const comparisonTime = timeDiff > maxSkewMs ? now : requestTimestamp
 
-      // Query pending script executions
-      const pendingExecutions = await this.prisma.scriptExecution.findMany({
-        where: {
-          machineId: vmId,
-          status: 'PENDING',
-          OR: [
-            { scheduledFor: null },
-            { scheduledFor: { lte: comparisonTime } }
-          ]
-        },
-        include: {
-          script: true,
-          machine: true
-        },
-        orderBy: [
-          { order: 'asc' },
-          { createdAt: 'asc' }
-        ]
-      })
-
-      // Filter executions based on scheduling rules
-      const eligibleExecutions = pendingExecutions.filter(execution => {
-        if (execution.maxExecutions !== null && execution.executionCount >= execution.maxExecutions) {
-          setImmediate(async () => {
-            try {
-              await this.prisma.scriptExecution.update({
-                where: { id: execution.id },
-                data: { status: 'SUCCESS', completedAt: now }
-              })
-              this.debug.info(`Marked execution ${execution.id} as SUCCESS (max executions reached)`)
-            } catch (err) {
-              this.debug.error(`Failed to mark execution ${execution.id} as SUCCESS: ${err}`)
-            }
-          })
-          return false
-        }
-
-        if (execution.repeatIntervalMinutes) {
-          if (execution.lastExecutedAt === null) {
-            return true
-          }
-
-          const intervalMs = execution.repeatIntervalMinutes * 60 * 1000
-          const timeSinceLastExecution = now.getTime() - execution.lastExecutedAt.getTime()
-
-          if (timeSinceLastExecution < intervalMs) {
-            return false
-          }
-        }
-
-        return true
-      })
-
-      this.debug.info(`Found ${eligibleExecutions.length} pending scripts ready for execution`)
-
-      // Process executions in transaction
-      const scriptManager = new ScriptManager(this.prisma)
-      const templateEngine = new TemplateEngine()
-      const pendingScripts: PendingScriptInfo[] = []
-
-      const result = await this.prisma.$transaction(async (tx) => {
-        const successfullyUpdated: string[] = []
-
-        for (const execution of eligibleExecutions) {
-          try {
-            const updated = await tx.scriptExecution.updateMany({
-              where: {
-                id: execution.id,
-                status: 'PENDING'
-              },
-              data: {
-                status: 'RUNNING',
-                startedAt: now
-              }
-            })
-
-            if (updated.count === 0) {
-              this.debug.warn(`Execution ${execution.id} was already claimed by another request`)
-              continue
-            }
-
-            successfullyUpdated.push(execution.id)
-
-            const scriptWithContent = await scriptManager.getScript(execution.scriptId)
-
-            const format = scriptWithContent.fileName.endsWith('.yaml') ? 'yaml' : 'json'
-            const { ScriptParser } = await import('./scripts/ScriptParser')
-            const parser = new ScriptParser()
-            const parsed = format === 'yaml'
-              ? parser.parseYAML(scriptWithContent.content)
-              : parser.parseJSON(scriptWithContent.content)
-
-            const interpolatedContent = templateEngine.interpolate(
-              parsed.script,
-              (execution.inputValues as Record<string, any>) || {}
-            )
-
-            pendingScripts.push({
-              execution_id: execution.id,
-              script_id: execution.scriptId,
-              script_name: scriptWithContent.name,
-              script_content: interpolatedContent,
-              shell: execution.script.shell,
-              execution_type: execution.executionType,
-              input_values: (execution.inputValues as Record<string, any>) || {},
-              timeout_seconds: 600,
-              run_as: execution.executedAs
-            })
-
-            this.debug.debug(`Script ${scriptWithContent.name} (${execution.id}) prepared for execution`)
-          } catch (error) {
-            this.debug.error(`Failed to prepare script ${execution.scriptId}: ${error}`)
-            await tx.scriptExecution.update({
-              where: { id: execution.id },
-              data: {
-                status: 'FAILED',
-                completedAt: now,
-                error: `Failed to prepare script: ${error}`
-              }
-            })
-          }
-        }
-
-        return { pendingScripts, successfullyUpdated }
-      })
-
-      // Send response to VM
-      const response: PendingScriptsResponseMessage = {
-        type: 'pending_scripts_response',
-        timestamp: now.toISOString(),
-        scripts: result.pendingScripts
-      }
-
-      this.sendMessage(connection, response)
-      this.debug.info(`Sent ${result.pendingScripts.length} pending scripts to VM ${vmId}`)
+      const count = await this.dispatchPendingScripts(vmId, connection, now, comparisonTime)
+      this.debug.info(`Sent ${count} pending scripts to VM ${vmId}`)
     } catch (error) {
       this.debug.error(`Failed to handle pending scripts request: ${error}`)
     }
@@ -891,145 +914,14 @@ export class VirtioSocketWatcherService extends EventEmitter {
 
       this.debug.info(`Pushing pending scripts to VM ${vmId}`)
 
-      // 2. Query Pending Executions
+      // 2. Dispatch. The push path has no request_timestamp / clock-skew
+      //    handling, so it uses `now` as the scheduledFor bound.
       const now = new Date()
-      const pendingExecutions = await this.prisma.scriptExecution.findMany({
-        where: {
-          machineId: vmId,
-          status: 'PENDING',
-          OR: [
-            { scheduledFor: null },
-            { scheduledFor: { lte: now } }
-          ]
-        },
-        include: {
-          script: true,
-          machine: true
-        },
-        orderBy: [
-          { order: 'asc' },
-          { createdAt: 'asc' }
-        ]
-      })
+      const count = await this.dispatchPendingScripts(vmId, connection, now, now)
+      this.debug.info(`Pushed ${count} pending scripts to VM ${vmId}`)
 
-      // 3. Filter Eligible Executions
-      const eligibleExecutions = pendingExecutions.filter(execution => {
-        if (execution.maxExecutions !== null && execution.executionCount >= execution.maxExecutions) {
-          setImmediate(async () => {
-            try {
-              await this.prisma.scriptExecution.update({
-                where: { id: execution.id },
-                data: { status: 'SUCCESS', completedAt: now }
-              })
-              this.debug.info(`Marked execution ${execution.id} as SUCCESS (max executions reached)`)
-            } catch (err) {
-              this.debug.error(`Failed to mark execution ${execution.id} as SUCCESS: ${err}`)
-            }
-          })
-          return false
-        }
-
-        if (execution.repeatIntervalMinutes) {
-          if (execution.lastExecutedAt === null) {
-            return true
-          }
-
-          const intervalMs = execution.repeatIntervalMinutes * 60 * 1000
-          const timeSinceLastExecution = now.getTime() - execution.lastExecutedAt.getTime()
-
-          if (timeSinceLastExecution < intervalMs) {
-            return false
-          }
-        }
-
-        return true
-      })
-
-      this.debug.info(`Found ${eligibleExecutions.length} pending scripts ready for execution`)
-
-      // 4. Prepare Scripts in Transaction
-      const scriptManager = new ScriptManager(this.prisma)
-      const templateEngine = new TemplateEngine()
-      const pendingScripts: PendingScriptInfo[] = []
-
-      const result = await this.prisma.$transaction(async (tx) => {
-        const successfullyUpdated: string[] = []
-
-        for (const execution of eligibleExecutions) {
-          try {
-            const updated = await tx.scriptExecution.updateMany({
-              where: {
-                id: execution.id,
-                status: 'PENDING'
-              },
-              data: {
-                status: 'RUNNING',
-                startedAt: now
-              }
-            })
-
-            if (updated.count === 0) {
-              this.debug.warn(`Execution ${execution.id} was already claimed by another request`)
-              continue
-            }
-
-            successfullyUpdated.push(execution.id)
-
-            const scriptWithContent = await scriptManager.getScript(execution.scriptId)
-
-            const format = scriptWithContent.fileName.endsWith('.yaml') ? 'yaml' : 'json'
-            const { ScriptParser } = await import('./scripts/ScriptParser')
-            const parser = new ScriptParser()
-            const parsed = format === 'yaml'
-              ? parser.parseYAML(scriptWithContent.content)
-              : parser.parseJSON(scriptWithContent.content)
-
-            const interpolatedContent = templateEngine.interpolate(
-              parsed.script,
-              (execution.inputValues as Record<string, any>) || {}
-            )
-
-            pendingScripts.push({
-              execution_id: execution.id,
-              script_id: execution.scriptId,
-              script_name: scriptWithContent.name,
-              script_content: interpolatedContent,
-              shell: execution.script.shell,
-              execution_type: execution.executionType,
-              input_values: (execution.inputValues as Record<string, any>) || {},
-              timeout_seconds: 600,
-              run_as: execution.executedAs
-            })
-
-            this.debug.debug(`Script ${scriptWithContent.name} (${execution.id}) prepared for execution`)
-          } catch (error) {
-            this.debug.error(`Failed to prepare script ${execution.scriptId}: ${error}`)
-            await tx.scriptExecution.update({
-              where: { id: execution.id },
-              data: {
-                status: 'FAILED',
-                completedAt: now,
-                error: `Failed to prepare script: ${error}`
-              }
-            })
-          }
-        }
-
-        return { pendingScripts, successfullyUpdated }
-      })
-
-      // 5. Send Response Message
-      const response: PendingScriptsResponseMessage = {
-        type: 'pending_scripts_response',
-        timestamp: now.toISOString(),
-        scripts: result.pendingScripts
-      }
-
-      this.sendMessage(connection, response)
-      this.debug.info(`Pushed ${result.pendingScripts.length} pending scripts to VM ${vmId}`)
-
-      // 6. Return Result
-      return { success: true, scriptCount: result.pendingScripts.length }
+      // 3. Return Result
+      return { success: true, scriptCount: count }
     } catch (error) {
       this.debug.error(`Failed to push pending scripts to VM: ${error}`)
       return { success: false, scriptCount: 0, error: (error as Error).message }

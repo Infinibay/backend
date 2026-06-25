@@ -33,7 +33,8 @@ import {
 
 import { Logger } from 'winston'
 import logger from '@main/logger'
-import { getInfinization } from '@services/InfinizationService'
+import { getInfinization, getInfinizationConfig } from '@services/InfinizationService'
+import { validateUsernameStrict } from '@services/shellEscape'
 import { DepartmentNetworkService } from '@services/network/DepartmentNetworkService'
 import { UnattendedManagerBase } from '@services/unattendedManagerBase'
 import { UnattendedRedHatManager } from '@services/unattendedRedHatManager'
@@ -60,6 +61,10 @@ export class CreateMachineServiceV2 {
   private prisma: PrismaClient
   private debug: Logger
   private departmentNetworkService: DepartmentNetworkService
+  // Path of the unattended ISO generated for this create (if any). Captured in
+  // buildVMConfig so rollback can delete it by exact path on failure — the random
+  // generated filenames have no vmId prefix to scan for.
+  private generatedIsoPath?: string
 
   constructor (prisma: PrismaClient) {
     this.debug = logger.child({ module: 'create-machine-v2' })
@@ -91,6 +96,13 @@ export class CreateMachineServiceV2 {
     timezone: string
   ): Promise<boolean> {
     this.debug.debug(`Creating machine ${machine.name} using infinization`)
+
+    // Deterministic disk path (infinization names disk0 `${internalName}.qcow2`
+    // in diskDir). Computed up front — and in scope for the catch — because
+    // infinization deliberately does NOT delete the qcow2 on failure and the
+    // backend only persists diskPaths to the DB on success, so rollback must
+    // unlink this known path itself.
+    const expectedDiskPath = path.join(getInfinizationConfig().diskDir, `${machine.internalName}.qcow2`)
 
     try {
       // Validate preconditions
@@ -150,7 +162,10 @@ export class CreateMachineServiceV2 {
           assignedGpuBus: pciBus,
           diskPaths: result.diskPaths,
           bridge: vmConfig.bridge,
-          infiniServiceSocketPath: vmConfig.infiniServiceSocketPath
+          infiniServiceSocketPath: vmConfig.infiniServiceSocketPath,
+          // Anchor the install clock at first boot so the stuck-install detector
+          // can fail a hung unattended install past getInstallationTimeout(os).
+          installStartedAt: new Date()
         }
       })
 
@@ -167,7 +182,7 @@ export class CreateMachineServiceV2 {
       this.debug.error(error.stack)
 
       // Rollback
-      await this.rollback(machine)
+      await this.rollback(machine, expectedDiskPath)
 
       throw new Error(`Error creating machine: ${error.message}`)
     }
@@ -390,6 +405,11 @@ export class CreateMachineServiceV2 {
         try {
           isoPath = await unattendedManager.generateNewImage()
           this.debug.debug(`Generated unattended ISO: ${isoPath}`)
+          // Only a freshly-generated temp ISO (distinct from the base) should be
+          // deleted on rollback; the base ISO is shared and must be preserved.
+          if (isoPath && isoPath !== baseIsoPath) {
+            this.generatedIsoPath = isoPath
+          }
         } catch (error: any) {
           this.debug.warn(`Failed to generate unattended ISO: ${error.message}`)
           this.debug.warn('Falling back to base ISO (manual installation required)')
@@ -477,12 +497,19 @@ export class CreateMachineServiceV2 {
     timezone: string,
     effectiveOs: string
   ): Promise<UnattendedManagerBase | null> {
+    // Validate the username once, here, before constructing any manager. It
+    // becomes a guest OS account AND is interpolated into install command lines,
+    // so a bad value must fail the create cleanly rather than produce a broken or
+    // injected autounattend. machine.id is a system-generated UUID (low risk) and
+    // is additionally escaped at its injection site.
+    const safeUsername = validateUsernameStrict(username)
+
     const osManagers: Record<string, () => UnattendedWindowsManager | UnattendedUbuntuManager | UnattendedRedHatManager> = {
-      windows10: () => new UnattendedWindowsManager(10, username, password, productKey, applications, machine.id, scripts),
-      windows11: () => new UnattendedWindowsManager(11, username, password, productKey, applications, machine.id, scripts),
-      ubuntu: () => new UnattendedUbuntuManager(username, password, applications, machine.id, scripts),
-      fedora: () => new UnattendedRedHatManager(username, password, applications, machine.id, locale, keyboard, timezone),
-      redhat: () => new UnattendedRedHatManager(username, password, applications, machine.id, locale, keyboard, timezone)
+      windows10: () => new UnattendedWindowsManager(10, safeUsername, password, productKey, applications, machine.id, scripts),
+      windows11: () => new UnattendedWindowsManager(11, safeUsername, password, productKey, applications, machine.id, scripts),
+      ubuntu: () => new UnattendedUbuntuManager(safeUsername, password, applications, machine.id, scripts),
+      fedora: () => new UnattendedRedHatManager(safeUsername, password, applications, machine.id, locale, keyboard, timezone),
+      redhat: () => new UnattendedRedHatManager(safeUsername, password, applications, machine.id, locale, keyboard, timezone)
     }
 
     const managerCreator = osManagers[effectiveOs as keyof typeof osManagers]
@@ -612,7 +639,7 @@ export class CreateMachineServiceV2 {
     this.debug.debug(`Machine status updated to ${status}`)
   }
 
-  private async rollback (machine: Machine): Promise<void> {
+  private async rollback (machine: Machine, expectedDiskPath?: string): Promise<void> {
     this.debug.debug(`Rolling back machine ${machine.id}`)
 
     try {
@@ -640,44 +667,39 @@ export class CreateMachineServiceV2 {
       const config = await this.prisma.machineConfiguration.findUnique({
         where: { machineId: machine.id }
       })
-      if (config?.diskPaths) {
-        const diskPaths = config.diskPaths as string[]
-        for (const diskPath of diskPaths) {
-          try {
-            await fs.promises.unlink(diskPath)
-            this.debug.debug(`Rollback: deleted disk file ${diskPath}`)
-          } catch (err: any) {
-            if (err.code !== 'ENOENT') {
-              this.debug.warn(`Rollback: failed to delete disk file ${diskPath}: ${err.message}`)
-            }
+      const diskPaths = (config?.diskPaths as string[] | null) ?? []
+      // Also try the deterministic path infinization would have created, since on
+      // a failure that path is never persisted to the DB (so it's not in diskPaths
+      // above) yet the qcow2 may exist on disk — the actual orphan-leak fix.
+      if (expectedDiskPath && !diskPaths.includes(expectedDiskPath)) {
+        diskPaths.push(expectedDiskPath)
+      }
+      for (const diskPath of diskPaths) {
+        try {
+          await fs.promises.unlink(diskPath)
+          this.debug.debug(`Rollback: deleted disk file ${diskPath}`)
+        } catch (err: any) {
+          if (err.code !== 'ENOENT') {
+            this.debug.warn(`Rollback: failed to delete disk file ${diskPath}: ${err.message}`)
           }
         }
       }
     } catch (err: any) {
-      this.debug.warn(`Rollback: failed to fetch machine configuration for disk cleanup: ${err.message}`)
+      this.debug.warn(`Rollback: failed to clean up disk files: ${err.message}`)
     }
 
-    // Clean up temporary unattended ISO files
-    try {
-      const tempIsoDir = process.env.INFINIBAY_ISO_TEMP_DIR ?? path.join('/opt', 'infinibay', 'iso', 'temp')
-      if (fs.existsSync(tempIsoDir)) {
-        const files = await fs.promises.readdir(tempIsoDir)
-        for (const file of files) {
-          if (file.startsWith(`unattended_${machine.id}_`) && file.endsWith('.iso')) {
-            const isoPath = path.join(tempIsoDir, file)
-            try {
-              await fs.promises.unlink(isoPath)
-              this.debug.debug(`Rollback: deleted temporary ISO ${isoPath}`)
-            } catch (err: any) {
-              if (err.code !== 'ENOENT') {
-                this.debug.warn(`Rollback: failed to delete ISO file ${isoPath}: ${err.message}`)
-              }
-            }
-          }
+    // Clean up the unattended ISO generated for this VM (if any). We delete it by
+    // the exact path captured in buildVMConfig — the old directory scan matched
+    // `unattended_<id>_*.iso`, which never matched the random generated filenames.
+    if (this.generatedIsoPath) {
+      try {
+        await fs.promises.unlink(this.generatedIsoPath)
+        this.debug.debug(`Rollback: deleted temporary ISO ${this.generatedIsoPath}`)
+      } catch (err: any) {
+        if (err.code !== 'ENOENT') {
+          this.debug.warn(`Rollback: failed to delete ISO file ${this.generatedIsoPath}: ${err.message}`)
         }
       }
-    } catch (err: any) {
-      this.debug.warn(`Rollback: failed to clean up temporary ISO directory: ${err.message}`)
     }
 
     this.debug.debug('Rollback completed')

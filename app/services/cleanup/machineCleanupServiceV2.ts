@@ -17,6 +17,7 @@ import path from 'path'
 import logger from '@main/logger'
 import { getInfinization } from '@services/InfinizationService'
 import { getVirtioSocketWatcherService } from '../VirtioSocketWatcherService'
+import { DELETE_FAILED_STATUS } from '../../constants/machine-status'
 
 interface ResourceCleanupResult {
   resource: string
@@ -104,6 +105,31 @@ export class MachineCleanupServiceV2 {
     summary.resourcesCleaned.tapDevice = vmResourcesResult.success
     summary.resourcesCleaned.firewallChain = vmResourcesResult.success
     if (vmResourcesResult.error) summary.errors.push(vmResourcesResult.error)
+
+    // ── Abort-on-physical-failure ──────────────────────────────────
+    // If infinization.destroyVM (process kill + TAP teardown + nftables chain
+    // removal) failed, the host still owns QEMU/TAP/firewall/disk resources.
+    // Deleting the DB row now would orphan them with no handle to retry against.
+    // Instead: KEEP the row, park it in DELETE_FAILED so an operator or a cron
+    // can re-attempt cleanup, and surface the failure by throwing. All callers
+    // (destroyMachine, PoolService.archiveMachine, GoldenImageService) already
+    // treat a throw as a failed cleanup.
+    if (!vmResourcesResult.success) {
+      summary.endTime = Date.now()
+      summary.totalDuration = summary.endTime - summary.startTime
+      this.logCleanupSummary(summary)
+      const reason = vmResourcesResult.error ?? 'physical VM teardown failed'
+      this.debug.error(`Aborting DB delete for VM ${machineId}: ${reason} — marking ${DELETE_FAILED_STATUS} for retry`)
+      try {
+        await this.prisma.machine.update({
+          where: { id: machineId },
+          data: { status: DELETE_FAILED_STATUS }
+        })
+      } catch (markErr: any) {
+        this.debug.warn(`Could not mark VM ${machineId} as ${DELETE_FAILED_STATUS}: ${markErr?.message ?? markErr}`)
+      }
+      throw new Error(`VM physical teardown failed; database row preserved for retry: ${reason}`)
+    }
 
     // 2. Clean up disk files
     this.debug.info(`[2/6] Cleaning disk files`)
@@ -235,9 +261,13 @@ export class MachineCleanupServiceV2 {
 
       result.duration = Date.now() - startTime
 
-      if (!destroyResult.success) {
+      // Defensive: a malformed/undefined return must be treated as failure.
+      // With the abort-on-physical-failure guard in cleanupVM, this success flag
+      // is now load-bearing for whether the DB row is deleted, so destroyVM must
+      // return an explicit { success: true } for cleanup to proceed.
+      if (!destroyResult?.success) {
         result.success = false
-        result.error = `Failed to destroy VM resources: ${destroyResult.error}`
+        result.error = `Failed to destroy VM resources: ${destroyResult?.error}`
         this.debug.warn(`✗ Failed to destroy VM resources after ${result.duration}ms: ${destroyResult.error}`)
       } else {
         result.success = true

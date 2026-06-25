@@ -62,11 +62,14 @@ describe('FirewallPolicyService', () => {
         expect(rules[0].name).toBe('Allow Established Connections (System)')
       })
 
-      it('should default to allow_outbound for unknown BLOCK_ALL config', () => {
+      it('should FAIL CLOSED for an unknown BLOCK_ALL config (no permissive rules)', () => {
         const rules = service.generateDefaultRules(FirewallPolicy.BLOCK_ALL, 'unknown_config' as any)
 
-        expect(rules).toHaveLength(2)
-        expect(rules[1].name).toBe('Allow All Outbound (System)')
+        // Only the system established/related rule — NO auto "allow all outbound".
+        // An unknown preset must not silently open traffic (M11).
+        expect(rules).toHaveLength(1)
+        expect(rules[0].name).toBe('Allow Established Connections (System)')
+        expect(rules.some(r => r.name === 'Allow All Outbound (System)')).toBe(false)
       })
     })
 
@@ -130,35 +133,42 @@ describe('FirewallPolicyService', () => {
 
       expect(rules[0].name).toBe('Allow Established Connections (System)')
       expect(rules[0].priority).toBe(50)
-      expect(rules[0].connectionState?.states).toEqual(['ESTABLISHED', 'RELATED'])
+      // Canonical boolean shape read by the nftables translator (the old
+      // { states: [...] } shape produced ZERO ct-state tokens — fail-open).
+      expect(rules[0].connectionState).toEqual({ established: true, related: true })
     })
   })
 
   describe('applyPolicyToRuleSet', () => {
-    it('should delete existing system-generated rules and create new ones', async () => {
+    it('should delete existing system-generated rules and create new ones in one transaction', async () => {
       const ruleSetId = 'ruleset-123'
-      const mockSystemRules = [
-        { id: 'rule-1', isSystemGenerated: true },
-        { id: 'rule-2', isSystemGenerated: true }
-      ]
 
-      jest.spyOn(mockRuleService, 'deleteSystemGeneratedRules').mockResolvedValue(2)
-      jest.spyOn(mockRuleService, 'createRule').mockResolvedValue({ id: 'new-rule' } as any)
+      // applyPolicyToRuleSet now does delete + create atomically inside $transaction;
+      // run the callback against mockPrisma so we can assert the tx operations.
+      ;(mockPrisma.$transaction as any).mockImplementation(async (cb: any) => cb(mockPrisma))
+      ;(mockPrisma.firewallRule.deleteMany as any).mockResolvedValue({ count: 2 })
+      ;(mockPrisma.firewallRule.createMany as any).mockResolvedValue({ count: 5 })
 
       await service.applyPolicyToRuleSet(ruleSetId, FirewallPolicy.BLOCK_ALL, 'allow_internet')
 
-      expect(mockRuleService.deleteSystemGeneratedRules).toHaveBeenCalledWith(ruleSetId)
-      expect(mockRuleService.createRule).toHaveBeenCalled()
+      expect(mockPrisma.$transaction).toHaveBeenCalled()
+      expect(mockPrisma.firewallRule.deleteMany).toHaveBeenCalledWith({
+        where: { ruleSetId, isSystemGenerated: true }
+      })
+      expect(mockPrisma.firewallRule.createMany).toHaveBeenCalled()
     })
 
     it('should work with empty rule set', async () => {
       const ruleSetId = 'ruleset-456'
-      jest.spyOn(mockRuleService, 'deleteSystemGeneratedRules').mockResolvedValue(0)
-      jest.spyOn(mockRuleService, 'createRule').mockResolvedValue({ id: 'new-rule' } as any)
+      ;(mockPrisma.$transaction as any).mockImplementation(async (cb: any) => cb(mockPrisma))
+      ;(mockPrisma.firewallRule.deleteMany as any).mockResolvedValue({ count: 0 })
+      ;(mockPrisma.firewallRule.createMany as any).mockResolvedValue({ count: 3 })
 
       await service.applyPolicyToRuleSet(ruleSetId, FirewallPolicy.ALLOW_ALL, 'block_ssh')
 
-      expect(mockRuleService.deleteSystemGeneratedRules).toHaveBeenCalledWith(ruleSetId)
+      expect(mockPrisma.firewallRule.deleteMany).toHaveBeenCalledWith({
+        where: { ruleSetId, isSystemGenerated: true }
+      })
     })
   })
 

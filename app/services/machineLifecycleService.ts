@@ -11,6 +11,7 @@ import { getEventManager } from '../services/EventManager'
 import { CreateMachineServiceV2 } from './CreateMachineServiceV2'
 import { NodePlacementService } from './node/NodePlacementService'
 import { CreateMachineInputType, UpdateMachineHardwareInput, UpdateMachineNameInput, UpdateMachineUserInput, SuccessType, FirstBootScriptInputType } from '../graphql/resolvers/machine/type'
+import { DELETING_STATUS, REBUILDING_STATUS } from '../constants/machine-status'
 
 /**
  * Normalize PCI address to standard format.
@@ -347,11 +348,35 @@ export class MachineLifecycleService {
       return { success: false, message: 'Machine not found' }
     }
 
+    // ── Atomic claim ────────────────────────────────────────────────
+    // Flip the row to DELETING in a single conditional updateMany. This is the
+    // lock that closes the double-delete race: two concurrent destroy requests
+    // both pass findFirst above, but only the first updateMany matches (count
+    // 1); the second sees status already 'deleting' (or 'rebuilding') and
+    // matches nothing (count 0), so it bails before running cleanupVM a second
+    // time. We also refuse to delete a VM a pool reset is mid-rebuild on
+    // (REBUILDING owns the disk). The authz scope is re-applied so the claim
+    // cannot widen past what findFirst already authorized.
+    const claim = await this.prisma.machine.updateMany({
+      where: {
+        ...whereClause,
+        status: { notIn: [DELETING_STATUS, REBUILDING_STATUS] }
+      },
+      data: { status: DELETING_STATUS }
+    })
+    if (claim.count === 0) {
+      this.debug.debug(`destroyMachine: ${id} already being deleted or not deletable (no row claimed)`)
+      return { success: false, message: 'Machine is already being deleted or cannot be deleted right now' }
+    }
+
     try {
       const cleanup = new MachineCleanupServiceV2(this.prisma)
       await cleanup.cleanupVM(machine.id)
       return { success: true, message: 'Machine destroyed' }
     } catch (error: unknown) {
+      // cleanupVM owns failure-state marking (DELETE_FAILED on physical-teardown
+      // failure); we don't revert DELETING here. On the happy path the row is
+      // already deleted, so DELETING is moot.
       this.debug.debug(`Error destroying machine: ${String(error)}`)
       const message = error instanceof Error ? error.message : String(error)
       return { success: false, message: `Error destroying machine: ${message}` }

@@ -130,8 +130,36 @@ async function initializeInfinization (): Promise<Infinization> {
   // Subscribe to QMP events for real-time status updates
   subscribeToVMEvents(infinization)
 
+  // Reconcile VMs stuck in transient states ('starting'/'powering_off_update'/
+  // 'rebuilding') after a previous backend/QEMU crash. ORDER IS LOAD-BEARING:
+  // this must run BEFORE attachToRunningVMs so VMs it promotes back to 'running'
+  // are then picked up by the running-VM attach pass. Log-but-continue so a
+  // reconcile failure never blocks startup.
+  try {
+    const summary = await infinization.reconcileStartupState()
+    if (summary.totalChecked > 0) {
+      logger.info(
+        `🔧 Startup reconcile: ${summary.promotedToRunning.length} promoted to running, ` +
+        `${summary.resetToOff.length} reset to off, ${summary.resetToError.length} reset to error, ` +
+        `${summary.skipped.length} skipped`
+      )
+    }
+  } catch (error) {
+    logger.error('❌ Startup transient-state reconciliation failed:', error)
+  }
+
   // Re-attach to running VMs (e.g., after backend restart)
   await attachToRunningVMs(infinization)
+
+  // Recover pool desktops left in a transient/locked status by a crash:
+  // 'rebuilding' -> 'error' (delta possibly half-written), stale 'starting' ->
+  // 'off' (stranded boot). Dynamic import matches the lazy pattern above.
+  try {
+    const { reconcilePoolStatusesOnStartup } = await import('./pool/PoolReconcileService')
+    await reconcilePoolStatusesOnStartup(prisma)
+  } catch (err) {
+    logger.warn(`Pool status reconcile failed: ${(err as Error).message}`)
+  }
 
   return infinization
 }
@@ -193,6 +221,20 @@ function subscribeToVMEvents (infinization: Infinization): void {
     } catch (error) {
       debug.error(`Failed to dispatch event for VM ${eventData.vmId}: ${error}`)
     }
+  })
+
+  // Fast-path hung-install detection: a boot/install RESET loop during the
+  // pre-setup phase marks the VM 'error' without waiting out the whole per-OS
+  // install timeout. QMP RESET is emitted from QEMU start (before any OS).
+  eventHandler.on('vm:reset', (data: VMEventData) => {
+    void (async () => {
+      try {
+        const { handleInstallReset } = await import('./installMonitor/InstallResetTracker')
+        await handleInstallReset(prisma, data.vmId)
+      } catch (err) {
+        debug.warn(`install reset handler failed for VM ${data?.vmId}: ${(err as Error).message}`)
+      }
+    })()
   })
 
   // Listen for disconnect events (QMP socket closed unexpectedly)

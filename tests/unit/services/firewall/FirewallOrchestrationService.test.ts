@@ -275,6 +275,8 @@ describe('FirewallOrchestrationService', () => {
       mockInfinizationService.applyDepartmentRules.mockResolvedValue({
         totalVms: 2,
         vmsUpdated: 2,
+        vmsSkippedNoTap: 0,
+        vmsFailed: 0,
         errors: []
       } as any);
       mockRuleService.updateRuleSetSyncTimestamp.mockResolvedValue(undefined)

@@ -117,12 +117,14 @@ describe('Firewall cleanup — real database', () => {
       expect(await prisma.machine.findUnique({ where: { id: vm.id } })).toBeNull()
     })
 
-    it('deletes the VM even when infinization cleanup reports failure', async () => {
+    it('FAILS CLOSED: preserves the VM row when infinization teardown reports failure', async () => {
       const { vm } = await seedVMWithRuleset()
       mockDestroyVM.mockResolvedValueOnce({ success: false, error: 'Process not found' })
 
-      await expect(machineCleanup().cleanupVM(vm.id)).resolves.not.toThrow()
-      expect(await prisma.machine.findUnique({ where: { id: vm.id } })).toBeNull()
+      // Physical teardown failed => keep the row (for retry) and surface the failure.
+      await expect(machineCleanup().cleanupVM(vm.id)).rejects.toThrow(/physical teardown failed/)
+      const stillThere = await prisma.machine.findUnique({ where: { id: vm.id } })
+      expect(stillThere).not.toBeNull()
     })
   })
 

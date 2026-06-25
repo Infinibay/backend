@@ -299,58 +299,6 @@ describe('VMOperationsService', () => {
     })
   })
 
-  describe('performGracefulRestart', () => {
-    it('should restart on first attempt if successful', async () => {
-      mockInfinization.restartVM.mockResolvedValue({
-        success: true,
-        message: 'VM restarted'
-      })
-
-      const result = await service.performGracefulRestart(validMachineId)
-
-      expect(result.success).toBe(true)
-      expect(mockInfinization.restartVM).toHaveBeenCalledTimes(1)
-    })
-
-    it('should retry up to maxRetries on failure and fallback to force power off', async () => {
-      mockInfinization.restartVM.mockResolvedValue({
-        success: false,
-        error: 'Restart failed'
-      })
-      mockInfinization.stopVM.mockResolvedValue({
-        success: true,
-        message: 'VM stopped'
-      })
-      mockInfinization.startVM.mockResolvedValue({
-        success: true,
-        message: 'VM started'
-      })
-
-      const result = await service.performGracefulRestart(validMachineId, 2)
-
-      expect(mockInfinization.restartVM).toHaveBeenCalledTimes(2)
-      expect(mockInfinization.stopVM).toHaveBeenCalledTimes(1)
-      expect(mockInfinization.startVM).toHaveBeenCalledTimes(1)
-      expect(result.success).toBe(true)
-    }, 15000)
-
-    it('should fail gracefully when all retries exhausted and force power off also fails', async () => {
-      mockInfinization.restartVM.mockResolvedValue({
-        success: false,
-        error: 'Restart failed'
-      })
-      mockInfinization.stopVM.mockResolvedValue({
-        success: false,
-        error: 'Force power off failed'
-      })
-
-      const result = await service.performGracefulRestart(validMachineId, 2)
-
-      expect(result.success).toBe(false)
-      expect(result.error).toBe('Force power off failed')
-    }, 15000)
-  })
-
   describe('edge cases', () => {
     it('should handle null machineId', async () => {
       mockInfinization.startVM.mockRejectedValue(new Error('Invalid machine ID'))
