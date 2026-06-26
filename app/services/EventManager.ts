@@ -3,7 +3,7 @@ import { PrismaClient } from '@prisma/client'
 import { SocketService } from './SocketService'
 
 // Event action types
-export type EventAction = 'create' | 'update' | 'delete' | 'power_on' | 'power_off' | 'suspend' | 'resume' | 'crash' | 'registered' | 'removed' | 'validated' | 'progress' | 'status_changed' | 'health_check' | 'health_status_change' | 'remediation' | 'autocheck_issue_detected' | 'autocheck_remediation_available' | 'autocheck_remediation_completed' | 'round_started' | 'round_completed' | 'round_failed' | 'task_started' | 'task_completed' | 'task_failed' | 'maintenance_completed' | 'maintenance_failed' | 'started' | 'completed' | 'failed'
+export type EventAction = 'create' | 'update' | 'delete' | 'power_on' | 'power_off' | 'suspend' | 'resume' | 'crash' | 'registered' | 'removed' | 'validated' | 'progress' | 'status_changed' | 'health_check' | 'health_status_change' | 'remediation' | 'remediation_started' | 'remediation_succeeded' | 'remediation_failed' | 'remediation_requires_reboot' | 'remediation_cancelled' | 'autocheck_issue_detected' | 'autocheck_remediation_available' | 'autocheck_remediation_completed' | 'round_started' | 'round_completed' | 'round_failed' | 'task_started' | 'task_completed' | 'task_failed' | 'maintenance_completed' | 'maintenance_failed' | 'started' | 'completed' | 'failed'
 
 // Event data types
 export interface EventData {

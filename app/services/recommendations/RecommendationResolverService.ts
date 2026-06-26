@@ -3,6 +3,14 @@ import logger from '@main/logger'
 import { Logger } from 'winston'
 import { getResolutionHandler, ResolutionHandler, ResolutionHandlerContext } from './handlers'
 import { PermissionService } from '@main/permissions'
+import { getEventManager } from '../EventManager'
+
+type RemediationEventAction =
+  | 'remediation_started'
+  | 'remediation_succeeded'
+  | 'remediation_failed'
+  | 'remediation_requires_reboot'
+  | 'remediation_cancelled'
 
 export interface ResolveOptions {
   recommendationId: string
@@ -85,7 +93,7 @@ export class RecommendationResolverService {
     })
 
     // Fire-and-forget: run the handler asynchronously
-    void this.runHandler(handler, resolution.id, rec, params ?? {})
+    void this.runHandler(handler, resolution.id, rec, params ?? {}, userId)
       .catch(err => {
         this.debug.error(`Unhandled error in resolution ${resolution.id}: ${err?.message || err}`)
       })
@@ -106,24 +114,60 @@ export class RecommendationResolverService {
     if (!cancelAllowed) throw new Error('Access denied')
     if (isTerminalStatus(resolution.status)) return resolution
 
-    return this.prisma.recommendationResolution.update({
+    const cancelled = await this.prisma.recommendationResolution.update({
       where: { id: resolutionId },
       data: { status: ResolutionStatus.CANCELLED, completedAt: new Date() }
     })
+
+    await this.emitRemediation('remediation_cancelled', cancelled.machineId, {
+      recommendationId: cancelled.recommendationId,
+      resolutionId: cancelled.id,
+      status: 'cancelled'
+    }, userId)
+
+    return cancelled
+  }
+
+  /**
+   * Error-isolated emit of a user-initiated remediation lifecycle event.
+   * A socket/emit failure must never break the resolution flow.
+   */
+  private async emitRemediation (
+    action: RemediationEventAction,
+    vmId: string,
+    result: Record<string, unknown>,
+    triggeredBy?: string
+  ): Promise<void> {
+    try {
+      await getEventManager().dispatchEvent('vms', action, { id: vmId, result }, triggeredBy)
+    } catch (e: any) {
+      this.debug.error(`Failed to emit ${action} for vm ${vmId}: ${e?.message || e}`)
+    }
   }
 
   private async runHandler (
     handler: ResolutionHandler,
     resolutionId: string,
     rec: VMRecommendation & { machine: { id: string; userId: string | null; name: string; os: string } },
-    params: Record<string, unknown>
+    params: Record<string, unknown>,
+    triggeredBy?: string
   ): Promise<void> {
     const prisma = this.prisma
     const update = async (patch: Prisma.RecommendationResolutionUpdateInput): Promise<void> => {
       await prisma.recommendationResolution.update({ where: { id: resolutionId }, data: patch })
     }
 
+    const description = rec.text ?? rec.actionText ?? handler.actionKey
+
     await update({ status: ResolutionStatus.RUNNING, startedAt: new Date(), progress: 5 })
+
+    await this.emitRemediation('remediation_started', rec.machineId, {
+      description,
+      actionKey: handler.actionKey,
+      recommendationId: rec.id,
+      resolutionId,
+      status: 'running'
+    }, triggeredBy)
 
     const ctx: ResolutionHandlerContext = {
       prisma,
@@ -138,6 +182,19 @@ export class RecommendationResolverService {
     try {
       const result = await handler.run(ctx)
       const finalStatus = result.requiresReboot ? ResolutionStatus.REQUIRES_REBOOT : ResolutionStatus.SUCCEEDED
+
+      // If the resolution was cancelled (or otherwise reached a terminal state)
+      // while the handler was running, do not overwrite it or emit a
+      // contradictory toast.
+      const current = await prisma.recommendationResolution.findUnique({
+        where: { id: resolutionId },
+        select: { status: true }
+      })
+      if (current && isTerminalStatus(current.status)) {
+        this.debug.info(`Resolution ${resolutionId} already ${current.status}; skipping final success update/emit`)
+        return
+      }
+
       await update({
         status: finalStatus,
         progress: 100,
@@ -152,8 +209,40 @@ export class RecommendationResolverService {
           data: { dismissedAt: new Date(), activeResolutionId: null }
         })
       }
+
+      await this.emitRemediation(
+        finalStatus === ResolutionStatus.REQUIRES_REBOOT ? 'remediation_requires_reboot' : 'remediation_succeeded',
+        rec.machineId,
+        {
+          description,
+          reason: result.message ?? undefined,
+          actionKey: handler.actionKey,
+          recommendationId: rec.id,
+          resolutionId,
+          status: finalStatus === ResolutionStatus.REQUIRES_REBOOT ? 'requires-reboot' : 'succeeded',
+          requiresReboot: !!result.requiresReboot
+        },
+        triggeredBy
+      )
     } catch (err: any) {
       this.debug.error(`Handler for ${handler.actionKey} failed on rec ${rec.id}: ${err?.message || err}`)
+
+      // Don't clobber a cancellation (or other terminal state) reached while the
+      // handler was running, nor emit a contradictory failure toast. The re-read
+      // is defensive: any error here falls through to the normal failure path.
+      try {
+        const current = await prisma.recommendationResolution.findUnique({
+          where: { id: resolutionId },
+          select: { status: true }
+        })
+        if (current && isTerminalStatus(current.status)) {
+          this.debug.info(`Resolution ${resolutionId} already ${current.status}; skipping final failure update/emit`)
+          return
+        }
+      } catch (reReadErr: any) {
+        this.debug.error(`Failed to re-read status for resolution ${resolutionId}: ${reReadErr?.message || reReadErr}`)
+      }
+
       await update({
         status: ResolutionStatus.FAILED,
         error: err?.message || String(err),
@@ -164,6 +253,15 @@ export class RecommendationResolverService {
         where: { id: rec.id },
         data: { activeResolutionId: null }
       })
+
+      await this.emitRemediation('remediation_failed', rec.machineId, {
+        description,
+        reason: err?.message ?? String(err),
+        actionKey: handler.actionKey,
+        recommendationId: rec.id,
+        resolutionId,
+        status: 'failed'
+      }, triggeredBy)
     }
   }
 }

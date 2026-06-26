@@ -160,6 +160,20 @@ export class VmEventManager extends BaseEventManager {
         return
       }
 
+      // Handle user-initiated remediation lifecycle events. Derive the wire
+      // action (e.g. 'remediation_requires_reboot' → 'requires-reboot') and route
+      // to handleRemediationEvent so the wire event is resource 'remediation'.
+      // Must NOT fall through to super.handleEvent (that would emit resource 'vms').
+      if (action.startsWith('remediation_')) {
+        if (!vmData?.id) {
+          logger.warn(`⚠️ VM id missing for remediation event: ${action}`)
+          return
+        }
+        const wireAction = action.replace('remediation_', '').replace(/_/g, '-')
+        await this.handleRemediationEvent(vmData.id, wireAction, (vmData as any).result ?? {}, triggeredBy)
+        return
+      }
+
       // Delegate all other events to base class (handles delete, create, update, etc.)
       await super.handleEvent(action, vmData, triggeredBy)
     } catch (error) {

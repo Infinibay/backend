@@ -50,6 +50,8 @@ export class MetricsHandler {
   private readonly prisma: any
   private readonly getVmEventManager: () => any | undefined
   private readonly emitter: EventEmitter
+  /** Last observed health status per VM; used to dedup health_status:change emissions (avoids toast spam, including a spurious toast for every VM after each backend restart) */
+  private readonly lastHealthStatusByVm = new Map<string, string>()
 
   constructor(deps: MetricsHandlerDeps) {
     this.debug = deps.debug
@@ -685,6 +687,28 @@ export class MetricsHandler {
           description: `System health check detected ${healthData.overall_health.toLowerCase()} issues`,
           details: healthData
         })
+      }
+
+      // Emit the agent's TRUE health verdict to the frontend (resource 'health_status', action 'change').
+      // Only the three known verdicts are emitted; anything else/undefined is ignored.
+      if (
+        healthData.overall_health === 'Healthy' ||
+        healthData.overall_health === 'Warning' ||
+        healthData.overall_health === 'Critical'
+      ) {
+        const status = healthData.overall_health.toLowerCase()
+        const previousStatus = this.lastHealthStatusByVm.get(vmId)
+
+        // First observation establishes a silent baseline (no toast on backend restart);
+        // only real transitions are emitted afterwards.
+        if (previousStatus === undefined) {
+          this.lastHealthStatusByVm.set(vmId, status)
+        } else if (previousStatus !== status) {
+          this.lastHealthStatusByVm.set(vmId, status)
+          // Error isolation: handleHealthStatusChange is async and rethrows on failure;
+          // attach a .catch so an async emit failure never escapes as an unhandled rejection.
+          this.getVmEventManager()?.handleHealthStatusChange(vmId, status, healthData.checks)?.catch((emitError: unknown) => this.debug.error(`Error emitting health_status change for VM ${vmId}: ${emitError}`))
+        }
       }
     } catch (error) {
       this.debug.error(`Error analyzing health check response: ${error}`)
