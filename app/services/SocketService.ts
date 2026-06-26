@@ -32,9 +32,10 @@ export class SocketService {
 
   // Initialize Socket.io server
   initialize (httpServer: HTTPServer): void {
+    const corsOrigin = this.resolveCorsOrigin()
     this.io = new SocketIOServer(httpServer, {
       cors: {
-        origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+        origin: corsOrigin,
         methods: ['GET', 'POST'],
         credentials: true
       },
@@ -45,7 +46,19 @@ export class SocketService {
     this.setupConnectionHandlers()
 
     logger.info('🔌 Socket.io service initialized')
-    logger.info('🔌 Socket.io CORS origin:', process.env.FRONTEND_URL || 'http://localhost:3000')
+    logger.info('🔌 Socket.io CORS origin:', corsOrigin)
+  }
+
+  // Resolve the allowed CORS origin(s) for socket.io. Prefer ALLOWED_ORIGINS (the
+  // same comma-separated allow-list the HTTP/GraphQL CORS uses) so a single source
+  // of truth covers every transport; fall back to FRONTEND_URL, then localhost.
+  // We return an ARRAY (not '*') because credentials:true is set and a browser
+  // rejects a wildcard Allow-Origin on a credentialed request; socket.io reflects
+  // the matching origin from the array, which is credential-safe.
+  private resolveCorsOrigin (): string[] {
+    const raw = process.env.ALLOWED_ORIGINS || process.env.FRONTEND_URL || 'http://localhost:3000'
+    const origins = raw.split(',').map(o => o.trim()).filter(Boolean)
+    return origins.length > 0 ? origins : ['http://localhost:3000']
   }
 
   // Setup JWT authentication middleware

@@ -1,3 +1,9 @@
+// Polyfill the Reflect metadata API FIRST: this seed transitively imports
+// TypeGraphQL-decorated modules (via app/permissions/presets → pagination), and
+// their @Field decorators throw ReflectMetadataMissingError unless reflect-metadata
+// is loaded before any decorated class is evaluated.
+import 'reflect-metadata'
+
 // Register tsconfig paths before any imports that use path aliases
 import { register } from 'tsconfig-paths'
 import { resolve } from 'path'
