@@ -118,6 +118,9 @@ export class BackupResolver {
         backupId: input.backupId,
         diskPaths: input.diskPaths.length > 0 ? input.diskPaths : undefined,
         overwriteExisting: input.overwriteExisting,
+        // Default false: a normal restore never reverts the live source disk in
+        // place. Only an explicit operator opt-in passes true to the library.
+        allowInPlaceSnapshotRevert: input.allowInPlaceSnapshotRevert ?? false,
         triggeredBy: ctx.user?.id
       })
       return {

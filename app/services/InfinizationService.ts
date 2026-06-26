@@ -18,6 +18,8 @@ import path from 'path'
 import { Infinization, VMEventData } from '@infinibay/infinization'
 import prisma from '../utils/database'
 import { getEventManager, EventAction } from './EventManager'
+// Read-only import of the canonical disk-op markers (constants owned elsewhere).
+import { DISK_OP_STATUSES, OFF_STATUS } from '../constants/machine-status'
 
 const debug = logger.child({ module: 'infinization-service' })
 
@@ -148,6 +150,16 @@ async function initializeInfinization (): Promise<Infinization> {
     logger.error('❌ Startup transient-state reconciliation failed:', error)
   }
 
+  // Reconcile disk-op "status-as-lock" markers orphaned by a hard crash. The
+  // H1 fix sets transient Machine.status = backing_up/restoring/snapshotting
+  // around an exclusive qemu-img operation; if the backend (or host) dies
+  // mid-op, the row is left STUCK in that marker forever, and every power-on
+  // path refuses it (isDiskOperationInProgress) — the VM is permanently
+  // un-startable with no live qemu-img holding the lock. The claiming process
+  // is gone with the crash, so it is safe to release the marker back to 'off'.
+  // Log-but-continue so a reconcile failure never blocks startup.
+  await reconcileOrphanedDiskOpMarkers()
+
   // Re-attach to running VMs (e.g., after backend restart)
   await attachToRunningVMs(infinization)
 
@@ -237,13 +249,129 @@ function subscribeToVMEvents (infinization: Infinization): void {
     })()
   })
 
-  // Listen for disconnect events (QMP socket closed unexpectedly)
-  eventHandler.on('vm:disconnect', async (data: { vmId: string; timestamp: Date }) => {
-    debug.debug(`QMP disconnect for VM ${data.vmId}`)
-    // HealthMonitor will handle crash detection; just log here
+  // Listen for disconnect events (QMP socket closed). OBSERVABILITY ONLY: with
+  // the EventHandler reconnect fix (audit H9, owned by LIB-CORE2), a transient
+  // QMP socket blip no longer detaches the VM — the library keeps it attached
+  // and attempts to reconnect, emitting 'vm:reconnect' on success or 'vm:stale'
+  // on permanent failure. So a 'vm:disconnect' here is NOT a crash signal and
+  // must NOT trigger any state mutation; we only log it. Crash detection is the
+  // HealthMonitor's job; the actionable signal is 'vm:stale' below.
+  eventHandler.on('vm:disconnect', (data: { vmId: string; timestamp?: Date }) => {
+    debug.debug(`QMP disconnect for VM ${data.vmId} (transient — awaiting reconnect/stale)`)
+  })
+
+  // QMP reconnected after a transient blip. State changes (SHUTDOWN/POWERDOWN)
+  // emitted while the socket was down may have been missed, so re-sync this VM's
+  // status from the source of truth and re-dispatch to the UI. The library
+  // performs its own internal re-sync (queryStatus -> updateStatusDirect); here
+  // we additionally surface the recovered state to the frontend.
+  //
+  // CROSS-UNIT CONTRACT (LIB-CORE2): event name 'vm:reconnect'. The library
+  // currently emits a raw QMPClient 'reconnect' and re-emits 'vm:stale' on
+  // failure; the parallel H9 fix is expected to re-emit reconnect success as
+  // 'vm:reconnect'. Subscribing now is forward-compatible (a no-match handler
+  // is harmless). If the library names it differently, update this string.
+  eventHandler.on('vm:reconnect', (data: { vmId: string; timestamp?: Date }) => {
+    void (async () => {
+      logger.info(`🔌 QMP reconnected for VM ${data.vmId} — re-syncing status`)
+      try {
+        const vm = await prisma.machine.findUnique({
+          where: { id: data.vmId },
+          include: { user: true, template: true, department: true, configuration: true }
+        })
+        if (vm) {
+          await eventManager.dispatchEvent('vms', 'update', vm)
+        }
+      } catch (err) {
+        debug.warn(`Failed to re-sync VM ${data.vmId} after reconnect: ${(err as Error).message}`)
+      }
+    })()
+  })
+
+  // QMP reconnect exhausted its attempts: the client is permanently dead and
+  // state sync for this VM has stopped. The DB row will silently drift from
+  // reality until an operator re-attaches/reconciles. Surface it as an
+  // actionable, persistent warning by recording it on the VM's lastError and
+  // re-dispatching so the UI can flag the machine as needs-attention. We do NOT
+  // flip Machine.status here — the process may well still be running; we only
+  // mark that we've lost our window onto it.
+  //
+  // CROSS-UNIT CONTRACT (LIB-CORE2): event name 'vm:stale' with payload
+  // { vmId, reason }. Verified emitted today at EventHandler reconnectFailed
+  // listener (infinization/src/sync/EventHandler.ts:196).
+  eventHandler.on('vm:stale', (data: { vmId: string; reason?: string }) => {
+    void (async () => {
+      const reason = data.reason ?? 'qmp_state_sync_lost'
+      logger.warn(
+        `⚠️  VM ${data.vmId} is STALE (${reason}): QMP state sync stopped — ` +
+        'status may be drifting. Needs operator re-attach/reconcile.'
+      )
+      try {
+        const updated = await prisma.machine.update({
+          where: { id: data.vmId },
+          data: {
+            configuration: {
+              update: { lastError: `QMP state sync lost (${reason}) — VM status may be stale; needs re-attach` }
+            }
+          },
+          include: { user: true, template: true, department: true, configuration: true }
+        })
+        await eventManager.dispatchEvent('vms', 'update', updated)
+      } catch (err) {
+        debug.warn(`Failed to mark VM ${data.vmId} as stale: ${(err as Error).message}`)
+      }
+    })()
   })
 
   logger.info('📡 Subscribed to QMP events for real-time status updates')
+}
+
+/**
+ * Releases disk-op "status-as-lock" markers (backing_up / restoring /
+ * snapshotting) orphaned by a hard crash, flipping the affected Machine rows
+ * back to 'off'.
+ *
+ * Rationale: these markers are claimed only around an exclusive qemu-img
+ * operation on a STOPPED VM (see constants/machine-status.ts). They are not QEMU
+ * states — there is never a live QEMU process to probe. If the process that set
+ * the marker dies before clearing it, the row is stuck and refused by every
+ * power-on path (isDiskOperationInProgress). On a fresh boot no disk op can
+ * still be in flight (the backend just started), so any surviving marker is by
+ * definition orphaned and safe to clear to 'off'. We deliberately reset to
+ * 'off' (not 'error'): the on-disk qcow2 may be fine; the operator can simply
+ * retry the operation. Errors are logged and swallowed so startup proceeds.
+ *
+ * @returns the count of rows reset (for logging/tests)
+ */
+export async function reconcileOrphanedDiskOpMarkers (): Promise<number> {
+  try {
+    const stuck = await prisma.machine.findMany({
+      where: { status: { in: DISK_OP_STATUSES as unknown as string[] } },
+      select: { id: true, name: true, status: true }
+    })
+
+    if (stuck.length === 0) {
+      return 0
+    }
+
+    for (const vm of stuck) {
+      logger.warn(
+        `🔧 VM ${vm.name} (${vm.id}) left in transient disk-op status '${vm.status}' ` +
+        `by a crash — resetting to '${OFF_STATUS}' (operation can be retried)`
+      )
+    }
+
+    const result = await prisma.machine.updateMany({
+      where: { status: { in: DISK_OP_STATUSES as unknown as string[] } },
+      data: { status: OFF_STATUS }
+    })
+
+    logger.info(`🔧 Disk-op marker reconcile: reset ${result.count} orphaned VM(s) to '${OFF_STATUS}'`)
+    return result.count
+  } catch (error) {
+    logger.error('❌ Disk-op marker reconciliation failed:', error)
+    return 0
+  }
 }
 
 /**

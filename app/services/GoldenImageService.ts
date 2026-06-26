@@ -32,6 +32,12 @@ import { VirtioSocketWatcherService } from './VirtioSocketWatcherService'
 import type { SafeCommandType } from './VirtioSocketWatcherService'
 import { CreateMachineServiceV2 } from './CreateMachineServiceV2'
 import { MachineCleanupServiceV2 } from './cleanup/machineCleanupServiceV2'
+import { VMOperationsService } from './VMOperationsService'
+import {
+  OFF_STATUS,
+  ERROR_STATUS,
+  CAPTURING_STATUS
+} from '../constants/machine-status'
 
 const BASE_IMAGE_DIR =
   process.env.INFINIZATION_GOLDEN_IMAGE_DIR ??
@@ -391,6 +397,13 @@ export class GoldenImageService {
 
     const infinization = await getInfinization()
 
+    // ── Stop the source, then atomically claim it as CAPTURING (SF-2) ─────────
+    // Stop first so the row is genuinely OFF/ERROR for the claim. The claim is
+    // the cross-service gate: it refuses if the VM already carries a disk-op
+    // marker (a concurrent backup/snapshot owns it) and, once held, blocks any
+    // power-on or other qemu-img op for the exclusive convert/copy window that
+    // reads the source disk. Without it, a concurrent claim could tear the disk
+    // mid-convert and a direct startVM would bypass isDiskOperationInProgress.
     this.emitProgress(imageId, 10, 'stopping_source')
     try {
       const status = await infinization.getVMStatus(machine.id)
@@ -401,20 +414,38 @@ export class GoldenImageService {
       this.debug.warn(`stopVM before capture: ${(err as Error).message}`)
     }
 
+    if (!await this.claimCapturing(machine.id)) {
+      throw new Error(
+        `Cannot capture machine ${machine.id}: it is not stopped or a ` +
+        'backup/restore/snapshot/capture is already in progress. ' +
+        'Ensure the VM is OFF and no other disk operation is running, then retry.'
+      )
+    }
+
     // Determine target base path and staging path.
     await fs.mkdir(BASE_IMAGE_DIR, { recursive: true })
     const stagingPath = path.join(BASE_IMAGE_DIR, `building-${imageId}.qcow2`)
     const finalPath = path.join(BASE_IMAGE_DIR, `${imageId}.qcow2`)
 
-    if (destroySource) {
-      await this.runCaptureDestroySource(
-        imageId, machine.id, infinization, sanitizeUserData, sourceDisk, finalPath
-      )
-    } else {
-      await this.runCapturePreserveSource(
-        imageId, machine.id, infinization, sanitizeUserData,
-        sourceDisk, stagingPath, finalPath
-      )
+    // The CAPTURING marker MUST be released on every exit path so a failed
+    // capture never strands the VM un-startable. The variants release it
+    // themselves BEFORE restarting the source (the hardened start() refuses a
+    // disk-op marker); this finally is the catch-all backstop for the convert
+    // window and any error before the variant's own release. It only flips a row
+    // still on CAPTURING, so a clean release inside the variant is a no-op here.
+    try {
+      if (destroySource) {
+        await this.runCaptureDestroySource(
+          imageId, machine.id, sanitizeUserData, sourceDisk, finalPath
+        )
+      } else {
+        await this.runCapturePreserveSource(
+          imageId, machine.id, sanitizeUserData,
+          sourceDisk, stagingPath, finalPath
+        )
+      }
+    } finally {
+      await this.releaseCapturing(machine.id)
     }
 
     const stat = await fs.stat(finalPath)
@@ -437,13 +468,16 @@ export class GoldenImageService {
   private async runCaptureDestroySource (
     imageId: string,
     machineId: string,
-    infinization: any,
     sanitizeUserData: boolean,
     sourceDisk: string,
     finalPath: string
   ): Promise<void> {
+    // Release CAPTURING BEFORE booting: the hardened library start() (and the
+    // VMOperationsService guard) refuses to start a VM whose status is a disk-op
+    // marker. Power-on through the GUARDED path, not infinization.startVM direct.
     this.emitProgress(imageId, 20, 'starting_for_seal')
-    await infinization.startVM(machineId)
+    await this.releaseCapturing(machineId)
+    await this.startSourceGuarded(machineId)
 
     this.emitProgress(imageId, 35, 'waiting_for_agent')
     await this.waitForSetupComplete(machineId, SETUP_WAIT_TIMEOUT_MS)
@@ -456,6 +490,17 @@ export class GoldenImageService {
 
     this.emitProgress(imageId, 75, 'waiting_for_shutdown')
     await this.waitForShutdown(machineId, SHUTDOWN_WAIT_TIMEOUT_MS)
+
+    // Re-claim CAPTURING for the post-shutdown copy so nothing boots the source
+    // over the disk we are reading. Best-effort: if the row isn't OFF/ERROR after
+    // the seal we log and proceed (the VM is shut down). The final 'archived'
+    // status below supersedes the marker; the parent finally's release then no-ops.
+    if (!await this.claimCapturing(machineId)) {
+      this.debug.warn(
+        `Could not re-claim CAPTURING on ${machineId} for the promote copy ` +
+        '(row not OFF/ERROR after seal); proceeding — source is shut down.'
+      )
+    }
 
     this.emitProgress(imageId, 85, 'promoting_disk')
     await fs.copyFile(sourceDisk, finalPath)
@@ -474,20 +519,24 @@ export class GoldenImageService {
   private async runCapturePreserveSource (
     imageId: string,
     machineId: string,
-    infinization: any,
     sanitizeUserData: boolean,
     sourceDisk: string,
     stagingPath: string,
     finalPath: string
   ): Promise<void> {
-    // 1. Snapshot the source disk before any modifications.
+    // 1. Snapshot the source disk before any modifications. This runs while we
+    //    still hold CAPTURING (claimed by the caller) — exclusive read of the
+    //    source disk, no concurrent power-on or qemu-img op possible.
     this.emitProgress(imageId, 20, 'cloning_disk')
     await this.convertDisk(sourceDisk, stagingPath)
 
     try {
-      // 2. Boot the source VM, seal, shut down.
+      // 2. Boot the source VM, seal, shut down. Release CAPTURING BEFORE the boot
+      //    — the hardened library start() refuses a disk-op-marker row — and go
+      //    through the GUARDED power-on path (not infinization.startVM direct).
       this.emitProgress(imageId, 25, 'starting_for_seal')
-      await infinization.startVM(machineId)
+      await this.releaseCapturing(machineId)
+      await this.startSourceGuarded(machineId)
 
       this.emitProgress(imageId, 35, 'waiting_for_agent')
       await this.waitForSetupComplete(machineId, SETUP_WAIT_TIMEOUT_MS)
@@ -501,14 +550,31 @@ export class GoldenImageService {
       this.emitProgress(imageId, 75, 'waiting_for_shutdown')
       await this.waitForShutdown(machineId, SHUTDOWN_WAIT_TIMEOUT_MS)
 
-      // 3. Convert the sealed disk → golden image.
+      // 3. Re-claim CAPTURING for the post-shutdown convert + restore window so
+      //    nothing boots the source over the disk we are reading/rewriting. The
+      //    re-claim only succeeds if the row came back to OFF/ERROR after the
+      //    seal-shutdown; if it can't be re-claimed (e.g. something else grabbed
+      //    it) we still proceed — the source is shut down and assertVmStopped is
+      //    not in this path — but log it. The finally below releases whatever we
+      //    hold.
+      if (!await this.claimCapturing(machineId)) {
+        this.debug.warn(
+          `Could not re-claim CAPTURING on ${machineId} for the promote/restore ` +
+          'window (row not OFF/ERROR after seal); proceeding — source is shut down.'
+        )
+      }
+
+      // 4. Convert the sealed disk → golden image.
       this.emitProgress(imageId, 85, 'promoting_disk')
       await this.convertDisk(sourceDisk, finalPath)
     } finally {
-      // 4. Always restore the source disk from the pre-seal snapshot so
-      //    the machine is left in its original (unsealed) state.  This
+      // 5. Always restore the source disk from the pre-seal snapshot so
+      //    the machine is left in its original (unsealed) state. This
       //    runs even if an earlier step threw — the admin's VM must not
-      //    be left with a sealed disk.
+      //    be left with a sealed disk. We may still hold CAPTURING here
+      //    (re-claimed at step 3, or never released if the boot itself threw),
+      //    which is exactly what we want: an exclusive lock for this overwrite of
+      //    the source disk. The parent runCaptureFromMachine finally releases it.
       this.emitProgress(imageId, 92, 'restoring_source')
       try {
         await this.convertDisk(stagingPath, sourceDisk)
@@ -519,7 +585,7 @@ export class GoldenImageService {
         )
       }
 
-      // 5. Clean up the staging file.
+      // 6. Clean up the staging file.
       await fs.unlink(stagingPath).catch(() => {})
     }
   }
@@ -706,6 +772,67 @@ export class GoldenImageService {
       await sleep(POLL_INTERVAL_MS)
     }
     throw new Error(`Timed out waiting for machine ${machineId} to shut down`)
+  }
+
+  /**
+   * Atomically claim a STOPPED source VM row (OFF/ERROR) as CAPTURING for the
+   * exclusive `qemu-img convert`/`copyFile` window of a golden-image capture
+   * (SF-2). CAPTURING is a disk-op marker: while it is held, every power-on path
+   * refuses the VM (isDiskOperationInProgress) and a concurrent backup/snapshot's
+   * own claim (OFF/ERROR → marker) sees count !== 1 and bails — so nothing can
+   * boot QEMU or start another qemu-img op over the disk we are converting.
+   * Returns true when THIS caller won the claim.
+   */
+  private async claimCapturing (machineId: string): Promise<boolean> {
+    const claimed = await this.prisma.machine.updateMany({
+      where: { id: machineId, status: { in: [OFF_STATUS, ERROR_STATUS] } },
+      data: { status: CAPTURING_STATUS }
+    })
+    return claimed.count === 1
+  }
+
+  /**
+   * Release a CAPTURING claim, flipping the row back to OFF — but only if it is
+   * still on the CAPTURING marker WE set (so we never clobber a status another
+   * flow legitimately moved on to). Never throws: a failed release is logged,
+   * because it runs in `finally` paths that must not mask the real error. The
+   * startup `reconcileOrphanedDiskOpMarkers` (which iterates DISK_OP_STATUSES,
+   * now including CAPTURING) is the backstop if a hard crash skips this.
+   *
+   * IMPORTANT: the capture flow must release CAPTURING BEFORE any internal
+   * restart of the source — the hardened library VMLifecycle.start() refuses to
+   * start a VM whose DB status is a disk-op marker, so a CAPTURING row cannot be
+   * booted to be sealed.
+   */
+  private async releaseCapturing (machineId: string): Promise<void> {
+    try {
+      await this.prisma.machine.updateMany({
+        where: { id: machineId, status: CAPTURING_STATUS },
+        data: { status: OFF_STATUS }
+      })
+    } catch (err) {
+      this.debug.error(
+        `Failed to release CAPTURING marker on VM ${machineId}: ` +
+        `${err instanceof Error ? err.message : String(err)}`
+      )
+    }
+  }
+
+  /**
+   * Start the source VM for sealing through the GUARDED power-on path
+   * (VMOperationsService.startMachine), NOT infinization.startVM directly, so the
+   * disk-op-marker guard is honoured. The caller MUST have released CAPTURING
+   * first (see releaseCapturing) — otherwise the guard (and the hardened library
+   * start()) would refuse the boot. Throws on failure so the capture flow aborts
+   * and its finally re-releases / restores the source.
+   */
+  private async startSourceGuarded (machineId: string): Promise<void> {
+    const result = await new VMOperationsService(this.prisma).startMachine(machineId)
+    if (!result.success) {
+      throw new Error(
+        `Failed to start source VM ${machineId} for sealing: ${result.error ?? 'unknown error'}`
+      )
+    }
   }
 
   private async convertDisk (sourcePath: string, destPath: string): Promise<void> {

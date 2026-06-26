@@ -207,6 +207,16 @@ export class RestoreBackupInput {
 
   @Field({ nullable: true })
     overwriteExisting?: boolean
+
+  /**
+   * SNAPSHOT restore only: explicit operator opt-in to revert the LIVE source
+   * disk in place (destructive `qemu-img snapshot -a`). Default false — a normal
+   * restore never clobbers the live source; the library either materializes the
+   * snapshot to a distinct target or refuses. Set true ONLY when the operator
+   * deliberately wants the in-place revert. Ignored for FULL/INCREMENTAL.
+   */
+  @Field({ nullable: true })
+    allowInPlaceSnapshotRevert?: boolean
 }
 
 @InputType()

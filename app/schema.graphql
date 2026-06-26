@@ -2260,6 +2260,7 @@ type ResourceRecommendation {
 }
 
 input RestoreBackupInput {
+  allowInPlaceSnapshotRevert: Boolean
   backupId: String!
   diskPaths: [String!]!
   overwriteExisting: Boolean

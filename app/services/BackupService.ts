@@ -25,13 +25,52 @@ import {
   BackupRestoreResult as InfinizationRestoreResult,
   DEFAULT_BACKUP_DIR,
   DEFAULT_BACKUP_COMPRESSION,
-  BackupError
+  BackupError,
+  GuestAgentClient
+} from '@infinibay/infinization'
+import type {
+  IsVmRunningProbe,
+  GuestAgentFactory,
+  GuestQuiesce
 } from '@infinibay/infinization'
 import type { PrismaClient, Backup as PrismaBackup } from '@prisma/client'
 
 import logger from '@main/logger'
 import { getEventManager } from '@services/EventManager'
+import { VMOperationsService } from '@services/VMOperationsService'
 import { assertVmStopped } from '@utils/assertVmStopped'
+import {
+  OFF_STATUS,
+  ERROR_STATUS,
+  BACKING_UP_STATUS,
+  RESTORING_STATUS
+} from '../constants/machine-status'
+
+/**
+ * Thrown when a disk operation cannot claim the VM because it is running, in
+ * another disk op, or otherwise not in a stoppable (OFF/ERROR) state. Distinct
+ * type so the resolver/tests can tell a "busy" refusal from a generic failure.
+ */
+export class VmBusyError extends Error {
+  constructor (message: string) {
+    super(message)
+    this.name = 'VmBusyError'
+  }
+}
+
+/**
+ * Thrown by deleteBackup when an incremental backup still depends on the target
+ * (audit H5). Deleting the base would orphan the chain.
+ */
+export class BackupDependencyError extends Error {
+  /** DB ids of the dependent (orphan-risk) backups. */
+  readonly dependentIds: string[]
+  constructor (message: string, dependentIds: string[]) {
+    super(message)
+    this.name = 'BackupDependencyError'
+    this.dependentIds = dependentIds
+  }
+}
 
 export interface CreateBackupParams {
   vmId: string
@@ -54,6 +93,13 @@ export interface RestoreBackupParams {
   backupId: string
   diskPaths?: string[]
   overwriteExisting?: boolean
+  /**
+   * SNAPSHOT restore only: explicit opt-in to revert the live source disk in
+   * place (destructive). Default false — the library refuses to clobber the
+   * live source / materializes to a distinct target unless this is true. Ignored
+   * for FULL/INCREMENTAL restores.
+   */
+  allowInPlaceSnapshotRevert?: boolean
   triggeredBy?: string
 }
 
@@ -67,10 +113,19 @@ export class BackupService {
     this.backupRootDir = process.env.INFINIZATION_BACKUP_DIR ?? DEFAULT_BACKUP_DIR
 
     if (infinization) {
-      // Caller owns the infinization instance; we just wire events once.
+      // Caller owns the infinization instance; we just wire events once. The
+      // caller is responsible for injecting the live-disk probes (tests do not).
       this.infinization = infinization
     } else {
-      this.infinization = new InfinizationBackupService({ backupRootDir: this.backupRootDir })
+      // H6: inject the live-disk hardening probes so the library's guard against
+      // backing up a LIVE qcow2 (crash-inconsistent / torn reads) actually
+      // activates. Without these the guard is inert and a running VM's disk is
+      // copied bare.
+      this.infinization = new InfinizationBackupService({
+        backupRootDir: this.backupRootDir,
+        isVmRunning: this.buildIsVmRunningProbe(),
+        guestAgentFactory: this.buildGuestAgentFactory()
+      })
     }
 
     // Wire progress events exactly once regardless of construction path.
@@ -91,6 +146,95 @@ export class BackupService {
   }
 
   /**
+   * Builds the `isVmRunning` probe the library uses to decide whether a
+   * FULL/INCREMENTAL backup must quiesce / snapshot rather than read the bare
+   * live disk (H6). Derived from the SAME authoritative runtime source as
+   * `assertVmStopped`: VMOperationsService.getStatus() -> the live qemu process
+   * probe (processAlive), NOT the drift-prone DB Machine.status column.
+   *
+   * Fail-closed contract (must match the library's null handling):
+   *  - getStatus() returns null            => probe unavailable    -> return null
+   *  - getStatus().processAlive === false  => provably stopped     -> return false
+   *  - getStatus().processAlive !== false  => running / ambiguous  -> return true
+   *  - getStatus() throws                  => indeterminate        -> return null
+   *
+   * Returning null (never a silent false) on an error/unknown state lets the
+   * library FAIL CLOSED (throw VM_RUNNING / quiesce) instead of copying a disk
+   * that might be live. `!== false` mirrors assertVmStopped: an undefined
+   * processAlive inside a non-null object is treated as running.
+   */
+  private buildIsVmRunningProbe (): IsVmRunningProbe {
+    const prisma = this.prisma
+    return async (vmId: string): Promise<boolean | null> => {
+      try {
+        const ops = new VMOperationsService(prisma)
+        const status = await ops.getStatus(vmId)
+        // Null/undefined => the live probe could not be obtained. Do NOT coerce
+        // to false; surface the unknown so the library fails closed.
+        if (!status) return null
+        return status.processAlive !== false
+      } catch (err) {
+        logger.warn(
+          `isVmRunning probe failed for VM ${vmId}; returning null (fail-closed): ` +
+          `${err instanceof Error ? err.message : String(err)}`
+        )
+        return null
+      }
+    }
+  }
+
+  /**
+   * Builds the `guestAgentFactory` the library uses to quiesce a running guest
+   * (guest-fsfreeze) before reading its live disk, yielding a
+   * filesystem-consistent backup instead of a crash-consistent one (H6).
+   *
+   * Resolves the VM's guest-agent socket from machine.configuration
+   * .guestAgentSocketPath (the same field VMOperationsService uses for
+   * guest-exec). Returns:
+   *  - null when the VM has no guest agent socket configured, OR the agent
+   *    cannot be connected — the library then falls back to a transient
+   *    snapshot. We never throw to the library here; a null fallback is safe.
+   *  - a connected GuestAgentClient (which structurally satisfies the library's
+   *    GuestQuiesce: fsFreeze/fsThaw/connect/disconnect/isConnected) otherwise.
+   */
+  private buildGuestAgentFactory (): GuestAgentFactory {
+    const prisma = this.prisma
+    return async (vmId: string): Promise<GuestQuiesce | null> => {
+      let socketPath: string | null | undefined
+      try {
+        const machine = await prisma.machine.findUnique({
+          where: { id: vmId },
+          select: { configuration: { select: { guestAgentSocketPath: true } } }
+        })
+        socketPath = machine?.configuration?.guestAgentSocketPath
+      } catch (err) {
+        logger.warn(
+          `guestAgentFactory: failed to resolve guest-agent socket for VM ${vmId}; ` +
+          `falling back to transient snapshot: ${err instanceof Error ? err.message : String(err)}`
+        )
+        return null
+      }
+
+      if (!socketPath) {
+        // No guest agent configured — library falls back to a transient snapshot.
+        return null
+      }
+
+      try {
+        const agent = new GuestAgentClient(socketPath)
+        await agent.connect()
+        return agent
+      } catch (err) {
+        logger.warn(
+          `guestAgentFactory: could not connect guest agent at ${socketPath} for VM ${vmId}; ` +
+          `falling back to transient snapshot: ${err instanceof Error ? err.message : String(err)}`
+        )
+        return null
+      }
+    }
+  }
+
+  /**
    * Any row left in IN_PROGRESS / PENDING belongs to a previous backend
    * process that died mid-operation. Mark them FAILED so the UI doesn't
    * show a forever-spinning bar. Call at boot.
@@ -108,6 +252,40 @@ export class BackupService {
       logger.warn(`Recovered ${res.count} orphaned backup row(s) from previous run`)
     }
     return res.count
+  }
+
+  /**
+   * Atomically claims a STOPPED VM row for an exclusive disk operation by
+   * flipping its status to the given marker, but ONLY if it is currently OFF or
+   * ERROR. This is the authoritative cross-service lock (audit H1): a concurrent
+   * powerOn refuses the marker, and a second disk op sees `count === 0` and bails.
+   * Returns true when this caller won the claim.
+   */
+  private async claimVm (vmId: string, marker: string): Promise<boolean> {
+    const claimed = await this.prisma.machine.updateMany({
+      where: { id: vmId, status: { in: [OFF_STATUS, ERROR_STATUS] } },
+      data: { status: marker }
+    })
+    return claimed.count === 1
+  }
+
+  /**
+   * Releases a disk-op claim, flipping the row back to OFF — but only if it is
+   * still on the marker WE set (so we never clobber a status another flow may
+   * have legitimately moved on to). Never throws: a failed release is logged,
+   * because it runs in `finally` paths that must not mask the real error.
+   * `recoverOrphanedBackups`-style boot recovery is the backstop if this is ever
+   * skipped by a hard crash.
+   */
+  private async releaseVm (vmId: string, marker: string): Promise<void> {
+    try {
+      await this.prisma.machine.updateMany({
+        where: { id: vmId, status: marker },
+        data: { status: OFF_STATUS }
+      })
+    } catch (err) {
+      logger.error(`Failed to release disk-op marker '${marker}' on VM ${vmId}: ${err instanceof Error ? err.message : String(err)}`)
+    }
   }
 
   /**
@@ -138,59 +316,82 @@ export class BackupService {
       throw new Error(`VM ${params.vmId} has no disk paths configured`)
     }
 
-    // Reject when the VM is running OR its liveness is unknown: qemu holds an
-    // exclusive write lock on the qcow2 and qemu-img convert cannot safely read a
-    // live image. FAIL CLOSED — a null probe must never be treated as "stopped"
-    // (the previous `status?.processAlive` check passed when the probe returned
-    // null, silently backing up a possibly-running VM).
-    await assertVmStopped(this.prisma, params.vmId, vm.name)
+    // ── Atomic claim (audit H1) ──────────────────────────────────────────────
+    // Flip the STOPPED VM row to BACKING_UP in a single conditional updateMany.
+    // This is the durable lock that closes the TOCTOU on assertVmStopped: any
+    // concurrent powerOn refuses a row in a disk-op marker, and a second backup/
+    // snapshot sees count !== 1 and bails. The marker is owned by the background
+    // worker below and released in its `finally` (or synchronously here if we
+    // throw before handing it off).
+    if (!await this.claimVm(params.vmId, BACKING_UP_STATUS)) {
+      throw new VmBusyError(
+        `VM ${vm.name} is busy or not stopped — cannot start a backup. ` +
+        'Stop the VM (it must be OFF or ERROR) and ensure no other backup/restore/snapshot is in progress.'
+      )
+    }
 
-    // Validate user-supplied paths before they reach qemu-img / mkdir: keep the
-    // destination within the backup root and the source disks within the disk dir
-    // (path-traversal + leading-dash arg-injection guard).
-    const destinationDir = this.assertWithinBase(
-      params.destinationDir ?? path.join(this.backupRootDir, vm.id),
-      this.backupRootDir,
-      'destinationDir'
-    )
-    const diskBaseDir = path.resolve(process.env.INFINIZATION_DISK_DIR ?? '/var/lib/infinization/disks')
-    const safeDiskPaths = diskPaths.map((p) => this.assertWithinBase(p, diskBaseDir, 'diskPath'))
-    const compression = params.compression ?? DEFAULT_BACKUP_COMPRESSION
+    try {
+      // Re-probe the live process AFTER the claim and BEFORE any qemu-img work.
+      // The claim blocks new power-ons; this catches a power-on that slipped in
+      // just before the claim (its qemu may still be alive). FAIL CLOSED — a null
+      // probe is treated as "running", never "stopped".
+      await assertVmStopped(this.prisma, params.vmId, vm.name)
 
-    // Pre-insert a row so in-flight backups are visible to the UI.
-    const pending = await this.prisma.backup.create({
-      data: {
-        backupId: 'pending-' + Date.now() + '-' + vm.id.slice(0, 8),
+      // Validate user-supplied paths before they reach qemu-img / mkdir: keep the
+      // destination within the backup root and the source disks within the disk dir
+      // (path-traversal + leading-dash arg-injection guard).
+      const destinationDir = this.assertWithinBase(
+        params.destinationDir ?? path.join(this.backupRootDir, vm.id),
+        this.backupRootDir,
+        'destinationDir'
+      )
+      const diskBaseDir = path.resolve(process.env.INFINIZATION_DISK_DIR ?? '/var/lib/infinization/disks')
+      const safeDiskPaths = diskPaths.map((p) => this.assertWithinBase(p, diskBaseDir, 'diskPath'))
+      const compression = params.compression ?? DEFAULT_BACKUP_COMPRESSION
+
+      // Pre-insert a row so in-flight backups are visible to the UI.
+      const pending = await this.prisma.backup.create({
+        data: {
+          backupId: 'pending-' + Date.now() + '-' + vm.id.slice(0, 8),
+          vmId: vm.id,
+          type: params.type,
+          status: BackupStatus.IN_PROGRESS,
+          compression,
+          destinationDir,
+          description: params.description,
+          tags: params.tags ?? undefined,
+          parentBackupId: params.parentBackupId,
+          scheduleId: params.scheduleId
+        }
+      })
+
+      this.dispatch('started', pending, params.triggeredBy).catch((err: unknown) => logger.error(`Failed to dispatch 'started' event for backup ${pending.id}: ${err instanceof Error ? err.message : String(err)}`))
+
+      // Kick off the real work in the background so the GraphQL mutation
+      // returns immediately. UI polls the row for progress/status. Ownership of
+      // the BACKING_UP marker transfers here: runBackupInBackground releases it
+      // in its own `finally` whether the convert succeeds or fails.
+      void this.runBackupInBackground({
+        pendingId: pending.id,
         vmId: vm.id,
-        type: params.type,
-        status: BackupStatus.IN_PROGRESS,
-        compression,
+        diskPaths: safeDiskPaths,
         destinationDir,
+        type: params.type,
+        compression,
         description: params.description,
-        tags: params.tags ?? undefined,
         parentBackupId: params.parentBackupId,
-        scheduleId: params.scheduleId
-      }
-    })
+        tags: params.tags,
+        triggeredBy: params.triggeredBy
+      })
 
-    this.dispatch('started', pending, params.triggeredBy).catch((err: unknown) => logger.error(`Failed to dispatch 'started' event for backup ${pending.id}: ${err instanceof Error ? err.message : String(err)}`))
-
-    // Kick off the real work in the background so the GraphQL mutation
-    // returns immediately. UI polls the row for progress/status.
-    void this.runBackupInBackground({
-      pendingId: pending.id,
-      vmId: vm.id,
-      diskPaths: safeDiskPaths,
-      destinationDir,
-      type: params.type,
-      compression,
-      description: params.description,
-      parentBackupId: params.parentBackupId,
-      tags: params.tags,
-      triggeredBy: params.triggeredBy
-    })
-
-    return pending
+      return pending
+    } catch (err) {
+      // We threw before handing the marker to the background worker (failed probe,
+      // path validation, or row insert). Release synchronously so the VM is never
+      // left stuck in BACKING_UP.
+      await this.releaseVm(params.vmId, BACKING_UP_STATUS)
+      throw err
+    }
   }
 
   /**
@@ -214,6 +415,11 @@ export class BackupService {
       description, parentBackupId, tags, triggeredBy
     } = args
 
+    // This worker OWNS the BACKING_UP marker that createBackup claimed. Release
+    // it in `finally` so the VM returns to OFF whether the convert succeeds,
+    // fails, or this method takes the early `return` in the catch below (audit
+    // H1: the marker must ALWAYS be cleared on this async path).
+    try {
     // --- Live progress wiring -------------------------------------------------
     let lastPersisted = -1
     const persistIfChanged = (pct: number): void => {
@@ -333,6 +539,11 @@ export class BackupService {
     } catch (dbErr) {
       logger.error(`failed to finalize backup ${pendingId}: ${dbErr instanceof Error ? dbErr.message : String(dbErr)}`)
     }
+    } finally {
+      // Release the disk-op claim. Safe on every exit (normal completion, the
+      // early `return` in the infinization-error catch, or an unexpected throw).
+      await this.releaseVm(vmId, BACKING_UP_STATUS)
+    }
   }
 
   /**
@@ -364,46 +575,68 @@ export class BackupService {
     const diskBaseDir = path.resolve(process.env.INFINIZATION_DISK_DIR ?? '/var/lib/infinization/disks')
     const diskPaths = rawDiskPaths.map((p) => this.assertWithinBase(p, diskBaseDir, 'diskPath'))
 
-    // Restoring over a live qcow2 corrupts it (qemu-img convert vs the VM's write
-    // lock). Gate on the live process — fail closed — BEFORE any disk is touched.
-    // NOTE: multi-disk restore is still non-atomic in infinization (a failure on
-    // disk N leaves disks 0..N-1 already overwritten); making it temp+atomic-rename
-    // is a tracked follow-up. The stopped-guard removes the dominant corruption path.
-    await assertVmStopped(this.prisma, params.vmId)
+    // ── Atomic claim (audit H1) ──────────────────────────────────────────────
+    // Claim the STOPPED VM as RESTORING before touching any disk. A concurrent
+    // powerOn (or another disk op) is refused for the whole restore. Unlike
+    // createBackup the restore is fully awaited here, so claim + release live in
+    // this method's try/finally — no ownership handoff.
+    if (!await this.claimVm(params.vmId, RESTORING_STATUS)) {
+      throw new VmBusyError(
+        `VM ${vm.id} is busy or not stopped — cannot restore. ` +
+        'Stop the VM (it must be OFF or ERROR) and ensure no other backup/restore/snapshot is in progress.'
+      )
+    }
 
-    // Announce the restore so the UI (and other sessions) can show activity
-    // while the — potentially multi-minute — copy runs. The mutation itself
-    // stays awaited and returns the final result.
-    const startedEventManager = getEventManager()
-    if (startedEventManager) {
-      startedEventManager.dispatchEvent('backups', 'started', {
+    try {
+      // Restoring over a live qcow2 corrupts it (qemu-img convert vs the VM's write
+      // lock). Re-probe the live process — fail closed — AFTER the claim and BEFORE
+      // any disk is touched, to catch a power-on that slipped in just before it.
+      // NOTE: multi-disk restore is still non-atomic in infinization (a failure on
+      // disk N leaves disks 0..N-1 already overwritten); making it temp+atomic-rename
+      // is a tracked follow-up. The stopped-guard removes the dominant corruption path.
+      await assertVmStopped(this.prisma, params.vmId)
+
+      // Announce the restore so the UI (and other sessions) can show activity
+      // while the — potentially multi-minute — copy runs. The mutation itself
+      // stays awaited and returns the final result.
+      const startedEventManager = getEventManager()
+      if (startedEventManager) {
+        startedEventManager.dispatchEvent('backups', 'started', {
+          id: params.backupId,
+          vmId: vm.id,
+          restoring: true
+        }).catch((err: unknown) => logger.warn(`backups:restore started event failed: ${err instanceof Error ? err.message : String(err)}`))
+      }
+
+      const result = await this.infinization.restoreBackup({
+        vmId: vm.id,
+        backupId: params.backupId,
+        diskPaths,
+        overwriteExisting: params.overwriteExisting ?? false,
+        // Default false: a normal restore of a SNAPSHOT-type backup never clobbers
+        // the live source disk in place — the library materializes to a distinct
+        // target or refuses. Only an explicit operator opt-in flips this to true.
+        allowInPlaceSnapshotRevert: params.allowInPlaceSnapshotRevert ?? false
+      })
+
+      // Restore is an event on its own — the UI wants to know the VM changed.
+      const payload = {
         id: params.backupId,
         vmId: vm.id,
-        restoring: true
-      }).catch((err: unknown) => logger.warn(`backups:restore started event failed: ${err instanceof Error ? err.message : String(err)}`))
-    }
+        success: result.success,
+        durationMs: result.durationMs
+      }
+      const eventManager = getEventManager()
+      if (eventManager) {
+        eventManager.dispatchEvent('backups', result.success ? 'completed' : 'failed', payload, params.triggeredBy)
+          .catch((err: unknown) => logger.warn(`backups:restore event failed: ${err instanceof Error ? err.message : String(err)}`))
+      }
 
-    const result = await this.infinization.restoreBackup({
-      vmId: vm.id,
-      backupId: params.backupId,
-      diskPaths,
-      overwriteExisting: params.overwriteExisting ?? false
-    })
-
-    // Restore is an event on its own — the UI wants to know the VM changed.
-    const payload = {
-      id: params.backupId,
-      vmId: vm.id,
-      success: result.success,
-      durationMs: result.durationMs
+      return result
+    } finally {
+      // Always release the RESTORING claim — success, qemu-img failure, or throw.
+      await this.releaseVm(params.vmId, RESTORING_STATUS)
     }
-    const eventManager = getEventManager()
-    if (eventManager) {
-      eventManager.dispatchEvent('backups', result.success ? 'completed' : 'failed', payload, params.triggeredBy)
-        .catch((err: unknown) => logger.warn(`backups:restore event failed: ${err instanceof Error ? err.message : String(err)}`))
-    }
-
-    return result
   }
 
   /** Lists persisted backups for a VM, newest first. */
@@ -414,10 +647,45 @@ export class BackupService {
     })
   }
 
-  /** Deletes a backup from disk and from the database. */
+  /**
+   * Returns the DB ids of any backups that name `backup` as their parent, i.e.
+   * incrementals that would be orphaned (and unrestorable) if `backup` were
+   * deleted. We match against BOTH the infinization `backupId` (the public id the
+   * UI passes as a parent) AND the DB `id`, so the guard holds regardless of which
+   * identifier a caller stored in `parentBackupId`. Audit H5.
+   */
+  async findDependentBackupIds (backup: Pick<PrismaBackup, 'id' | 'backupId' | 'vmId'>): Promise<string[]> {
+    const parents = [backup.backupId, backup.id].filter((p): p is string => typeof p === 'string' && p.length > 0)
+    const dependents = await this.prisma.backup.findMany({
+      where: {
+        vmId: backup.vmId,
+        id: { not: backup.id },
+        parentBackupId: { in: parents }
+      },
+      select: { id: true }
+    })
+    return dependents.map((d) => d.id)
+  }
+
+  /**
+   * Deletes a backup from disk and from the database. Refuses (audit H5) when an
+   * incremental backup still names this one as its parent: removing the base would
+   * orphan the whole chain and make those increments unrestorable. Delete the
+   * dependent increments first (or let retention age the whole chain out).
+   */
   async deleteBackup (dbId: string, triggeredBy?: string): Promise<void> {
     const backup = await this.prisma.backup.findUnique({ where: { id: dbId } })
     if (!backup) throw new Error(`Backup ${dbId} not found`)
+
+    const dependents = await this.findDependentBackupIds(backup)
+    if (dependents.length > 0) {
+      throw new BackupDependencyError(
+        `Cannot delete backup ${backup.backupId}: ${dependents.length} incremental backup(s) ` +
+        'depend on it. Deleting the base would orphan the chain and make those increments ' +
+        'unrestorable. Delete the dependent increments first.',
+        dependents
+      )
+    }
 
     try {
       await this.infinization.deleteBackup(backup.backupId, backup.vmId)

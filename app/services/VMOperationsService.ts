@@ -9,6 +9,7 @@ import { PrismaClient } from '@prisma/client'
 import { Logger } from 'winston'
 import logger from '@main/logger'
 import { getInfinization } from './InfinizationService'
+import { isDiskOperationInProgress } from '../constants/machine-status'
 
 export interface VMOperationResult {
   success: boolean
@@ -95,9 +96,27 @@ export class VMOperationsService {
   }
 
   /**
-   * Start a virtual machine
+   * Start a virtual machine.
+   *
+   * REFUSES to start while the VM row is claimed by an in-progress disk
+   * operation (backing_up / restoring / snapshotting). Starting qemu while
+   * qemu-img holds the qcow2 open corrupts the image — this DB-status check is
+   * the authoritative cross-service gate that backs up the claim in
+   * BackupService / SnapshotServiceV2 (audit H1). Fail closed.
    */
   async startMachine (machineId: string): Promise<VMOperationResult> {
+    const machine = await this.prisma.machine.findUnique({
+      where: { id: machineId },
+      select: { status: true }
+    })
+    if (machine && isDiskOperationInProgress(machine.status)) {
+      this.debug.warn(`Refusing to start machine ${machineId}: disk operation in progress (status=${machine.status})`)
+      return {
+        success: false,
+        error: `VM has a disk operation in progress (${machine.status}). Wait for the backup/restore/snapshot to finish before powering on.`
+      }
+    }
+
     return this.runOperation(
       machineId, 'Starting', 'Machine started successfully', 'Failed to start machine',
       (infinization) => infinization.startVM(machineId)

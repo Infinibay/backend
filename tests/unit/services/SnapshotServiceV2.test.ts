@@ -42,6 +42,12 @@ describe('SnapshotServiceV2', () => {
 
     mockPrisma = mockDeep<PrismaClient>()
 
+    // createSnapshot now atomically claims the row (status OFF/ERROR → snapshotting)
+    // via updateMany before any qemu-img work, and releases it the same way
+    // (snapshotting → off) in a finally. Default both to count:1 so the happy path
+    // proceeds; the claim-failure test overrides count to 0.
+    mockPrisma.machine.updateMany.mockResolvedValue({ count: 1 } as never)
+
     // Setup mock fs
     ;(fs.existsSync as jest.Mock).mockReturnValue(true)
 
@@ -99,6 +105,58 @@ describe('SnapshotServiceV2', () => {
 
       expect(result.success).toBe(false)
       expect(result.message).toContain('Disk image not found')
+    })
+
+    // ── Audit H1: durable disk-op claim ────────────────────────────────────────
+
+    it('claims the row (OFF/ERROR → snapshotting) before any qemu-img work', async () => {
+      mockPrisma.machine.findUnique.mockResolvedValue(mockVM)
+      mockSnapshotManager.createSnapshot.mockResolvedValue(undefined)
+
+      await service.createSnapshot('vm-123', 'snap')
+
+      const claim = mockPrisma.machine.updateMany.mock.calls[0][0] as any
+      expect(claim.where).toEqual({ id: 'vm-123', status: { in: expect.arrayContaining(['off', 'error']) } })
+      expect(claim.data).toEqual({ status: 'snapshotting' })
+    })
+
+    it('fails to claim (VM busy) when the conditional updateMany matches no row', async () => {
+      mockPrisma.machine.findUnique.mockResolvedValue(mockVM)
+      // The pre-check passes (status 'off') but the atomic claim loses the race.
+      mockPrisma.machine.updateMany.mockResolvedValueOnce({ count: 0 } as never)
+
+      const result = await service.createSnapshot('vm-123', 'snap')
+
+      expect(result.success).toBe(false)
+      expect(result.message).toMatch(/busy or not stopped/i)
+      // The claim is the gate: qemu-img is never invoked.
+      expect(mockSnapshotManager.createSnapshot).not.toHaveBeenCalled()
+    })
+
+    it('releases the snapshotting marker (→ off) on SUCCESS', async () => {
+      mockPrisma.machine.findUnique.mockResolvedValue(mockVM)
+      mockSnapshotManager.createSnapshot.mockResolvedValue(undefined)
+
+      await service.createSnapshot('vm-123', 'snap')
+
+      expect(mockPrisma.machine.updateMany).toHaveBeenCalledWith({
+        where: { id: 'vm-123', status: 'snapshotting' },
+        data: { status: 'off' }
+      })
+    })
+
+    it('releases the snapshotting marker (→ off) when qemu-img THROWS', async () => {
+      mockPrisma.machine.findUnique.mockResolvedValue(mockVM)
+      mockSnapshotManager.createSnapshot.mockRejectedValue(new Error('qemu-img failed'))
+
+      const result = await service.createSnapshot('vm-123', 'snap')
+
+      expect(result.success).toBe(false)
+      // Even on failure, the finally must flip the marker back so the VM isn't stuck.
+      expect(mockPrisma.machine.updateMany).toHaveBeenCalledWith({
+        where: { id: 'vm-123', status: 'snapshotting' },
+        data: { status: 'off' }
+      })
     })
   })
 
@@ -174,6 +232,82 @@ describe('SnapshotServiceV2', () => {
 
       expect(result.success).toBe(false)
       expect(result.message).toContain('not found')
+    })
+
+    // ── MF-1: restore now takes the SAME durable disk-op claim as createSnapshot ──
+    // The in-place `qemu-img snapshot -a` revert overwrites the qcow2; without a
+    // claim a powerOn landing between the status read and the revert boots QEMU
+    // over the disk being rewritten (re-opens the H1 TOCTOU). restoreSnapshot must
+    // atomically flip OFF/ERROR → restoring, bail if the claim is lost, and release
+    // restoring → off in a finally on every exit path.
+
+    it('claims the row (OFF/ERROR → restoring) before reverting the qcow2', async () => {
+      mockPrisma.machine.findUnique.mockResolvedValue(mockVM)
+      mockSnapshotManager.snapshotExists.mockResolvedValue(true)
+      mockSnapshotManager.revertSnapshot.mockResolvedValue(undefined)
+
+      await service.restoreSnapshot('vm-123', 'snap')
+
+      // The very first updateMany is the conditional claim.
+      const claim = mockPrisma.machine.updateMany.mock.calls[0][0] as any
+      expect(claim.where).toEqual({ id: 'vm-123', status: { in: expect.arrayContaining(['off', 'error']) } })
+      expect(claim.data).toEqual({ status: 'restoring' })
+    })
+
+    it('bails (does NOT revert) when the atomic claim matches no row (VM busy / lost race)', async () => {
+      mockPrisma.machine.findUnique.mockResolvedValue(mockVM)
+      mockSnapshotManager.snapshotExists.mockResolvedValue(true)
+      // Pre-check passes (status 'off') but the atomic claim loses the race.
+      mockPrisma.machine.updateMany.mockResolvedValueOnce({ count: 0 } as never)
+
+      const result = await service.restoreSnapshot('vm-123', 'snap')
+
+      expect(result.success).toBe(false)
+      expect(result.message).toMatch(/busy or not stopped/i)
+      // The claim is the gate: qemu-img revert is never invoked.
+      expect(mockSnapshotManager.revertSnapshot).not.toHaveBeenCalled()
+    })
+
+    it('releases the restoring marker (→ off) on SUCCESS', async () => {
+      mockPrisma.machine.findUnique.mockResolvedValue(mockVM)
+      mockSnapshotManager.snapshotExists.mockResolvedValue(true)
+      mockSnapshotManager.revertSnapshot.mockResolvedValue(undefined)
+
+      await service.restoreSnapshot('vm-123', 'snap')
+
+      expect(mockPrisma.machine.updateMany).toHaveBeenCalledWith({
+        where: { id: 'vm-123', status: 'restoring' },
+        data: { status: 'off' }
+      })
+    })
+
+    it('releases the restoring marker (→ off) when the revert THROWS', async () => {
+      mockPrisma.machine.findUnique.mockResolvedValue(mockVM)
+      mockSnapshotManager.snapshotExists.mockResolvedValue(true)
+      mockSnapshotManager.revertSnapshot.mockRejectedValue(new Error('qemu-img -a failed'))
+
+      const result = await service.restoreSnapshot('vm-123', 'snap')
+
+      expect(result.success).toBe(false)
+      // Even on failure, the finally must flip the marker back so the VM isn't stuck.
+      expect(mockPrisma.machine.updateMany).toHaveBeenCalledWith({
+        where: { id: 'vm-123', status: 'restoring' },
+        data: { status: 'off' }
+      })
+    })
+
+    it('releases the restoring marker (→ off) when the snapshot is NOT found', async () => {
+      mockPrisma.machine.findUnique.mockResolvedValue(mockVM)
+      mockSnapshotManager.snapshotExists.mockResolvedValue(false)
+
+      const result = await service.restoreSnapshot('vm-123', 'nope')
+
+      expect(result.success).toBe(false)
+      // The early `return` for a missing snapshot still passes through the finally.
+      expect(mockPrisma.machine.updateMany).toHaveBeenCalledWith({
+        where: { id: 'vm-123', status: 'restoring' },
+        data: { status: 'off' }
+      })
     })
   })
 

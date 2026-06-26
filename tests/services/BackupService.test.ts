@@ -4,8 +4,9 @@ import { mockDeep, DeepMockProxy } from 'jest-mock-extended'
 import type { PrismaClient } from '@prisma/client'
 import { BackupService as InfinizationBackupService, BackupStatus, BackupType } from '@infinibay/infinization'
 
-import { BackupService } from '@services/BackupService'
+import { BackupService, VmBusyError, BackupDependencyError } from '@services/BackupService'
 import { assertVmStopped, VmRunningError } from '@utils/assertVmStopped'
+import { BACKING_UP_STATUS, OFF_STATUS } from '@main/constants/machine-status'
 
 jest.mock('@services/EventManager', () => ({
   getEventManager: () => null
@@ -38,6 +39,15 @@ describe('BackupService (backend wrapper)', () => {
     prisma = mockDeep<PrismaClient>()
     infinization = new FakeInfinization()
     service = new BackupService(prisma, infinization as unknown as InfinizationBackupService)
+
+    // Default: the atomic disk-op claim succeeds (VM was OFF/ERROR) and the
+    // release flips it back. Individual tests override count to simulate a busy VM.
+    prisma.machine.updateMany.mockResolvedValue({ count: 1 } as never)
+    // Default: no incremental backup depends on a delete target.
+    prisma.backup.findMany.mockResolvedValue([] as never)
+    // assertVmStopped is mocked module-wide; reset it to "stopped" each test so a
+    // prior test's mockRejectedValueOnce doesn't leak.
+    ;(assertVmStopped as jest.Mock).mockResolvedValue(undefined)
   })
 
   describe('createBackup', () => {
@@ -156,6 +166,97 @@ describe('BackupService (backend wrapper)', () => {
       await expect(service.createBackup({ vmId: 'missing', type: BackupType.FULL }))
         .rejects.toThrow(/not found/)
     })
+
+    // ── Audit H1: durable disk-op claim ────────────────────────────────────────
+
+    it('claim fails (VmBusyError) when the VM row is not OFF/ERROR — no row, no qemu-img', async () => {
+      const vmId = 'vm-1'
+      prisma.machine.findUnique.mockResolvedValue({
+        id: vmId, name: 'web-1', userId: 'user-1', configuration: { diskPaths: ['/disks/web-1.qcow2'] }
+      } as never)
+      // The conditional updateMany matches nothing because status is RUNNING.
+      prisma.machine.updateMany.mockResolvedValueOnce({ count: 0 } as never)
+
+      await expect(service.createBackup({ vmId, type: BackupType.FULL })).rejects.toThrow(VmBusyError)
+      // The claim is the gate: we never insert a row, never re-probe, never convert.
+      expect(prisma.backup.create).not.toHaveBeenCalled()
+      expect(assertVmStopped as jest.Mock).not.toHaveBeenCalled()
+      expect(infinization.createBackup).not.toHaveBeenCalled()
+    })
+
+    it('claims the row with BACKING_UP before re-probing, in OFF/ERROR-only fashion', async () => {
+      const vmId = 'vm-1'
+      prisma.machine.findUnique.mockResolvedValue({
+        id: vmId, name: 'web-1', userId: 'user-1', configuration: { diskPaths: ['/disks/web-1.qcow2'] }
+      } as never)
+      prisma.backup.create.mockResolvedValue({ id: 'db-1', backupId: 'p', vmId } as never)
+      prisma.backup.update.mockResolvedValue({ id: 'db-1', status: BackupStatus.COMPLETED } as never)
+      infinization.createBackup.mockResolvedValue({ success: true, backupId: 'b', vmId, type: BackupType.FULL, disks: [], totalSize: 1, durationMs: 1 })
+      infinization.getBackupMetadata.mockResolvedValue({ totalOriginalSize: 1 })
+
+      await service.createBackup({ vmId, type: BackupType.FULL })
+
+      // First updateMany is the claim: only matches an OFF/ERROR row, sets BACKING_UP.
+      const claimCall = prisma.machine.updateMany.mock.calls[0][0] as any
+      expect(claimCall.where).toEqual({ id: vmId, status: { in: expect.arrayContaining(['off', 'error']) } })
+      expect(claimCall.data).toEqual({ status: BACKING_UP_STATUS })
+    })
+
+    it('releases the BACKING_UP marker on background SUCCESS (flips back to OFF)', async () => {
+      const vmId = 'vm-1'
+      prisma.machine.findUnique.mockResolvedValue({
+        id: vmId, name: 'web-1', userId: 'user-1', configuration: { diskPaths: ['/disks/web-1.qcow2'] }
+      } as never)
+      prisma.backup.create.mockResolvedValue({ id: 'db-1', backupId: 'p', vmId } as never)
+      prisma.backup.update.mockResolvedValue({ id: 'db-1', status: BackupStatus.COMPLETED } as never)
+      infinization.createBackup.mockResolvedValue({ success: true, backupId: 'b', vmId, type: BackupType.FULL, disks: [], totalSize: 1, durationMs: 1 })
+      infinization.getBackupMetadata.mockResolvedValue({ totalOriginalSize: 1 })
+
+      await service.createBackup({ vmId, type: BackupType.FULL })
+      // Let the detached background worker reach its finally.
+      await new Promise((r) => setTimeout(r, 50))
+
+      // A release updateMany flips BACKING_UP → OFF, conditioned on still holding it.
+      expect(prisma.machine.updateMany).toHaveBeenCalledWith({
+        where: { id: vmId, status: BACKING_UP_STATUS },
+        data: { status: OFF_STATUS }
+      })
+    })
+
+    it('releases the BACKING_UP marker on background FAILURE (flips back to OFF)', async () => {
+      const vmId = 'vm-1'
+      prisma.machine.findUnique.mockResolvedValue({
+        id: vmId, name: 'web-1', userId: 'user-1', configuration: { diskPaths: ['/disks/web-1.qcow2'] }
+      } as never)
+      prisma.backup.create.mockResolvedValue({ id: 'db-1', backupId: 'p', vmId } as never)
+      prisma.backup.update.mockResolvedValue({ id: 'db-1', status: BackupStatus.FAILED } as never)
+      infinization.createBackup.mockRejectedValue(new Error('qemu-img blew up'))
+
+      await service.createBackup({ vmId, type: BackupType.FULL })
+      await new Promise((r) => setTimeout(r, 50))
+
+      expect(prisma.machine.updateMany).toHaveBeenCalledWith({
+        where: { id: vmId, status: BACKING_UP_STATUS },
+        data: { status: OFF_STATUS }
+      })
+    })
+
+    it('releases the BACKING_UP marker when the post-claim probe fails (synchronous path)', async () => {
+      const vmId = 'vm-1'
+      prisma.machine.findUnique.mockResolvedValue({
+        id: vmId, name: 'web-1', userId: 'user-1', configuration: { diskPaths: ['/disks/web-1.qcow2'] }
+      } as never)
+      ;(assertVmStopped as jest.Mock).mockRejectedValueOnce(new VmRunningError('slipped in'))
+
+      await expect(service.createBackup({ vmId, type: BackupType.FULL })).rejects.toThrow(VmRunningError)
+
+      // We claimed, the probe threw, so we must release synchronously before rethrowing.
+      expect(prisma.machine.updateMany).toHaveBeenCalledWith({
+        where: { id: vmId, status: BACKING_UP_STATUS },
+        data: { status: OFF_STATUS }
+      })
+      expect(prisma.backup.create).not.toHaveBeenCalled()
+    })
   })
 
   describe('deleteBackup', () => {
@@ -181,6 +282,39 @@ describe('BackupService (backend wrapper)', () => {
 
       await expect(service.deleteBackup('db-1')).rejects.toThrow('permission denied')
       expect(prisma.backup.delete).not.toHaveBeenCalled()
+    })
+
+    // ── Audit H5: never orphan an incremental chain ────────────────────────────
+
+    it('refuses (BackupDependencyError) when an incremental still names it as parent', async () => {
+      prisma.backup.findUnique.mockResolvedValue({
+        id: 'db-base', backupId: 'bkp-base', vmId: 'vm-1'
+      } as never)
+      // One increment depends on the base (parentBackupId === bkp-base).
+      prisma.backup.findMany.mockResolvedValue([{ id: 'db-incr' }] as never)
+
+      await expect(service.deleteBackup('db-base')).rejects.toThrow(BackupDependencyError)
+      // Neither the on-disk delete nor the DB row delete happens — the chain is intact.
+      expect(infinization.deleteBackup).not.toHaveBeenCalled()
+      expect(prisma.backup.delete).not.toHaveBeenCalled()
+
+      // The dependency scan matched the base by BOTH its public backupId and DB id.
+      const scanWhere = (prisma.backup.findMany.mock.calls[0][0] as any).where
+      expect(scanWhere.vmId).toBe('vm-1')
+      expect(scanWhere.id).toEqual({ not: 'db-base' })
+      expect(scanWhere.parentBackupId.in).toEqual(expect.arrayContaining(['bkp-base', 'db-base']))
+    })
+
+    it('deletes normally when no increment depends on it', async () => {
+      prisma.backup.findUnique.mockResolvedValue({
+        id: 'db-leaf', backupId: 'bkp-leaf', vmId: 'vm-1'
+      } as never)
+      prisma.backup.findMany.mockResolvedValue([] as never)
+      infinization.deleteBackup.mockResolvedValue(undefined as never)
+
+      await service.deleteBackup('db-leaf')
+
+      expect(prisma.backup.delete).toHaveBeenCalledWith({ where: { id: 'db-leaf' } })
     })
   })
 })

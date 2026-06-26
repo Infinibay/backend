@@ -425,10 +425,16 @@ export class CreateMachineServiceV2 {
     // Build base directories
     const socketDir = process.env.INFINIZATION_SOCKET_DIR ?? '/opt/infinibay/sockets'
 
+    // Per-VM display secret. infinization delivers this to QEMU over QMP
+    // `set_password` (never on the cmdline), so it authenticates the SPICE
+    // console regardless of QEMU version. It is the single source of truth for
+    // the console ticket: it is persisted as graphicPassword (see :157) and the
+    // console-connect resolver presents it to the proxy. Without it, the
+    // library's fail-closed guard throws INVALID_CONFIG when displayAddr is
+    // non-loopback (and would otherwise ship an unauthenticated console).
+    const displayPassword = this.generatePassword()
+
     // Build the VMCreateConfig
-    // NOTE: displayPassword is disabled because QEMU 9.x removed the 'password=' parameter.
-    // QEMU 9.x requires using -object secret + password-secret= instead.
-    // TODO: Fix infinization SpiceConfig to support QEMU 9.x password-secret format
     const config: VMCreateConfig = {
       vmId: machine.id,
       name: machine.name,
@@ -440,8 +446,20 @@ export class CreateMachineServiceV2 {
       bridge,
       displayType: 'spice',
       displayPort,
-      // displayPassword, // Disabled: QEMU 9.x doesn't support 'password=' parameter
-      displayAddr: process.env.APP_HOST ?? '0.0.0.0',
+      // Delivered to QEMU over QMP set_password by infinization (never on the
+      // cmdline); supplied so the console is authenticated.
+      displayPassword,
+      // Default to loopback — pairing a routable bind (APP_HOST) with the
+      // generated displayPassword above is the only safe way to expose the
+      // console off-host; otherwise keep QEMU's SPICE port on 127.0.0.1.
+      displayAddr: process.env.APP_HOST ?? '127.0.0.1',
+
+      // Drop QEMU's privileges to an unprivileged account (-runas) so a guest
+      // escape lands as that uid rather than root. Opt-in via env: left
+      // undefined when unset, preserving current behavior (and avoiding a
+      // launch failure if the account doesn't exist on this install). seccomp
+      // (disableSandbox) is intentionally left unset so the sandbox stays on.
+      runAsUser: process.env.INFINIZATION_QEMU_USER,
 
       // Optional hardware configuration
       gpuPciAddress: pciBus ?? undefined,

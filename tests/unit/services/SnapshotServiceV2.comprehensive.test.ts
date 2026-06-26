@@ -34,6 +34,11 @@ describe('SnapshotServiceV2', () => {
 
   beforeEach(() => {
     jest.clearAllMocks()
+    // createSnapshot now atomically claims the row (status OFF/ERROR →
+    // snapshotting) via updateMany before any qemu-img work, requiring
+    // count===1, then releases it (snapshotting → off) in a finally. Default
+    // both updateMany calls to count:1 so the happy path proceeds.
+    mockPrisma.machine.updateMany.mockResolvedValue({ count: 1 } as never)
     service = new SnapshotServiceV2(mockPrisma)
   })
 

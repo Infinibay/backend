@@ -25,6 +25,25 @@ export const REBUILDING_STATUS = 'rebuilding' as const
 // drops out of every checkout/power path until the flow releases it.
 export const DELETING_STATUS = 'deleting' as const
 export const MOVING_STATUS = 'moving' as const
+// Transient disk-operation "status-as-lock" markers (not QEMU states). These
+// claim a *stopped* VM row (OFF/ERROR) for the duration of a qemu-img operation
+// that needs an exclusive qcow2 write lock — backup convert, restore overwrite,
+// or snapshot create. A VM in one of these MUST be refused by every power-on
+// path: starting qemu while qemu-img reads/writes the image corrupts the qcow2.
+// The DB claim is the authoritative cross-service gate (the live-process probe
+// in assertVmStopped is a TOCTOU window on its own — see audit H1).
+export const BACKING_UP_STATUS = 'backing_up' as const
+export const RESTORING_STATUS = 'restoring' as const
+export const SNAPSHOTTING_STATUS = 'snapshotting' as const
+// Disk-op marker held by GoldenImageService while it stops a source VM and runs
+// an exclusive `qemu-img convert` over that VM's disk during a golden-image
+// capture. Like the other disk-op markers it claims a STOPPED row (OFF/ERROR)
+// and MUST keep the VM out of every power-on path until released — booting QEMU
+// over the disk qemu-img is converting corrupts the qcow2. The capture flow
+// releases this back to 'off' BEFORE any internal restart of the source, because
+// the hardened library VMLifecycle.start() now refuses to start a VM whose DB
+// status is a disk-op marker.
+export const CAPTURING_STATUS = 'capturing' as const
 // Pool pseudo-status for archived/scaled-down members (previously a local
 // literal in NonPersistentResetService/PoolService).
 export const ARCHIVED_STATUS = 'archived' as const
@@ -45,6 +64,10 @@ export type MachineStatusValue =
   | typeof REBUILDING_STATUS
   | typeof DELETING_STATUS
   | typeof MOVING_STATUS
+  | typeof BACKING_UP_STATUS
+  | typeof RESTORING_STATUS
+  | typeof SNAPSHOTTING_STATUS
+  | typeof CAPTURING_STATUS
   | typeof ARCHIVED_STATUS
   | typeof DELETE_FAILED_STATUS
   | typeof ERROR_STATUS
@@ -60,9 +83,25 @@ const ALL_STATUSES: MachineStatusValue[] = [
   REBUILDING_STATUS,
   DELETING_STATUS,
   MOVING_STATUS,
+  BACKING_UP_STATUS,
+  RESTORING_STATUS,
+  SNAPSHOTTING_STATUS,
+  CAPTURING_STATUS,
   ARCHIVED_STATUS,
   DELETE_FAILED_STATUS,
   ERROR_STATUS
+]
+
+/**
+ * The transient disk-op markers, in one place. A VM in any of these has claimed
+ * its row for an exclusive qemu-img operation and must be kept out of every
+ * power-on path until the operation releases the marker (back to OFF/ERROR).
+ */
+export const DISK_OP_STATUSES: MachineStatusValue[] = [
+  BACKING_UP_STATUS,
+  RESTORING_STATUS,
+  SNAPSHOTTING_STATUS,
+  CAPTURING_STATUS
 ]
 
 export function isValidMachineStatus (status: string): status is MachineStatusValue {
@@ -71,4 +110,13 @@ export function isValidMachineStatus (status: string): status is MachineStatusVa
 
 export function isMachineRunning (status: string): boolean {
   return status === RUNNING_STATUS
+}
+
+/**
+ * True when the VM row is claimed by an in-progress qemu-img disk operation
+ * (backup / restore / snapshot). Power-on paths MUST refuse these to avoid
+ * corrupting a qcow2 that qemu-img currently holds open.
+ */
+export function isDiskOperationInProgress (status: string): boolean {
+  return (DISK_OP_STATUSES as string[]).includes(status)
 }

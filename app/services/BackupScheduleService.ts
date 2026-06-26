@@ -20,8 +20,9 @@ import type { PrismaClient, BackupSchedule as PrismaSchedule } from '@prisma/cli
 
 import logger from '@main/logger'
 import { CronExpression, Scheduler, getScheduler, ScheduledHandle } from '@main/lib/scheduler'
-import { BackupService } from '@services/BackupService'
+import { BackupService, VmBusyError, BackupDependencyError } from '@services/BackupService'
 import { getEventManager } from '@services/EventManager'
+import { VmRunningError } from '@utils/assertVmStopped'
 
 export interface CreateScheduleInput {
   vmId: string
@@ -218,14 +219,39 @@ export class BackupScheduleService {
         await this.enforceRetention(schedule.id, schedule.retentionCount)
       }
     } catch (err) {
-      logger.error(`Scheduled backup failed (schedule ${schedule.id}): ${err instanceof Error ? err.message : String(err)}`)
+      // Distinguish "VM was running / busy" from a genuine backup failure (audit
+      // L145). A scheduled backup that fires while the VM is up is EXPECTED on a
+      // desktop VM that's in use — it is not an error to alert on, and it must
+      // not look like a failing schedule. Log it as info "skipped: VM running",
+      // still advance lastRun/nextRun so the schedule keeps progressing, and do
+      // NOT touch lastBackupId (no backup was produced).
+      const skipped = err instanceof VmBusyError || err instanceof VmRunningError
+      const msg = err instanceof Error ? err.message : String(err)
+      if (skipped) {
+        logger.info(`⏭️  Scheduled backup skipped: VM running/busy (schedule ${schedule.id}): ${msg}`)
+      } else {
+        logger.error(`Scheduled backup failed (schedule ${schedule.id}): ${msg}`)
+      }
       await this.prisma.backupSchedule.update({
         where: { id: schedule.id },
         data: { lastRunAt: new Date(), nextRunAt: this.computeNextRun(schedule.id) }
-      }).catch((dbErr: unknown) => logger.error(`Failed to update schedule ${schedule.id} after failed backup: ${dbErr instanceof Error ? dbErr.message : String(dbErr)}`))
+      }).catch((dbErr: unknown) => logger.error(`Failed to update schedule ${schedule.id} after ${skipped ? 'skipped' : 'failed'} backup: ${dbErr instanceof Error ? dbErr.message : String(dbErr)}`))
     }
   }
 
+  /**
+   * Deletes aged-out backups beyond `retentionCount`, newest-first, but NEVER
+   * orphans an incremental chain (audit H5). A base backup that falls outside the
+   * retention window may still have increments that depend on it; deleting it
+   * would make the whole chain unrestorable. So before deleting a candidate we
+   * check for dependents and SKIP+WARN if any exist — a base is only removed once
+   * its entire chain has aged out (the increments are deleted in earlier passes
+   * of this same loop, freeing the base for a subsequent retention run).
+   *
+   * `deleteBackup` enforces the same guard and throws BackupDependencyError; we
+   * also pre-check here so a skip is logged as a benign "deferred" rather than
+   * surfacing as a delete failure. Either way the loop keeps progressing.
+   */
   private async enforceRetention (scheduleId: string, retentionCount: number): Promise<void> {
     const backups = await this.prisma.backup.findMany({
       where: { scheduleId },
@@ -236,8 +262,19 @@ export class BackupScheduleService {
     const toDelete = backups.slice(retentionCount)
     for (const backup of toDelete) {
       try {
+        // Pre-check: a base with surviving dependents is deferred, not deleted.
+        const dependents = await this.backupService.findDependentBackupIds(backup)
+        if (dependents.length > 0) {
+          logger.info(`Retention: deferring delete of backup ${backup.id} — ${dependents.length} incremental(s) still depend on it; chain not fully aged out yet`)
+          continue
+        }
         await this.backupService.deleteBackup(backup.id)
       } catch (err) {
+        if (err instanceof BackupDependencyError) {
+          // Race: a dependent appeared between the pre-check and the delete. Defer.
+          logger.info(`Retention: deferring delete of backup ${backup.id} — ${err.message}`)
+          continue
+        }
         logger.warn(`Retention: failed to delete backup ${backup.id}: ${err instanceof Error ? err.message : String(err)}`)
       }
     }

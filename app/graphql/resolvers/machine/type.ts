@@ -226,6 +226,16 @@ export enum MachineStatus {
     // or a pool checkout.
     DELETING = 'deleting',
     MOVING = 'moving',
+    // Transient disk-op "status-as-lock" markers (not QEMU states): a VM row is
+    // claimed for the duration of an exclusive qemu-img operation on a STOPPED
+    // disk (backup convert / restore overwrite / snapshot create / golden-image
+    // capture convert). Every power-on path refuses these — booting QEMU while
+    // qemu-img holds the qcow2 open corrupts the image. Mirror the string
+    // constants in app/constants/machine-status.ts (DISK_OP_STATUSES).
+    BACKING_UP = 'backing_up',
+    RESTORING = 'restoring',
+    SNAPSHOTTING = 'snapshotting',
+    CAPTURING = 'capturing',
     // Pool pseudo-status for archived/scaled-down members.
     ARCHIVED = 'archived',
     // Terminal marker: physical teardown failed and the DB row was KEPT on

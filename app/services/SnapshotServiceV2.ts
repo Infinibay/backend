@@ -25,6 +25,12 @@ import { Logger } from 'winston'
 import logger from '@main/logger'
 import { getInfinization } from '@services/InfinizationService'
 import { assertVmStopped } from '@utils/assertVmStopped'
+import {
+  OFF_STATUS,
+  ERROR_STATUS,
+  SNAPSHOTTING_STATUS,
+  RESTORING_STATUS
+} from '../constants/machine-status'
 
 /**
  * Snapshot information compatible with the original SnapshotService interface.
@@ -109,38 +115,67 @@ export class SnapshotServiceV2 {
           message: 'VM must be stopped before creating a snapshot. Please shut down the VM first.'
         }
       }
-      // Authoritative fail-closed gate against the live process (qcow2 write lock).
-      await assertVmStopped(this.prisma, vmId)
 
-      // Get disk path
-      const diskPath = this.getDiskPath(vm.internalName)
-      if (!fs.existsSync(diskPath)) {
-        return { success: false, message: `Disk image not found: ${diskPath}` }
-      }
-
-      // Create snapshot via SnapshotManager
-      const options: SnapshotCreateOptions = {
-        imagePath: diskPath,
-        name,
-        description
-      }
-
-      await this.snapshotManager.createSnapshot(options)
-
-      this.debug.debug(`Snapshot '${name}' created successfully`)
-
-      return {
-        success: true,
-        message: `Snapshot '${name}' created successfully`,
-        snapshot: {
-          name,
-          // qemu-img persists neither a description nor a current-snapshot flag,
-          // so we don't echo back values that won't survive a subsequent list.
-          description: undefined,
-          createdAt: new Date(),
-          state: 'shutoff',
-          isCurrent: false
+      // ── Atomic claim (audit H1) ────────────────────────────────────────────
+      // Flip the STOPPED VM row to SNAPSHOTTING in a single conditional
+      // updateMany. This is the durable cross-service lock that closes the TOCTOU
+      // on assertVmStopped: a concurrent powerOn refuses a row in a disk-op
+      // marker, and a second backup/restore/snapshot sees count !== 1 and bails.
+      const claimed = await this.prisma.machine.updateMany({
+        where: { id: vmId, status: { in: [OFF_STATUS, ERROR_STATUS] } },
+        data: { status: SNAPSHOTTING_STATUS }
+      })
+      if (claimed.count !== 1) {
+        return {
+          success: false,
+          message: 'VM is busy or not stopped — cannot create a snapshot. Ensure the VM is OFF and no other backup/restore/snapshot is in progress.'
         }
+      }
+
+      try {
+        // Authoritative fail-closed gate against the live process (qcow2 write
+        // lock). Re-probe AFTER the claim, to catch a power-on that slipped in
+        // just before it.
+        await assertVmStopped(this.prisma, vmId)
+
+        // Get disk path
+        const diskPath = this.getDiskPath(vm.internalName)
+        if (!fs.existsSync(diskPath)) {
+          return { success: false, message: `Disk image not found: ${diskPath}` }
+        }
+
+        // Create snapshot via SnapshotManager
+        const options: SnapshotCreateOptions = {
+          imagePath: diskPath,
+          name,
+          description
+        }
+
+        await this.snapshotManager.createSnapshot(options)
+
+        this.debug.debug(`Snapshot '${name}' created successfully`)
+
+        return {
+          success: true,
+          message: `Snapshot '${name}' created successfully`,
+          snapshot: {
+            name,
+            // qemu-img persists neither a description nor a current-snapshot flag,
+            // so we don't echo back values that won't survive a subsequent list.
+            description: undefined,
+            createdAt: new Date(),
+            state: 'shutoff',
+            isCurrent: false
+          }
+        }
+      } finally {
+        // Release the SNAPSHOTTING claim on every exit (success, disk-not-found
+        // early return, qemu-img throw). Flip back to OFF only if we still hold
+        // the marker, so we never clobber a status another flow moved on to.
+        await this.prisma.machine.updateMany({
+          where: { id: vmId, status: SNAPSHOTTING_STATUS },
+          data: { status: OFF_STATUS }
+        }).catch((err: unknown) => this.debug.error(`Failed to release SNAPSHOTTING marker on VM ${vmId}: ${err instanceof Error ? err.message : String(err)}`))
       }
     } catch (error: any) {
       this.debug.error(`Failed to create snapshot: ${error.message}`)
@@ -225,27 +260,62 @@ export class SnapshotServiceV2 {
           message: 'VM must be stopped before restoring a snapshot. Please shut down the VM first.'
         }
       }
-      // Reverting a running VM's disk via qemu-img corrupts the guest FS.
-      await assertVmStopped(this.prisma, vmId)
 
-      const diskPath = this.getDiskPath(vm.internalName)
-      if (!fs.existsSync(diskPath)) {
-        return { success: false, message: `Disk image not found: ${diskPath}` }
+      // ── Atomic claim (audit H1 / MF-1) ─────────────────────────────────────
+      // Flip the STOPPED VM row to RESTORING in a single conditional updateMany.
+      // This is the durable cross-service lock that closes the TOCTOU on
+      // assertVmStopped: the in-place `qemu-img snapshot -a` revert overwrites the
+      // qcow2, so a powerOn landing between the status read and the revert would
+      // boot QEMU over the disk being rewritten → corruption. With the claim, a
+      // concurrent powerOn refuses a row in a disk-op marker
+      // (isDiskOperationInProgress), and a second backup/restore/snapshot sees
+      // count !== 1 and bails. Mirrors createSnapshot's exact pattern.
+      const claimed = await this.prisma.machine.updateMany({
+        where: { id: vmId, status: { in: [OFF_STATUS, ERROR_STATUS] } },
+        data: { status: RESTORING_STATUS }
+      })
+      if (claimed.count !== 1) {
+        return {
+          success: false,
+          message: 'VM is busy or not stopped — cannot restore a snapshot. Ensure the VM is OFF and no other backup/restore/snapshot is in progress.'
+        }
       }
 
-      // Verify snapshot exists
-      const exists = await this.snapshotManager.snapshotExists(diskPath, snapshotName)
-      if (!exists) {
-        return { success: false, message: `Snapshot '${snapshotName}' not found` }
-      }
+      try {
+        // Authoritative fail-closed gate against the live process (qcow2 write
+        // lock). Re-probe AFTER the claim, to catch a power-on that slipped in
+        // just before it. Reverting a running VM's disk via qemu-img corrupts
+        // the guest FS.
+        await assertVmStopped(this.prisma, vmId)
 
-      // Revert to snapshot
-      await this.snapshotManager.revertSnapshot(diskPath, snapshotName)
+        const diskPath = this.getDiskPath(vm.internalName)
+        if (!fs.existsSync(diskPath)) {
+          return { success: false, message: `Disk image not found: ${diskPath}` }
+        }
 
-      this.debug.debug(`VM ${vmId} restored to snapshot '${snapshotName}'`)
-      return {
-        success: true,
-        message: `Restored to snapshot '${snapshotName}' successfully`
+        // Verify snapshot exists
+        const exists = await this.snapshotManager.snapshotExists(diskPath, snapshotName)
+        if (!exists) {
+          return { success: false, message: `Snapshot '${snapshotName}' not found` }
+        }
+
+        // Revert to snapshot
+        await this.snapshotManager.revertSnapshot(diskPath, snapshotName)
+
+        this.debug.debug(`VM ${vmId} restored to snapshot '${snapshotName}'`)
+        return {
+          success: true,
+          message: `Restored to snapshot '${snapshotName}' successfully`
+        }
+      } finally {
+        // Release the RESTORING claim on every exit (success, disk-not-found /
+        // snapshot-not-found early return, qemu-img throw). Flip back to OFF only
+        // if we still hold the marker, so we never clobber a status another flow
+        // moved on to.
+        await this.prisma.machine.updateMany({
+          where: { id: vmId, status: RESTORING_STATUS },
+          data: { status: OFF_STATUS }
+        }).catch((err: unknown) => this.debug.error(`Failed to release RESTORING marker on VM ${vmId}: ${err instanceof Error ? err.message : String(err)}`))
       }
     } catch (error: any) {
       this.debug.error(`Failed to restore snapshot: ${error.message}`)

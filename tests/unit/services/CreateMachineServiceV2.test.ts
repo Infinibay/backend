@@ -389,6 +389,97 @@ describe('CreateMachineServiceV2', () => {
     })
   })
 
+  // ─── buildVMConfig: display + privilege hardening ───────────────────────
+  //
+  // buildVMConfig is private, so we exercise it through create() and inspect
+  // the VMCreateConfig handed to infinization.createVM. These assertions lock
+  // in the production-readiness fixes:
+  //   B1   — a non-empty displayPassword is always supplied (the library
+  //          delivers it over QMP set_password and its fail-closed guard would
+  //          otherwise throw INVALID_CONFIG on a non-loopback bind).
+  //   L249 — displayAddr defaults to loopback (127.0.0.1) when APP_HOST unset.
+  //   H11  — runAsUser is threaded from INFINIZATION_QEMU_USER (undefined when
+  //          unset, preserving the current no-privilege-drop behavior).
+  describe('buildVMConfig - display + privilege hardening', () => {
+    let savedAppHost: string | undefined
+    let savedQemuUser: string | undefined
+
+    beforeEach(() => {
+      savedAppHost = process.env.APP_HOST
+      savedQemuUser = process.env.INFINIZATION_QEMU_USER
+      delete process.env.APP_HOST
+      delete process.env.INFINIZATION_QEMU_USER
+    })
+
+    afterEach(() => {
+      if (savedAppHost === undefined) delete process.env.APP_HOST
+      else process.env.APP_HOST = savedAppHost
+      if (savedQemuUser === undefined) delete process.env.INFINIZATION_QEMU_USER
+      else process.env.INFINIZATION_QEMU_USER = savedQemuUser
+    })
+
+    async function runCreateAndCapture(): Promise<any> {
+      const machine = makeMachine()
+      const template = makeTemplate()
+      const config = makeConfiguration()
+
+      mockPrisma.machineTemplate.findUnique.mockResolvedValue(template as any)
+      mockPrisma.machineConfiguration.findUnique.mockResolvedValue(config as any)
+      mockPrisma.machineApplication.findMany.mockResolvedValue([] as any)
+      mockPrisma.scriptExecution.findMany.mockResolvedValue([] as any)
+      mockPrisma.machine.update.mockResolvedValue(machine as any)
+      mockPrisma.machineConfiguration.update.mockResolvedValue(config as any)
+      mockInfinization.createVM.mockResolvedValue(makeCreateResult())
+
+      await service.create(
+        machine, 'admin', 'password123', undefined, null,
+        'en_US.UTF-8', 'us', 'America/New_York',
+      )
+
+      expect(mockInfinization.createVM).toHaveBeenCalledTimes(1)
+      return (mockInfinization.createVM as jest.Mock).mock.calls[0][0]
+    }
+
+    it('(a) supplies a non-empty displayPassword and persists the same value as graphicPassword', async () => {
+      const vmCreateConfig = await runCreateAndCapture()
+
+      expect(typeof vmCreateConfig.displayPassword).toBe('string')
+      expect(vmCreateConfig.displayPassword.length).toBeGreaterThan(0)
+
+      // Single source of truth: the persisted graphicPassword must equal the
+      // generated displayPassword (so the console-connect resolver can present
+      // the same ticket the library provisioned over QMP).
+      const updateArg = (mockPrisma.machineConfiguration.update as jest.Mock).mock.calls[0][0]
+      expect(updateArg.data.graphicPassword).toBe(vmCreateConfig.displayPassword)
+    })
+
+    it('(b) defaults displayAddr to 127.0.0.1 when APP_HOST is unset', async () => {
+      const vmCreateConfig = await runCreateAndCapture()
+      expect(vmCreateConfig.displayAddr).toBe('127.0.0.1')
+    })
+
+    it('(b2) honors APP_HOST for displayAddr when set (paired with the password)', async () => {
+      process.env.APP_HOST = '192.168.1.100'
+      const vmCreateConfig = await runCreateAndCapture()
+      expect(vmCreateConfig.displayAddr).toBe('192.168.1.100')
+      // A routable bind is only safe because it is paired with a real password.
+      expect(vmCreateConfig.displayPassword?.length).toBeGreaterThan(0)
+    })
+
+    it('(c) sets runAsUser from INFINIZATION_QEMU_USER when set', async () => {
+      process.env.INFINIZATION_QEMU_USER = 'infinibay-qemu'
+      const vmCreateConfig = await runCreateAndCapture()
+      expect(vmCreateConfig.runAsUser).toBe('infinibay-qemu')
+    })
+
+    it('(c2) leaves runAsUser undefined when INFINIZATION_QEMU_USER is unset (no privilege-drop regression)', async () => {
+      const vmCreateConfig = await runCreateAndCapture()
+      expect(vmCreateConfig.runAsUser).toBeUndefined()
+      // seccomp sandbox stays on: disableSandbox must never be set to true here.
+      expect(vmCreateConfig.disableSandbox).not.toBe(true)
+    })
+  })
+
   // ─── getGraphicsInfo ───────────────────────────────────────────────────
 
   describe('getGraphicsInfo', () => {

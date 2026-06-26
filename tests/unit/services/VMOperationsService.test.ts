@@ -26,11 +26,18 @@ describe('VMOperationsService', () => {
   const invalidMachineId = ''
   const specialCharsMachineId = 'vm@#$%^&*()'
 
+  let machineFindUnique: jest.Mock
+
   beforeEach(() => {
     jest.clearAllMocks()
-    mockPrisma = {} as PrismaClient
+    // startMachine now reads Machine.status to refuse power-on during a disk op
+    // (audit H1). Default the row to a stopped, non-disk-op status so existing
+    // power tests pass through; the disk-op describe below overrides it.
+    machineFindUnique = jest.fn().mockResolvedValue({ status: 'off' })
+    mockPrisma = { machine: { findUnique: machineFindUnique } } as unknown as PrismaClient
     service = new VMOperationsService(mockPrisma)
     jest.spyOn(logger, 'info').mockImplementation(() => undefined as any)
+    jest.spyOn(logger, 'warn').mockImplementation(() => undefined as any)
   })
 
   afterEach(() => {
@@ -90,6 +97,31 @@ describe('VMOperationsService', () => {
 
       expect(result.success).toBe(false)
       expect(result.error).toBe('Invalid characters in machine ID')
+    })
+  })
+
+  describe('startMachine — disk-op refusal (audit H1)', () => {
+    it.each(['backing_up', 'restoring', 'snapshotting'])(
+      'refuses to start while a disk operation (%s) holds the row, without calling startVM',
+      async (status) => {
+        machineFindUnique.mockResolvedValueOnce({ status })
+
+        const result = await service.startMachine(validMachineId)
+
+        expect(result.success).toBe(false)
+        expect(result.error).toMatch(/disk operation in progress/i)
+        expect(mockInfinization.startVM).not.toHaveBeenCalled()
+      }
+    )
+
+    it('still starts when the row is in a normal stopped status', async () => {
+      machineFindUnique.mockResolvedValueOnce({ status: 'off' })
+      mockInfinization.startVM.mockResolvedValue({ success: true, message: 'ok' })
+
+      const result = await service.startMachine(validMachineId)
+
+      expect(result.success).toBe(true)
+      expect(mockInfinization.startVM).toHaveBeenCalledWith(validMachineId)
     })
   })
 

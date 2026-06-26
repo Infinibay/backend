@@ -227,8 +227,9 @@ model Machine {
   id                 String                @id @default(uuid())
   name               String
   internalName       String
-  /// QEMU process state. Allowed values: off | starting | running | suspended | paused | updating_hardware | powering_off_update | rebuilding | error.
+  /// QEMU process state. Allowed values: off | starting | running | suspended | paused | updating_hardware | powering_off_update | rebuilding | deleting | moving | backing_up | restoring | snapshotting | archived | delete_failed | error.
   /// 'rebuilding' is a transient lock set while a non-persistent pool desktop is re-baselined to its golden image (see NonPersistentResetService).
+  /// 'backing_up' | 'restoring' | 'snapshotting' are transient disk-op locks that claim a stopped VM for an exclusive qemu-img operation; power-on is refused while they are set (see constants/machine-status.ts, audit H1). Free-form String column — adding these required NO migration.
   /// Independent from MachineConfiguration.setupComplete (whether OS install + first infiniservice handshake completed).
   status             String
   userId             String?

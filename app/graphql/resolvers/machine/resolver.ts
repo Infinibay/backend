@@ -26,6 +26,7 @@ import { GraphicPortService } from '@utils/VirtManager/graphicPortService'
 import { MachineLifecycleService } from '../../../services/machineLifecycleService'
 import { getEventManager } from '../../../services/EventManager'
 import { VMOperationsService } from '../../../services/VMOperationsService'
+import { isDiskOperationInProgress } from '../../../constants/machine-status'
 import { getSocketService } from '../../../services/SocketService'
 import { VMMoveService } from '../../../services/VMMoveService'
 import { FirewallOrchestrationService } from '../../../services/firewall/FirewallOrchestrationService'
@@ -519,6 +520,20 @@ export class MachineMutations {
       const machine = await prisma.machine.findFirst({ where: { id } })
       if (!machine) {
         return { success: false, message: 'Machine not found' }
+      }
+
+      // Refuse to power on a VM whose row is claimed by an in-progress disk
+      // operation (backing_up / restoring / snapshotting). Starting qemu while
+      // qemu-img holds the qcow2 open corrupts the image. The DB status claim set
+      // by BackupService / SnapshotServiceV2 is the authoritative cross-service
+      // gate (audit H1). VMOperationsService.startMachine re-checks this too;
+      // this is the outer fail-closed guard at the API boundary.
+      if (action === 'powerOn' && isDiskOperationInProgress(machine.status)) {
+        this.debug.warn(`[changeMachineState] Refusing powerOn for ${id}: disk operation in progress (status=${machine.status})`)
+        return {
+          success: false,
+          message: `VM has a disk operation in progress (${machine.status}). Wait for the backup/restore/snapshot to finish before powering on.`
+        }
       }
 
       // Pre-operation logging
