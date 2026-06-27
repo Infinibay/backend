@@ -286,4 +286,88 @@ describe('UserResolver — real database', () => {
       expect(result.role).toBe('ADMIN')
     })
   })
+
+  describe('destroyUser', () => {
+    it('soft-deletes the user and invalidates their tokens', async () => {
+      const target = await createUser(prisma)
+
+      const result = await resolver.destroyUser(target.id, adminContext)
+
+      expect(result).toBe(true)
+      const reloaded = await prisma.user.findUnique({ where: { id: target.id } })
+      expect(reloaded?.deleted).toBe(true)
+      expect(reloaded?.tokenInvalidatedAt).not.toBeNull()
+    })
+
+    it('hides a soft-deleted user from user(id) and users()', async () => {
+      const target = await createUser(prisma, { email: `gone-${Date.now()}@test.infinibay` })
+      await resolver.destroyUser(target.id, adminContext)
+
+      expect(await resolver.user(target.id, adminContext)).toBeNull()
+
+      const list = await resolver.users(
+        { fieldName: UserOrderByField.EMAIL, direction: OrderByDirection.ASC },
+        { take: 100, skip: 0 },
+        adminContext
+      )
+      expect(list.find(u => u.id === target.id)).toBeUndefined()
+    })
+
+    it('throws UserInputError when the user does not exist', async () => {
+      await expect(resolver.destroyUser('non-existent-id', adminContext))
+        .rejects.toThrow(UserInputError)
+    })
+
+    it('throws UserInputError for an already soft-deleted user', async () => {
+      const target = await createUser(prisma, { deleted: true })
+      await expect(resolver.destroyUser(target.id, adminContext))
+        .rejects.toThrow(UserInputError)
+    })
+
+    it('refuses to delete your own account', async () => {
+      // A second admin guarantees the self-delete (not the last-admin) guard fires.
+      await createAdmin(prisma)
+      await expect(resolver.destroyUser(adminContext.user!.id, adminContext))
+        .rejects.toThrow('your own account')
+    })
+
+    it('refuses to let a non-SUPER_ADMIN delete a SUPER_ADMIN', async () => {
+      const superAdmin = await createUser(prisma, { role: 'SUPER_ADMIN' })
+      // adminContext.user is an ADMIN, not a SUPER_ADMIN.
+      await expect(resolver.destroyUser(superAdmin.id, adminContext))
+        .rejects.toThrow(UserInputError)
+    })
+
+    it('lets a SUPER_ADMIN delete another SUPER_ADMIN', async () => {
+      const superActor = await createUser(prisma, { role: 'SUPER_ADMIN' })
+      const superTarget = await createUser(prisma, { role: 'SUPER_ADMIN' })
+      const ctx = { ...adminContext, user: superActor } as InfinibayContext
+
+      const result = await resolver.destroyUser(superTarget.id, ctx)
+
+      expect(result).toBe(true)
+      const reloaded = await prisma.user.findUnique({ where: { id: superTarget.id } })
+      expect(reloaded?.deleted).toBe(true)
+    })
+
+    it('refuses to delete the last administrator', async () => {
+      // The beforeEach admin is the ONLY admin; a non-admin actor avoids the
+      // self-delete guard so the last-admin guard is what trips.
+      const actor = await createUser(prisma, { role: 'USER' })
+      const ctx = { ...adminContext, user: actor } as InfinibayContext
+
+      await expect(resolver.destroyUser(adminContext.user!.id, ctx))
+        .rejects.toThrow('last administrator')
+    })
+
+    it('allows deleting an admin when another administrator remains', async () => {
+      const secondAdmin = await createAdmin(prisma)
+
+      const result = await resolver.destroyUser(secondAdmin.id, adminContext)
+
+      expect(result).toBe(true)
+      const reloaded = await prisma.user.findUnique({ where: { id: secondAdmin.id } })
+      expect(reloaded?.deleted).toBe(true)
+    })
+  })
 })

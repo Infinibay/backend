@@ -49,6 +49,7 @@ export interface UserResolverInterface {
     input: UpdateUserInputType,
     context: InfinibayContext
   ): Promise<UserType>
+  destroyUser(id: string, context: InfinibayContext): Promise<boolean>
 }
 
 @Resolver(() => UserType)
@@ -86,9 +87,9 @@ export class UserResolver implements UserResolverInterface {
   ): Promise<UserType | null> {
     const prisma = context.prisma
     const user = await prisma.user.findUnique({ where: { id } })
-    // thrwo exception if user not found
-    if (!user) {
-      // throw new UserInputError('User not found')
+    // Treat a soft-deleted user (deleted: true) as not found, so a destroyed
+    // account never resurfaces through this lookup.
+    if (!user || user.deleted) {
       return null
     }
     return user as unknown as UserType
@@ -122,6 +123,9 @@ export class UserResolver implements UserResolverInterface {
       }
     }
     const users = await prisma.user.findMany({
+      // Exclude soft-deleted users so a destroyed account does not reappear in
+      // the admin list on the next refetch.
+      where: { deleted: false },
       orderBy: order,
       take,
       skip,
@@ -462,5 +466,80 @@ export class UserResolver implements UserResolverInterface {
     }
 
     return updatedUser as unknown as UserType
+  }
+
+  /*
+  destroyUser Mutation
+  @Args
+      id: ID!
+  Require user:delete @ ANY (an admin managing other people's accounts).
+
+  SOFT delete (sets `deleted: true`) — NOT a row delete. A hard delete is blocked
+  by required (Restrict) foreign keys (MaintenanceTask.createdByUserId,
+  RecommendationResolution.triggeredByUserId, DepartmentScript.assignedById) and
+  would orphan owned VMs (Machine.userId → null) and blank audit attribution.
+  Soft delete preserves history; `login`/`refreshToken`/`user`/`users` already
+  filter `deleted: false`, so the account disappears everywhere.
+
+  Guards (mirroring updateUser): cannot delete your own account, cannot delete a
+  SUPER_ADMIN unless you are one, and cannot delete the last administrator.
+  */
+  @Mutation(() => Boolean)
+  @Can('user:delete', { id: (a) => a.id, minScope: 'ANY' })
+  async destroyUser (
+    @Arg('id') id: string,
+    @Ctx() context: InfinibayContext
+  ): Promise<boolean> {
+    const prisma = context.prisma
+
+    const user = await prisma.user.findUnique({ where: { id } })
+    if (!user || user.deleted) {
+      throw new UserInputError('User not found')
+    }
+
+    // Cannot delete your own account: avoids an admin locking themselves out and
+    // tearing down the session performing the request. Belt-and-braces with the
+    // authz layer (minScope: 'ANY'), which already rejects an OWN-scoped grant
+    // that would otherwise resolve "self".
+    if (context.user?.id === id) {
+      throw new UserInputError('You cannot delete your own account')
+    }
+
+    // Only a SUPER_ADMIN may delete a SUPER_ADMIN (mirrors updateUser's
+    // SUPER_ADMIN protection).
+    if (user.role === 'SUPER_ADMIN' && context.user?.role !== 'SUPER_ADMIN') {
+      throw new UserInputError('Only SUPER_ADMIN users can delete a SUPER_ADMIN user.')
+    }
+
+    // Never delete the last remaining administrator — that would lock everyone
+    // out of user/role governance.
+    if (user.role === 'ADMIN' || user.role === 'SUPER_ADMIN') {
+      const otherAdmins = await prisma.user.count({
+        where: { deleted: false, id: { not: id }, role: { in: ['ADMIN', 'SUPER_ADMIN'] } }
+      })
+      if (otherAdmins === 0) {
+        throw new UserInputError('Cannot delete the last administrator account')
+      }
+    }
+
+    // Soft delete + kill the deleted user's sessions immediately (same pattern as
+    // logout): set the access-token revocation cutoff and revoke refresh tokens.
+    await prisma.user.update({
+      where: { id },
+      data: { deleted: true, tokenInvalidatedAt: new Date() }
+    })
+    await revokeAllForUser(prisma, id)
+
+    // Trigger real-time event for user deletion (best-effort).
+    try {
+      const eventManager = getEventManager()
+      await eventManager.dispatchEvent('users', 'delete', { id }, context.user?.id)
+      logger.info(`🎯 Triggered real-time event: users:delete for user ${id}`)
+    } catch (eventError) {
+      logger.error('Failed to trigger real-time event:', eventError)
+      // Don't fail the main operation if event triggering fails
+    }
+
+    return true
   }
 }
