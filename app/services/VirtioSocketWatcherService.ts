@@ -31,6 +31,7 @@ import { KeepAliveManager } from './socket-watcher/KeepAliveManager'
 import { MessageRouter } from './socket-watcher/MessageRouter'
 import { ConnectionManager } from './socket-watcher/ConnectionManager'
 import { HealthMonitor } from './socket-watcher/HealthMonitor'
+import { signForVm } from './socket-watcher/AgentMessageSigner'
 
 // Import all types, constants, and helpers from the canonical source
 import {
@@ -124,6 +125,9 @@ export class VirtioSocketWatcherService extends EventEmitter {
   private messageRouter: MessageRouter
   private connectionManager: ConnectionManager
   private healthMonitor: HealthMonitor
+
+  // One-time guard so a missing master secret warns once, not per message.
+  private warnedNoAgentSecret = false
 
   constructor(prismaClient: typeof prisma) {
     super()
@@ -246,11 +250,30 @@ export class VirtioSocketWatcherService extends EventEmitter {
       return
     }
 
+    // SECURITY: every host→agent message is HMAC-signed. The agent rejects
+    // anything unsigned (fail-closed), so we must sign here — the single choke
+    // point all outbound traffic funnels through. Without a master secret we
+    // cannot authenticate; sending an unsigned message would only be dropped by
+    // the agent, so refuse and warn once.
+    const envelope = signForVm(connection.vmId, message)
+    if (!envelope) {
+      if (!this.warnedNoAgentSecret) {
+        this.warnedNoAgentSecret = true
+        this.debug.error(
+          'INFINISERVICE_HMAC_MASTER_SECRET is not set: cannot sign agent messages. ' +
+          'All host→agent commands are being withheld (the agent rejects unsigned messages). ' +
+          'Configure the master secret to enable command delivery.'
+        )
+      }
+      connection.messageStats.errors++
+      return
+    }
+
     try {
-      const messageStr = JSON.stringify(message) + '\n'
+      const messageStr = JSON.stringify(envelope) + '\n'
       const messageSize = Buffer.byteLength(messageStr, 'utf8')
 
-      this.debug.debug(`📤 Sending message to VM ${connection.vmId}: size=${messageSize} bytes, type=${message.type || 'unknown'}`)
+      this.debug.debug(`📤 Sending signed message to VM ${connection.vmId}: size=${messageSize} bytes, type=${message.type || 'unknown'}`)
       // Payload preview suppressed: outbound messages can carry secrets
       // (e.g. the domain-join password). Log only the size, never the body.
       this.debug.debug(`Message payload suppressed (${messageSize} bytes)`)

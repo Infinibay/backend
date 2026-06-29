@@ -12,6 +12,7 @@ import { promises as fsPromises } from 'fs'
 
 import { UnattendedManagerBase } from './unattendedManagerBase'
 import { escapeForCmd, escapeForPowerShellArg } from './shellEscape'
+import { deriveVmSecret } from './socket-watcher/AgentMessageSigner'
 
 export interface ComponentConfig {
   name: string;
@@ -600,6 +601,16 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
     const baseUrl = `http://${backendHost}:${backendPort}`
     const { PATHS, INFINISERVICE } = UnattendedWindowsManager
 
+    // Per-VM HMAC secret (hex). install-windows.ps1 reads it from the env var
+    // and stores it in the service-private registry environment (ACL'd). We set
+    // it inline on the install command (running in the single-user OOBE context,
+    // so it is not observable by any unprivileged user). Empty when no master
+    // secret is configured → agent runs LOCKED.
+    const agentSecret = deriveVmSecret(this.vmId)
+    const agentSecretPrefix = agentSecret
+      ? `$env:INFINISERVICE_SHARED_SECRET='${agentSecret}'; `
+      : ''
+
     const commands = [
       {
         $: { 'wcm:action': 'add' },
@@ -662,7 +673,9 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
         Order: idx + 8,
         Description: 'Install InfiniService',
         RequiresUserInput: false,
-        CommandLine: `powershell -ExecutionPolicy Bypass -File C:\\Temp\\InfiniService\\install-windows.ps1 -ServiceMode normal -VmId ${escapeForPowerShellArg(this.vmId)}`
+        CommandLine: agentSecret
+          ? `powershell -ExecutionPolicy Bypass -Command "${agentSecretPrefix}& 'C:\\Temp\\InfiniService\\install-windows.ps1' -ServiceMode normal -VmId ${escapeForPowerShellArg(this.vmId)}"`
+          : `powershell -ExecutionPolicy Bypass -File C:\\Temp\\InfiniService\\install-windows.ps1 -ServiceMode normal -VmId ${escapeForPowerShellArg(this.vmId)}`
       },
       {
         $: { 'wcm:action': 'add' },

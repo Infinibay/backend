@@ -181,6 +181,9 @@ export class UnattendedManagerBase {
       .replace(/(<(?:Password|PlainText)>)[\s\S]*?(<\/(?:Password|PlainText)>)/gi, '$1**redacted**$2')
       // YAML / kickstart credential lines.
       .replace(/^(\s*(?:password|passwd|plain_text_passwd|rootpw)\s*[:=]\s*).*$/gim, '$1**redacted**')
+      // Per-VM infiniservice HMAC secret, injected as `export FOO='...'` (Linux)
+      // or `$env:FOO='...'` (Windows CommandLine). Mask the single-quoted value.
+      .replace(/(INFINISERVICE_SHARED_SECRET\s*=\s*')[^']*(')/gi, '$1**redacted**$2')
   }
 
   /**

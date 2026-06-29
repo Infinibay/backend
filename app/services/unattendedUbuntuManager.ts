@@ -6,6 +6,7 @@ import { Application, PrismaClient } from '@prisma/client'
 import { promises as fsPromises } from 'fs'
 import { Eta } from 'eta'
 import { randomBytes } from 'crypto'
+import { deriveVmSecret } from './socket-watcher/AgentMessageSigner'
 
 import { UnattendedManagerBase } from './unattendedManagerBase'
 
@@ -325,6 +326,14 @@ EOF`,
     const backendPort = process.env.PORT || '4000'
     const baseUrl = `http://${backendHost}:${backendPort}`
 
+    // Per-VM HMAC secret derived from the host master secret. The installer
+    // reads it from its environment and writes it to a root-only EnvironmentFile.
+    // Derived value is hex ([0-9a-f]), safe to single-quote.
+    const agentSecret = deriveVmSecret(this.vmId)
+    const agentSecretExport = agentSecret
+      ? `export INFINISERVICE_SHARED_SECRET='${agentSecret}'`
+      : '# INFINISERVICE_SHARED_SECRET not provisioned (no master secret); agent will run LOCKED'
+
     const commands = [
       // Create InfiniService installation script
       `cat > /target/var/lib/cloud/scripts/per-instance/install_infiniservice.sh << 'EOF'
@@ -388,6 +397,9 @@ fi
 
 # Make files executable
 chmod +x infiniservice install-linux.sh
+
+# Provide the per-VM HMAC secret to the installer (root-only EnvironmentFile).
+${agentSecretExport}
 
 # Run installation script with VM ID
 log_message "Installing InfiniService with VM ID: ${this.vmId}"

@@ -5,6 +5,7 @@ import * as path from 'path'
 import { Eta } from 'eta'
 
 import { UnattendedManagerBase } from './unattendedManagerBase'
+import { deriveVmSecret } from './socket-watcher/AgentMessageSigner'
 
 /**
  * UnattendedRedHatManager is a class that extends UnattendedManagerBase.
@@ -179,6 +180,12 @@ export class UnattendedRedHatManager extends UnattendedManagerBase {
     const backendPort = process.env.PORT || '4000'
     const baseUrl = `http://${backendHost}:${backendPort}`
 
+    // Per-VM HMAC secret (hex) for the installer's root-only EnvironmentFile.
+    const agentSecret = deriveVmSecret(this.vmId)
+    const agentSecretExport = agentSecret
+      ? `export INFINISERVICE_SHARED_SECRET='${agentSecret}'`
+      : '# INFINISERVICE_SHARED_SECRET not provisioned (no master secret); agent will run LOCKED'
+
     // Build a robust post-install script with network waiting and retries
     const postInstallScript = `%post --log=/root/infiniservice-install.log
 echo "=== Starting InfiniService Installation ==="
@@ -271,6 +278,9 @@ fi
 
 # Make files executable
 chmod +x infiniservice install-linux.sh
+
+# Provide the per-VM HMAC secret to the installer (root-only EnvironmentFile).
+${agentSecretExport}
 
 # Run installation script with VM ID
 echo "Installing InfiniService with VM ID: ${this.vmId}"
