@@ -2,7 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import forge from 'node-forge'
 import logger from '@main/logger'
-import { certFingerprint, csrPublicKeyFingerprint } from './clusterCrypto'
+import { certFingerprint, certExpiresWithinDays, csrPublicKeyFingerprint } from './clusterCrypto'
 import type { ClusterIdentity } from './clusterMtls'
 
 /**
@@ -174,9 +174,7 @@ export class ClusterCA {
 
   /** True if the PEM cert is expired or expires within `days` from now. */
   static expiresWithinDays (certPem: string, days: number): boolean {
-    const cert = forge.pki.certificateFromPem(certPem)
-    const threshold = new Date(Date.now() + days * 24 * 60 * 60 * 1000)
-    return cert.validity.notAfter <= threshold
+    return certExpiresWithinDays(certPem, days)
   }
 
   /**

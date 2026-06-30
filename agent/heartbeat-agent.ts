@@ -32,6 +32,7 @@
  */
 import os from 'os'
 import fs from 'fs'
+import path from 'path'
 import https from 'node:https'
 import express from 'express'
 import { Infinization } from '@infinibay/infinization'
@@ -39,6 +40,7 @@ import { RpcDatabaseAdapter, HttpDbRpcTransport } from '../app/services/node/Rpc
 import { createAgentVerbRouter } from '../app/services/node/AgentVerbServer'
 import { type NodeExecutor } from '../app/services/node/NodeExecutor'
 import { loadClusterIdentity, httpsJsonPost, clusterServerOptions, type ClusterIdentity } from '../app/services/node/clusterMtls'
+import { generateNodeKeyAndCsr, certFingerprint, certExpiresWithinDays } from '../app/services/node/clusterCrypto'
 
 const MASTER_URL = (process.env.MASTER_URL || 'http://localhost:4000').replace(/\/+$/, '')
 const NAME = process.env.INFINIBAY_NODE_NAME || os.hostname()
@@ -58,16 +60,25 @@ const PID_DIR = process.env.INFINIZATION_PID_DIR || '/opt/infinibay/pids'
 // run the verb server over HTTPS — the shared token is no longer used for ops. The
 // master's cluster server is a SEPARATE HTTPS endpoint (MASTER_CLUSTER_URL).
 const CERT_DIR = process.env.INFINIBAY_CERT_DIR || '/opt/infinibay/certs'
+const KEY_PATH = path.join(CERT_DIR, 'node-key.pem')
+const CERT_PATH = path.join(CERT_DIR, 'node-cert.pem')
+const CA_PATH = path.join(CERT_DIR, 'cluster-ca.pem')
 const MASTER_CLUSTER_URL = (process.env.MASTER_CLUSTER_URL || MASTER_URL).replace(/\/+$/, '')
 // The master's certificate CN — pinned on BOTH directions (the agent verifies the
 // master's server cert on agent→master calls, and only the master's CN may call
 // the verb server). Required under mTLS; the agent fails closed if it is unset.
 const MASTER_CN = process.env.INFINIBAY_MASTER_CN || undefined
-const IDENTITY: ClusterIdentity | null = loadClusterIdentity(CERT_DIR)
+// Mutable so a renewed (rotated) certificate can be hot-swapped in-process without
+// a restart (Phase 2.1e). Read via currentIdentity() everywhere it is used.
+let identity: ClusterIdentity | null = loadClusterIdentity(CERT_DIR)
+function currentIdentity (): ClusterIdentity { return identity! }
 // mTLS is REQUESTED when INFINIBAY_CLUSTER_MTLS=1 (hard requirement) and ACTIVE
 // when the client certs are present and it is not explicitly disabled.
 const MTLS_REQUIRED = process.env.INFINIBAY_CLUSTER_MTLS === '1'
-const MTLS = IDENTITY !== null && process.env.INFINIBAY_CLUSTER_MTLS !== '0'
+const MTLS = identity !== null && process.env.INFINIBAY_CLUSTER_MTLS !== '0'
+// Renew the node's own cert this many days before it lapses; check on this interval.
+const CERT_RENEW_BEFORE_DAYS = 30
+const CERT_RENEW_CHECK_MS = 12 * 60 * 60 * 1000 // 12h
 
 // ---------------------------------------------------------------------------
 // Verb target: a lazily-constructed infinization instance whose DB access is
@@ -85,7 +96,8 @@ async function buildTarget (): Promise<NodeExecutor> {
   const databaseAdapter = new RpcDatabaseAdapter(
     new HttpDbRpcTransport(
       MTLS
-        ? { masterUrl: MASTER_CLUSTER_URL, nodeName: NAME, identity: IDENTITY!, masterCn: MASTER_CN! }
+        // Pass the identity as a GETTER so a renewed cert is used on the next call.
+        ? { masterUrl: MASTER_CLUSTER_URL, nodeName: NAME, identity: currentIdentity, masterCn: MASTER_CN! }
         : { masterUrl: MASTER_URL, nodeName: NAME, token: TOKEN }
     )
   )
@@ -148,7 +160,7 @@ async function sendHeartbeat (): Promise<void> {
     let status: number
     let text: string
     if (MTLS) {
-      const r = await httpsJsonPost(`${MASTER_CLUSTER_URL}/cluster/heartbeat`, body, IDENTITY!, { expectedCn: MASTER_CN! })
+      const r = await httpsJsonPost(`${MASTER_CLUSTER_URL}/cluster/heartbeat`, body, currentIdentity(), { expectedCn: MASTER_CN! })
       status = r.status
       text = r.text
     } else {
@@ -175,6 +187,9 @@ async function sendHeartbeat (): Promise<void> {
 // ---------------------------------------------------------------------------
 // Verb HTTP server
 // ---------------------------------------------------------------------------
+// Kept so cert renewal can hot-swap the TLS context (Phase 2.1e).
+let verbHttpsServer: https.Server | null = null
+
 function startVerbServer (): void {
   const app = express()
   app.get('/agent/health', (_req: express.Request, res: express.Response) => {
@@ -190,11 +205,12 @@ function startVerbServer (): void {
   if (MTLS) {
     // Only the master's CN may call verbs (mandatory pin — guaranteed set by main()).
     app.use('/agent', createAgentVerbRouter({ getTarget, auth: 'mtls', masterCn: MASTER_CN }))
-    const server = https.createServer(clusterServerOptions(IDENTITY!, { rejectUnauthorized: true }), app)
+    const server = https.createServer(clusterServerOptions(currentIdentity(), { rejectUnauthorized: true }), app)
     server.on('error', onListenError)
     server.listen(AGENT_PORT, () => {
       console.log(`[agent] verb server listening on :${AGENT_PORT} (HTTPS mTLS, master CN '${MASTER_CN}', POST /agent/vm)`)
     })
+    verbHttpsServer = server
   } else {
     app.use('/agent', createAgentVerbRouter({ getTarget }))
     const server = app.listen(AGENT_PORT, () => {
@@ -204,10 +220,44 @@ function startVerbServer (): void {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Certificate renewal (Phase 2.1e) — rotate this node's leaf before it expires,
+// over the mTLS channel (the current cert is the auth; no re-approval), and
+// hot-swap it in-process so a long-running agent never lapses.
+// ---------------------------------------------------------------------------
+async function maybeRenewCert (): Promise<void> {
+  if (!MTLS) return
+  const id = identity
+  if (!id || !certExpiresWithinDays(id.cert, CERT_RENEW_BEFORE_DAYS)) return
+
+  console.log('[agent] client certificate is near expiry — renewing…')
+  const { privateKeyPem, csrPem } = generateNodeKeyAndCsr(NAME)
+  const r = await httpsJsonPost(`${MASTER_CLUSTER_URL}/cluster/renew`, { csrPem }, id, { expectedCn: MASTER_CN! })
+  if (r.status < 200 || r.status >= 300) {
+    console.error(`[agent] cert renewal rejected (${r.status}): ${r.text}`)
+    return
+  }
+  const body = JSON.parse(r.text) as { certPem?: string, caCertPem?: string }
+  if (!body.certPem) {
+    console.error('[agent] cert renewal response missing certPem')
+    return
+  }
+  // Persist (key 0600), then hot-swap the in-process identity + the verb server's
+  // TLS context. New agent→master calls use the getter, so they pick it up too.
+  fs.writeFileSync(KEY_PATH, privateKeyPem, { mode: 0o600 })
+  fs.writeFileSync(CERT_PATH, body.certPem, { mode: 0o644 })
+  if (body.caCertPem) fs.writeFileSync(CA_PATH, body.caCertPem, { mode: 0o644 })
+  identity = { key: privateKeyPem, cert: body.certPem, ca: body.caCertPem ?? id.ca }
+  if (verbHttpsServer) {
+    verbHttpsServer.setSecureContext(clusterServerOptions(identity, { rejectUnauthorized: true }))
+  }
+  console.log(`[agent] certificate renewed (fingerprint ${certFingerprint(body.certPem).slice(0, 16)}…)`)
+}
+
 function main (): void {
   // Fail closed when mTLS is MANDATED but the materials to do it securely are absent —
   // never silently downgrade to the cleartext token channel against operator intent.
-  if (MTLS_REQUIRED && IDENTITY === null) {
+  if (MTLS_REQUIRED && identity === null) {
     console.error('[agent] FATAL: INFINIBAY_CLUSTER_MTLS=1 but no client certificate in INFINIBAY_CERT_DIR')
     console.error('[agent]        run `npm run agent:join` to enroll this node, then restart')
     process.exit(1)
@@ -229,7 +279,21 @@ function main (): void {
   startVerbServer()
   void sendHeartbeat()
   const timer = setInterval(() => { void sendHeartbeat() }, INTERVAL_MS)
-  const shutdown = (): void => { clearInterval(timer); process.exit(0) }
+
+  // Proactively rotate this node's certificate before it lapses (mTLS only).
+  let renewTimer: NodeJS.Timeout | null = null
+  if (MTLS) {
+    const renew = (): void => { maybeRenewCert().catch((e) => console.error(`[agent] cert renewal error: ${String(e)}`)) }
+    renew()
+    renewTimer = setInterval(renew, CERT_RENEW_CHECK_MS)
+    if (typeof renewTimer.unref === 'function') renewTimer.unref()
+  }
+
+  const shutdown = (): void => {
+    clearInterval(timer)
+    if (renewTimer) clearInterval(renewTimer)
+    process.exit(0)
+  }
   process.on('SIGINT', shutdown)
   process.on('SIGTERM', shutdown)
 }

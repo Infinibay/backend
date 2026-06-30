@@ -187,4 +187,32 @@ describe('NodeEnrollmentService (SAS-verified onboarding)', () => {
     const reenrolled = await svc.requestEnrollment({ name: 'worker-6', csrPem: attackerCsr })
     expect(reenrolled.status).toBe('pending')
   })
+
+  it('renews an onboarded node cert (rotates the key, same CN, chains to CA) — no re-approval', async () => {
+    const { prisma } = makeFakePrisma()
+    const svc = new NodeEnrollmentService(prisma, ca)
+    const csrPem = makeNodeKeyAndCsr('worker-7')
+    const pending = await svc.requestEnrollment({ name: 'worker-7', csrPem })
+    await svc.approve(pending.nodeId, pending.sasCode)
+    const issued = await svc.poll({ name: 'worker-7', csrPem })
+    const firstFp = issued.status === 'issued' ? issued.fingerprint : ''
+
+    // Renew with a FRESH key (rotation) — authenticated by the mTLS CN, no SAS.
+    const newCsr = makeNodeKeyAndCsr('worker-7')
+    const renewed = await svc.renew('worker-7', newCsr)
+    expect(renewed.status).toBe('issued')
+    expect(renewed.fingerprint).not.toBe(firstFp) // a genuinely new cert
+    const cert = forge.pki.certificateFromPem(renewed.certPem)
+    expect(forge.pki.certificateFromPem(ca.getCaCertPem()).verify(cert)).toBe(true)
+    expect(cert.subject.getField('CN')?.value).toBe('worker-7')
+  })
+
+  it('refuses to renew a node that was never onboarded (or does not exist)', async () => {
+    const { prisma } = makeFakePrisma()
+    const svc = new NodeEnrollmentService(prisma, ca)
+    const csrPem = makeNodeKeyAndCsr('worker-8')
+    await svc.requestEnrollment({ name: 'worker-8', csrPem }) // pending, no cert yet
+    await expect(svc.renew('worker-8', csrPem)).rejects.toThrow(/not an onboarded node|cannot renew/i)
+    await expect(svc.renew('ghost', csrPem)).rejects.toThrow(/no such node/i)
+  })
 })

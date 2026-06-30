@@ -228,4 +228,36 @@ export class NodeEnrollmentService {
     logger.info(`📜 Issued client certificate to node '${node.name}' (fingerprint ${issued.fingerprint.slice(0, 16)}…)`)
     return { status: 'issued', certPem: issued.certPem, caCertPem: this.ca.getCaCertPem(), fingerprint: issued.fingerprint }
   }
+
+  /**
+   * Renew an already-onboarded node's client certificate (Phase 2.1e). Unlike
+   * enrollment this needs NO SAS/approval: the caller is identified by its CURRENT
+   * valid mTLS client cert (the route passes the verified CN as `nodeName`), so
+   * re-issuing for that same identity is safe. A fresh CSR rotates the key too.
+   *
+   * Only an approved, already-issued node may renew — a node that was never
+   * onboarded (or was rejected) must go through enrollment, not renewal.
+   */
+  async renew (nodeName: string, csrPem: string): Promise<Extract<EnrollmentResult, { status: 'issued' }>> {
+    const node = await this.prisma.node.findFirst({
+      where: { name: nodeName },
+      select: { id: true, name: true, status: true, certPem: true }
+    })
+    if (!node) {
+      throw new Error(`no such node: ${nodeName}`)
+    }
+    if (node.status !== 'approved' || !node.certPem) {
+      throw new Error(`node '${nodeName}' is not an onboarded node (status=${node.status}); cannot renew`)
+    }
+
+    // CN is the verified caller identity (nodeName), NOT the CSR's self-asserted
+    // subject — only the CSR's public key is trusted.
+    const issued = this.ca.signNodeCsr(csrPem, node.name)
+    await this.prisma.node.update({
+      where: { id: node.id },
+      data: { certPem: issued.certPem, fingerprint: issued.fingerprint }
+    })
+    logger.info(`🔄 Renewed client certificate for node '${node.name}' (fingerprint ${issued.fingerprint.slice(0, 16)}…)`)
+    return { status: 'issued', certPem: issued.certPem, caCertPem: this.ca.getCaCertPem(), fingerprint: issued.fingerprint }
+  }
 }

@@ -137,7 +137,9 @@ export class HttpDbRpcTransport implements DbRpcTransport {
       masterUrl: string
       nodeName: string
       token?: string
-      identity?: ClusterIdentity
+      // A value, or a getter resolved per-call so a renewed (rotated) certificate
+      // is picked up in-process without rebuilding the transport (Phase 2.1e).
+      identity?: ClusterIdentity | (() => ClusterIdentity)
       /** The master's CN, pinned on the mTLS server cert (required with `identity`). */
       masterCn?: string
       fetchImpl?: typeof fetch
@@ -155,7 +157,8 @@ export class HttpDbRpcTransport implements DbRpcTransport {
     let status: number
     let text: string
     if (this.opts.identity) {
-      const r = await httpsJsonPost(url, payload, this.opts.identity, { expectedCn: this.opts.masterCn! })
+      const identity = typeof this.opts.identity === 'function' ? this.opts.identity() : this.opts.identity
+      const r = await httpsJsonPost(url, payload, identity, { expectedCn: this.opts.masterCn! })
       status = r.status
       text = r.text
     } else {

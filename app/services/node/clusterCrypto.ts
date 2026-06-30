@@ -17,6 +17,18 @@ export function certFingerprint (certPem: string): string {
 }
 
 /**
+ * True if the PEM cert is expired or expires within `days` from `now` (default
+ * the current time). Used to drive proactive certificate renewal — the master's
+ * own leaf AND the node agent's leaf re-mint before they lapse, so a long-running
+ * cluster never hits a fixed-date mTLS outage.
+ */
+export function certExpiresWithinDays (certPem: string, days: number, now: Date = new Date()): boolean {
+  const cert = forge.pki.certificateFromPem(certPem)
+  const threshold = new Date(now.getTime() + days * 24 * 60 * 60 * 1000)
+  return cert.validity.notAfter <= threshold
+}
+
+/**
  * SHA-256 fingerprint of the PUBLIC KEY inside a CSR (SubjectPublicKeyInfo).
  * Verifies the CSR self-signature first.
  */

@@ -94,6 +94,14 @@ describe('ClusterCA', () => {
     expect(() => ca.signNodeCsr(tampered, 'worker-4')).toThrow()
   })
 
+  it('expiresWithinDays detects an approaching expiry (drives renewal)', () => {
+    const ca = new ClusterCA(caDir)
+    const { csrPem } = makeCsr('worker-exp')
+    const certPem = ca.signNodeCsr(csrPem, 'worker-exp').certPem // 365-day leaf
+    expect(ClusterCA.expiresWithinDays(certPem, 30)).toBe(false) // not within 30 days
+    expect(ClusterCA.expiresWithinDays(certPem, 400)).toBe(true) // within 400 days (it's a 365d cert)
+  })
+
   it('mints the master mTLS identity (CN, chains to CA, persisted 0600, idempotent)', () => {
     const ca = new ClusterCA(caDir)
     const id = ca.getMasterIdentity('master-1')

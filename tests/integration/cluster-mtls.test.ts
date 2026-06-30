@@ -223,3 +223,50 @@ describe('POST /cluster/db over mTLS — CN overrides body.nodeName', () => {
     }
   })
 })
+
+describe('POST /cluster/renew over mTLS (Phase 2.1e cert rotation)', () => {
+  beforeEach(() => { jest.clearAllMocks() })
+
+  function clusterApp () {
+    const r = express.Router()
+    r.use('/cluster', createClusterRouter({ mode: 'mtls' }))
+    return r
+  }
+
+  it('renews an onboarded node cert, identity derived from the verified CN (no re-approval)', async () => {
+    mockPrisma.node.findFirst.mockResolvedValue({ id: 'worker-1-id', name: 'worker-1', status: 'approved', certPem: 'OLD-CERT' } as never)
+    mockPrisma.node.update.mockResolvedValue({ id: 'worker-1-id' } as never)
+
+    const srv = await startServer(clusterApp())
+    try {
+      // The node presents a FRESH CSR (key rotation) over its current mTLS cert.
+      const { csrPem } = generateNodeKeyAndCsr('worker-1')
+      const r = await httpsJsonPost(`${srv.url}/cluster/renew`, { csrPem }, nodeIdentity, { expectedCn: 'master-1' })
+
+      expect(r.status).toBe(200)
+      const body = JSON.parse(r.text)
+      expect(body.status).toBe('issued')
+      expect(typeof body.certPem).toBe('string')
+      // Looked up + updated by the VERIFIED CN (worker-1), and the cert was persisted.
+      expect(mockPrisma.node.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { name: 'worker-1' } })
+      )
+      expect(mockPrisma.node.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'worker-1-id' }, data: expect.objectContaining({ certPem: body.certPem }) })
+      )
+    } finally {
+      await srv.close()
+    }
+  })
+
+  it('rejects renew with no client certificate (401), never touching the DB', async () => {
+    const srv = await startServer(clusterApp())
+    try {
+      const r = await rawPostNoCert(`${srv.url}/cluster/renew`, { csrPem: 'x' }, clusterCaPem)
+      expect(r.status).toBe(401)
+      expect(mockPrisma.node.update).not.toHaveBeenCalled()
+    } finally {
+      await srv.close()
+    }
+  })
+})

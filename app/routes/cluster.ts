@@ -201,6 +201,33 @@ export function createClusterRouter (opts: { mode?: ClusterRouterMode } = {}): e
   })
 
   /**
+   * POST /cluster/renew (mTLS only) — an onboarded node rotates its certificate
+   * before it expires (Phase 2.1e). Authenticated by the node's CURRENT client
+   * cert; identity is the verified CN, so no SAS/approval is needed. The node
+   * submits a fresh CSR (new key) and gets a new cert for the same identity.
+   */
+  if (mode === 'mtls') {
+    router.post('/renew', express.json({ limit: '64kb' }), opsAuth, async (req: Request, res: Response) => {
+      try {
+        const nodeName = verifiedCn(req)
+        const { csrPem } = (req.body ?? {}) as { csrPem?: unknown }
+        if (typeof nodeName !== 'string' || nodeName.length === 0) {
+          res.status(401).json({ error: 'a verified client certificate is required' })
+          return
+        }
+        if (typeof csrPem !== 'string' || csrPem.length === 0) {
+          res.status(400).json({ error: 'csrPem (string) is required' })
+          return
+        }
+        const result = await enrollment().renew(nodeName, csrPem)
+        res.json({ status: 'issued', certPem: result.certPem, caCertPem: result.caCertPem, fingerprint: result.fingerprint })
+      } catch (error) {
+        res.status(409).json({ error: error instanceof Error ? error.message : 'renew failed' })
+      }
+    })
+  }
+
+  /**
    * POST /cluster/enroll — a new node requests to join (Phase 2 onboarding).
    *
    * Token-gated in BOTH modes (a joining node has no client cert yet). The SAS +
