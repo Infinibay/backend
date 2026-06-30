@@ -4,7 +4,7 @@ import * as os from 'os'
 import * as path from 'path'
 import { promises as fsPromises } from 'fs'
 import * as execModule from 'child_process'
-import { UnattendedRedHatManager } from '@services/unattendedRedHatManager'
+import { KickstartInstaller } from '@services/kickstartInstaller'
 
 // Mock the logger
 const mockDebugLog = jest.fn()
@@ -64,13 +64,13 @@ jest.mock('eta', () => ({
   Eta: jest.fn().mockImplementation(() => mockEta)
 }))
 
-describe('UnattendedRedHatManager', () => {
-  let manager: UnattendedRedHatManager
+describe('KickstartInstaller', () => {
+  let manager: KickstartInstaller
 
   beforeEach(() => {
     jest.clearAllMocks()
 
-    manager = new UnattendedRedHatManager(
+    manager = new KickstartInstaller(
       'testuser',
       'testpassword123',
       [],
@@ -80,30 +80,30 @@ describe('UnattendedRedHatManager', () => {
 
   describe('constructor', () => {
     it('should create instance with valid parameters', () => {
-      expect(manager).toBeInstanceOf(UnattendedRedHatManager)
+      expect(manager).toBeInstanceOf(KickstartInstaller)
       expect(manager.configFileName).toBe('ks.cfg')
       expect(manager.isoPath).toContain('fedora.iso')
     })
 
     it('should throw error when username is empty', () => {
       expect(() => {
-        new UnattendedRedHatManager('', 'password', [])
+        new KickstartInstaller('', 'password', [])
       }).toThrow('Username and password are required')
     })
 
     it('should throw error when password is empty', () => {
       expect(() => {
-        new UnattendedRedHatManager('username', '', [])
+        new KickstartInstaller('username', '', [])
       }).toThrow('Username and password are required')
     })
 
     it('should use default locale, keyboard, and timezone', () => {
-      const m = new UnattendedRedHatManager('user', 'pass', [])
+      const m = new KickstartInstaller('user', 'pass', [])
       expect(m).toBeDefined()
     })
 
     it('should accept custom locale, keyboard, and timezone', () => {
-      const m = new UnattendedRedHatManager(
+      const m = new KickstartInstaller(
         'user',
         'pass',
         [],
@@ -116,7 +116,7 @@ describe('UnattendedRedHatManager', () => {
     })
 
     it('should set vmId to empty string when not provided', () => {
-      const m = new UnattendedRedHatManager('user', 'pass', [])
+      const m = new KickstartInstaller('user', 'pass', [])
       expect(m['vmId']).toBe('')
     })
   })
@@ -144,7 +144,7 @@ describe('UnattendedRedHatManager', () => {
 
     it('should reject invalid locale format', async () => {
       // Partial config missing many required directives
-      const testManager = new UnattendedRedHatManager('user', 'pass', [])
+      const testManager = new KickstartInstaller('user', 'pass', [])
       const validation = await (testManager as any).validateConfig('lang invalid_locale')
       expect(validation.valid).toBe(false)
       expect(validation.errors.length).toBeGreaterThan(0)
@@ -176,7 +176,7 @@ describe('UnattendedRedHatManager', () => {
         }
       ] as unknown as Application[]
 
-      const testManager = new UnattendedRedHatManager('user', 'pass', apps)
+      const testManager = new KickstartInstaller('user', 'pass', apps)
       const config = await testManager.generateApplicationsConfig()
 
       expect(config).toContain('Test App')
@@ -196,7 +196,7 @@ describe('UnattendedRedHatManager', () => {
         }
       ] as unknown as Application[]
 
-      const testManager = new UnattendedRedHatManager('user', 'pass', apps)
+      const testManager = new KickstartInstaller('user', 'pass', apps)
       const config = await testManager.generateApplicationsConfig()
 
       expect(config).toBe('')
@@ -213,7 +213,7 @@ describe('UnattendedRedHatManager', () => {
         }
       ] as unknown as Application[]
 
-      const testManager = new UnattendedRedHatManager('user', 'pass', apps)
+      const testManager = new KickstartInstaller('user', 'pass', apps)
       const config = await testManager.generateApplicationsConfig()
 
       // No RedHat/Fedora compatible apps means empty string
@@ -245,7 +245,7 @@ describe('UnattendedRedHatManager', () => {
         }
       ] as unknown as Application[]
 
-      const testManager = new UnattendedRedHatManager('user', 'pass', apps)
+      const testManager = new KickstartInstaller('user', 'pass', apps)
       const config = await testManager.generateApplicationsConfig()
 
       expect(config).toContain('App 1')
@@ -285,7 +285,7 @@ describe('UnattendedRedHatManager', () => {
       process.env.APP_HOST = 'custom-server'
       process.env.PORT = '8080'
 
-      const testManager = new UnattendedRedHatManager('user', 'pass', [])
+      const testManager = new KickstartInstaller('user', 'pass', [])
       const config = testManager['generateInfiniServiceConfig']()
 
       expect(config).toContain('http://custom-server:8080')
@@ -297,7 +297,7 @@ describe('UnattendedRedHatManager', () => {
 
   describe('extractFedoraVersionFromISO', () => {
     it('should extract Fedora version from ISO Volume ID', async () => {
-      const testManager = new UnattendedRedHatManager('user', 'pass', [])
+      const testManager = new KickstartInstaller('user', 'pass', [])
       testManager['isoPath'] = '/path/to/fedora-43.iso'
 
       // Mock executeCommand to return isoinfo output with Volume ID
@@ -311,7 +311,7 @@ describe('UnattendedRedHatManager', () => {
     })
 
     it('should return 99 when version extraction fails', async () => {
-      const testManager = new UnattendedRedHatManager('user', 'pass', [])
+      const testManager = new KickstartInstaller('user', 'pass', [])
       testManager['isoPath'] = '/nonexistent.iso'
 
       // Mock executeCommand to reject
@@ -350,7 +350,7 @@ menuentry "Fedora" {
 `
       mockReadFile.mockResolvedValue(grubCfgContent)
 
-      const testManager = new UnattendedRedHatManager('user', 'pass', [])
+      const testManager = new KickstartInstaller('user', 'pass', [])
       await testManager['modifyGrubConfigForKickstart']('/boot/grub2/grub.cfg')
 
       expect(mockWriteFile).toHaveBeenCalled()
@@ -360,7 +360,7 @@ menuentry "Fedora" {
       const grubCfgContent = 'set timeout=10'
       mockReadFile.mockResolvedValue(grubCfgContent)
 
-      const testManager = new UnattendedRedHatManager('user', 'pass', [])
+      const testManager = new KickstartInstaller('user', 'pass', [])
       await testManager['modifyGrubConfigForKickstart']('/boot/grub2/grub.cfg')
 
       expect(mockWriteFile).toHaveBeenCalledWith(
@@ -374,7 +374,7 @@ menuentry "Fedora" {
       const grubCfgContent = 'set gfxpayload=keep\nmenuentry "Fedora" { }'
       mockReadFile.mockResolvedValue(grubCfgContent)
 
-      const testManager = new UnattendedRedHatManager('user', 'pass', [])
+      const testManager = new KickstartInstaller('user', 'pass', [])
       await testManager['modifyGrubConfigForKickstart']('/boot/grub2/grub.cfg')
 
       expect(mockWriteFile).toHaveBeenCalledWith(
@@ -399,7 +399,7 @@ label Fedora
       (fs.promises.readFile as jest.Mock).mockResolvedValue(isolinuxCfgContent);
       (fs.promises.writeFile as jest.Mock).mockResolvedValue(undefined)
 
-      const testManager = new UnattendedRedHatManager('user', 'pass', [])
+      const testManager = new KickstartInstaller('user', 'pass', [])
       await testManager['modifyIsolinuxConfigForKickstart']('/isolinux/isolinux.cfg')
 
       expect(fs.promises.writeFile).toHaveBeenCalled()
@@ -410,7 +410,7 @@ label Fedora
       (fs.promises.readFile as jest.Mock).mockResolvedValue(isolinuxCfgContent);
       (fs.promises.writeFile as jest.Mock).mockResolvedValue(undefined)
 
-      const testManager = new UnattendedRedHatManager('user', 'pass', [])
+      const testManager = new KickstartInstaller('user', 'pass', [])
       await testManager['modifyIsolinuxConfigForKickstart']('/isolinux/isolinux.cfg')
 
       expect(fs.promises.writeFile).toHaveBeenCalledWith(
@@ -423,7 +423,7 @@ label Fedora
 
   describe('getXorrisoParamsFromISO', () => {
     it('should extract xorriso parameters from ISO', async () => {
-      const testManager = new UnattendedRedHatManager('user', 'pass', [])
+      const testManager = new KickstartInstaller('user', 'pass', [])
       testManager['isoPath'] = '/path/to/test.iso'
 
       // Mock executeCommand to return xorriso params
@@ -436,7 +436,7 @@ label Fedora
     })
 
     it('should return empty array when extraction fails', async () => {
-      const testManager = new UnattendedRedHatManager('user', 'pass', [])
+      const testManager = new KickstartInstaller('user', 'pass', [])
       testManager['isoPath'] = '/nonexistent.iso'
 
       const mockedExecuteCommand = jest.spyOn(testManager, 'executeCommand' as any)
@@ -450,21 +450,21 @@ label Fedora
 
   describe('parseShellArgs', () => {
     it('should parse shell arguments respecting quotes', () => {
-      const testManager = new UnattendedRedHatManager('user', 'pass', [])
+      const testManager = new KickstartInstaller('user', 'pass', [])
 
       const result = (testManager as any).parseShellArgs('-V \'Fedora 41 x86_64\'')
       expect(result).toEqual(['-V', 'Fedora 41 x86_64'])
     })
 
     it('should handle double quotes', () => {
-      const testManager = new UnattendedRedHatManager('user', 'pass', [])
+      const testManager = new KickstartInstaller('user', 'pass', [])
 
       const result = (testManager as any).parseShellArgs('-V "Fedora 41"')
       expect(result).toEqual(['-V', 'Fedora 41'])
     })
 
     it('should split multiple arguments', () => {
-      const testManager = new UnattendedRedHatManager('user', 'pass', [])
+      const testManager = new KickstartInstaller('user', 'pass', [])
 
       const result = (testManager as any).parseShellArgs('-V Test -b boot.img -o output.iso')
       expect(result).toEqual(['-V', 'Test', '-b', 'boot.img', '-o', 'output.iso'])
@@ -473,14 +473,14 @@ label Fedora
 
   describe('sanitizeScriptName', () => {
     it('should sanitize script name by removing special characters', () => {
-      const testManager = new UnattendedRedHatManager('user', 'pass', [])
+      const testManager = new KickstartInstaller('user', 'pass', [])
 
       const sanitized = (testManager as any).sanitizeScriptName('My Script/Name&Special!')
       expect(sanitized).toBe('My_ScriptNameSpecial')
     })
 
     it('should truncate names longer than 60 characters', () => {
-      const testManager = new UnattendedRedHatManager('user', 'pass', [])
+      const testManager = new KickstartInstaller('user', 'pass', [])
 
       const longName = 'a'.repeat(100)
       const sanitized = (testManager as any).sanitizeScriptName(longName)
@@ -488,7 +488,7 @@ label Fedora
     })
 
     it('should return "script" for empty or invalid input', () => {
-      const testManager = new UnattendedRedHatManager('user', 'pass', [])
+      const testManager = new KickstartInstaller('user', 'pass', [])
 
       expect((testManager as any).sanitizeScriptName('')).toBe('script')
       expect((testManager as any).sanitizeScriptName(null as any)).toBe('script')
@@ -528,7 +528,7 @@ fedoraVersion: ${data.fedoraVersion}
     })
 
     it('should use default locale when invalid', async () => {
-      const testManager = new UnattendedRedHatManager('user', 'pass', [], 'vm-123', 'invalid_locale')
+      const testManager = new KickstartInstaller('user', 'pass', [], 'vm-123', 'invalid_locale')
       jest.spyOn(testManager as any, 'extractFedoraVersionFromISO').mockResolvedValue('43')
       const mockLog = jest.spyOn(testManager['debug'], 'warn').mockImplementation(() => ({} as any))
 
@@ -540,7 +540,7 @@ fedoraVersion: ${data.fedoraVersion}
 
     it('should use default keyboard when invalid', async () => {
       // 'INVALID' is uppercase, which fails the /^[a-z]{2,3}$/ check
-      const testManager = new UnattendedRedHatManager('user', 'pass', [], 'vm-123', 'en_US', 'INVALID', 'UTC')
+      const testManager = new KickstartInstaller('user', 'pass', [], 'vm-123', 'en_US', 'INVALID', 'UTC')
       jest.spyOn(testManager as any, 'extractFedoraVersionFromISO').mockResolvedValue('43')
       const mockLog = jest.spyOn(testManager['debug'], 'warn').mockImplementation(() => ({} as any))
 
@@ -552,7 +552,7 @@ fedoraVersion: ${data.fedoraVersion}
     it('should use default timezone when empty', async () => {
       // Constructor defaults empty string to 'America/New_York', so timezone is never empty in generateConfig
       // Instead, verify the constructor handles the default correctly
-      const testManager = new UnattendedRedHatManager('user', 'pass', [], 'vm-123', 'en_US', 'us', '')
+      const testManager = new KickstartInstaller('user', 'pass', [], 'vm-123', 'en_US', 'us', '')
       jest.spyOn(testManager as any, 'extractFedoraVersionFromISO').mockResolvedValue('43')
 
       await testManager.generateConfig()
@@ -562,7 +562,7 @@ fedoraVersion: ${data.fedoraVersion}
     })
 
     it('should throw error when template file is missing', async () => {
-      const testManager = new UnattendedRedHatManager('user', 'pass', [])
+      const testManager = new KickstartInstaller('user', 'pass', [])
       jest.spyOn(testManager as any, 'extractFedoraVersionFromISO').mockResolvedValue('43')
 
       // Mock readFileSync to throw error
@@ -576,7 +576,7 @@ fedoraVersion: ${data.fedoraVersion}
 
   describe('generateNewImage', () => {
     it('should throw error when ISO path is not set', async () => {
-      const testManager = new UnattendedRedHatManager('user', 'pass', [])
+      const testManager = new KickstartInstaller('user', 'pass', [])
       testManager['isoPath'] = null
 
       await expect(testManager.generateNewImage()).rejects.toThrow('No ISO path specified')
@@ -618,7 +618,7 @@ fedoraVersion: ${data.fedoraVersion}
         }
       ] as unknown as Application[]
 
-      const testManager = new UnattendedRedHatManager('testuser', 'testpass123', apps)
+      const testManager = new KickstartInstaller('testuser', 'testpass123', apps)
       // Mock extractFedoraVersionFromISO to avoid real command execution
       jest.spyOn(testManager as any, 'extractFedoraVersionFromISO').mockResolvedValue('43')
       ;(fs.readFileSync as jest.Mock).mockReturnValue('template content')

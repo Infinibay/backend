@@ -5,16 +5,17 @@ import * as path from 'path'
 import { Eta } from 'eta'
 
 import { UnattendedManagerBase } from './unattendedManagerBase'
+import { type OsProfile } from './install/osProfiles'
 import { deriveVmSecret } from './socket-watcher/AgentMessageSigner'
 
 /**
- * UnattendedRedHatManager is a class that extends UnattendedManagerBase.
+ * KickstartInstaller is a class that extends UnattendedManagerBase.
  * It is used to generate a Kickstart configuration file for unattended Red Hat installations.
  * The class takes a username, password, and a list of applications as parameters.
  * It generates a configuration file that includes the user credentials and the post-installation scripts for the applications (TODO).
  *
  * Usage:
- * const unattendedManager = new UnattendedRedHatManager(username, password, applications);
+ * const unattendedManager = new KickstartInstaller(username, password, applications);
  * const config = unattendedManager.generateConfig();
  *
  * Locale/Keyboard/Timezone Configuration:
@@ -27,7 +28,7 @@ import { deriveVmSecret } from './socket-watcher/AgentMessageSigner'
  * https://docs.fedoraproject.org/en-US/fedora/latest/install-guide/appendixes/Kickstart_Syntax_Reference/
  */
 
-export class UnattendedRedHatManager extends UnattendedManagerBase {
+export class KickstartInstaller extends UnattendedManagerBase {
   private username: string
   private password: string
   private applications: Application[]
@@ -37,6 +38,8 @@ export class UnattendedRedHatManager extends UnattendedManagerBase {
   private timezone: string
   // protected debug: Logger = logger.child({ module: 'unattended-redhat-manager' });
 
+  private readonly osProfile?: OsProfile
+
   constructor (
     username: string,
     password: string,
@@ -44,15 +47,19 @@ export class UnattendedRedHatManager extends UnattendedManagerBase {
     vmId?: string,
     locale?: string,
     keyboard?: string,
-    timezone?: string
+    timezone?: string,
+    opts: { osProfile?: OsProfile } = {}
   ) {
     super()
-    this.debug.debug('Initializing UnattendedRedHatManager')
+    this.debug.debug('Initializing KickstartInstaller')
     if (!username || !password) {
       this.debug.error('Username and password are required')
       throw new Error('Username and password are required')
     }
-    this.isoPath = path.join(path.join(process.env.INFINIBAY_BASE_DIR ?? '/opt/infinibay', 'iso'), 'fedora.iso')
+    this.osProfile = opts.osProfile
+    // RHEL-family ISO (fedora / rhel / rocky / alma / centos): name by family.
+    const family = opts.osProfile?.family === 'rhel' ? 'rhel' : 'fedora'
+    this.isoPath = path.join(path.join(process.env.INFINIBAY_BASE_DIR ?? '/opt/infinibay', 'iso'), `${family}.iso`)
     this.username = username
     this.password = password
     this.applications = applications
@@ -64,7 +71,7 @@ export class UnattendedRedHatManager extends UnattendedManagerBase {
     this.keyboard = keyboard || 'us'
     this.timezone = timezone || 'America/New_York'
     this.configFileName = 'ks.cfg'
-    this.debug.debug(`UnattendedRedHatManager initialized with locale=${this.locale}, keyboard=${this.keyboard}, timezone=${this.timezone}`)
+    this.debug.debug(`KickstartInstaller initialized with locale=${this.locale}, keyboard=${this.keyboard}, timezone=${this.timezone}`)
   }
 
   async generateConfig (): Promise<string> {
@@ -856,3 +863,6 @@ echo "=== InfiniService Installation Completed ==="
     }
   }
 }
+
+// Back-compat alias: this installer was formerly distro-named.
+export { KickstartInstaller as UnattendedRedHatManager }

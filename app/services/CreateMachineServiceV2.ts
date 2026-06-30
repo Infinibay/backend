@@ -38,9 +38,10 @@ import { NodeDispatcher } from '@services/node/NodeDispatcher'
 import { validateUsernameStrict } from '@services/shellEscape'
 import { DepartmentNetworkService } from '@services/network/DepartmentNetworkService'
 import { UnattendedManagerBase } from '@services/unattendedManagerBase'
-import { UnattendedRedHatManager } from '@services/unattendedRedHatManager'
-import { UnattendedUbuntuManager } from '@services/unattendedUbuntuManager'
+import { KickstartInstaller } from '@services/kickstartInstaller'
+import { CloudInitInstaller } from '@services/cloudInitInstaller'
 import { UnattendedWindowsManager } from '@services/unattendedWindowsManager'
+import { resolveOsProfile } from '@services/install/osProfiles'
 
 const ALLOWED_GPU_VENDORS = [
   'NVIDIA Corporation',
@@ -535,27 +536,30 @@ export class CreateMachineServiceV2 {
     // is additionally escaped at its injection site.
     const safeUsername = validateUsernameStrict(username)
 
-    const osManagers: Record<string, () => UnattendedWindowsManager | UnattendedUbuntuManager | UnattendedRedHatManager> = {
-      windows10: () => new UnattendedWindowsManager(10, safeUsername, password, productKey, applications, machine.id, scripts),
-      windows11: () => new UnattendedWindowsManager(11, safeUsername, password, productKey, applications, machine.id, scripts),
-      ubuntu: () => new UnattendedUbuntuManager(safeUsername, password, applications, machine.id, scripts),
-      fedora: () => new UnattendedRedHatManager(safeUsername, password, applications, machine.id, locale, keyboard, timezone),
-      redhat: () => new UnattendedRedHatManager(safeUsername, password, applications, machine.id, locale, keyboard, timezone)
-    }
-
-    const managerCreator = osManagers[effectiveOs as keyof typeof osManagers]
-    if (!managerCreator) {
-      this.debug.warn(`No unattended manager for OS: ${effectiveOs}`)
+    // Select by install MECHANISM via the OS catalog, not a hardcoded distro name.
+    // This resolves versioned strings ('ubuntu-22.04') and RHEL rebuilds, and keeps
+    // the service distro-agnostic: a new distro/version is a catalog entry.
+    const profile = resolveOsProfile(effectiveOs)
+    if (!profile) {
+      this.debug.warn(`No install profile for OS: ${effectiveOs}`)
       return null
     }
 
-    const manager = managerCreator()
-    // Async init for language detection (Windows only)
-    if (manager instanceof UnattendedWindowsManager) {
-      await manager.init()
+    switch (profile.mechanism) {
+      case 'autounattend': {
+        const version = profile.id === 'windows11' ? 11 : 10
+        const manager = new UnattendedWindowsManager(version, safeUsername, password, productKey, applications, machine.id, scripts)
+        await manager.init() // async language detection (Windows only)
+        return manager
+      }
+      case 'cloud-init':
+        return new CloudInitInstaller(safeUsername, password, applications, machine.id, scripts, { osProfile: profile, locale, keyboard, timezone })
+      case 'kickstart':
+        return new KickstartInstaller(safeUsername, password, applications, machine.id, locale, keyboard, timezone, { osProfile: profile })
+      default:
+        this.debug.warn(`Unsupported install mechanism for OS: ${effectiveOs}`)
+        return null
     }
-
-    return manager
   }
 
   private getUefiFirmwarePath (os: string): string | undefined {

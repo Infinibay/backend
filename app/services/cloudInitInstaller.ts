@@ -9,32 +9,104 @@ import { randomBytes } from 'crypto'
 import { deriveVmSecret } from './socket-watcher/AgentMessageSigner'
 
 import { UnattendedManagerBase } from './unattendedManagerBase'
+import { type OsProfile } from './install/osProfiles'
+
+export interface CloudInitInstallerOptions {
+  /** The resolved OS profile (distro/family/version), drives ISO + source choices. */
+  osProfile?: OsProfile
+  locale?: string
+  keyboard?: string
+  timezone?: string
+}
 
 /**
- * This class is used to generate an unattended Ubuntu installation configuration.
+ * CloudInitInstaller — generates an unattended Linux install via the cloud-init /
+ * subiquity autoinstall mechanism (Ubuntu, Debian, and other NoCloud-seed distros).
+ * Mechanism-based and distro-agnostic: the OsProfile + the ISO drive any
+ * version/edition-specific choices (e.g. the subiquity `source.id`).
  */
-export class UnattendedUbuntuManager extends UnattendedManagerBase {
+export class CloudInitInstaller extends UnattendedManagerBase {
   private username: string
   private password: string
   private applications: Application[]
   private scripts: any[] = []
   private vmId: string = ''
+  private readonly osProfile?: OsProfile
+  private readonly locale: string
+  private readonly keyboard: string
+  private readonly timezone: string
+  // The subiquity install source detected from the ISO (set during createISO).
+  // Server ISOs have NO 'ubuntu-desktop' source — hardcoding it stalls the install.
+  private detectedSource?: string
 
-  constructor (username: string, password: string, applications: Application[], vmId?: string, scripts: any[] = []) {
+  constructor (
+    username: string,
+    password: string,
+    applications: Application[],
+    vmId?: string,
+    scripts: any[] = [],
+    opts: CloudInitInstallerOptions = {}
+  ) {
     super()
-    this.debug.debug('Initializing UnattendedUbuntuManager')
+    this.debug.debug('Initializing CloudInitInstaller')
     if (!username || !password) {
       this.debug.error('Username and password are required')
       throw new Error('Username and password are required')
     }
-    this.isoPath = path.join(path.join(process.env.INFINIBAY_BASE_DIR ?? '/opt/infinibay', 'iso'), 'ubuntu.iso')
+    const family = opts.osProfile?.family ?? 'ubuntu'
+    this.isoPath = path.join(path.join(process.env.INFINIBAY_BASE_DIR ?? '/opt/infinibay', 'iso'), `${family}.iso`)
     this.username = username
     this.password = password
     this.applications = applications
     this.vmId = vmId || ''
     this.scripts = scripts
+    this.osProfile = opts.osProfile
+    // Parameterized like the Kickstart installer (previously hardcoded us/en_US/UTC).
+    this.locale = (opts.locale && opts.locale.length > 0) ? opts.locale : 'en_US'
+    this.keyboard = (opts.keyboard && opts.keyboard.length > 0) ? opts.keyboard : 'us'
+    this.timezone = (opts.timezone && opts.timezone.length > 0) ? opts.timezone : 'UTC'
     this.configFileName = 'user-data'
-    this.debug.debug('UnattendedUbuntuManager initialized')
+    this.debug.debug('CloudInitInstaller initialized')
+  }
+
+  // Cache the SHA-512 crypt of the password (unixcrypt salts randomly each call, so
+  // computing it once keeps every written copy of user-data consistent).
+  private _crypted?: string
+  private cryptedPassword (): string {
+    if (this._crypted === undefined) this._crypted = unixcrypt.encrypt(this.password)
+    return this._crypted
+  }
+
+  /**
+   * Detect a valid subiquity install `source.id` from the extracted ISO's
+   * `casper/install-sources.yaml`. Server ISOs expose e.g. `ubuntu-server` /
+   * `ubuntu-server-minimal`; Desktop ISOs expose `ubuntu-desktop`. We prefer (in
+   * order): the profile's preferred source if present on the ISO, the ISO's own
+   * `default: true` entry, then the first non-minimal id, then the first id.
+   * Returns undefined when the file is absent/unparseable — the caller then omits
+   * `source` entirely and lets subiquity use the ISO default.
+   */
+  private detectInstallSource (extractDir: string): string | undefined {
+    try {
+      const p = path.join(extractDir, 'casper', 'install-sources.yaml')
+      if (!fs.existsSync(p)) return undefined
+      const parsed = yaml.load(fs.readFileSync(p, 'utf8'))
+      const entries = Array.isArray(parsed) ? parsed : []
+      const ids = entries
+        .map((e) => (e && typeof e === 'object' ? (e as Record<string, unknown>) : null))
+        .filter((e): e is Record<string, unknown> => e !== null && typeof e.id === 'string')
+      if (ids.length === 0) return undefined
+
+      const preferred = this.osProfile?.cloudInitPreferredSource
+      if (preferred && ids.some((e) => e.id === preferred)) return preferred
+      const def = ids.find((e) => e.default === true)
+      if (def) return def.id as string
+      const nonMinimal = ids.find((e) => !String(e.id).includes('minimal'))
+      return (nonMinimal ?? ids[0]).id as string
+    } catch (err) {
+      this.debug.warn(`[SOURCE] Could not detect install source from ISO (${String(err)}); letting subiquity use its default`)
+      return undefined
+    }
   }
 
   /**
@@ -47,119 +119,48 @@ export class UnattendedUbuntuManager extends UnattendedManagerBase {
     // clash on the department network; crypto fallback when no vmId. The old
     // Math.random().toString(36).substring(7) yielded only a few chars (sometimes
     // zero), making collisions easy.
+    const familyPrefix = this.osProfile?.family ?? 'ubuntu'
     const suffix = (this.vmId || randomBytes(6).toString('hex'))
       .toLowerCase()
       .replace(/[^a-z0-9]/g, '')
       .slice(0, 12)
-    const hostname = `ubuntu-${suffix}`
+    const hostname = `${familyPrefix}-${suffix}`
 
-    // Create the autoinstall configuration
-    const config = {
-      autoinstall: {
-        version: 1,
+    // The subiquity autoinstall config. Built to install OFFLINE-ROBUSTLY: only
+    // the steps needed to put a bootable OS on disk; anything that REQUIRES the
+    // internet (restricted codecs/drivers, OEM mode) is omitted so a base install
+    // never hangs waiting on a network that may not exist.
+    const autoinstall: Record<string, unknown> = {
+      version: 1,
+      // Let subiquity pick the mirror; geoip degrades gracefully without internet.
+      apt: { geoip: true },
+      // Reboot into the installed system when finished.
+      shutdown: 'reboot',
+      identity: {
+        hostname,
+        realname: this.username,
+        username: this.username,
+        password: this.cryptedPassword()
+      },
+      keyboard: { layout: this.keyboard },
+      locale: this.locale,
+      timezone: this.timezone,
+      // Networking is left to subiquity's own DHCP (it brings up en*/eth* itself).
+      // The previous early-commands force-ran dhclient + ping/DNS probes that BLOCK
+      // when there is no DHCP/internet and fight subiquity's networkd — removed.
+      'late-commands': this.generateLateCommands()
+    }
 
-        // Note: refresh-installer disabled because updated subiquity versions
-        // may have incompatible source schemas with the ISO's install-sources.yaml
-        // This caused SerializationError: 'kernel' is not a <class 'dict'>
-        // 'refresh-installer': {
-        //   update: true,
-        //   channel: 'latest/stable'
-        // },
-        // Use default apt configuration - let Ubuntu auto-detect mirrors
-        // Note: Do NOT override apt sources as it breaks package installation
-        apt: {
-          geoip: true // Let Ubuntu select the best mirror automatically
-        },
-        codecs: {
-          install: true
-        },
-        drivers: {
-          install: true
-        },
-        oem: {
-          install: 'auto'
-        },
-        // Lets reboot when finish the instalation
-        shutdown: 'reboot',
-        identity: {
-          hostname,
-          realname: this.username,
-          username: this.username,
-          password: unixcrypt.encrypt(this.password) // Properly encrypt password for cloud-init
-        },
-
-        keyboard: {
-          layout: 'us'
-        },
-
-        locale: 'en_US',
-
-        // Network configuration removed - Ubuntu autoinstall uses DHCP by default
-        // for interfaces matching 'eth*' or 'en*'. Manual network configuration
-        // was causing DHCP issues. See: https://canonical-subiquity.readthedocs-hosted.com/
-
-        // Early commands to force DHCP before installation begins
-        // This ensures network connectivity before subiquity tries to configure the network
-        'early-commands': [
-          // Log network state before any configuration
-          'echo "=== Initial Network State ===" | tee -a /var/log/installer/network-debug.log',
-          'ip addr show | tee -a /var/log/installer/network-debug.log',
-          'ip route show | tee -a /var/log/installer/network-debug.log',
-
-          // Restart systemd-networkd to ensure clean state
-          'systemctl restart systemd-networkd',
-          'sleep 2',
-
-          // Force DHCP on all ethernet interfaces
-          'for iface in $(ip -o link show | grep -E "en[op][0-9]s[0-9]" | awk -F: \'{print $2}\' | tr -d \' \'); do echo "Configuring $iface for DHCP..." | tee -a /var/log/installer/network-debug.log; ip link set $iface up; dhclient -v $iface 2>&1 | tee -a /var/log/installer/network-debug.log; done',
-
-          // Wait for IP assignment with retries (only check for global scope, non-loopback addresses)
-          'for attempt in $(seq 1 10); do echo "Checking for IP (attempt $attempt/10)..." | tee -a /var/log/installer/network-debug.log; if ip -4 addr show scope global | grep -q "inet "; then echo "IP assigned successfully" | tee -a /var/log/installer/network-debug.log; ip -4 addr show scope global | tee -a /var/log/installer/network-debug.log; break; fi; sleep 2; done',
-
-          // Configure DNS manually as fallback
-          'echo "nameserver 8.8.8.8" > /etc/resolv.conf',
-          'echo "nameserver 1.1.1.1" >> /etc/resolv.conf',
-          'echo "nameserver 8.8.4.4" >> /etc/resolv.conf',
-
-          // Test connectivity
-          'echo "=== Testing Connectivity ===" | tee -a /var/log/installer/network-debug.log',
-          'ping -c 2 8.8.8.8 2>&1 | tee -a /var/log/installer/network-debug.log || echo "Ping failed" | tee -a /var/log/installer/network-debug.log',
-          'getent hosts ubuntu.com 2>&1 | tee -a /var/log/installer/network-debug.log || echo "DNS resolution failed" | tee -a /var/log/installer/network-debug.log',
-
-          // Log final state
-          'echo "=== Final Network State ===" | tee -a /var/log/installer/network-debug.log',
-          'ip addr show | tee -a /var/log/installer/network-debug.log',
-          'cat /etc/resolv.conf | tee -a /var/log/installer/network-debug.log'
-        ],
-
-        timezone: 'UTC', // TODO: Autodetect timezone or get it form system configuration.
-
-        // Source specifies which installation variant to use from the Desktop ISO
-        // This is required for Desktop ISO - do NOT use packages: [ubuntu-desktop]
-        source: {
-          id: 'ubuntu-desktop', // Full desktop installation
-          search_drivers: true
-        },
-
-        // Note: Additional packages (curl, wget, qemu-guest-agent) are installed
-        // in late-commands after apt is configured, since Desktop ISOs don't
-        // include these packages and the packages: section may run before
-        // apt has full repository access.
-
-        // Use the entire disk with a single partition
-        // lets try the default (full disk 1 partition). This do not work
-        // if the autoinstall has more than one disk
-        // storage: {
-        //   layout: ...
-        // },
-
-        // Add late-commands for post-installation tasks
-        'late-commands': this.generateLateCommands()
-      }
+    // The `source.id` is ISO/edition-specific (Server ISOs have NO 'ubuntu-desktop'
+    // source — hardcoding it STALLS the install). Only set it when we DETECTED a
+    // valid source id from the ISO (see detectInstallSource); otherwise subiquity
+    // uses the ISO's own default source, which is correct for both editions.
+    if (this.detectedSource) {
+      autoinstall.source = { id: this.detectedSource, search_drivers: true }
     }
 
     // Append '#cloud-config' to the beginning of the config
-    const configStr = '#cloud-config\n' + yaml.dump(config)
+    const configStr = '#cloud-config\n' + yaml.dump({ autoinstall })
 
     return configStr
   }
@@ -785,6 +786,11 @@ menuentry "Automatic Install Ubuntu" {
     const noCloudDir = path.join(extractDir, 'nocloud')
     await fsPromises.mkdir(noCloudDir, { recursive: true })
 
+    // Detect the ISO's valid subiquity install source BEFORE generating the config,
+    // so we never request a source the ISO doesn't have (which stalls the install).
+    this.detectedSource = this.detectInstallSource(extractDir)
+    this.debug.debug(`[SOURCE] install source.id = ${this.detectedSource ?? '(subiquity default)'}`)
+
     // Generate the configuration once and reuse it
     const config = await this.generateConfig()
 
@@ -990,3 +996,6 @@ menuentry "Automatic Install Ubuntu" {
     }
   }
 }
+
+// Back-compat alias: this installer was formerly distro-named.
+export { CloudInitInstaller as UnattendedUbuntuManager }

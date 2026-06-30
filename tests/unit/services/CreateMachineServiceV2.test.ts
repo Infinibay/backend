@@ -56,15 +56,15 @@ jest.mock('../../../app/services/unattendedWindowsManager', () => ({
   })),
 }))
 
-jest.mock('../../../app/services/unattendedUbuntuManager', () => ({
-  UnattendedUbuntuManager: jest.fn().mockImplementation(() => ({
+jest.mock('../../../app/services/cloudInitInstaller', () => ({
+  CloudInitInstaller: jest.fn().mockImplementation(() => ({
     isoPath: '',
     generateNewImage: jest.fn().mockResolvedValue('/tmp/test-unattended.iso'),
   })),
 }))
 
-jest.mock('../../../app/services/unattendedRedHatManager', () => ({
-  UnattendedRedHatManager: jest.fn().mockImplementation(() => ({
+jest.mock('../../../app/services/kickstartInstaller', () => ({
+  KickstartInstaller: jest.fn().mockImplementation(() => ({
     isoPath: '',
     generateNewImage: jest.fn().mockResolvedValue('/tmp/test-unattended.iso'),
   })),

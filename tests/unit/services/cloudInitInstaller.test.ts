@@ -1,12 +1,12 @@
 import { Application } from '@prisma/client'
-import { UnattendedUbuntuManager } from '../../../app/services/unattendedUbuntuManager'
+import { CloudInitInstaller } from '../../../app/services/cloudInitInstaller'
 import * as fs from 'fs'
 import * as os from 'os'
 import * as path from 'path'
 import * as yaml from 'js-yaml'
 import * as unixcrypt from 'unixcrypt'
 
-describe('UnattendedUbuntuManager', () => {
+describe('CloudInitInstaller', () => {
   const originalEnv = process.env
   const validUsername = 'testuser'
   const validPassword = 'testpass123'
@@ -30,37 +30,37 @@ describe('UnattendedUbuntuManager', () => {
 
   describe('constructor', () => {
     it('should create instance with valid parameters', () => {
-      const manager = new UnattendedUbuntuManager(
+      const manager = new CloudInitInstaller(
         validUsername,
         validPassword,
         mockApplications
       )
 
       expect(manager).toBeDefined()
-      expect(manager).toBeInstanceOf(UnattendedUbuntuManager)
+      expect(manager).toBeInstanceOf(CloudInitInstaller)
       expect(manager.configFileName).toBe('user-data')
       expect(manager['username']).toBe(validUsername)
     })
 
     it('should throw error when username is missing', () => {
       expect(() => {
-        new UnattendedUbuntuManager('', validPassword, mockApplications)
+        new CloudInitInstaller('', validPassword, mockApplications)
       }).toThrow('Username and password are required')
     })
 
     it('should throw error when password is missing', () => {
       expect(() => {
-        new UnattendedUbuntuManager(validUsername, '', mockApplications)
+        new CloudInitInstaller(validUsername, '', mockApplications)
       }).toThrow('Username and password are required')
     })
 
     it('should initialize with empty applications array', () => {
-      const manager = new UnattendedUbuntuManager(validUsername, validPassword, [])
+      const manager = new CloudInitInstaller(validUsername, validPassword, [])
       expect(manager['applications']).toEqual([])
     })
 
     it('should set empty VM ID by default', () => {
-      const manager = new UnattendedUbuntuManager(
+      const manager = new CloudInitInstaller(
         validUsername,
         validPassword,
         mockApplications
@@ -69,7 +69,7 @@ describe('UnattendedUbuntuManager', () => {
     })
 
     it('should set custom VM ID when provided', () => {
-      const manager = new UnattendedUbuntuManager(
+      const manager = new CloudInitInstaller(
         validUsername,
         validPassword,
         mockApplications,
@@ -79,7 +79,7 @@ describe('UnattendedUbuntuManager', () => {
     })
 
     it('should initialize empty scripts array by default', () => {
-      const manager = new UnattendedUbuntuManager(
+      const manager = new CloudInitInstaller(
         validUsername,
         validPassword,
         mockApplications
@@ -89,7 +89,7 @@ describe('UnattendedUbuntuManager', () => {
 
     it('should accept scripts parameter', () => {
       const mockScripts = [{ id: 'script1', name: 'test' }]
-      const manager = new UnattendedUbuntuManager(
+      const manager = new CloudInitInstaller(
         validUsername,
         validPassword,
         mockApplications,
@@ -102,7 +102,7 @@ describe('UnattendedUbuntuManager', () => {
 
   describe('generateConfig', () => {
     it('should generate valid YAML configuration', async () => {
-      const manager = new UnattendedUbuntuManager(
+      const manager = new CloudInitInstaller(
         validUsername,
         validPassword,
         mockApplications
@@ -120,7 +120,7 @@ describe('UnattendedUbuntuManager', () => {
     })
 
     it('should include autoinstall configuration', async () => {
-      const manager = new UnattendedUbuntuManager(
+      const manager = new CloudInitInstaller(
         validUsername,
         validPassword,
         mockApplications
@@ -135,7 +135,7 @@ describe('UnattendedUbuntuManager', () => {
     })
 
     it('should encrypt password using unixcrypt', async () => {
-      const manager = new UnattendedUbuntuManager(
+      const manager = new CloudInitInstaller(
         validUsername,
         validPassword,
         mockApplications
@@ -150,7 +150,7 @@ describe('UnattendedUbuntuManager', () => {
     })
 
     it('should generate unique hostname', async () => {
-      const manager = new UnattendedUbuntuManager(
+      const manager = new CloudInitInstaller(
         validUsername,
         validPassword,
         mockApplications
@@ -166,8 +166,8 @@ describe('UnattendedUbuntuManager', () => {
       expect(parsed1.autoinstall.identity.hostname).toMatch(/^ubuntu-/)
     })
 
-    it('should include network early-commands', async () => {
-      const manager = new UnattendedUbuntuManager(
+    it('does NOT emit fragile early-commands (subiquity owns DHCP; the old dhclient/ping loops blocked offline)', async () => {
+      const manager = new CloudInitInstaller(
         validUsername,
         validPassword,
         mockApplications
@@ -176,12 +176,11 @@ describe('UnattendedUbuntuManager', () => {
       const config = await manager.generateConfig()
       const parsed = yaml.load(config) as any
 
-      expect(parsed.autoinstall['early-commands']).toBeDefined()
-      expect(Array.isArray(parsed.autoinstall['early-commands'])).toBe(true)
+      expect(parsed.autoinstall['early-commands']).toBeUndefined()
     })
 
     it('should include shutdown reboot setting', async () => {
-      const manager = new UnattendedUbuntuManager(
+      const manager = new CloudInitInstaller(
         validUsername,
         validPassword,
         mockApplications
@@ -194,7 +193,7 @@ describe('UnattendedUbuntuManager', () => {
     })
 
     it('should set timezone to UTC', async () => {
-      const manager = new UnattendedUbuntuManager(
+      const manager = new CloudInitInstaller(
         validUsername,
         validPassword,
         mockApplications
@@ -206,22 +205,38 @@ describe('UnattendedUbuntuManager', () => {
       expect(parsed.autoinstall.timezone).toBe('UTC')
     })
 
-    it('should include source configuration', async () => {
-      const manager = new UnattendedUbuntuManager(
+    it('OMITS source when none was detected from the ISO (lets subiquity use the ISO default — Server ISOs have no ubuntu-desktop)', async () => {
+      const manager = new CloudInitInstaller(
         validUsername,
         validPassword,
         mockApplications
       )
 
+      // generateConfig() with no createISO/ISO-detection → no source key.
       const config = await manager.generateConfig()
       const parsed = yaml.load(config) as any
 
-      expect(parsed.autoinstall.source).toBeDefined()
-      expect(parsed.autoinstall.source.id).toBe('ubuntu-desktop')
+      expect(parsed.autoinstall.source).toBeUndefined()
+    })
+
+    it('honors parameterized locale / keyboard / timezone (no longer hardcoded us/en_US/UTC)', async () => {
+      const manager = new CloudInitInstaller(
+        validUsername,
+        validPassword,
+        mockApplications,
+        undefined,
+        [],
+        { locale: 'es_AR.UTF-8', keyboard: 'es', timezone: 'America/Argentina/Buenos_Aires' }
+      )
+
+      const parsed = yaml.load(await manager.generateConfig()) as any
+      expect(parsed.autoinstall.locale).toBe('es_AR.UTF-8')
+      expect(parsed.autoinstall.keyboard.layout).toBe('es')
+      expect(parsed.autoinstall.timezone).toBe('America/Argentina/Buenos_Aires')
     })
 
     it('should include late-commands', async () => {
-      const manager = new UnattendedUbuntuManager(
+      const manager = new CloudInitInstaller(
         validUsername,
         validPassword,
         mockApplications
@@ -235,7 +250,7 @@ describe('UnattendedUbuntuManager', () => {
     })
 
     it('should set keyboard layout to US', async () => {
-      const manager = new UnattendedUbuntuManager(
+      const manager = new CloudInitInstaller(
         validUsername,
         validPassword,
         mockApplications
@@ -248,7 +263,7 @@ describe('UnattendedUbuntuManager', () => {
     })
 
     it('should set locale', async () => {
-      const manager = new UnattendedUbuntuManager(
+      const manager = new CloudInitInstaller(
         validUsername,
         validPassword,
         mockApplications
@@ -260,8 +275,8 @@ describe('UnattendedUbuntuManager', () => {
       expect(parsed.autoinstall.locale).toBe('en_US')
     })
 
-    it('should enable codecs and drivers', async () => {
-      const manager = new UnattendedUbuntuManager(
+    it('does NOT install internet-only restricted codecs/drivers/OEM in the base config (offline-robust)', async () => {
+      const manager = new CloudInitInstaller(
         validUsername,
         validPassword,
         mockApplications
@@ -270,15 +285,16 @@ describe('UnattendedUbuntuManager', () => {
       const config = await manager.generateConfig()
       const parsed = yaml.load(config) as any
 
-      expect(parsed.autoinstall.codecs.install).toBe(true)
-      expect(parsed.autoinstall.drivers.install).toBe(true)
-      expect(parsed.autoinstall.oem.install).toBe('auto')
+      // These all require the internet and hang/fail a base install offline.
+      expect(parsed.autoinstall.codecs).toBeUndefined()
+      expect(parsed.autoinstall.drivers).toBeUndefined()
+      expect(parsed.autoinstall.oem).toBeUndefined()
     })
   })
 
   describe('generateLateCommands', () => {
     it('should generate network validation helper script', async () => {
-      const manager = new UnattendedUbuntuManager(
+      const manager = new CloudInitInstaller(
         validUsername,
         validPassword,
         mockApplications
@@ -291,7 +307,7 @@ describe('UnattendedUbuntuManager', () => {
     })
 
     it('should include apt-get update in late-commands', async () => {
-      const manager = new UnattendedUbuntuManager(
+      const manager = new CloudInitInstaller(
         validUsername,
         validPassword,
         mockApplications
@@ -303,7 +319,7 @@ describe('UnattendedUbuntuManager', () => {
     })
 
     it('should install required packages', async () => {
-      const manager = new UnattendedUbuntuManager(
+      const manager = new CloudInitInstaller(
         validUsername,
         validPassword,
         mockApplications
@@ -317,7 +333,7 @@ describe('UnattendedUbuntuManager', () => {
     })
 
     it('should create cloud scripts directory', async () => {
-      const manager = new UnattendedUbuntuManager(
+      const manager = new CloudInitInstaller(
         validUsername,
         validPassword,
         mockApplications
@@ -329,7 +345,7 @@ describe('UnattendedUbuntuManager', () => {
     })
 
     it('should generate first-boot script commands (handled by InfiniService post-boot)', async () => {
-      const manager = new UnattendedUbuntuManager(
+      const manager = new CloudInitInstaller(
         validUsername,
         validPassword,
         mockApplications
@@ -344,7 +360,7 @@ describe('UnattendedUbuntuManager', () => {
 
   describe('generateInfiniServiceInstallCommands', () => {
     it('should generate InfiniService installation commands', async () => {
-      const manager = new UnattendedUbuntuManager(
+      const manager = new CloudInitInstaller(
         validUsername,
         validPassword,
         mockApplications
@@ -357,7 +373,7 @@ describe('UnattendedUbuntuManager', () => {
     })
 
     it('should include download with retry logic', async () => {
-      const manager = new UnattendedUbuntuManager(
+      const manager = new CloudInitInstaller(
         validUsername,
         validPassword,
         mockApplications
@@ -371,7 +387,7 @@ describe('UnattendedUbuntuManager', () => {
     })
 
     it('should use backend URL from environment', async () => {
-      const manager = new UnattendedUbuntuManager(
+      const manager = new CloudInitInstaller(
         validUsername,
         validPassword,
         mockApplications
@@ -385,7 +401,7 @@ describe('UnattendedUbuntuManager', () => {
 
     it('should include VM ID in installation', async () => {
       const vmId = 'test-vm-123'
-      const manager = new UnattendedUbuntuManager(
+      const manager = new CloudInitInstaller(
         validUsername,
         validPassword,
         mockApplications,
@@ -402,7 +418,7 @@ describe('UnattendedUbuntuManager', () => {
 
   describe('generateAppScriptCommands', () => {
     it('should generate script commands for each application', () => {
-      const manager = new UnattendedUbuntuManager(
+      const manager = new CloudInitInstaller(
         validUsername,
         validPassword,
         mockApplications
@@ -425,7 +441,7 @@ describe('UnattendedUbuntuManager', () => {
         }
       ] as unknown as Application[]
 
-      const manager = new UnattendedUbuntuManager(
+      const manager = new CloudInitInstaller(
         validUsername,
         validPassword,
         mixedApps
@@ -439,7 +455,7 @@ describe('UnattendedUbuntuManager', () => {
 
   describe('generateMasterInstallScript', () => {
     it('should generate master install script', async () => {
-      const manager = new UnattendedUbuntuManager(
+      const manager = new CloudInitInstaller(
         validUsername,
         validPassword,
         mockApplications
@@ -463,7 +479,7 @@ describe('UnattendedUbuntuManager', () => {
         }
       ] as unknown as Application[]
 
-      const manager = new UnattendedUbuntuManager(
+      const manager = new CloudInitInstaller(
         validUsername,
         validPassword,
         mixedApps
@@ -477,7 +493,7 @@ describe('UnattendedUbuntuManager', () => {
 
   describe('parseInstallCommand', () => {
     it('should replace placeholders in command', () => {
-      const manager = new UnattendedUbuntuManager(
+      const manager = new CloudInitInstaller(
         validUsername,
         validPassword,
         mockApplications
@@ -492,7 +508,7 @@ describe('UnattendedUbuntuManager', () => {
     })
 
     it('should handle multiple placeholders', () => {
-      const manager = new UnattendedUbuntuManager(
+      const manager = new CloudInitInstaller(
         validUsername,
         validPassword,
         mockApplications
@@ -507,7 +523,7 @@ describe('UnattendedUbuntuManager', () => {
     })
 
     it('should return original command when no parameters', () => {
-      const manager = new UnattendedUbuntuManager(
+      const manager = new CloudInitInstaller(
         validUsername,
         validPassword,
         mockApplications
@@ -522,7 +538,7 @@ describe('UnattendedUbuntuManager', () => {
 
   describe('getUbuntuInstallCommand', () => {
     it('should return Ubuntu install command', () => {
-      const manager = new UnattendedUbuntuManager(
+      const manager = new CloudInitInstaller(
         validUsername,
         validPassword,
         mockApplications
@@ -534,7 +550,7 @@ describe('UnattendedUbuntuManager', () => {
     })
 
     it('should return undefined for non-ubuntu install command', () => {
-      const manager = new UnattendedUbuntuManager(
+      const manager = new CloudInitInstaller(
         validUsername,
         validPassword,
         mockApplications
@@ -551,7 +567,7 @@ describe('UnattendedUbuntuManager', () => {
     })
 
     it('should return undefined for null install command', () => {
-      const manager = new UnattendedUbuntuManager(
+      const manager = new CloudInitInstaller(
         validUsername,
         validPassword,
         mockApplications
@@ -570,7 +586,7 @@ describe('UnattendedUbuntuManager', () => {
 
   describe('validateConfig', () => {
     it('should return valid for properly formatted config', async () => {
-      const manager = new UnattendedUbuntuManager(
+      const manager = new CloudInitInstaller(
         validUsername,
         validPassword,
         mockApplications
@@ -584,7 +600,7 @@ describe('UnattendedUbuntuManager', () => {
     })
 
     it('should return invalid for empty config', async () => {
-      const manager = new UnattendedUbuntuManager(
+      const manager = new CloudInitInstaller(
         validUsername,
         validPassword,
         mockApplications
@@ -597,7 +613,7 @@ describe('UnattendedUbuntuManager', () => {
     })
 
     it('should return invalid for missing autoinstall section', async () => {
-      const manager = new UnattendedUbuntuManager(
+      const manager = new CloudInitInstaller(
         validUsername,
         validPassword,
         mockApplications
@@ -609,7 +625,7 @@ describe('UnattendedUbuntuManager', () => {
     })
 
     it('should return invalid for missing identity', async () => {
-      const manager = new UnattendedUbuntuManager(
+      const manager = new CloudInitInstaller(
         validUsername,
         validPassword,
         mockApplications
@@ -622,7 +638,7 @@ describe('UnattendedUbuntuManager', () => {
     })
 
     it('should return invalid for missing username', async () => {
-      const manager = new UnattendedUbuntuManager(
+      const manager = new CloudInitInstaller(
         validUsername,
         validPassword,
         mockApplications
@@ -640,7 +656,7 @@ autoinstall:
     })
 
     it('should return invalid for missing password', async () => {
-      const manager = new UnattendedUbuntuManager(
+      const manager = new CloudInitInstaller(
         validUsername,
         validPassword,
         mockApplications
@@ -661,7 +677,7 @@ autoinstall:
 
   describe('modifyGrubConfig', () => {
     it('should modify GRUB configuration file', async () => {
-      const manager = new UnattendedUbuntuManager(
+      const manager = new CloudInitInstaller(
         validUsername,
         validPassword,
         mockApplications
@@ -683,7 +699,7 @@ autoinstall:
     })
 
     it('should add timeout setting if not present', async () => {
-      const manager = new UnattendedUbuntuManager(
+      const manager = new CloudInitInstaller(
         validUsername,
         validPassword,
         mockApplications
@@ -706,7 +722,7 @@ autoinstall:
 
   describe('findKernelPaths', () => {
     it('should return default paths when standard paths exist', async () => {
-      const manager = new UnattendedUbuntuManager(
+      const manager = new CloudInitInstaller(
         validUsername,
         validPassword,
         mockApplications
@@ -729,7 +745,7 @@ autoinstall:
     })
 
     it('should search for files when standard paths do not exist', async () => {
-      const manager = new UnattendedUbuntuManager(
+      const manager = new CloudInitInstaller(
         validUsername,
         validPassword,
         mockApplications
@@ -749,7 +765,7 @@ autoinstall:
 
   describe('parseShellArgs', () => {
     it('should parse simple arguments', () => {
-      const manager = new UnattendedUbuntuManager(
+      const manager = new CloudInitInstaller(
         validUsername,
         validPassword,
         mockApplications
@@ -761,7 +777,7 @@ autoinstall:
     })
 
     it('should parse quoted arguments', () => {
-      const manager = new UnattendedUbuntuManager(
+      const manager = new CloudInitInstaller(
         validUsername,
         validPassword,
         mockApplications
@@ -773,7 +789,7 @@ autoinstall:
     })
 
     it('should handle double quotes', () => {
-      const manager = new UnattendedUbuntuManager(
+      const manager = new CloudInitInstaller(
         validUsername,
         validPassword,
         mockApplications
@@ -787,7 +803,7 @@ autoinstall:
 
   describe('getXorrisoParamsFromISO', () => {
     it('should return empty array when isoinfo fails', async () => {
-      const manager = new UnattendedUbuntuManager(
+      const manager = new CloudInitInstaller(
         validUsername,
         validPassword,
         mockApplications
@@ -801,7 +817,7 @@ autoinstall:
 
   describe('edge cases', () => {
     it('should handle empty applications array', async () => {
-      const manager = new UnattendedUbuntuManager(
+      const manager = new CloudInitInstaller(
         validUsername,
         validPassword,
         []
@@ -822,7 +838,7 @@ autoinstall:
         parameters: {} as any
       } as unknown as Application]
 
-      const manager = new UnattendedUbuntuManager(
+      const manager = new CloudInitInstaller(
         validUsername,
         validPassword,
         apps
