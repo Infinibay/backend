@@ -43,9 +43,12 @@ describe('NodeDispatcher.executorFor', () => {
     expect(await dispatcher.executorFor('m1')).toBe(LOCAL)
   })
 
-  it('routes to LOCAL when this host is not yet registered (single-host mode)', async () => {
+  it('THROWS (fail-closed, NOT local) for a node-owned VM when this host cannot resolve its own identity', async () => {
+    // A VM carries an owning node but the master lost its identity (hostname
+    // drift / unregistered name). Falling back to local would be wrong-host
+    // execution (G0 fail-OPEN). The dispatcher must refuse.
     const { dispatcher } = makeDispatcher({ machine: { nodeId: 'node-A' }, localNodeId: undefined })
-    expect(await dispatcher.executorFor('m1')).toBe(LOCAL)
+    await expect(dispatcher.executorFor('m1')).rejects.toThrow(/could not resolve its own node identity/)
   })
 
   it('routes to REMOTE (with the owning node address) when the VM lives on another node', async () => {

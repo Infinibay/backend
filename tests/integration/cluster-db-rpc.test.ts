@@ -73,11 +73,50 @@ describe('POST /cluster/db (node DB facade)', () => {
 
   it('forwards positional args (updateMachineStatus id,status) to the scoped adapter', async () => {
     mockPrisma.node.findFirst.mockResolvedValue({ id: 'node-1-id' } as never)
+    // The node-ownership gate verifies the target machine belongs to the caller.
+    mockPrisma.machine.findFirst.mockResolvedValue({ id: 'm1' } as never)
     mockPrisma.machine.updateMany.mockResolvedValue({ count: 1 } as never)
 
     const res = await post({ nodeName: 'node-1', method: 'updateMachineStatus', args: ['m1', 'off'] })
 
     expect(res.status).toBe(200)
     expect(mockPrisma.machine.updateMany).toHaveBeenCalledWith({ where: { id: 'm1' }, data: { status: 'off' } })
+    // Ownership was checked node-scoped before the write ran.
+    expect(mockPrisma.machine.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 'm1', nodeId: 'node-1-id' } })
+    )
+  })
+
+  describe('node-ownership gate (G0 — F3/F4/F5)', () => {
+    it('rejects an id-keyed method with an EMPTY id (400) — blocks the cluster-wide mass wipe', async () => {
+      mockPrisma.node.findFirst.mockResolvedValue({ id: 'node-1-id' } as never)
+
+      const res = await post({ nodeName: 'node-1', method: 'clearMachineConfiguration', args: [] })
+
+      expect(res.status).toBe(400)
+      // The dangerous updateMany must never run for an absent id.
+      expect(mockPrisma.machine.updateMany).not.toHaveBeenCalled()
+    })
+
+    it("rejects a method targeting a machine the caller does NOT own (403) — blocks cross-node write/read", async () => {
+      mockPrisma.node.findFirst.mockResolvedValue({ id: 'node-1-id' } as never)
+      // Ownership lookup scoped to node-1 finds nothing (the VM lives on node-2).
+      mockPrisma.machine.findFirst.mockResolvedValue(null as never)
+
+      const res = await post({ nodeName: 'node-1', method: 'transitionVMStatus', args: ['vm-on-node-2', 'running', 'off', 3] })
+
+      expect(res.status).toBe(403)
+      expect(mockPrisma.machine.updateMany).not.toHaveBeenCalled()
+    })
+
+    it('allows a non-id-keyed enumeration read (findRunningVMs) without an ownership lookup', async () => {
+      mockPrisma.node.findFirst.mockResolvedValue({ id: 'node-1-id' } as never)
+      mockPrisma.machine.findMany.mockResolvedValue([] as never)
+
+      const res = await post({ nodeName: 'node-1', method: 'findRunningVMs', args: [] })
+
+      expect(res.status).toBe(200)
+      expect(mockPrisma.machine.findFirst).not.toHaveBeenCalled()
+    })
   })
 })

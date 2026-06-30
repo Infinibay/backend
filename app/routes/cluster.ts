@@ -15,6 +15,28 @@ const service = new NodeHeartbeatService(prisma as unknown as PrismaClient)
 // needs, nothing more (no arbitrary Prisma access).
 const DB_METHOD_ALLOWLIST = new Set<string>(DB_FACADE_METHODS as readonly string[])
 
+// Facade methods whose FIRST argument is a Machine.id (the VM the call targets).
+// These are gated by a node-ownership check below: the caller may only touch a
+// machine assigned to ITS OWN node. Everything not listed here is either an
+// enumeration read already node-scoped inside PrismaAdapter (findRunningVMs,
+// findMachinesByStatuses, findMachineByInternalName) and therefore needs no
+// arg-level gate.
+const MACHINE_ID_KEYED_METHODS = new Set<string>([
+  'findMachine',
+  'findMachineWithConfig',
+  'updateMachineStatus',
+  'updateMachineConfiguration',
+  'transitionVMStatus',
+  'clearMachineConfiguration',
+  'clearVolatileMachineConfiguration',
+  'getMachineInternalName',
+  'getMachineDiskPath',
+  'getFirewallRules',
+  'getFirewallRulesSplit',
+  'getDepartmentFirewallPolicy',
+  'getFirewallRuleSetId'
+])
+
 /**
  * POST /cluster/heartbeat — a node agent reports it is alive + its capacity.
  * Upserts the Node and stamps lastHeartbeat (drives online/stale in the UI).
@@ -64,6 +86,32 @@ router.post('/db', express.json({ limit: '256kb' }), requireClusterToken, async 
     if (!node) {
       res.status(404).json({ error: `node not registered: ${nodeName}` })
       return
+    }
+
+    // Node-ownership enforcement (G0) — the authoritative trust-boundary check.
+    // For a machine-id-keyed method, the first argument MUST be a non-empty
+    // string AND name a machine assigned to the CALLING node. This closes three
+    // holes that the PrismaAdapter's enumeration-only scoping leaves open:
+    //   - mass wipe: clearMachineConfiguration([]) would otherwise hit
+    //     updateMany({ where: { machineId: undefined } }) → Prisma elides the
+    //     undefined filter → every VM's config nulled cluster-wide.
+    //   - cross-node write: transitionVMStatus(<other node's vmId>, …) mutates a
+    //     VM that lives on another host.
+    //   - cross-node read: findMachineWithConfig(<other node's vmId>) discloses
+    //     another VM's graphic password / disk paths / firewall rules.
+    // (mTLS in Phase 2 only de-spoofs nodeName; it does NOT scope these methods,
+    // so this gate is required regardless.)
+    if (MACHINE_ID_KEYED_METHODS.has(method)) {
+      const vmId = callArgs[0]
+      if (typeof vmId !== 'string' || vmId.length === 0) {
+        res.status(400).json({ error: `method ${method} requires a machine id as the first argument` })
+        return
+      }
+      const owned = await prisma.machine.findFirst({ where: { id: vmId, nodeId: node.id }, select: { id: true } })
+      if (!owned) {
+        res.status(403).json({ error: `node ${nodeName} does not own machine ${vmId}` })
+        return
+      }
     }
 
     // Node-scoped adapter (G0): every enumeration read is filtered to this node's

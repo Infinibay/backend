@@ -71,9 +71,24 @@ export class NodeDispatcher {
 
     const localNodeId = await this.resolveLocalNodeId()
 
-    // This host isn't registered yet (single-host mode) or the VM is ours.
-    if (!localNodeId || machine.nodeId === localNodeId) {
+    // The VM is ours → local.
+    if (localNodeId && machine.nodeId === localNodeId) {
       return this.createLocalExecutor()
+    }
+
+    // The VM carries an owning node but this host could NOT resolve its own
+    // identity. We must NOT fall back to local: a node-owned VM whose owner we
+    // can't compare against might live on another host, and running it locally
+    // would be wrong-host execution (G0). Fail closed. (resolveLocalNodeId caches
+    // a successful result, so this only fires when the host is genuinely
+    // unregistered under its current name — a misconfiguration to fix, not a
+    // transient blip.)
+    if (!localNodeId) {
+      throw new Error(
+        `Cannot route VM ${machineId}: it is owned by node ${machine.nodeId} but this host ` +
+        'could not resolve its own node identity. Refusing to execute locally ' +
+        '(set INFINIBAY_NODE_NAME or check the local Node registration).'
+      )
     }
 
     // The VM belongs to a DIFFERENT node — it MUST run there.

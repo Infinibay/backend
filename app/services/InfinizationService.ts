@@ -78,7 +78,17 @@ export async function getInfinization (): Promise<Infinization> {
  * exactly the safe single-host behaviour (every local VM belongs to this host).
  * Read-only and fail-soft: a DB error must not block VM-service startup.
  */
+// Cache of THIS host's resolved Node.id. A node's identity is stable for the
+// process lifetime, so once we resolve it successfully we keep it — a later
+// transient DB error must NOT make us "forget" who we are, because the
+// NodeDispatcher relies on a stable answer to avoid wrong-host execution (G0):
+// losing the identity for one VM op would make a remote-owned VM look routable
+// locally. Only a successful resolution is cached; undefined (unregistered /
+// transient error) is retried on the next call.
+let cachedLocalNodeId: string | undefined
+
 export async function resolveLocalNodeId (): Promise<string | undefined> {
+  if (cachedLocalNodeId) return cachedLocalNodeId
   const name = process.env.INFINIBAY_NODE_NAME || os.hostname()
   try {
     const node = await prisma.node.findFirst({ where: { name }, select: { id: true } })
@@ -86,6 +96,7 @@ export async function resolveLocalNodeId (): Promise<string | undefined> {
       logger.warn(`⚠️  Local Node '${name}' not registered yet — infinization runs UN-scoped (single-host). Register the node (setupNode) and restart to enable node scoping.`)
       return undefined
     }
+    cachedLocalNodeId = node.id
     return node.id
   } catch (error) {
     logger.warn(`⚠️  Could not resolve local nodeId (continuing UN-scoped): ${String(error)}`)

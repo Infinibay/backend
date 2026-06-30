@@ -83,8 +83,16 @@ async function buildTarget (): Promise<NodeExecutor> {
 async function getTarget (): Promise<NodeExecutor> {
   if (target) return target
   if (!initPromise) initPromise = buildTarget()
-  target = await initPromise
-  return target
+  try {
+    target = await initPromise
+    return target
+  } catch (error) {
+    // Do NOT memoize a rejected init: a transient failure (storage dir not yet
+    // mounted, nftables modules not loaded at container-start) must not brick the
+    // verb server forever. Clear it so the next verb retries construction.
+    initPromise = null
+    throw error
+  }
 }
 
 // ---------------------------------------------------------------------------
