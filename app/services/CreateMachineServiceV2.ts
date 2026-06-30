@@ -33,7 +33,8 @@ import {
 
 import { Logger } from 'winston'
 import logger from '@main/logger'
-import { getInfinization, getInfinizationConfig } from '@services/InfinizationService'
+import { getInfinizationConfig } from '@services/InfinizationService'
+import { NodeDispatcher } from '@services/node/NodeDispatcher'
 import { validateUsernameStrict } from '@services/shellEscape'
 import { DepartmentNetworkService } from '@services/network/DepartmentNetworkService'
 import { UnattendedManagerBase } from '@services/unattendedManagerBase'
@@ -66,10 +67,16 @@ export class CreateMachineServiceV2 {
   // generated filenames have no vmId prefix to scan for.
   private generatedIsoPath?: string
 
-  constructor (prisma: PrismaClient) {
+  private dispatcher: NodeDispatcher
+
+  constructor (prisma: PrismaClient, dispatcher?: NodeDispatcher) {
     this.debug = logger.child({ module: 'create-machine-v2' })
     this.prisma = prisma
     this.departmentNetworkService = new DepartmentNetworkService(prisma)
+    // Multi-node routing: createVM (and rollback stop) run on the node that OWNS
+    // the VM (Machine.nodeId). On a single-node cluster this resolves to the
+    // local infinization, unchanged.
+    this.dispatcher = dispatcher ?? new NodeDispatcher(prisma)
   }
 
   /**
@@ -115,8 +122,8 @@ export class CreateMachineServiceV2 {
       const applications = await this.fetchMachineApplications(machine)
       const scripts = await this.fetchMachineScripts(machine)
 
-      // Get infinization instance
-      const infinization = await getInfinization()
+      // Resolve the executor for the node that OWNS this VM (local or remote).
+      const executor = await this.dispatcher.executorFor(machine.id)
 
       // Prepare VM configuration
       const vmConfig = await this.buildVMConfig(
@@ -134,9 +141,9 @@ export class CreateMachineServiceV2 {
         timezone
       )
 
-      // Create and start VM via infinization
+      // Create and start VM via infinization (on the owning node)
       this.debug.debug('Creating VM via infinization')
-      const result = await infinization.createVM(vmConfig)
+      const result = await executor.createVM(vmConfig)
 
       if (!result.success) {
         throw new Error(`Failed to create VM: ${result.vmId}`)
@@ -661,13 +668,13 @@ export class CreateMachineServiceV2 {
     this.debug.debug(`Rolling back machine ${machine.id}`)
 
     try {
-      // Get infinization and stop the VM if running
-      const infinization = await getInfinization()
-      const status = await infinization.getVMStatus(machine.id)
+      // Stop the VM if running — on the node that owns it.
+      const executor = await this.dispatcher.executorFor(machine.id)
+      const status = await executor.getVMStatus(machine.id)
 
       if (status.processAlive) {
         this.debug.debug('Stopping VM during rollback')
-        await infinization.stopVM(machine.id, { force: true })
+        await executor.stopVM(machine.id, { force: true })
       }
     } catch (error: any) {
       this.debug.warn(`Error during rollback stop: ${error.message}`)

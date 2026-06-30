@@ -104,6 +104,7 @@ function makeMachine(overrides?: Partial<Machine>): Machine {
   return {
     ...machine,
     nodeId: machine.nodeId ?? null,
+    migrationJobId: machine.migrationJobId ?? null,
   }
 }
 

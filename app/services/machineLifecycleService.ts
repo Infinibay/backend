@@ -625,9 +625,11 @@ export class MachineLifecycleService {
       // We don't delete the DB Machine row — keep status='error' so the user
       // can see what happened and click destroy from the UI.
       try {
-        const { getInfinization } = await import('@services/InfinizationService')
-        const infinization = await getInfinization()
-        const destroyResult = await infinization.destroyVM(id)
+        // Route the teardown to the node that owns the VM (Machine.nodeId), so a
+        // failed create on a remote node is cleaned up THERE, not on the master.
+        const { NodeDispatcher } = await import('@services/node/NodeDispatcher')
+        const executor = await new NodeDispatcher(this.prisma).executorFor(id)
+        const destroyResult = await executor.destroyVM(id)
         if (!destroyResult.success) {
           logger.warn(`[backgroundCode] destroyVM during rollback returned: ${destroyResult.error ?? destroyResult.message ?? 'unknown'}`)
         }

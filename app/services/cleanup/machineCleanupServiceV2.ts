@@ -15,7 +15,7 @@ import { unlink } from 'fs/promises'
 import path from 'path'
 
 import logger from '@main/logger'
-import { getInfinization } from '@services/InfinizationService'
+import { NodeDispatcher } from '@services/node/NodeDispatcher'
 import { getVirtioSocketWatcherService } from '../VirtioSocketWatcherService'
 import { DELETE_FAILED_STATUS } from '../../constants/machine-status'
 
@@ -49,9 +49,14 @@ interface CleanupSummary {
 export class MachineCleanupServiceV2 {
   private prisma: PrismaClient
   private debug = logger.child({ module: 'machine-cleanup-v2' })
+  private dispatcher: NodeDispatcher
 
-  constructor (prisma: PrismaClient) {
+  constructor (prisma: PrismaClient, dispatcher?: NodeDispatcher) {
     this.prisma = prisma
+    // Multi-node routing: destroyVM (qemu kill + TAP/nftables teardown) runs on
+    // the node that OWNS the VM (Machine.nodeId), not unconditionally on the
+    // master. On a single-node cluster this resolves to the local infinization.
+    this.dispatcher = dispatcher ?? new NodeDispatcher(prisma)
   }
 
   /**
@@ -254,10 +259,10 @@ export class MachineCleanupServiceV2 {
       const tapDeviceName = machineWithConfig?.configuration?.tapDeviceName ?? `tap-${machineId}`
       const firewallChainName = machineWithConfig?.firewallRuleSet?.internalName ?? `chain-${machineId}`
 
-      const infinization = await getInfinization()
+      const executor = await this.dispatcher.executorFor(machineId)
 
       this.debug.info(`Destroying VM resources for ${machineId} (TAP device: ${tapDeviceName}, Firewall chain: ${firewallChainName})`)
-      const destroyResult = await infinization.destroyVM(machineId)
+      const destroyResult = await executor.destroyVM(machineId)
 
       result.duration = Date.now() - startTime
 
