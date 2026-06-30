@@ -1,5 +1,6 @@
 import type { InfinizationDatabase } from '@infinibay/infinization'
 import { PrismaAdapterError, PrismaAdapterErrorCode } from '@infinibay/infinization'
+import { httpsJsonPost, type ClusterIdentity } from './clusterMtls'
 
 /**
  * Multi-node Phase 1 (increment 3): the compute-node side of the DB facade.
@@ -121,34 +122,66 @@ export const DB_FACADE_METHODS: ReadonlyArray<keyof M> = [
 
 /**
  * HTTP transport: POSTs {nodeName, method, args} to the master's /cluster/db and
- * returns the `result`. Bearer-token authenticated (pre-mTLS; Phase 2 swaps in
- * the per-node client certificate as the verified identity).
+ * returns the `result`.
+ *
+ * Two auth modes:
+ *   - mTLS (Phase 2.1d): when `identity` is supplied the node presents its
+ *     per-node client certificate over HTTPS; the master derives the node identity
+ *     from the verified cert CN and IGNORES the body's nodeName. No bearer token.
+ *   - token (pre-mTLS / walking skeleton): a shared bootstrap bearer token over
+ *     plain HTTP, with the node name self-asserted in the body.
  */
 export class HttpDbRpcTransport implements DbRpcTransport {
   constructor (
     private readonly opts: {
       masterUrl: string
       nodeName: string
-      token: string
+      token?: string
+      identity?: ClusterIdentity
+      /** The master's CN, pinned on the mTLS server cert (required with `identity`). */
+      masterCn?: string
       fetchImpl?: typeof fetch
     }
-  ) {}
+  ) {
+    if (opts.identity && (!opts.masterCn || opts.masterCn.length === 0)) {
+      throw new Error('HttpDbRpcTransport: masterCn is required for mTLS (pin the master server identity)')
+    }
+  }
 
   async call (method: string, args: unknown[]): Promise<unknown> {
-    const doFetch = this.opts.fetchImpl ?? fetch
-    const res = await doFetch(`${this.opts.masterUrl.replace(/\/+$/, '')}/cluster/db`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        authorization: `Bearer ${this.opts.token}`
-      },
-      body: JSON.stringify({ nodeName: this.opts.nodeName, method, args })
-    })
-    if (!res.ok) {
-      const text = await res.text().catch(() => '')
-      throw new Error(`RPC ${method} failed (${res.status}): ${text}`)
+    const url = `${this.opts.masterUrl.replace(/\/+$/, '')}/cluster/db`
+    const payload = { nodeName: this.opts.nodeName, method, args }
+
+    let status: number
+    let text: string
+    if (this.opts.identity) {
+      const r = await httpsJsonPost(url, payload, this.opts.identity, { expectedCn: this.opts.masterCn! })
+      status = r.status
+      text = r.text
+    } else {
+      const doFetch = this.opts.fetchImpl ?? fetch
+      const res = await doFetch(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${this.opts.token ?? ''}` },
+        body: JSON.stringify(payload)
+      })
+      status = res.status
+      text = await res.text().catch(() => '')
     }
-    const body = (await res.json()) as { ok?: boolean, result?: unknown, error?: unknown }
+    return this.parseResponse(method, status, text)
+  }
+
+  /** Shared response handling for both the mTLS and token paths. */
+  private parseResponse (method: string, status: number, text: string): unknown {
+    if (status < 200 || status >= 300) {
+      throw new Error(`RPC ${method} failed (${status}): ${text}`)
+    }
+    let body: { ok?: boolean, result?: unknown, error?: unknown }
+    try {
+      body = JSON.parse(text) as typeof body
+    } catch {
+      throw new Error(`RPC ${method} returned a non-JSON response`)
+    }
     if (body.ok !== true) {
       // The master forwards a TYPED PrismaAdapterError as a structured object so
       // infinization's code-based branches (MACHINE_NOT_FOUND / VERSION_CONFLICT)

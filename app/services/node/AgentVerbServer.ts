@@ -1,5 +1,6 @@
-import express, { Request, Response } from 'express'
+import express, { Request, RequestHandler, Response } from 'express'
 import { requireClusterToken } from './clusterAuth'
+import { requireClientCert } from './clusterMtls'
 import { VM_VERB_METHODS, type NodeExecutor } from './NodeExecutor'
 
 /**
@@ -26,6 +27,14 @@ export interface AgentVerbServerOptions {
   getTarget: () => Promise<NodeExecutor>
   /** JSON body limit (createVM configs can be sizeable). */
   jsonLimit?: string
+  /**
+   * Auth mode. 'token' (default) requires the shared bootstrap bearer token over
+   * plain HTTP. 'mtls' requires a verified client certificate (the master's),
+   * optionally pinned to `masterCn` — used when the verb server runs over HTTPS.
+   */
+  auth?: 'token' | 'mtls'
+  /** Under mTLS, the only CN allowed to call verbs (the master's node name). */
+  masterCn?: string
 }
 
 /**
@@ -34,8 +43,9 @@ export interface AgentVerbServerOptions {
  */
 export function createAgentVerbRouter (opts: AgentVerbServerOptions): express.Router {
   const router = express.Router()
+  const auth: RequestHandler = opts.auth === 'mtls' ? requireClientCert(opts.masterCn) : requireClusterToken
 
-  router.post('/vm', express.json({ limit: opts.jsonLimit ?? '1mb' }), requireClusterToken, async (req: Request, res: Response) => {
+  router.post('/vm', express.json({ limit: opts.jsonLimit ?? '1mb' }), auth, async (req: Request, res: Response) => {
     try {
       const { verb, args } = (req.body ?? {}) as { verb?: unknown, args?: unknown }
       if (typeof verb !== 'string' || !VERB_ALLOWLIST.has(verb)) {

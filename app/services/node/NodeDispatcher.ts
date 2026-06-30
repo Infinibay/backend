@@ -1,3 +1,4 @@
+import os from 'os'
 import { PrismaClient } from '@prisma/client'
 import logger from '@main/logger'
 import { resolveLocalNodeId } from '../InfinizationService'
@@ -7,6 +8,8 @@ import {
   HttpVmRpcTransport
 } from './NodeExecutor'
 import { LocalNodeExecutor } from './LocalNodeExecutor'
+import { ClusterCA } from './ClusterCA'
+import { type ClusterIdentity } from './clusterMtls'
 
 /**
  * Multi-node Phase 1 (VM-op routing): resolves WHICH host executes a VM verb.
@@ -114,11 +117,38 @@ export class NodeDispatcher {
   }
 }
 
+// The master's mTLS identity is the same for every remote call; cache it, but
+// re-read periodically so a re-minted (renewed) leaf is picked up WITHOUT a
+// restart — otherwise an in-process master would keep using an expired cert.
+let cachedMasterIdentity: ClusterIdentity | null = null
+let masterIdentityRefreshAfter = 0
+const MASTER_IDENTITY_TTL_MS = 60 * 60 * 1000 // 1h
+function masterIdentity (): ClusterIdentity {
+  if (!cachedMasterIdentity || Date.now() >= masterIdentityRefreshAfter) {
+    const masterName = process.env.INFINIBAY_NODE_NAME || os.hostname()
+    cachedMasterIdentity = new ClusterCA().getMasterIdentity(masterName)
+    masterIdentityRefreshAfter = Date.now() + MASTER_IDENTITY_TTL_MS
+  }
+  return cachedMasterIdentity
+}
+
 /**
- * Default remote executor: an HTTP verb client pointed at the owning node
- * agent's verb server, authenticated with the shared cluster token (pre-mTLS).
+ * Default remote executor: a verb client pointed at the owning node agent's verb
+ * server. Under mTLS (INFINIBAY_CLUSTER_MTLS=1) the master presents its CA-signed
+ * client certificate over HTTPS; otherwise it falls back to the shared bootstrap
+ * token over plain HTTP (pre-mTLS path).
  */
 function defaultRemoteExecutor (node: RemoteNodeInfo): NodeExecutor {
+  if (process.env.INFINIBAY_CLUSTER_MTLS === '1') {
+    const transport = new HttpVmRpcTransport({
+      agentUrl: `https://${node.address}:${node.agentPort}`,
+      identity: masterIdentity(),
+      // Pin the target node's verb-server cert CN to its name, so a rogue node
+      // cannot impersonate the intended agent (its leaf is serverAuth-capable).
+      expectedCn: node.name
+    })
+    return new RemoteNodeExecutor(transport)
+  }
   const token = process.env.INFINIBAY_CLUSTER_TOKEN
   if (!token) {
     throw new Error('INFINIBAY_CLUSTER_TOKEN is not set — cannot reach remote node agents')

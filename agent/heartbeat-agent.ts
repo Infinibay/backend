@@ -32,11 +32,13 @@
  */
 import os from 'os'
 import fs from 'fs'
+import https from 'node:https'
 import express from 'express'
 import { Infinization } from '@infinibay/infinization'
 import { RpcDatabaseAdapter, HttpDbRpcTransport } from '../app/services/node/RpcDatabaseAdapter'
 import { createAgentVerbRouter } from '../app/services/node/AgentVerbServer'
 import { type NodeExecutor } from '../app/services/node/NodeExecutor'
+import { loadClusterIdentity, httpsJsonPost, clusterServerOptions, type ClusterIdentity } from '../app/services/node/clusterMtls'
 
 const MASTER_URL = (process.env.MASTER_URL || 'http://localhost:4000').replace(/\/+$/, '')
 const NAME = process.env.INFINIBAY_NODE_NAME || os.hostname()
@@ -50,6 +52,22 @@ const VERSION = process.env.AGENT_VERSION || '0.0.0-skeleton'
 const DISK_DIR = process.env.INFINIZATION_DISK_DIR || '/var/lib/infinization/disks'
 const SOCKET_DIR = process.env.INFINIZATION_SOCKET_DIR || '/opt/infinibay/sockets'
 const PID_DIR = process.env.INFINIZATION_PID_DIR || '/opt/infinibay/pids'
+
+// mTLS (Phase 2.1d): if this node has been enrolled (join.ts wrote its key/cert/CA
+// into INFINIBAY_CERT_DIR), present that client certificate on the ops channel and
+// run the verb server over HTTPS — the shared token is no longer used for ops. The
+// master's cluster server is a SEPARATE HTTPS endpoint (MASTER_CLUSTER_URL).
+const CERT_DIR = process.env.INFINIBAY_CERT_DIR || '/opt/infinibay/certs'
+const MASTER_CLUSTER_URL = (process.env.MASTER_CLUSTER_URL || MASTER_URL).replace(/\/+$/, '')
+// The master's certificate CN — pinned on BOTH directions (the agent verifies the
+// master's server cert on agent→master calls, and only the master's CN may call
+// the verb server). Required under mTLS; the agent fails closed if it is unset.
+const MASTER_CN = process.env.INFINIBAY_MASTER_CN || undefined
+const IDENTITY: ClusterIdentity | null = loadClusterIdentity(CERT_DIR)
+// mTLS is REQUESTED when INFINIBAY_CLUSTER_MTLS=1 (hard requirement) and ACTIVE
+// when the client certs are present and it is not explicitly disabled.
+const MTLS_REQUIRED = process.env.INFINIBAY_CLUSTER_MTLS === '1'
+const MTLS = IDENTITY !== null && process.env.INFINIBAY_CLUSTER_MTLS !== '0'
 
 // ---------------------------------------------------------------------------
 // Verb target: a lazily-constructed infinization instance whose DB access is
@@ -65,7 +83,11 @@ async function buildTarget (): Promise<NodeExecutor> {
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true, mode: 0o755 })
   }
   const databaseAdapter = new RpcDatabaseAdapter(
-    new HttpDbRpcTransport({ masterUrl: MASTER_URL, nodeName: NAME, token: TOKEN })
+    new HttpDbRpcTransport(
+      MTLS
+        ? { masterUrl: MASTER_CLUSTER_URL, nodeName: NAME, identity: IDENTITY!, masterCn: MASTER_CN! }
+        : { masterUrl: MASTER_URL, nodeName: NAME, token: TOKEN }
+    )
   )
   const inf = new Infinization({
     databaseAdapter,
@@ -123,17 +145,27 @@ async function sendHeartbeat (): Promise<void> {
     hardware: collectHardware()
   }
   try {
-    const res = await fetch(`${MASTER_URL}/cluster/heartbeat`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${TOKEN}` },
-      body: JSON.stringify(body)
-    })
-    if (!res.ok) {
-      const text = await res.text().catch(() => '')
-      console.error(`[agent] heartbeat rejected (${res.status}): ${text}`)
+    let status: number
+    let text: string
+    if (MTLS) {
+      const r = await httpsJsonPost(`${MASTER_CLUSTER_URL}/cluster/heartbeat`, body, IDENTITY!, { expectedCn: MASTER_CN! })
+      status = r.status
+      text = r.text
+    } else {
+      const res = await fetch(`${MASTER_URL}/cluster/heartbeat`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${TOKEN}` },
+        body: JSON.stringify(body)
+      })
+      status = res.status
+      text = await res.text().catch(() => '')
+    }
+    if (status < 200 || status >= 300) {
+      console.error(`[agent] heartbeat rejected (${status}): ${text}`)
       return
     }
-    const json = (await res.json().catch(() => ({}))) as { nodeId?: string, created?: boolean }
+    let json: { nodeId?: string, created?: boolean } = {}
+    try { json = JSON.parse(text) } catch { /* tolerate a non-JSON 2xx */ }
     console.log(`[agent] heartbeat ok name=${NAME} nodeId=${json.nodeId ?? '?'}${json.created ? ' (registered)' : ''}`)
   } catch (error) {
     console.error(`[agent] heartbeat error: ${String(error)}`)
@@ -146,21 +178,54 @@ async function sendHeartbeat (): Promise<void> {
 function startVerbServer (): void {
   const app = express()
   app.get('/agent/health', (_req: express.Request, res: express.Response) => {
-    res.json({ ok: true, node: NAME, role: ROLE, infinizationReady: target !== null })
+    res.json({ ok: true, node: NAME, role: ROLE, mtls: MTLS, infinizationReady: target !== null })
   })
-  // POST /agent/vm — the master's RemoteNodeExecutor calls this.
-  app.use('/agent', createAgentVerbRouter({ getTarget }))
-  app.listen(AGENT_PORT, () => {
-    console.log(`[agent] verb server listening on :${AGENT_PORT} (POST /agent/vm)`)
-  })
+  // POST /agent/vm — the master's RemoteNodeExecutor calls this. Under mTLS the
+  // verb server runs over HTTPS and requires the master's verified client cert
+  // (optionally pinned to MASTER_CN); otherwise plain HTTP + shared token.
+  const onListenError = (err: unknown): void => {
+    console.error(`[agent] FATAL: verb server failed to listen on :${AGENT_PORT}: ${String(err)}`)
+    process.exit(1)
+  }
+  if (MTLS) {
+    // Only the master's CN may call verbs (mandatory pin — guaranteed set by main()).
+    app.use('/agent', createAgentVerbRouter({ getTarget, auth: 'mtls', masterCn: MASTER_CN }))
+    const server = https.createServer(clusterServerOptions(IDENTITY!, { rejectUnauthorized: true }), app)
+    server.on('error', onListenError)
+    server.listen(AGENT_PORT, () => {
+      console.log(`[agent] verb server listening on :${AGENT_PORT} (HTTPS mTLS, master CN '${MASTER_CN}', POST /agent/vm)`)
+    })
+  } else {
+    app.use('/agent', createAgentVerbRouter({ getTarget }))
+    const server = app.listen(AGENT_PORT, () => {
+      console.log(`[agent] verb server listening on :${AGENT_PORT} (POST /agent/vm)`)
+    })
+    server.on('error', onListenError)
+  }
 }
 
 function main (): void {
-  if (TOKEN.length === 0) {
-    console.error('[agent] FATAL: INFINIBAY_CLUSTER_TOKEN is required')
+  // Fail closed when mTLS is MANDATED but the materials to do it securely are absent —
+  // never silently downgrade to the cleartext token channel against operator intent.
+  if (MTLS_REQUIRED && IDENTITY === null) {
+    console.error('[agent] FATAL: INFINIBAY_CLUSTER_MTLS=1 but no client certificate in INFINIBAY_CERT_DIR')
+    console.error('[agent]        run `npm run agent:join` to enroll this node, then restart')
     process.exit(1)
   }
-  console.log(`[agent] starting: name=${NAME} role=${ROLE} master=${MASTER_URL} port=${AGENT_PORT} interval=${INTERVAL_MS}ms`)
+  if (MTLS && !MASTER_CN) {
+    console.error('[agent] FATAL: mTLS is active but INFINIBAY_MASTER_CN is unset')
+    console.error('[agent]        set INFINIBAY_MASTER_CN to the master node name so the master can be pinned')
+    console.error('[agent]        (and only the master can call this node\'s verb server)')
+    process.exit(1)
+  }
+  if (MTLS) {
+    console.log(`[agent] mTLS enabled (client cert from ${CERT_DIR}); master cluster endpoint ${MASTER_CLUSTER_URL}, master CN '${MASTER_CN}'`)
+  } else if (TOKEN.length === 0) {
+    console.error('[agent] FATAL: no client certificate in INFINIBAY_CERT_DIR and INFINIBAY_CLUSTER_TOKEN is unset')
+    console.error('[agent]        run `npm run agent:join` to enroll, or set INFINIBAY_CLUSTER_TOKEN for the pre-mTLS path')
+    process.exit(1)
+  }
+  console.log(`[agent] starting: name=${NAME} role=${ROLE} master=${MASTER_URL} port=${AGENT_PORT} interval=${INTERVAL_MS}ms mtls=${MTLS}`)
   startVerbServer()
   void sendHeartbeat()
   const timer = setInterval(() => { void sendHeartbeat() }, INTERVAL_MS)

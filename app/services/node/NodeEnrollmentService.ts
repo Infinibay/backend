@@ -1,3 +1,4 @@
+import os from 'os'
 import { createHash, randomBytes } from 'crypto'
 import { PrismaClient } from '@prisma/client'
 import logger from '@main/logger'
@@ -61,6 +62,14 @@ export class NodeEnrollmentService {
    * public key and returns the SAS material the node displays on its terminal.
    */
   async requestEnrollment (req: EnrollmentRequest): Promise<Extract<EnrollmentResult, { status: 'pending' }>> {
+    // Reserve the master's name: a node enrolled under it would receive a leaf whose
+    // CN collides with the master's, defeating the master-CN pin on the verb channel
+    // (and the upsert below would flip the master's own row to pending).
+    const masterName = process.env.INFINIBAY_NODE_NAME || os.hostname()
+    if (req.name === masterName) {
+      throw new Error(`'${req.name}' is reserved for the master node and cannot be enrolled`)
+    }
+
     const pubKeyFp = ClusterCA.csrPublicKeyFingerprint(req.csrPem) // also verifies the CSR self-signature
     const joinNonce = randomBytes(16).toString('hex')
     const caFingerprint = this.ca.caFingerprint()
@@ -69,11 +78,23 @@ export class NodeEnrollmentService {
 
     // `name` is not a DB-unique column (matching NodeHeartbeatService), so we
     // manually upsert via findFirst → create/update rather than prisma.upsert.
-    const existing = await this.prisma.node.findFirst({ where: { name: req.name }, select: { id: true } })
+    const existing = await this.prisma.node.findFirst({
+      where: { name: req.name },
+      select: { id: true, role: true, status: true, certPem: true }
+    })
     let nodeId: string
     if (existing) {
-      // Re-enrollment (node reinstalled / new key): reset back to pending and
-      // drop any previously-issued cert.
+      // Refuse to SILENTLY rebind a live identity: a token holder must not be able
+      // to take over an already-approved / already-issued node by re-enrolling its
+      // name with a fresh key. An admin must explicitly reject it first (which
+      // clears its cert), after which re-enrollment is allowed.
+      if (existing.role === 'master') {
+        throw new Error(`'${req.name}' is the master node and cannot be enrolled`)
+      }
+      if (existing.status === 'approved' || existing.certPem) {
+        throw new Error(`node '${req.name}' is already enrolled; an admin must reject it before it can re-enroll`)
+      }
+      // Pending / rejected → allow re-enrollment (new key): reset to pending.
       await this.prisma.node.update({
         where: { id: existing.id },
         data: { status: 'pending', joinNonce, joinCodeHash, fingerprint: pubKeyFp, certPem: null }
@@ -122,11 +143,16 @@ export class NodeEnrollmentService {
     logger.info(`✅ Node '${node.name}' approved for the cluster`)
   }
 
-  /** Reject a pending node: mark rejected and drop the join material. */
+  /**
+   * Reject a node: mark rejected and drop ALL identity material (join material AND
+   * any issued cert). Clearing certPem is what lets the name be cleanly re-enrolled
+   * afterwards — it is the explicit operator reset that the rebind guard in
+   * requestEnrollment requires.
+   */
   async reject (nodeId: string): Promise<void> {
     await this.prisma.node.update({
       where: { id: nodeId },
-      data: { status: 'rejected', joinNonce: null, joinCodeHash: null }
+      data: { status: 'rejected', joinNonce: null, joinCodeHash: null, certPem: null }
     })
   }
 

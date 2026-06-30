@@ -93,4 +93,31 @@ describe('ClusterCA', () => {
     const tampered = csrPem.replace(/[A-Za-z0-9]{8}(?=[\s\S]{40})/, 'AAAAAAAA')
     expect(() => ca.signNodeCsr(tampered, 'worker-4')).toThrow()
   })
+
+  it('mints the master mTLS identity (CN, chains to CA, persisted 0600, idempotent)', () => {
+    const ca = new ClusterCA(caDir)
+    const id = ca.getMasterIdentity('master-1')
+
+    // Bundle is well-formed: a private key, a leaf cert, and the CA cert.
+    expect(id.key).toMatch(/BEGIN (RSA )?PRIVATE KEY/)
+    expect(id.ca).toBe(ca.getCaCertPem())
+
+    const cert = forge.pki.certificateFromPem(id.cert)
+    expect(cert.subject.getField('CN')?.value).toBe('master-1')
+    // The leaf chains to the CA and carries BOTH client + server auth (the master
+    // is a server to enrolling nodes and a client to node verb servers).
+    const caCert = forge.pki.certificateFromPem(id.ca)
+    expect(caCert.verify(cert)).toBe(true)
+    const eku = cert.getExtension('extKeyUsage') as { clientAuth?: boolean, serverAuth?: boolean } | undefined
+    expect(eku?.clientAuth).toBe(true)
+    expect(eku?.serverAuth).toBe(true)
+
+    // Persisted with a private key that is not world-readable.
+    const keyMode = fs.statSync(path.join(caDir, 'cluster-master-key.pem')).mode & 0o777
+    expect(keyMode).toBe(0o600)
+
+    // Idempotent: a second call returns the SAME persisted leaf (stable fingerprint).
+    expect(ClusterCA.fingerprint(new ClusterCA(caDir).getMasterIdentity('master-1').cert))
+      .toBe(ClusterCA.fingerprint(id.cert))
+  })
 })

@@ -307,6 +307,16 @@ async function bootstrap (): Promise<void> {
       logger.error('⚠️ Failed to start cluster heartbeat:', error)
     }
 
+    // Multi-node (Phase 2.1d): the dedicated cluster mTLS server for the ops
+    // channel. Opt-in via INFINIBAY_CLUSTER_MTLS=1; a no-op (returns null) on a
+    // single-node host, leaving startup byte-for-byte unchanged.
+    try {
+      const { startClusterMtlsServer } = await import('./services/node/clusterMtlsServer')
+      startClusterMtlsServer()
+    } catch (error) {
+      logger.error('⚠️ Failed to start cluster mTLS server:', error)
+    }
+
     // Start server
     const port = parseInt(process.env.PORT || '4000', 10)
     const host = '0.0.0.0'
@@ -343,6 +353,12 @@ async function shutdown (): Promise<void> {
       })
     })
   }
+
+  // Stop the cluster mTLS server (multi-node ops channel), if it was started
+  try {
+    const { stopClusterMtlsServer } = await import('./services/node/clusterMtlsServer')
+    stopClusterMtlsServer()
+  } catch { /* never started / import failed — nothing to stop */ }
 
   // Stop cron jobs so they don't enqueue new work during shutdown
   if (cronHandles) {

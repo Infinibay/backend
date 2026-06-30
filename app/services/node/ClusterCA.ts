@@ -3,6 +3,7 @@ import path from 'path'
 import forge from 'node-forge'
 import logger from '@main/logger'
 import { certFingerprint, csrPublicKeyFingerprint } from './clusterCrypto'
+import type { ClusterIdentity } from './clusterMtls'
 
 /**
  * Multi-node Phase 2 (onboarding): the cluster's private Certificate Authority.
@@ -32,11 +33,19 @@ export interface IssuedCert {
 
 const CA_KEY_FILE = 'cluster-ca-key.pem'
 const CA_CERT_FILE = 'cluster-ca-cert.pem'
+// The master's own leaf identity (used as BOTH the cluster mTLS server cert and
+// the client cert for master→agent calls — node leaves carry serverAuth+clientAuth
+// too, so a single leaf serves both roles).
+const MASTER_KEY_FILE = 'cluster-master-key.pem'
+const MASTER_CERT_FILE = 'cluster-master-cert.pem'
 
-// Validity windows. The CA is long-lived (cluster lifetime); node certs are
-// short-lived and renewed on heartbeat (a stolen node cert expires on its own).
+// Validity windows. The CA is long-lived (cluster lifetime); node + master leaves
+// are shorter-lived and re-minted as they approach expiry.
 const CA_VALIDITY_YEARS = 10
 const NODE_CERT_VALIDITY_DAYS = 365
+// Re-mint the master's own leaf this many days before it expires, so a
+// long-running cluster never hits a fixed-date outage on the OPS channel.
+const MASTER_CERT_RENEW_BEFORE_DAYS = 30
 
 export class ClusterCA {
   private readonly caDir: string
@@ -118,30 +127,79 @@ export class ClusterCA {
     if (!csr.publicKey) {
       throw new Error('CSR has no public key')
     }
-
-    const cert = forge.pki.createCertificate()
-    cert.publicKey = csr.publicKey
-    cert.serialNumber = '00' + forge.util.bytesToHex(forge.random.getBytesSync(16))
-    cert.validity.notBefore = new Date()
-    cert.validity.notAfter = new Date()
-    cert.validity.notAfter.setDate(cert.validity.notBefore.getDate() + NODE_CERT_VALIDITY_DAYS)
-
-    // Identity is assigned by the master, not copied from the CSR subject.
-    cert.setSubject([{ name: 'commonName', value: nodeName }])
-    cert.setIssuer(this.caCert!.subject.attributes)
-    cert.setExtensions([
-      { name: 'basicConstraints', cA: false, critical: true },
-      { name: 'keyUsage', digitalSignature: true, keyEncipherment: true, critical: true },
-      // clientAuth: this cert authenticates the node TO the master.
-      { name: 'extKeyUsage', clientAuth: true, serverAuth: true }
-    ])
-    cert.sign(this.caKey!, forge.md.sha256.create())
-
+    // Identity is assigned by the master, not copied from the CSR subject; only
+    // the CSR's public key is trusted (after the self-signature check above).
+    const cert = this.signLeaf(csr.publicKey, nodeName)
     return {
       certPem: forge.pki.certificateToPem(cert),
       fingerprint: ClusterCA.fingerprintOf(cert),
       notAfter: cert.validity.notAfter.toISOString()
     }
+  }
+
+  /**
+   * The master's own mTLS identity (key + leaf cert + CA), load-or-created under
+   * the CA dir. Used as the cluster mTLS server certificate AND as the client
+   * certificate for master→agent verb calls (the leaf carries serverAuth +
+   * clientAuth). CN is the master node name so an agent can pin it.
+   */
+  getMasterIdentity (masterName: string): ClusterIdentity {
+    this.loadOrCreate()
+    const keyPath = path.join(this.caDir, MASTER_KEY_FILE)
+    const certPath = path.join(this.caDir, MASTER_CERT_FILE)
+    const ca = this.getCaCertPem()
+
+    // Reuse the persisted leaf UNLESS it is missing or within the renewal window —
+    // returning a stale/expired leaf would break the OPS channel cluster-wide at a
+    // fixed date (the same leaf is the mTLS server cert AND the master→agent client
+    // cert), so re-mint proactively.
+    if (fs.existsSync(keyPath) && fs.existsSync(certPath)) {
+      const certPem = fs.readFileSync(certPath, 'utf8')
+      if (!ClusterCA.expiresWithinDays(certPem, MASTER_CERT_RENEW_BEFORE_DAYS)) {
+        return { key: fs.readFileSync(keyPath, 'utf8'), cert: certPem, ca }
+      }
+      logger.info('🔐 Cluster master identity is at/near expiry — re-minting')
+    }
+
+    const keys = forge.pki.rsa.generateKeyPair(2048)
+    const cert = this.signLeaf(keys.publicKey, masterName)
+    const keyPem = forge.pki.privateKeyToPem(keys.privateKey)
+    const certPem = forge.pki.certificateToPem(cert)
+    fs.mkdirSync(this.caDir, { recursive: true, mode: 0o700 })
+    fs.writeFileSync(keyPath, keyPem, { mode: 0o600 })
+    fs.writeFileSync(certPath, certPem, { mode: 0o644 })
+    logger.info(`🔐 Cluster master identity minted (CN=${masterName}, valid ${NODE_CERT_VALIDITY_DAYS}d)`)
+    return { key: keyPem, cert: certPem, ca }
+  }
+
+  /** True if the PEM cert is expired or expires within `days` from now. */
+  static expiresWithinDays (certPem: string, days: number): boolean {
+    const cert = forge.pki.certificateFromPem(certPem)
+    const threshold = new Date(Date.now() + days * 24 * 60 * 60 * 1000)
+    return cert.validity.notAfter <= threshold
+  }
+
+  /**
+   * Mint a CA-signed leaf certificate (cA:false, digitalSignature/keyEncipherment,
+   * extKeyUsage clientAuth+serverAuth) for `commonName`, valid NODE_CERT_VALIDITY_DAYS.
+   * Shared by node-cert issuance and the master's own identity.
+   */
+  private signLeaf (publicKey: forge.pki.PublicKey, commonName: string): forge.pki.Certificate {
+    const cert = forge.pki.createCertificate()
+    cert.publicKey = publicKey
+    cert.serialNumber = '00' + forge.util.bytesToHex(forge.random.getBytesSync(16))
+    cert.validity.notBefore = new Date()
+    cert.validity.notAfter = new Date()
+    cert.validity.notAfter.setDate(cert.validity.notBefore.getDate() + NODE_CERT_VALIDITY_DAYS)
+    cert.setSubject([{ name: 'commonName', value: commonName }])
+    cert.setIssuer(this.caCert!.subject.attributes)
+    cert.setExtensions([
+      { name: 'basicConstraints', cA: false, critical: true },
+      { name: 'keyUsage', digitalSignature: true, keyEncipherment: true, critical: true },
+      { name: 'extKeyUsage', clientAuth: true, serverAuth: true }
+    ])
+    cert.sign(this.caKey!, forge.md.sha256.create())
+    return cert
   }
 
   /** SHA-256 fingerprint (lowercase hex) of a PEM certificate. */

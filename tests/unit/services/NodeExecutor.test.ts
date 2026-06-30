@@ -46,7 +46,7 @@ describe('HttpVmRpcTransport', () => {
   }
 
   it('POSTs {verb, args} to /agent/vm with bearer auth and returns body.result', async () => {
-    const fetchImpl = fakeFetch(() => ({ ok: true, json: async () => ({ ok: true, result: { success: true } }) }))
+    const fetchImpl = fakeFetch(() => ({ status: 200, text: async () => JSON.stringify({ ok: true, result: { success: true } }) }))
     const transport = new HttpVmRpcTransport({ agentUrl: 'http://node-1:9443/', token: 'tok', fetchImpl })
 
     const result = await transport.call('startVM', ['m1'])
@@ -66,7 +66,7 @@ describe('HttpVmRpcTransport', () => {
   })
 
   it('throws when the agent reports ok:false', async () => {
-    const fetchImpl = fakeFetch(() => ({ ok: true, json: async () => ({ ok: false, error: 'vm not found' }) }))
+    const fetchImpl = fakeFetch(() => ({ status: 200, text: async () => JSON.stringify({ ok: false, error: 'vm not found' }) }))
     const transport = new HttpVmRpcTransport({ agentUrl: 'http://n', token: 't', fetchImpl })
     await expect(transport.call('startVM', ['m1'])).rejects.toThrow(/vm not found/)
   })

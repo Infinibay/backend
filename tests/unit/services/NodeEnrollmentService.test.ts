@@ -151,4 +151,40 @@ describe('NodeEnrollmentService (SAS-verified onboarding)', () => {
     await svc.reject(pending.nodeId)
     await expect(svc.poll({ name: 'worker-4', csrPem })).rejects.toThrow(/rejected/)
   })
+
+  it('REFUSES to enroll under the master node name (CN-collision / row hijack guard)', async () => {
+    const { prisma } = makeFakePrisma()
+    const svc = new NodeEnrollmentService(prisma, ca)
+    const prev = process.env.INFINIBAY_NODE_NAME
+    process.env.INFINIBAY_NODE_NAME = 'the-master'
+    try {
+      const csrPem = makeNodeKeyAndCsr('the-master')
+      await expect(svc.requestEnrollment({ name: 'the-master', csrPem })).rejects.toThrow(/reserved for the master/)
+    } finally {
+      if (prev === undefined) delete process.env.INFINIBAY_NODE_NAME
+      else process.env.INFINIBAY_NODE_NAME = prev
+    }
+  })
+
+  it('REFUSES to silently rebind an already-issued node; allows it only after an admin reject', async () => {
+    const { prisma } = makeFakePrisma()
+    const svc = new NodeEnrollmentService(prisma, ca)
+    const csrPem = makeNodeKeyAndCsr('worker-6')
+    const pending = await svc.requestEnrollment({ name: 'worker-6', csrPem })
+    await svc.approve(pending.nodeId, pending.sasCode)
+    const issued = await svc.poll({ name: 'worker-6', csrPem })
+    expect(issued.status).toBe('issued')
+
+    // An attacker holding the bootstrap token tries to take over the live identity
+    // with a FRESH key — refused while the node is approved/issued.
+    const attackerCsr = makeNodeKeyAndCsr('worker-6')
+    await expect(svc.requestEnrollment({ name: 'worker-6', csrPem: attackerCsr }))
+      .rejects.toThrow(/already enrolled.*reject/i)
+
+    // After an explicit admin reject (which clears the issued cert), re-enrollment
+    // is allowed again — the legitimate reinstall path.
+    await svc.reject(pending.nodeId)
+    const reenrolled = await svc.requestEnrollment({ name: 'worker-6', csrPem: attackerCsr })
+    expect(reenrolled.status).toBe('pending')
+  })
 })

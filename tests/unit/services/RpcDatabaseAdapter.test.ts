@@ -44,7 +44,7 @@ describe('HttpDbRpcTransport', () => {
   }
 
   it('POSTs {nodeName, method, args} with bearer auth and returns body.result', async () => {
-    const fetchImpl = fakeFetch(() => ({ ok: true, json: async () => ({ ok: true, result: { id: 'm9' } }) }))
+    const fetchImpl = fakeFetch(() => ({ status: 200, text: async () => JSON.stringify({ ok: true, result: { id: 'm9' } }) }))
     const transport = new HttpDbRpcTransport({ masterUrl: 'http://master:4000/', nodeName: 'node-1', token: 'tok', fetchImpl })
 
     const result = await transport.call('findMachine', ['m9'])
@@ -64,15 +64,15 @@ describe('HttpDbRpcTransport', () => {
   })
 
   it('throws when the master reports ok:false', async () => {
-    const fetchImpl = fakeFetch(() => ({ ok: true, json: async () => ({ ok: false, error: 'node not registered: n' }) }))
+    const fetchImpl = fakeFetch(() => ({ status: 200, text: async () => JSON.stringify({ ok: false, error: 'node not registered: n' }) }))
     const transport = new HttpDbRpcTransport({ masterUrl: 'http://m', nodeName: 'n', token: 't', fetchImpl })
     await expect(transport.call('findMachine', ['x'])).rejects.toThrow(/node not registered/)
   })
 
   it('reconstructs a forwarded PrismaAdapterError as a REAL PrismaAdapterError (F8 — code + instanceof preserved)', async () => {
     const fetchImpl = fakeFetch(() => ({
-      ok: true,
-      json: async () => ({
+      status: 200,
+      text: async () => JSON.stringify({
         ok: false,
         error: { name: 'PrismaAdapterError', code: 'MACHINE_NOT_FOUND', message: 'Machine not found: m1', vmId: 'm1' }
       })

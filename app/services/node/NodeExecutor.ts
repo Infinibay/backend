@@ -1,4 +1,5 @@
 import type { Infinization } from '@infinibay/infinization'
+import { httpsJsonPost, type ClusterIdentity } from './clusterMtls'
 
 /**
  * Multi-node Phase 1 (VM-op routing): the node-agnostic VM lifecycle surface.
@@ -124,33 +125,60 @@ export class RemoteNodeExecutor implements NodeExecutor {
 
 /**
  * HTTP transport: POSTs {verb, args} to a node agent's verb server and returns
- * the `result`. Bearer-token authenticated against the same pre-mTLS cluster
- * token the agent presents to the master (Phase 2 swaps in per-node mTLS).
+ * the `result`.
+ *
+ * Two auth modes (mirroring HttpDbRpcTransport, opposite direction):
+ *   - mTLS (Phase 2.1d): when `identity` is supplied the master presents its
+ *     CA-signed client certificate over HTTPS; the agent verb server requires it
+ *     and (optionally) pins the master CN. No bearer token.
+ *   - token (pre-mTLS): the shared bootstrap bearer token over plain HTTP.
  */
 export class HttpVmRpcTransport implements VmRpcTransport {
   constructor (
     private readonly opts: {
       agentUrl: string
-      token: string
+      token?: string
+      identity?: ClusterIdentity
+      /** The target node's CN, pinned on its mTLS verb-server cert (required with `identity`). */
+      expectedCn?: string
       fetchImpl?: typeof fetch
     }
-  ) {}
+  ) {
+    if (opts.identity && (!opts.expectedCn || opts.expectedCn.length === 0)) {
+      throw new Error('HttpVmRpcTransport: expectedCn is required for mTLS (pin the target node identity)')
+    }
+  }
 
   async call (verb: string, args: unknown[]): Promise<unknown> {
-    const doFetch = this.opts.fetchImpl ?? fetch
-    const res = await doFetch(`${this.opts.agentUrl.replace(/\/+$/, '')}/agent/vm`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        authorization: `Bearer ${this.opts.token}`
-      },
-      body: JSON.stringify({ verb, args })
-    })
-    if (!res.ok) {
-      const text = await res.text().catch(() => '')
-      throw new Error(`VM RPC ${verb} failed (${res.status}): ${text}`)
+    const url = `${this.opts.agentUrl.replace(/\/+$/, '')}/agent/vm`
+    const payload = { verb, args }
+
+    let status: number
+    let text: string
+    if (this.opts.identity) {
+      const r = await httpsJsonPost(url, payload, this.opts.identity, { expectedCn: this.opts.expectedCn! })
+      status = r.status
+      text = r.text
+    } else {
+      const doFetch = this.opts.fetchImpl ?? fetch
+      const res = await doFetch(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${this.opts.token ?? ''}` },
+        body: JSON.stringify(payload)
+      })
+      status = res.status
+      text = await res.text().catch(() => '')
     }
-    const body = (await res.json()) as { ok?: boolean, result?: unknown, error?: string }
+
+    if (status < 200 || status >= 300) {
+      throw new Error(`VM RPC ${verb} failed (${status}): ${text}`)
+    }
+    let body: { ok?: boolean, result?: unknown, error?: string }
+    try {
+      body = JSON.parse(text) as typeof body
+    } catch {
+      throw new Error(`VM RPC ${verb} returned a non-JSON response`)
+    }
     if (body.ok !== true) {
       throw new Error(`VM RPC ${verb} error: ${body.error ?? 'unknown'}`)
     }
