@@ -55,6 +55,13 @@ describe('LocalDiskStore (path-confined disk store)', () => {
     expect(fs.readdirSync(dir).some((f) => f.includes('.part-'))).toBe(false)
   })
 
+  it('freeBytes works even when the disk dir does not exist yet (statfs an existing ancestor)', () => {
+    const base = tmp()
+    // A node that never ran a VM has no disk dir yet; freeBytes must not ENOENT.
+    const store = new LocalDiskStore(path.join(base, 'not', 'created', 'yet'))
+    expect(store.freeBytes()).toBeGreaterThan(0)
+  })
+
   it('unlink removes a present file and is a no-op (false) when already gone', async () => {
     const dir = tmp()
     const store = new LocalDiskStore(dir)

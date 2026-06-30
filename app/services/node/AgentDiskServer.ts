@@ -57,9 +57,19 @@ export class LocalDiskStore {
     return fs.statSync(this.resolveWithin(p)).size
   }
 
-  /** Bytes currently free on the filesystem backing the disk store. */
+  /**
+   * Bytes currently free on the filesystem backing the disk store. The disk dir
+   * may not exist yet on a node that has never run a VM, so statfs the nearest
+   * EXISTING ancestor (free space is a property of the filesystem, not the dir).
+   */
   freeBytes (): number {
-    const st = fs.statfsSync(this.root)
+    let dir = this.root
+    while (!fs.existsSync(dir)) {
+      const parent = path.dirname(dir)
+      if (parent === dir) break
+      dir = parent
+    }
+    const st = fs.statfsSync(dir)
     return st.bavail * st.bsize
   }
 
