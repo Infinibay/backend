@@ -59,6 +59,21 @@ describe('VMOperationsService', () => {
       expect(result.error).toBeUndefined()
     })
 
+    it('threads the seccomp-sandbox opt-out into startVM when INFINIZATION_DISABLE_SANDBOX=1', async () => {
+      const prev = process.env.INFINIZATION_DISABLE_SANDBOX
+      process.env.INFINIZATION_DISABLE_SANDBOX = '1'
+      try {
+        mockInfinization.startVM.mockResolvedValue({ success: true, message: 'ok' })
+        await service.startMachine(validMachineId)
+        // The operator's opt-out travels in the start config (applies on a remote
+        // node too, since it crosses the verb RPC) — NOT just create.
+        expect(mockInfinization.startVM).toHaveBeenCalledWith(validMachineId, { disableSandbox: true })
+      } finally {
+        if (prev === undefined) delete process.env.INFINIZATION_DISABLE_SANDBOX
+        else process.env.INFINIZATION_DISABLE_SANDBOX = prev
+      }
+    })
+
     it('should handle start failure with error message', async () => {
       mockInfinization.startVM.mockResolvedValue({
         success: false,

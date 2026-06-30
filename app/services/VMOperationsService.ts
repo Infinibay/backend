@@ -123,9 +123,16 @@ export class VMOperationsService {
       }
     }
 
+    // Thread the operator's seccomp-sandbox opt-out (read from the master's env)
+    // into start too, so a VM created with the sandbox disabled does not re-enable
+    // it on stop/start. Default keeps the sandbox ON. Travels in the config over the
+    // verb RPC, so it applies whether the VM runs locally or on a remote node.
+    const startConfig = process.env.INFINIZATION_DISABLE_SANDBOX === '1' ? { disableSandbox: true } : undefined
     return this.runOperation(
       machineId, 'Starting', 'Machine started successfully', 'Failed to start machine',
-      (infinization) => infinization.startVM(machineId)
+      // Only pass a config when there is one, so the default call shape (and the
+      // single-node behavior) is byte-for-byte unchanged when the opt-out is unset.
+      (infinization) => startConfig ? infinization.startVM(machineId, startConfig) : infinization.startVM(machineId)
     )
   }
 

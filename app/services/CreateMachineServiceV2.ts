@@ -464,9 +464,15 @@ export class CreateMachineServiceV2 {
       // Drop QEMU's privileges to an unprivileged account (-runas) so a guest
       // escape lands as that uid rather than root. Opt-in via env: left
       // undefined when unset, preserving current behavior (and avoiding a
-      // launch failure if the account doesn't exist on this install). seccomp
-      // (disableSandbox) is intentionally left unset so the sandbox stays on.
+      // launch failure if the account doesn't exist on this install).
       runAsUser: process.env.INFINIZATION_QEMU_USER,
+
+      // The QEMU seccomp sandbox stays ON by default (defense-in-depth). It can
+      // be opted out ONLY for environments where the host kernel/seccomp policy
+      // is incompatible with it — e.g. some nested/rootless-container CI runners
+      // where a sandboxed device-init syscall is killed with SIGSYS. Production
+      // (bare metal / privileged hypervisor nodes) must leave this unset.
+      disableSandbox: process.env.INFINIZATION_DISABLE_SANDBOX === '1' ? true : undefined,
 
       // Optional hardware configuration
       gpuPciAddress: pciBus ?? undefined,
