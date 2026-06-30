@@ -2,6 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import forge from 'node-forge'
 import logger from '@main/logger'
+import { certFingerprint, csrPublicKeyFingerprint } from './clusterCrypto'
 
 /**
  * Multi-node Phase 2 (onboarding): the cluster's private Certificate Authority.
@@ -145,33 +146,19 @@ export class ClusterCA {
 
   /** SHA-256 fingerprint (lowercase hex) of a PEM certificate. */
   static fingerprint (certPem: string): string {
-    return ClusterCA.fingerprintOf(forge.pki.certificateFromPem(certPem))
+    return certFingerprint(certPem)
   }
 
   /**
-   * SHA-256 fingerprint of the PUBLIC KEY inside a CSR (SubjectPublicKeyInfo).
-   * Verifies the CSR self-signature first. Used to bind a pending enrollment to a
-   * specific keypair: the node must re-present a CSR with the SAME public key when
-   * it polls for its issued cert, so an approval can't be redeemed by a different
-   * key. Also the value mixed into the SAS code.
+   * SHA-256 fingerprint of the PUBLIC KEY inside a CSR. Binds a pending enrollment
+   * to a specific keypair (the node must re-present the SAME public key at poll
+   * time) and is mixed into the SAS code. Delegates to the shared cluster crypto.
    */
   static csrPublicKeyFingerprint (csrPem: string): string {
-    const csr = forge.pki.certificationRequestFromPem(csrPem)
-    if (!csr.verify()) {
-      throw new Error('CSR self-signature is invalid')
-    }
-    if (!csr.publicKey) {
-      throw new Error('CSR has no public key')
-    }
-    return forge.pki.getPublicKeyFingerprint(csr.publicKey, {
-      type: 'SubjectPublicKeyInfo',
-      md: forge.md.sha256.create(),
-      encoding: 'hex'
-    }) as string
+    return csrPublicKeyFingerprint(csrPem)
   }
 
   private static fingerprintOf (cert: forge.pki.Certificate): string {
-    const der = forge.asn1.toDer(forge.pki.certificateToAsn1(cert)).getBytes()
-    return forge.md.sha256.create().update(der).digest().toHex()
+    return certFingerprint(forge.pki.certificateToPem(cert))
   }
 }

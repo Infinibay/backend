@@ -2,6 +2,7 @@ import { createHash, randomBytes } from 'crypto'
 import { PrismaClient } from '@prisma/client'
 import logger from '@main/logger'
 import { ClusterCA } from './ClusterCA'
+import { computeSas } from './clusterCrypto'
 
 /**
  * Multi-node Phase 2 (onboarding): SAS-verified node enrollment.
@@ -48,11 +49,7 @@ export class NodeEnrollmentService {
    * Deterministic in its three inputs; uniform over 000000-999999.
    */
   static computeSas (csrPublicKeyFingerprint: string, joinNonce: string, caFingerprint: string): string {
-    const digest = createHash('sha256')
-      .update(`${csrPublicKeyFingerprint}|${joinNonce}|${caFingerprint}`)
-      .digest()
-    const n = digest.readUInt32BE(0) % 1_000_000
-    return n.toString().padStart(6, '0')
+    return computeSas(csrPublicKeyFingerprint, joinNonce, caFingerprint)
   }
 
   private static hashSas (sasCode: string): string {
