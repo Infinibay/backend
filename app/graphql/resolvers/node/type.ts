@@ -30,6 +30,19 @@ export class NodeType {
   @Field(() => String)
     name!: string
 
+  // --- multi-node lifecycle (Phase 2) ---
+  @Field(() => String)
+    role!: string
+
+  @Field(() => String)
+    status!: string
+
+  @Field(() => String, { nullable: true })
+    address?: string | null
+
+  @Field(() => String, { nullable: true })
+    fingerprint?: string | null
+
   @Field(() => String)
     currentRaid!: string
 
@@ -98,4 +111,33 @@ export class NodeInventorySummary {
 
   @Field(() => Int)
     totalDisks!: number
+}
+
+/**
+ * A node awaiting SAS approval. `pairingCode` is the 6-digit code the master
+ * computed for this join — the admin compares it against the code shown on the
+ * node's own terminal before approving (Phase 2 double-verification).
+ */
+@ObjectType()
+export class PendingNodeType {
+  @Field(() => ID)
+    id!: string
+
+  @Field(() => String)
+    name!: string
+
+  @Field(() => String)
+    role!: string
+
+  @Field(() => String, { nullable: true })
+    address?: string | null
+
+  @Field(() => String, { nullable: true })
+    fingerprint?: string | null
+
+  @Field(() => String)
+    pairingCode!: string
+
+  @Field(() => Date)
+    createdAt!: Date
 }

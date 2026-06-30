@@ -2,9 +2,11 @@ import { Arg, Ctx, ID, Mutation, Query, Resolver } from 'type-graphql'
 import { Disk, Node } from '@prisma/client'
 
 import { InfinibayContext } from '@utils/context'
-import { NodeInventorySummary, NodeType } from './type'
+import { NodeInventorySummary, NodeType, PendingNodeType } from './type'
 import { Can } from '@main/permissions'
 import { calculateNodeCapacity, nodeHealth } from '../../../services/node/NodeCapacity'
+import { ClusterCA } from '../../../services/node/ClusterCA'
+import { NodeEnrollmentService } from '../../../services/node/NodeEnrollmentService'
 
 type NodeWithDisks = Node & { disks: Disk[] }
 
@@ -32,6 +34,10 @@ function toGraphql (node: NodeWithInventory, now = new Date()): NodeType {
   return {
     id: node.id,
     name: node.name,
+    role: node.role,
+    status: node.status,
+    address: node.address,
+    fingerprint: node.fingerprint,
     currentRaid: node.currentRaid,
     nextRaid: node.nextRaid,
     cpuFlags: node.cpuFlags,
@@ -156,5 +162,46 @@ export class NodeResolver {
     })
 
     return toGraphql(node)
+  }
+
+  /**
+   * Nodes awaiting SAS approval, each with the pairing code to compare against the
+   * one on the node terminal (Phase 2 onboarding / double-verification).
+   */
+  @Query(() => [PendingNodeType])
+  @Can('node:view')
+  async pendingNodes (@Ctx() context: InfinibayContext): Promise<PendingNodeType[]> {
+    const enrollment = new NodeEnrollmentService(context.prisma, new ClusterCA())
+    return enrollment.listPending()
+  }
+
+  /**
+   * Approve a pending node into the cluster. If `pairingCode` is supplied it must
+   * match the node's SAS — i.e. the admin confirms they read the code off the
+   * node's own terminal (the strongest form of the double-check). On the node's
+   * next poll the master signs its client certificate.
+   */
+  @Mutation(() => Boolean)
+  @Can('node:edit', { id: (a) => a.id })
+  async approveNode (
+    @Arg('id', () => ID) id: string,
+      @Arg('pairingCode', () => String, { nullable: true }) pairingCode: string | undefined,
+      @Ctx() context: InfinibayContext
+  ): Promise<boolean> {
+    const enrollment = new NodeEnrollmentService(context.prisma, new ClusterCA())
+    await enrollment.approve(id, pairingCode ?? undefined)
+    return true
+  }
+
+  /** Reject a pending node's join request. */
+  @Mutation(() => Boolean)
+  @Can('node:edit', { id: (a) => a.id })
+  async rejectNode (
+    @Arg('id', () => ID) id: string,
+      @Ctx() context: InfinibayContext
+  ): Promise<boolean> {
+    const enrollment = new NodeEnrollmentService(context.prisma, new ClusterCA())
+    await enrollment.reject(id)
+    return true
   }
 }

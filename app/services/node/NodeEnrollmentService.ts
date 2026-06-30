@@ -131,6 +131,32 @@ export class NodeEnrollmentService {
   }
 
   /**
+   * List nodes awaiting approval, each with the 6-digit pairing code the master
+   * computed (recomputed from the stored pubkey fingerprint + join nonce + CA
+   * fingerprint) so the admin UI can show it next to the one on the node terminal.
+   */
+  async listPending (): Promise<Array<{
+    id: string, name: string, role: string, address: string | null, fingerprint: string | null, pairingCode: string, createdAt: Date
+  }>> {
+    const nodes = await this.prisma.node.findMany({
+      where: { status: 'pending' },
+      select: { id: true, name: true, role: true, address: true, fingerprint: true, joinNonce: true, createdAt: true }
+    })
+    const caFingerprint = this.ca.caFingerprint()
+    return nodes.map(n => ({
+      id: n.id,
+      name: n.name,
+      role: n.role,
+      address: n.address,
+      fingerprint: n.fingerprint,
+      createdAt: n.createdAt,
+      pairingCode: (n.fingerprint && n.joinNonce)
+        ? NodeEnrollmentService.computeSas(n.fingerprint, n.joinNonce, caFingerprint)
+        : ''
+    }))
+  }
+
+  /**
    * Step 4: the node polls for its certificate. Returns 'pending' until approved,
    * throws on 'rejected', and on first poll after approval signs the (re-presented)
    * CSR into a client cert. Idempotent: a re-poll after issuance returns the
