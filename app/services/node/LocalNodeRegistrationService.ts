@@ -101,6 +101,15 @@ export class LocalNodeRegistrationService {
       where: { name: hardware.name }
     })
 
+    // This service runs inside the control-plane backend, so by default the local
+    // node IS the master. A compute-node agent (Phase 1) sets INFINIBAY_NODE_ROLE
+    // =compute and uses its own registration path that does NOT adopt orphan VMs.
+    const role = (process.env.INFINIBAY_NODE_ROLE || 'master').toLowerCase()
+    const address = process.env.HOST_IP || process.env.APP_HOST || null
+    // The local node is alive right now: stamp a heartbeat so it reads 'online'
+    // immediately (NodeCapacity staleness is heartbeat-driven in Phase 0).
+    const now = new Date()
+
     const node = existing
       ? await this.prisma.node.update({
         where: { id: existing.id },
@@ -108,7 +117,11 @@ export class LocalNodeRegistrationService {
           currentRaid: hardware.currentRaid,
           cpuFlags: hardware.cpuFlags,
           ram: hardware.ram,
-          cores: hardware.cores
+          cores: hardware.cores,
+          role,
+          status: 'online',
+          address,
+          lastHeartbeat: now
         }
       })
       : await this.prisma.node.create({
@@ -118,7 +131,11 @@ export class LocalNodeRegistrationService {
           cpuFlags: hardware.cpuFlags,
           ram: hardware.ram,
           cores: hardware.cores,
-          maintenanceMode: false
+          maintenanceMode: false,
+          role,
+          status: 'online',
+          address,
+          lastHeartbeat: now
         }
       })
 
@@ -134,6 +151,21 @@ export class LocalNodeRegistrationService {
           status: disk.status
         }))
       })
+    }
+
+    // Backfill (G0): adopt VMs that predate node placement (nodeId IS NULL) onto
+    // this master node so the node-scoped reconcile/reaper actually manages them.
+    // Only the master adopts orphans — a compute agent must never claim VMs it was
+    // not assigned. Idempotent: once every Machine has a nodeId this is a no-op.
+    if (role === 'master') {
+      const adopted = await this.prisma.machine.updateMany({
+        where: { nodeId: null },
+        data: { nodeId: node.id }
+      })
+      if (adopted.count > 0) {
+        // eslint-disable-next-line no-console
+        console.info(`[node] adopted ${adopted.count} unassigned VM(s) onto master node ${node.id}`)
+      }
     }
 
     return node

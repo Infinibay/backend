@@ -25,6 +25,7 @@ function toGraphql (node: NodeWithInventory, now = new Date()): NodeType {
     cores: node.cores,
     ram: node.ram,
     updatedAt: node.updatedAt,
+    lastHeartbeat: node.lastHeartbeat,
     maintenanceMode: node.maintenanceMode,
     machines: node.machines ?? []
   }, now)
@@ -37,7 +38,7 @@ function toGraphql (node: NodeWithInventory, now = new Date()): NodeType {
     ram: node.ram,
     cores: node.cores,
     maintenanceMode: node.maintenanceMode,
-    health: nodeHealth(node.updatedAt, now),
+    health: nodeHealth(node.lastHeartbeat ?? node.updatedAt, now),
     diskCount: disks.length,
     healthyDiskCount: disks.filter(disk => HEALTHY_DISK_STATUSES.has(disk.status.toLowerCase())).length,
     availableCores: capacity.availableCores,

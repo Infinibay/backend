@@ -191,10 +191,68 @@ model Node {
   ram             Int
   cores           Int
   maintenanceMode Boolean   @default(false)
+  // --- multi-node (Phase 0) ---
+  /// "master" (the control-plane host: runs Postgres + backend + CA) | "compute".
+  /// The local node is registered as "master" by LocalNodeRegistrationService.
+  role            String    @default("compute")
+  /// Lifecycle of the node in the cluster:
+  /// "pending" (join requested, awaiting SAS approval) | "approved" (cert issued, no HB yet)
+  /// | "online" (recent heartbeat) | "offline" (heartbeat stale) | "rejected" | "decommissioned".
+  /// Derived health (online/stale) is computed from `lastHeartbeat` (see NodeCapacity);
+  /// this column records the administrative/lifecycle state set by onboarding.
+  status          String    @default("pending")
+  /// Reachable management address of the node agent (LAN IP / host). Null until onboarded.
+  address         String?
+  /// Port the node agent's mTLS RPC listens on.
+  agentPort       Int       @default(9443)
+  /// SHA-256 fingerprint of the agent's mTLS client certificate (TOFU pin). Unique
+  /// across the cluster; null until the join is approved and a cert is issued.
+  fingerprint     String?   @unique
+  /// PEM of the agent client certificate signed by the master CA (issued on approval).
+  certPem         String?
+  /// Hash of the short pairing (SAS) code shown during onboarding; cleared after approval.
+  joinCodeHash    String?
+  /// Random nonce mixed into the SAS derivation for this join attempt.
+  joinNonce       String?
+  /// Last heartbeat/lease-renewal received from the agent. Drives staleness
+  /// (NodeCapacity.nodeHealth) — replaces the previous reliance on `updatedAt`,
+  /// which nothing refreshed after registration.
+  lastHeartbeat   DateTime?
+  /// Reported agent build/version, for skew checks during rolling upgrades.
+  agentVersion    String?
+  /// Free-form scheduling labels (e.g. {"gpu": true, "zone": "rack-a"}).
+  labels          Json?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
   disks           Disk[]
   machines        Machine[]
+
+  @@index([status])
+}
+
+/// Audit/observability record of a VM move between nodes (cold or live). The
+/// master is the sole writer while a Machine has a non-null migrationJobId
+/// (Machine.status = 'moving'). Plain id references in Phase 0 (no enforced
+/// relations yet) — kept minimal and additive.
+model MigrationJob {
+  id           String   @id @default(uuid())
+  machineId    String
+  sourceNodeId String?
+  targetNodeId String
+  /// "cold-shared" (reassign+relaunch on shared storage) | "cold-copy" (network disk copy)
+  /// | "live" (QEMU live migration).
+  mode         String
+  /// "queued" | "preparing" | "copying" | "activating" | "completed" | "failed" | "rolled_back".
+  phase        String   @default("queued")
+  progress     Int      @default(0)
+  bytesTotal   BigInt?
+  bytesDone    BigInt?
+  error        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([machineId])
+  @@index([phase])
 }
 
 model Disk {
@@ -244,6 +302,10 @@ model Machine {
   departmentId       String?
   version            Int                   @default(1)
   nodeId             String?
+  /// Active MigrationJob.id while this VM is moving between nodes (status='moving').
+  /// The master is the sole writer of status/nodeId while this is non-null. Plain
+  /// id reference in Phase 0 (no enforced relation yet).
+  migrationJobId     String?
   localIP            String?
   publicIP           String?
   firewallRuleSetId  String?               @unique

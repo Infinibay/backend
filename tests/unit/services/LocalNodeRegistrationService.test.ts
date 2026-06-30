@@ -28,6 +28,14 @@ describe('LocalNodeRegistrationService', () => {
     service = new LocalNodeRegistrationService(mockPrisma)
     jest.clearAllMocks()
 
+    // Phase 0: registerLocalNode now stamps role/status/address/lastHeartbeat and
+    // adopts orphan VMs (machine.updateMany). Default to a deterministic 'master'
+    // with no address, and a no-op adoption.
+    delete process.env.INFINIBAY_NODE_ROLE
+    delete process.env.HOST_IP
+    delete process.env.APP_HOST
+    mockPrisma.machine.updateMany.mockResolvedValue({ count: 0 } as never)
+
     mockedSi.cpu.mockResolvedValue({
       cores: 12,
       flags: 'vmx aes avx2'
@@ -84,8 +92,18 @@ describe('LocalNodeRegistrationService', () => {
         },
         ram: 32768,
         cores: 12,
-        maintenanceMode: false
+        maintenanceMode: false,
+        role: 'master',
+        status: 'online',
+        address: null,
+        lastHeartbeat: expect.any(Date)
       }
+    })
+    // Phase 0 backfill (G0): the master adopts VMs with no node assignment so the
+    // node-scoped reconcile/reaper manages them.
+    expect(mockPrisma.machine.updateMany).toHaveBeenCalledWith({
+      where: { nodeId: null },
+      data: { nodeId: createdNode.id }
     })
     expect(mockPrisma.disk.deleteMany).toHaveBeenCalledWith({
       where: { nodeId: createdNode.id }
@@ -118,8 +136,16 @@ describe('LocalNodeRegistrationService', () => {
           values: ['vmx', 'aes', 'avx2']
         },
         ram: 32768,
-        cores: 12
+        cores: 12,
+        role: 'master',
+        status: 'online',
+        address: null,
+        lastHeartbeat: expect.any(Date)
       }
+    })
+    expect(mockPrisma.machine.updateMany).toHaveBeenCalledWith({
+      where: { nodeId: null },
+      data: { nodeId: updatedNode.id }
     })
     expect(mockPrisma.node.create).not.toHaveBeenCalled()
   })

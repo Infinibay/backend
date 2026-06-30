@@ -14,8 +14,9 @@
 
 import logger from '@main/logger'
 import fs from 'fs'
+import os from 'os'
 import path from 'path'
-import { Infinization, VMEventData } from '@infinibay/infinization'
+import { Infinization, VMEventData, type InfinizationConfig } from '@infinibay/infinization'
 import prisma from '../utils/database'
 import { getEventManager, EventAction } from './EventManager'
 // Read-only import of the canonical disk-op markers (constants owned elsewhere).
@@ -68,6 +69,31 @@ export async function getInfinization (): Promise<Infinization> {
 }
 
 /**
+ * Resolve the owning Node.id for THIS host so infinization can node-scope its
+ * enumeration/orphan reads (the G0 fix). Looked up by node name
+ * (`INFINIBAY_NODE_NAME` || hostname), matching LocalNodeRegistrationService.
+ *
+ * Returns `undefined` when the local node is not yet registered (e.g. a fresh
+ * install before setupNode), in which case infinization runs UNSCOPED — which is
+ * exactly the safe single-host behaviour (every local VM belongs to this host).
+ * Read-only and fail-soft: a DB error must not block VM-service startup.
+ */
+async function resolveLocalNodeId (): Promise<string | undefined> {
+  const name = process.env.INFINIBAY_NODE_NAME || os.hostname()
+  try {
+    const node = await prisma.node.findFirst({ where: { name }, select: { id: true } })
+    if (!node) {
+      logger.warn(`⚠️  Local Node '${name}' not registered yet — infinization runs UN-scoped (single-host). Register the node (setupNode) and restart to enable node scoping.`)
+      return undefined
+    }
+    return node.id
+  } catch (error) {
+    logger.warn(`⚠️  Could not resolve local nodeId (continuing UN-scoped): ${String(error)}`)
+    return undefined
+  }
+}
+
+/**
  * Internal initialization function.
  */
 async function initializeInfinization (): Promise<Infinization> {
@@ -112,9 +138,20 @@ async function initializeInfinization (): Promise<Infinization> {
 
   const eventManager = getEventManager()
 
+  // Node identity for the G0 node-scoped reconcile/reaper. Resolved BEFORE
+  // initialize() so the startup reconcile + orphan scan inside it are already
+  // scoped to THIS node's VMs.
+  const nodeId = await resolveLocalNodeId()
+
   const infinization = new Infinization({
-    prismaClient: prisma,
+    // Pre-existing structural false-positive: Prisma's $extends client
+    // (ExtendedPrismaClient) is runtime-compatible with infinization's
+    // PrismaClientLike, but its overloaded `$transaction` signature does not
+    // structurally match the single-signature interface, so tsc rejects the
+    // assignment. The cast asserts the (real) runtime compatibility.
+    prismaClient: prisma as unknown as InfinizationConfig['prismaClient'],
     eventManager,
+    nodeId,
     diskDir: INFINIZATION_CONFIG.diskDir,
     qmpSocketDir: INFINIZATION_CONFIG.qmpSocketDir,
     pidfileDir: INFINIZATION_CONFIG.pidfileDir,
@@ -125,6 +162,7 @@ async function initializeInfinization (): Promise<Infinization> {
   await infinization.initialize()
 
   logger.info('✅ Infinization service initialized successfully')
+  logger.info(`   - Node scope: ${nodeId ?? 'UNSCOPED (single-host)'}`)
   logger.info(`   - Disk directory: ${INFINIZATION_CONFIG.diskDir}`)
   logger.info(`   - QMP socket directory: ${INFINIZATION_CONFIG.qmpSocketDir}`)
   logger.info(`   - Health monitor: ${INFINIZATION_CONFIG.autoStartHealthMonitor ? 'enabled' : 'disabled'}`)
