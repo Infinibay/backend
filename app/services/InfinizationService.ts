@@ -78,7 +78,7 @@ export async function getInfinization (): Promise<Infinization> {
  * exactly the safe single-host behaviour (every local VM belongs to this host).
  * Read-only and fail-soft: a DB error must not block VM-service startup.
  */
-async function resolveLocalNodeId (): Promise<string | undefined> {
+export async function resolveLocalNodeId (): Promise<string | undefined> {
   const name = process.env.INFINIBAY_NODE_NAME || os.hostname()
   try {
     const node = await prisma.node.findFirst({ where: { name }, select: { id: true } })

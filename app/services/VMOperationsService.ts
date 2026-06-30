@@ -8,8 +8,9 @@
 import { PrismaClient } from '@prisma/client'
 import { Logger } from 'winston'
 import logger from '@main/logger'
-import { getInfinization } from './InfinizationService'
 import { isDiskOperationInProgress } from '../constants/machine-status'
+import { NodeDispatcher } from './node/NodeDispatcher'
+import { type NodeExecutor } from './node/NodeExecutor'
 
 export interface VMOperationResult {
   success: boolean
@@ -20,10 +21,15 @@ export interface VMOperationResult {
 export class VMOperationsService {
   private prisma: PrismaClient
   private debug: Logger
+  private dispatcher: NodeDispatcher
 
-  constructor (prisma: PrismaClient) {
+  constructor (prisma: PrismaClient, dispatcher?: NodeDispatcher) {
     this.prisma = prisma
     this.debug = logger.child({ module: 'vm-operations' })
+    // Multi-node routing seam: every verb is executed against the node that owns
+    // the VM. On a single-node cluster this resolves to a LocalNodeExecutor, so
+    // behaviour is identical to the previous direct getInfinization() path.
+    this.dispatcher = dispatcher ?? new NodeDispatcher(prisma)
   }
 
   /**
@@ -37,13 +43,13 @@ export class VMOperationsService {
     verb: string,
     successMessage: string,
     failureMessage: string,
-    op: (infinization: Awaited<ReturnType<typeof getInfinization>>) => Promise<{ success: boolean, message?: string, error?: string }>
+    op: (executor: NodeExecutor) => Promise<{ success: boolean, message?: string, error?: string }>
   ): Promise<VMOperationResult> {
     this.debug.debug(`${verb} machine ${machineId}`)
 
     try {
-      const infinization = await getInfinization()
-      const result = await op(infinization)
+      const executor = await this.dispatcher.executorFor(machineId)
+      const result = await op(executor)
 
       if (result.success) {
         return { success: true, message: result.message || successMessage }
@@ -153,8 +159,8 @@ export class VMOperationsService {
     consistent: boolean
   } | null> {
     try {
-      const infinization = await getInfinization()
-      const result = await infinization.getVMStatus(machineId)
+      const executor = await this.dispatcher.executorFor(machineId)
+      const result = await executor.getVMStatus(machineId)
 
       return {
         status: result.status,
@@ -218,14 +224,14 @@ export class VMOperationsService {
         }
       }
 
-      const infinization = await getInfinization()
+      const executor = await this.dispatcher.executorFor(machineId)
 
       // Attach to the VM (registers it for QMP / lifecycle tracking)
-      await infinization.attachToRunningVM(machineId, qmpSocketPath)
+      await executor.attachToRunningVM(machineId, qmpSocketPath)
 
       // guest-exec / guest-exec-status are QEMU Guest Agent commands, not QMP —
       // they must go through the QGA socket, not the QMP socket.
-      const result = await infinization.guestExec(machineId, guestAgentSocketPath, command, args)
+      const result = await executor.guestExec(machineId, guestAgentSocketPath, command, args)
 
       this.debug.debug(`Guest command completed: exitCode=${result.exitCode}`)
 
