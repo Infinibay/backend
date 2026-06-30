@@ -105,7 +105,11 @@ class SetupService {
       'libvirt-daemon-system',
       'bridge-utils',
       'genisoimage',
-      '7z',
+      // p7zip-full provides the `7z` binary the unattended-ISO pipeline shells out
+      // to (unattendedManagerBase.ts). There is no apt package literally named
+      // `7z`, so the previous entry silently failed `apt install` and left the
+      // dependency missing — breaking Ubuntu/Fedora VM creation.
+      'p7zip-full',
       'xorriso',
       'grub-mkrescue',
       'isolinux',

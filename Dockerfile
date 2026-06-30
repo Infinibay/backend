@@ -25,6 +25,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
       qemu-system-x86 qemu-utils nftables iproute2 dnsmasq \
       swtpm swtpm-tools ethtool numactl genisoimage xorriso procps \
+      p7zip-full \
       postgresql-client curl ca-certificates bash \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /workspace/backend
