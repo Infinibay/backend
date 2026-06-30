@@ -5,6 +5,7 @@
   "main": "dist/index.js",
   "scripts": {
     "start": "ts-node -r tsconfig-paths/register app/index.ts",
+    "agent:heartbeat": "ts-node -r tsconfig-paths/register agent/heartbeat-agent.ts",
     "dev": "npm run start",
     "dev:verbose": "npm run start",
     "test": "jest",

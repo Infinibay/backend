@@ -298,6 +298,15 @@ async function bootstrap (): Promise<void> {
       logger.error('⚠️ Failed to start BackupScheduleService:', error)
     }
 
+    // Multi-node: register the local node and keep its heartbeat fresh (master
+    // role only; compute nodes heartbeat via the standalone agent).
+    try {
+      const { startClusterHeartbeat } = await import('./services/node/ClusterStartup')
+      await startClusterHeartbeat(prisma)
+    } catch (error) {
+      logger.error('⚠️ Failed to start cluster heartbeat:', error)
+    }
+
     // Start server
     const port = parseInt(process.env.PORT || '4000', 10)
     const host = '0.0.0.0'
