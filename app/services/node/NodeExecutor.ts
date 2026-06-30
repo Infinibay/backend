@@ -1,4 +1,4 @@
-import { getInfinization } from '../InfinizationService'
+import type { Infinization } from '@infinibay/infinization'
 
 /**
  * Multi-node Phase 1 (VM-op routing): the node-agnostic VM lifecycle surface.
@@ -6,21 +6,23 @@ import { getInfinization } from '../InfinizationService'
  * Every VM verb the backend invokes goes through a `NodeExecutor` rather than the
  * in-process infinization instance directly. Two implementations:
  *
- *   - `LocalNodeExecutor`  — forwards to THIS host's `getInfinization()`. This is
- *     byte-for-byte the single-node behaviour, so wiring the dispatcher in is a
- *     no-op for a one-node cluster (every existing test stays green).
+ *   - `LocalNodeExecutor`  (see LocalNodeExecutor.ts) — forwards to THIS host's
+ *     `getInfinization()`. Byte-for-byte the single-node behaviour. Kept in a
+ *     separate module so this file carries NO runtime dependency on the backend
+ *     InfinizationService/Prisma singleton — a node agent imports the verb wire
+ *     (this file) without dragging in a database connection.
  *   - `RemoteNodeExecutor` — forwards each verb over RPC to the node agent that
  *     actually owns the VM (its disk + qemu process live there). Mirror of the
  *     DB facade (`RpcDatabaseAdapter` / `HttpDbRpcTransport`).
  *
- * The interface is derived structurally from the live `Infinization` instance
- * type, so the executor surface can never drift from what infinization exposes:
- * change a verb signature in the library and this fails to compile until both
- * executors match.
+ * The interface is derived structurally from the `Infinization` class type, so
+ * the executor surface can never drift from what infinization exposes: change a
+ * verb signature in the library and this fails to compile until the executors
+ * match.
  */
 
-/** The resolved in-process infinization instance type (single source of truth). */
-type Inf = Awaited<ReturnType<typeof getInfinization>>
+/** The infinization instance type (single source of truth for verb signatures). */
+type Inf = Infinization
 
 export interface NodeExecutor {
   createVM: Inf['createVM']
@@ -56,56 +58,6 @@ export const VM_VERB_METHODS: ReadonlyArray<keyof NodeExecutor> = [
   'attachToRunningVM',
   'guestExec'
 ]
-
-/**
- * Executes VM verbs against THIS host's infinization instance. Resolves the
- * (cached) instance lazily per call, exactly as the call sites did before.
- */
-export class LocalNodeExecutor implements NodeExecutor {
-  async createVM (...a: Parameters<E['createVM']>): Promise<Awaited<ReturnType<E['createVM']>>> {
-    return (await getInfinization()).createVM(...a)
-  }
-
-  async startVM (...a: Parameters<E['startVM']>): Promise<Awaited<ReturnType<E['startVM']>>> {
-    return (await getInfinization()).startVM(...a)
-  }
-
-  async stopVM (...a: Parameters<E['stopVM']>): Promise<Awaited<ReturnType<E['stopVM']>>> {
-    return (await getInfinization()).stopVM(...a)
-  }
-
-  async restartVM (...a: Parameters<E['restartVM']>): Promise<Awaited<ReturnType<E['restartVM']>>> {
-    return (await getInfinization()).restartVM(...a)
-  }
-
-  async resetVM (...a: Parameters<E['resetVM']>): Promise<Awaited<ReturnType<E['resetVM']>>> {
-    return (await getInfinization()).resetVM(...a)
-  }
-
-  async suspendVM (...a: Parameters<E['suspendVM']>): Promise<Awaited<ReturnType<E['suspendVM']>>> {
-    return (await getInfinization()).suspendVM(...a)
-  }
-
-  async resumeVM (...a: Parameters<E['resumeVM']>): Promise<Awaited<ReturnType<E['resumeVM']>>> {
-    return (await getInfinization()).resumeVM(...a)
-  }
-
-  async destroyVM (...a: Parameters<E['destroyVM']>): Promise<Awaited<ReturnType<E['destroyVM']>>> {
-    return (await getInfinization()).destroyVM(...a)
-  }
-
-  async getVMStatus (...a: Parameters<E['getVMStatus']>): Promise<Awaited<ReturnType<E['getVMStatus']>>> {
-    return (await getInfinization()).getVMStatus(...a)
-  }
-
-  async attachToRunningVM (...a: Parameters<E['attachToRunningVM']>): Promise<Awaited<ReturnType<E['attachToRunningVM']>>> {
-    return (await getInfinization()).attachToRunningVM(...a)
-  }
-
-  async guestExec (...a: Parameters<E['guestExec']>): Promise<Awaited<ReturnType<E['guestExec']>>> {
-    return (await getInfinization()).guestExec(...a)
-  }
-}
 
 /** Pluggable transport: turns a (verb, args) pair into the agent's result. */
 export interface VmRpcTransport {

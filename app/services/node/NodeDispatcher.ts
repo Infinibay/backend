@@ -3,10 +3,10 @@ import logger from '@main/logger'
 import { resolveLocalNodeId } from '../InfinizationService'
 import {
   type NodeExecutor,
-  LocalNodeExecutor,
   RemoteNodeExecutor,
   HttpVmRpcTransport
 } from './NodeExecutor'
+import { LocalNodeExecutor } from './LocalNodeExecutor'
 
 /**
  * Multi-node Phase 1 (VM-op routing): resolves WHICH host executes a VM verb.
