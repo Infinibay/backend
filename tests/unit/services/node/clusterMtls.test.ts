@@ -10,6 +10,8 @@ import type { TLSSocket } from 'node:tls'
 
 import { loadClusterIdentity, peerCommonName, requireClientCert, type ClusterAuthedRequest } from '../../../../app/services/node/clusterMtls'
 import { createClusterRouter } from '../../../../app/routes/cluster'
+import { ClusterCA } from '../../../../app/services/node/ClusterCA'
+import { generateNodeKeyAndCsr } from '../../../../app/services/node/clusterCrypto'
 
 /** A fake TLS socket good enough for peerCommonName / requireClientCert. */
 function fakeSocket (opts: { authorized: boolean, cn?: string | null }): TLSSocket {
@@ -21,20 +23,47 @@ function fakeSocket (opts: { authorized: boolean, cn?: string | null }): TLSSock
 
 describe('clusterMtls — pure helpers', () => {
   describe('loadClusterIdentity', () => {
-    let dir: string
-    beforeAll(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'infinibay-identity-')) })
-    afterAll(() => { fs.rmSync(dir, { recursive: true, force: true }) })
+    let caDir: string
+    let ca: ClusterCA
+    let key: string
+    let cert: string
+    let caPem: string
+    beforeAll(() => {
+      caDir = fs.mkdtempSync(path.join(os.tmpdir(), 'infinibay-identity-ca-'))
+      process.env.INFINIBAY_CLUSTER_CA_DIR = caDir
+      ca = new ClusterCA(caDir)
+      ca.loadOrCreate()
+      caPem = ca.getCaCertPem()
+      const g = generateNodeKeyAndCsr('worker-1')
+      key = g.privateKeyPem
+      cert = ca.signNodeCsr(g.csrPem, 'worker-1').certPem
+    })
+    afterAll(() => { fs.rmSync(caDir, { recursive: true, force: true }) })
+
+    function freshDir (): string { return fs.mkdtempSync(path.join(os.tmpdir(), 'infinibay-identity-')) }
 
     it('returns null when the materials are not all present', () => {
+      const dir = freshDir()
       expect(loadClusterIdentity(dir)).toBeNull()
-      fs.writeFileSync(path.join(dir, 'node-key.pem'), 'KEY')
+      fs.writeFileSync(path.join(dir, 'node-key.pem'), key)
       expect(loadClusterIdentity(dir)).toBeNull() // cert + ca still missing
     })
 
-    it('returns the bundle once key + cert + ca all exist', () => {
-      fs.writeFileSync(path.join(dir, 'node-cert.pem'), 'CERT')
-      fs.writeFileSync(path.join(dir, 'cluster-ca.pem'), 'CA')
-      expect(loadClusterIdentity(dir)).toEqual({ key: 'KEY', cert: 'CERT', ca: 'CA' })
+    it('returns the bundle once a MATCHING key + cert + ca all exist', () => {
+      const dir = freshDir()
+      fs.writeFileSync(path.join(dir, 'node-key.pem'), key)
+      fs.writeFileSync(path.join(dir, 'node-cert.pem'), cert)
+      fs.writeFileSync(path.join(dir, 'cluster-ca.pem'), caPem)
+      expect(loadClusterIdentity(dir)).toEqual({ key, cert, ca: caPem })
+    })
+
+    it('returns null for a TORN renewal — key and cert do not correspond (avoids a startup crash-loop)', () => {
+      const dir = freshDir()
+      const otherKey = generateNodeKeyAndCsr('worker-1').privateKeyPem // a different keypair
+      fs.writeFileSync(path.join(dir, 'node-key.pem'), otherKey)
+      fs.writeFileSync(path.join(dir, 'node-cert.pem'), cert) // cert for the ORIGINAL key
+      fs.writeFileSync(path.join(dir, 'cluster-ca.pem'), caPem)
+      expect(loadClusterIdentity(dir)).toBeNull()
     })
   })
 

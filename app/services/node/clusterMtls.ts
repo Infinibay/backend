@@ -1,5 +1,6 @@
 import fs from 'fs'
 import path from 'path'
+import crypto from 'node:crypto'
 import https from 'node:https'
 import type { Request, Response, NextFunction, RequestHandler } from 'express'
 import type { TLSSocket, PeerCertificate } from 'node:tls'
@@ -50,11 +51,22 @@ export function loadClusterIdentity (
   if (!fs.existsSync(keyPath) || !fs.existsSync(certPath) || !fs.existsSync(caPath)) {
     return null
   }
-  return {
-    key: fs.readFileSync(keyPath, 'utf8'),
-    cert: fs.readFileSync(certPath, 'utf8'),
-    ca: fs.readFileSync(caPath, 'utf8')
+  const key = fs.readFileSync(keyPath, 'utf8')
+  const cert = fs.readFileSync(certPath, 'utf8')
+  const ca = fs.readFileSync(caPath, 'utf8')
+  // Guard against a TORN cert renewal (a crash between writing the new key and the
+  // new cert leaves a mismatched pair). https.createServer would then throw
+  // X509_check_private_key SYNCHRONOUSLY at startup → an unrecoverable crash-loop.
+  // Detect the mismatch here and report "no identity" so the caller fails closed
+  // (re-enroll) instead of crash-looping.
+  try {
+    if (!new crypto.X509Certificate(cert).checkPrivateKey(crypto.createPrivateKey(key))) {
+      return null
+    }
+  } catch {
+    return null
   }
+  return { key, cert, ca }
 }
 
 /**
@@ -72,9 +84,25 @@ export function peerCommonName (socket: TLSSocket | null | undefined): string | 
   return typeof cn === 'string' && cn.length > 0 ? cn : null
 }
 
+/**
+ * SHA-256 fingerprint (lowercase hex, no separators) of the peer's VERIFIED client
+ * certificate — byte-identical to ClusterCA.fingerprint()/certFingerprint() (both
+ * hash the DER), so it can be compared against the node's stored certPem to detect
+ * a stale/rotated cert being replayed. Null when no verified peer cert is present.
+ */
+export function peerCertFingerprint (socket: TLSSocket | null | undefined): string | null {
+  if (!socket || typeof (socket as TLSSocket).getPeerCertificate !== 'function') return null
+  if (!(socket as TLSSocket).authorized) return null
+  const cert = (socket as TLSSocket).getPeerCertificate()
+  if (!cert || !(cert as { raw?: Buffer }).raw) return null
+  return crypto.createHash('sha256').update((cert as { raw: Buffer }).raw).digest('hex')
+}
+
 /** A request whose caller identity was established by a verified client cert. */
 export interface ClusterAuthedRequest extends Request {
   clusterNodeName?: string
+  /** The DB Node id resolved + authorized for this mTLS request (set by requireActiveClusterNode). */
+  clusterNodeId?: string
 }
 
 /**

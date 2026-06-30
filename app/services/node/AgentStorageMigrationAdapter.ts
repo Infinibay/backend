@@ -87,6 +87,17 @@ export class AgentStorageMigrationAdapter implements VMStorageMigrationAdapter {
     const sourceLocal = sourceNodeId == null || (localNodeId != null && sourceNodeId === localNodeId)
     const targetLocal = localNodeId != null && targetNodeId === localNodeId
 
+    // CRITICAL data-safety: when BOTH legs resolve to the master's own disk store,
+    // source and target are the SAME file at the SAME path. Copying it onto itself
+    // (temp → rename back) and then unlinking the "source" would destroy the VM's
+    // only qcow2 — the sha256 self-check cannot protect against this. This happens
+    // for a VM with nodeId=null (never scoped) migrated to the master's own node id,
+    // where the raw id no-op check (null === masterId) is false. Treat it as a no-op.
+    if (sourceLocal && targetLocal) {
+      logger.info(`Migration ${machineId}: source and target are the same local disk store — disk already in place, no copy needed`)
+      return
+    }
+
     const sourceNode = sourceLocal ? null : await this.requireNode(sourceNodeId as string, 'source')
     const targetNode = targetLocal ? null : await this.requireNode(targetNodeId, 'target')
 
@@ -118,28 +129,37 @@ export class AgentStorageMigrationAdapter implements VMStorageMigrationAdapter {
     p: string,
     ctx: { sourceLocal: boolean, sourceNode: NodeAddr | null, targetLocal: boolean, targetNode: NodeAddr | null }
   ): Promise<string> {
-    // Source integrity reference + byte stream.
+    // Source integrity reference + size + byte stream.
     let srcSha: string
+    let srcSize: number
     let srcStream: Readable
     if (ctx.sourceLocal) {
       if (!this.store.exists(p)) throw new Error(`source disk missing on master: ${p}`)
       srcSha = await this.store.sha256(p)
+      srcSize = this.store.size(p)
       srcStream = this.store.createReadStream(p)
     } else {
       const stat = await this.statRemote(ctx.sourceNode!, p)
       if (!stat.exists || !stat.sha256) throw new Error(`source disk missing on node ${ctx.sourceNode!.name}: ${p}`)
       srcSha = stat.sha256
+      srcSize = stat.size ?? 0
       srcStream = await this.streamGet(this.pullUrl(ctx.sourceNode!, p), this.identity(), ctx.sourceNode!.name)
     }
 
     // Target write + its own sha256 of what landed.
     let tgtSha: string
     if (ctx.targetLocal) {
+      // Refuse if the master's own disk store can't hold the incoming image (5%
+      // margin) — don't fill the filesystem out from under other local VMs.
+      if (srcSize > 0 && this.store.freeBytes() < Math.ceil(srcSize * 1.05)) {
+        srcStream.destroy()
+        throw new Error(`insufficient disk space on master for ${p}: need ~${srcSize} bytes, ${this.store.freeBytes()} free`)
+      }
       const written = await this.store.writeFrom(p, srcStream)
       tgtSha = written.sha256
       if (tgtSha !== srcSha) { await this.store.unlink(p); throw new Error(`sha256 mismatch writing ${p} on master (src ${srcSha}, dst ${tgtSha})`) }
     } else {
-      const r = await this.streamPost(this.pushUrl(ctx.targetNode!, p, srcSha), srcStream, this.identity(), ctx.targetNode!.name)
+      const r = await this.streamPost(this.pushUrl(ctx.targetNode!, p, srcSha, srcSize), srcStream, this.identity(), ctx.targetNode!.name)
       const body = this.parseJson(r.text)
       if (r.status !== 200 || body?.ok !== true) {
         throw new Error(`disk push to node ${ctx.targetNode!.name} failed (${r.status}): ${r.text.slice(0, 300)}`)
@@ -165,8 +185,9 @@ export class AgentStorageMigrationAdapter implements VMStorageMigrationAdapter {
     return `https://${n.address}:${n.agentPort}/agent/disk/pull?path=${encodeURIComponent(p)}`
   }
 
-  private pushUrl (n: NodeAddr, p: string, sha256: string): string {
-    return `https://${n.address}:${n.agentPort}/agent/disk/push?path=${encodeURIComponent(p)}&sha256=${sha256}`
+  private pushUrl (n: NodeAddr, p: string, sha256: string, size?: number): string {
+    const sizeParam = size != null && size > 0 ? `&size=${size}` : ''
+    return `https://${n.address}:${n.agentPort}/agent/disk/push?path=${encodeURIComponent(p)}&sha256=${sha256}${sizeParam}`
   }
 
   private async statRemote (n: NodeAddr, p: string): Promise<DiskStat> {

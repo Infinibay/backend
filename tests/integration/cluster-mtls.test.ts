@@ -181,7 +181,9 @@ describe('POST /cluster/db over mTLS — CN overrides body.nodeName', () => {
   }
 
   it('derives the calling node from the verified cert CN, ignoring a spoofed body.nodeName', async () => {
-    mockPrisma.node.findFirst.mockResolvedValue({ id: 'worker-1-id' } as never)
+    // The ops channel now also authorizes the node: active status + the presented
+    // cert must be its CURRENT issued cert (certPem). worker-1 presents nodeIdentity.
+    mockPrisma.node.findFirst.mockResolvedValue({ id: 'worker-1-id', status: 'approved', certPem: nodeIdentity.cert } as never)
     mockPrisma.machine.findMany.mockResolvedValue([] as never)
 
     const srv = await startServer(clusterApp())
@@ -224,6 +226,40 @@ describe('POST /cluster/db over mTLS — CN overrides body.nodeName', () => {
   })
 })
 
+describe('mTLS ops authorization — status + cert-fingerprint revocation (no CRL)', () => {
+  beforeEach(() => { jest.clearAllMocks() })
+
+  function clusterApp (): express.Router {
+    const r = express.Router()
+    r.use('/cluster', createClusterRouter({ mode: 'mtls' }))
+    return r
+  }
+
+  it('refuses ops from a REJECTED node even though its cert still chains to the CA (403)', async () => {
+    // The node was decommissioned: status='rejected'. Its 365-day cert is still
+    // valid at the TLS layer, but the ops channel must deny it (revocation).
+    mockPrisma.node.findFirst.mockResolvedValue({ id: 'worker-1-id', status: 'rejected', certPem: nodeIdentity.cert } as never)
+    const srv = await startServer(clusterApp())
+    try {
+      const r = await httpsJsonPost(`${srv.url}/cluster/db`, { method: 'findRunningVMs', args: [] }, nodeIdentity, { expectedCn: 'master-1' })
+      expect(r.status).toBe(403)
+      expect(mockPrisma.machine.findMany).not.toHaveBeenCalled()
+    } finally { await srv.close() }
+  })
+
+  it('refuses a STALE certificate (rotated away) even with active status (403)', async () => {
+    // The DB holds a DIFFERENT (newer) cert than the one presented → replay of a
+    // pre-rotation cert is rejected.
+    const other = makeNodeIdentity(new ClusterCA(caDir), 'worker-1', clusterCaPem)
+    mockPrisma.node.findFirst.mockResolvedValue({ id: 'worker-1-id', status: 'online', certPem: other.cert } as never)
+    const srv = await startServer(clusterApp())
+    try {
+      const r = await httpsJsonPost(`${srv.url}/cluster/db`, { method: 'findRunningVMs', args: [] }, nodeIdentity, { expectedCn: 'master-1' })
+      expect(r.status).toBe(403)
+    } finally { await srv.close() }
+  })
+})
+
 describe('POST /cluster/renew over mTLS (Phase 2.1e cert rotation)', () => {
   beforeEach(() => { jest.clearAllMocks() })
 
@@ -234,7 +270,7 @@ describe('POST /cluster/renew over mTLS (Phase 2.1e cert rotation)', () => {
   }
 
   it('renews an onboarded node cert, identity derived from the verified CN (no re-approval)', async () => {
-    mockPrisma.node.findFirst.mockResolvedValue({ id: 'worker-1-id', name: 'worker-1', status: 'approved', certPem: 'OLD-CERT' } as never)
+    mockPrisma.node.findFirst.mockResolvedValue({ id: 'worker-1-id', name: 'worker-1', status: 'approved', certPem: nodeIdentity.cert } as never)
     mockPrisma.node.update.mockResolvedValue({ id: 'worker-1-id' } as never)
 
     const srv = await startServer(clusterApp())

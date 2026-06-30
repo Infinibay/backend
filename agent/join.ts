@@ -74,6 +74,27 @@ async function requestEnrollment (csrPem: string): Promise<JoinState> {
   if (!body.joinNonce || !body.caCertPem) {
     throw new Error('enroll response missing joinNonce/caCertPem')
   }
+
+  // SECURITY — out-of-band CA pinning (defeats a fake-CA MITM independent of the
+  // 6-digit SAS). The SAS alone is tamper-EVIDENCE, not tamper-PROOF: an active
+  // on-path attacker can substitute its own CA and grind the (short) pairing code
+  // to match. If the operator pins the real CA's fingerprint out-of-band
+  // (INFINIBAY_EXPECTED_CA_FP), we verify the received CA against it and abort on
+  // mismatch — so the attacker's CA is rejected here, before it is ever trusted.
+  const caFp = certFingerprint(body.caCertPem)
+  const expectedCaFp = (process.env.INFINIBAY_EXPECTED_CA_FP || '').toLowerCase().replace(/[^0-9a-f]/g, '')
+  if (expectedCaFp.length > 0 && caFp !== expectedCaFp) {
+    throw new Error(
+      `cluster CA fingerprint mismatch — refusing to trust this master.\n` +
+      `  expected (pinned): ${expectedCaFp}\n  received:          ${caFp}\n` +
+      `  The connection may be intercepted. Do NOT approve the pairing code.`
+    )
+  }
+  console.log(`[join] cluster CA fingerprint: ${caFp}`)
+  if (expectedCaFp.length === 0) {
+    console.log('[join] (tip: set INFINIBAY_EXPECTED_CA_FP to this value, obtained out-of-band from the master, for tamper-PROOF onboarding)')
+  }
+
   const state: JoinState = { csrPem, joinNonce: body.joinNonce, caCertPem: body.caCertPem }
   fs.writeFileSync(STATE_PATH, JSON.stringify(state), { mode: 0o600 })
   fs.writeFileSync(CA_PATH, body.caCertPem, { mode: 0o644 })
@@ -139,6 +160,14 @@ async function main (): Promise<void> {
   fs.mkdirSync(CERT_DIR, { recursive: true, mode: 0o700 })
 
   console.log(`[join] node='${NAME}' master=${MASTER_URL}`)
+  // SECURITY (#8) — the bootstrap token is sent in the enroll REQUEST. Over plain
+  // HTTP it (and the whole exchange) is exposed to any passive eavesdropper on the
+  // path. Warn loudly when enrolling cross-host over http:// so the operator either
+  // uses a trusted link or pins the CA fingerprint (INFINIBAY_EXPECTED_CA_FP).
+  if (/^http:\/\//i.test(MASTER_URL) && !/^http:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/i.test(MASTER_URL)) {
+    console.warn('[join] WARNING: enrolling over CLEARTEXT http:// — the bootstrap token is exposed to network eavesdroppers.')
+    console.warn('[join]          Use a trusted network for onboarding and set INFINIBAY_EXPECTED_CA_FP for tamper-proof verification.')
+  }
 
   // Resume an in-progress join (same key → same pubkey binding), else start fresh.
   let csrPem: string

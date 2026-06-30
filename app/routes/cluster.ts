@@ -5,8 +5,10 @@ import prisma from '../utils/database'
 import { NodeHeartbeatService } from '../services/node/NodeHeartbeatService'
 import { DB_FACADE_METHODS } from '../services/node/RpcDatabaseAdapter'
 import { requireClusterToken } from '../services/node/clusterAuth'
-import { requireClientCert, type ClusterAuthedRequest } from '../services/node/clusterMtls'
+import { requireClientCert, peerCertFingerprint, type ClusterAuthedRequest } from '../services/node/clusterMtls'
+import { certFingerprint } from '../services/node/clusterCrypto'
 import { ClusterCA } from '../services/node/ClusterCA'
+import type { TLSSocket } from 'node:tls'
 import { NodeEnrollmentService } from '../services/node/NodeEnrollmentService'
 import { PrismaClient } from '@prisma/client'
 
@@ -75,8 +77,45 @@ export function createClusterRouter (opts: { mode?: ClusterRouterMode } = {}): e
   // In token mode, when mTLS is enabled cluster-wide the token ops path is RETIRED
   // (421) so there is no spoofable downgrade route — nodes must use the mTLS
   // endpoint, where identity is their cert CN. Enrollment stays reachable (below).
+  // Under mTLS, after the cert is verified, ALSO enforce that the node is still an
+  // ACTIVE cluster member and is presenting its CURRENT certificate. Without this,
+  // a 365-day client cert keeps working after the node is rejected/decommissioned
+  // (there is no CRL), and a pre-rotation cert could be replayed. We gate on
+  // node.status ∈ {approved, online} AND peerCertFingerprint === fp(node.certPem),
+  // so reject()/decommission and cert rotation actually revoke ops access.
+  const requireActiveClusterNode: RequestHandler = (req, res, next) => {
+    const cn = (req as ClusterAuthedRequest).clusterNodeName
+    if (typeof cn !== 'string' || cn.length === 0) {
+      res.status(401).json({ error: 'a verified client certificate is required (mTLS)' })
+      return
+    }
+    void (async () => {
+      try {
+        const node = await prisma.node.findFirst({ where: { name: cn }, select: { id: true, status: true, certPem: true } })
+        if (!node) { res.status(403).json({ error: `node not registered: ${cn}` }); return }
+        if (node.status !== 'approved' && node.status !== 'online') {
+          res.status(403).json({ error: `node ${cn} is not an active cluster member (status=${node.status})` })
+          return
+        }
+        if (!node.certPem) { res.status(403).json({ error: `node ${cn} has no issued certificate` }); return }
+        const presented = peerCertFingerprint(req.socket as TLSSocket)
+        if (!presented || presented !== certFingerprint(node.certPem)) {
+          res.status(403).json({ error: `node ${cn} presented a stale or unrecognized certificate` })
+          return
+        }
+        ;(req as ClusterAuthedRequest).clusterNodeId = node.id
+        next()
+      } catch (err) {
+        logger.error('cluster ops node authorization failed', err)
+        res.status(500).json({ error: 'authorization failed' })
+      }
+    })()
+  }
+  const certThenActive: RequestHandler = (req, res, next) => {
+    requireClientCert()(req, res, () => requireActiveClusterNode(req, res, next))
+  }
   const opsAuth: RequestHandler = mode === 'mtls'
-    ? requireClientCert()
+    ? certThenActive
     : (req, res, next) => {
         if (process.env.INFINIBAY_CLUSTER_MTLS === '1') {
           res.status(421).json({ error: 'cluster ops require mTLS — use the cluster HTTPS endpoint (INFINIBAY_CLUSTER_PORT)' })

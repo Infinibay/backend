@@ -246,11 +246,19 @@ async function maybeRenewCert (): Promise<void> {
     console.error('[agent] cert renewal response missing certPem')
     return
   }
-  // Persist (key 0600), then hot-swap the in-process identity + the verb server's
-  // TLS context. New agent→master calls use the getter, so they pick it up too.
-  fs.writeFileSync(KEY_PATH, privateKeyPem, { mode: 0o600 })
-  fs.writeFileSync(CERT_PATH, body.certPem, { mode: 0o644 })
-  if (body.caCertPem) fs.writeFileSync(CA_PATH, body.caCertPem, { mode: 0o644 })
+  // Persist atomically (temp file → rename), then hot-swap the in-process identity
+  // + the verb server's TLS context. Writing in place is NOT crash-safe: a crash
+  // between the key and cert writes would leave a mismatched pair and brick the
+  // agent on its next start. loadClusterIdentity additionally rejects a mismatched
+  // pair, so a torn write fails closed (re-enroll) rather than crash-looping.
+  const atomicWrite = (target: string, data: string, mode: number): void => {
+    const tmp = `${target}.tmp-${process.pid}`
+    fs.writeFileSync(tmp, data, { mode })
+    fs.renameSync(tmp, target)
+  }
+  atomicWrite(KEY_PATH, privateKeyPem, 0o600)
+  atomicWrite(CERT_PATH, body.certPem, 0o644)
+  if (body.caCertPem) atomicWrite(CA_PATH, body.caCertPem, 0o644)
   identity = { key: privateKeyPem, cert: body.certPem, ca: body.caCertPem ?? id.ca }
   if (verbHttpsServer) {
     verbHttpsServer.setSecureContext(clusterServerOptions(identity, { rejectUnauthorized: true }))

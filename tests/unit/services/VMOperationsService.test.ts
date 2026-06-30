@@ -124,7 +124,7 @@ describe('VMOperationsService', () => {
         const result = await service.startMachine(validMachineId)
 
         expect(result.success).toBe(false)
-        expect(result.error).toMatch(/disk operation in progress/i)
+        expect(result.error).toMatch(/busy/i)
         expect(mockInfinization.startVM).not.toHaveBeenCalled()
       }
     )

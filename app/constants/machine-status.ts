@@ -120,3 +120,15 @@ export function isMachineRunning (status: string): boolean {
 export function isDiskOperationInProgress (status: string): boolean {
   return (DISK_OP_STATUSES as string[]).includes(status)
 }
+
+/**
+ * True when a power-on / restart must be refused because the row is claimed by a
+ * transient exclusive operation that holds (or is relocating) the qcow2: the
+ * qemu-img disk ops AND a cold migration ('moving'). Starting qemu under any of
+ * these races the operation — e.g. a node-to-node migration is copying/deleting
+ * the disk while a concurrent power-on would launch qemu on the source. Fail
+ * closed: power paths gate on this, not just isDiskOperationInProgress.
+ */
+export function isPowerActionLocked (status: string): boolean {
+  return isDiskOperationInProgress(status) || status === MOVING_STATUS
+}

@@ -35,6 +35,7 @@ import { FirewallValidationService } from '../../../services/firewall/FirewallVa
 import { InfinizationFirewallService } from '../../../services/firewall/InfinizationFirewallService'
 import { VMMigrationService } from '../../../services/node/VMMigrationService'
 import { AgentStorageMigrationAdapter } from '../../../services/node/AgentStorageMigrationAdapter'
+import { NodeDispatcher } from '../../../services/node/NodeDispatcher'
 import { DomainJoinService } from '../../../services/DomainJoinService'
 import { Machine as PrismaMachine, MachineTemplate as PrismaMachineTemplate, Department as PrismaDepartment, MachineConfiguration, PrismaClient } from '@prisma/client'
 import { SafeUser } from '@utils/context'
@@ -333,9 +334,12 @@ export class MachineMutations {
     // the mTLS disk channel (Phase 3). Shared storage needs no copy — the disk is
     // already reachable from the target — so we skip the adapter entirely.
     const sharedStorage = ['1', 'true', 'yes'].includes((process.env.INFINIBAY_SHARED_STORAGE || '').toLowerCase())
+    // The dispatcher doubles as the liveness probe (executorFor → getVMStatus on the
+    // owning node) so migration refuses to move a disk out from under a live qemu.
+    const livenessProbe = new NodeDispatcher(prisma)
     const migrationService = sharedStorage
-      ? new VMMigrationService(prisma, { storageMode: 'shared' })
-      : new VMMigrationService(prisma, { storageAdapter: new AgentStorageMigrationAdapter(prisma) })
+      ? new VMMigrationService(prisma, { storageMode: 'shared', livenessProbe })
+      : new VMMigrationService(prisma, { storageAdapter: new AgentStorageMigrationAdapter(prisma), livenessProbe })
     const result = await migrationService.migrateStoppedMachineToNode(id, targetNodeId)
 
     try {

@@ -57,6 +57,12 @@ export class LocalDiskStore {
     return fs.statSync(this.resolveWithin(p)).size
   }
 
+  /** Bytes currently free on the filesystem backing the disk store. */
+  freeBytes (): number {
+    const st = fs.statfsSync(this.root)
+    return st.bavail * st.bsize
+  }
+
   async sha256 (p: string): Promise<string> {
     const abs = this.resolveWithin(p)
     const hash = crypto.createHash('sha256')
@@ -142,6 +148,17 @@ export function createAgentDiskRouter (opts: AgentDiskServerOptions): express.Ro
       const p = String(req.query.path ?? '')
       const expected = req.query.sha256 != null ? String(req.query.sha256) : undefined
       store.resolveWithin(p) // validate before consuming the body
+      // Refuse before consuming the body if the target FS cannot hold the incoming
+      // disk (with a 5% margin) — otherwise a too-big migration fills the node disk
+      // and ENOSPC-fails OTHER VMs' writes that share it (507 Insufficient Storage).
+      const expectedSize = req.query.size != null ? Number(req.query.size) : NaN
+      if (Number.isFinite(expectedSize) && expectedSize > 0) {
+        const free = store.freeBytes()
+        if (free < Math.ceil(expectedSize * 1.05)) {
+          res.status(507).json({ ok: false, error: `insufficient disk space on target: need ~${expectedSize} bytes, ${free} free` })
+          return
+        }
+      }
       const written = await store.writeFrom(p, req)
       if (expected !== undefined && expected !== written.sha256) {
         await store.unlink(p)

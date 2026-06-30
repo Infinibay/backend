@@ -1,5 +1,7 @@
 import { PrismaClient } from '@prisma/client'
+import logger from '@main/logger'
 import { calculateNodeCapacity } from './NodeCapacity'
+import { MOVING_STATUS } from '../../constants/machine-status'
 
 export interface VMStorageMigrationAdapter {
   prepareMachineStorage(params: {
@@ -10,9 +12,22 @@ export interface VMStorageMigrationAdapter {
   }): Promise<void>
 }
 
+/**
+ * Minimal liveness probe: resolve the executor that OWNS a machine (the source
+ * node, since nodeId is not flipped until the copy succeeds) and read its real
+ * power state. NodeDispatcher satisfies this structurally; injected so migration
+ * can refuse to relocate a disk out from under a live qemu (a 'stopped'/'error'
+ * DB row can still have a running process — split-brain / corruption otherwise).
+ */
+export interface MigrationLivenessProbe {
+  executorFor(machineId: string): Promise<{ getVMStatus(machineId: string): Promise<{ processAlive?: boolean }> }>
+}
+
 export interface VMMigrationServiceOptions {
   storageMode?: 'shared' | 'external'
   storageAdapter?: VMStorageMigrationAdapter
+  /** Used to verify the VM is genuinely powered off on the source before moving its disk. */
+  livenessProbe?: MigrationLivenessProbe
 }
 
 export interface VMMigrationResult {
@@ -23,7 +38,7 @@ export interface VMMigrationResult {
   error?: string
 }
 
-const MIGRATABLE_STATUSES = new Set(['off', 'stopped', 'error'])
+const MIGRATABLE_STATUSES = ['off', 'stopped', 'error']
 const SHARED_STORAGE_VALUES = new Set(['1', 'true', 'yes'])
 
 export class VMMigrationService {
@@ -48,7 +63,7 @@ export class VMMigrationService {
       throw new Error('VM not found')
     }
 
-    if (!MIGRATABLE_STATUSES.has(machine.status)) {
+    if (!MIGRATABLE_STATUSES.includes(machine.status)) {
       throw new Error('Only stopped VMs can be migrated between nodes right now')
     }
 
@@ -92,23 +107,66 @@ export class VMMigrationService {
       throw new Error('Target node does not have enough available CPU or memory')
     }
 
-    await this.prepareStorageForMigration({
-      machineId,
-      sourceNodeId: machine.nodeId,
-      targetNodeId,
-      diskPaths: this.parseDiskPaths(machine.configuration?.diskPaths)
-    })
+    const sourceNodeId = machine.nodeId
+    const priorStatus = machine.status
+    const diskPaths = this.parseDiskPaths(machine.configuration?.diskPaths)
 
-    await this.prisma.machine.update({
-      where: { id: machineId },
-      data: { nodeId: targetNodeId }
+    // ── Atomic claim ('moving' status-as-lock) ───────────────────────────────
+    // Flip the row to 'moving' ONLY if it is still in a migratable state AND still
+    // owned by the same source node. This serializes concurrent migrations of the
+    // same VM (a second one sees count 0 and bails) and — because power-on paths
+    // refuse 'moving' (isPowerActionLocked) — blocks a concurrent power-on from
+    // launching qemu on the source while we copy/delete its disk. The prior status
+    // is restored on success AND rollback so the VM never gets stuck in 'moving'.
+    const claim = await this.prisma.machine.updateMany({
+      where: { id: machineId, status: { in: MIGRATABLE_STATUSES }, nodeId: sourceNodeId },
+      data: { status: MOVING_STATUS }
     })
+    if (claim.count !== 1) {
+      throw new Error('VM is busy or no longer in a migratable state (another migration or power operation is in progress)')
+    }
 
-    return {
-      success: true,
-      machineId,
-      sourceNodeId: machine.nodeId,
-      targetNodeId
+    try {
+      // ── Liveness ────────────────────────────────────────────────────────────
+      // The DB status can lag reality (e.g. an 'error' row left by a failed create
+      // whose qemu is still alive). Confirm the source process is actually dead
+      // before relocating + deleting its disk — otherwise we copy a live qcow2 and
+      // unlink it out from under the running process (corruption / split-brain).
+      if (this.options.livenessProbe) {
+        const executor = await this.options.livenessProbe.executorFor(machineId)
+        const state = await executor.getVMStatus(machineId)
+        if (state?.processAlive === true) {
+          throw new Error('Refusing to migrate: the VM process is still alive on the source node. Power it off first.')
+        }
+      }
+
+      // ── Relocate the disk (verified copy + I2 source reclaim) ─────────────────
+      await this.prepareStorageForMigration({
+        machineId,
+        sourceNodeId,
+        targetNodeId,
+        diskPaths
+      })
+
+      // ── Commit the new owner + release the lock in one write ──────────────────
+      await this.prisma.machine.update({
+        where: { id: machineId },
+        data: { nodeId: targetNodeId, status: priorStatus }
+      })
+
+      return {
+        success: true,
+        machineId,
+        sourceNodeId,
+        targetNodeId
+      }
+    } catch (err) {
+      // Release the claim so a failed migration never strands the VM in 'moving'.
+      await this.prisma.machine.updateMany({
+        where: { id: machineId, status: MOVING_STATUS },
+        data: { status: priorStatus }
+      }).catch((e) => logger.error(`Migration ${machineId}: failed to roll back 'moving' status: ${String(e)}`))
+      throw err
     }
   }
 

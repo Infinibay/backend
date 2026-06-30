@@ -8,7 +8,7 @@
 import { PrismaClient } from '@prisma/client'
 import { Logger } from 'winston'
 import logger from '@main/logger'
-import { isDiskOperationInProgress } from '../constants/machine-status'
+import { isPowerActionLocked } from '../constants/machine-status'
 import { NodeDispatcher } from './node/NodeDispatcher'
 import { type NodeExecutor } from './node/NodeExecutor'
 
@@ -115,11 +115,11 @@ export class VMOperationsService {
       where: { id: machineId },
       select: { status: true }
     })
-    if (machine && isDiskOperationInProgress(machine.status)) {
-      this.debug.warn(`Refusing to start machine ${machineId}: disk operation in progress (status=${machine.status})`)
+    if (machine && isPowerActionLocked(machine.status)) {
+      this.debug.warn(`Refusing to start machine ${machineId}: row is locked by a transient operation (status=${machine.status})`)
       return {
         success: false,
-        error: `VM has a disk operation in progress (${machine.status}). Wait for the backup/restore/snapshot to finish before powering on.`
+        error: `VM is busy (${machine.status}). Wait for the backup/restore/snapshot/migration to finish before powering on.`
       }
     }
 
