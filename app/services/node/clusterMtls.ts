@@ -2,7 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import https from 'node:https'
 import type { Request, Response, NextFunction, RequestHandler } from 'express'
-import type { TLSSocket } from 'node:tls'
+import type { TLSSocket, PeerCertificate } from 'node:tls'
 
 /**
  * Multi-node Phase 2 (2.1d): mTLS primitives for the cluster channel.
@@ -137,6 +137,36 @@ export interface HttpsPostOptions {
 const DEFAULT_MAX_RESPONSE_BYTES = 16 * 1024 * 1024
 
 /**
+ * The shared client-side TLS options for reaching a SPECIFIC cluster peer over
+ * mTLS: present our `identity`, verify the chain against our CA, AND pin the peer
+ * leaf's CN to `expectedCn`. Chain verification alone is insufficient — every
+ * cluster leaf is serverAuth-capable and signed by the same CA, so without the CN
+ * pin any enrolled node could impersonate the intended peer (rogue-node MITM).
+ * The default hostname check is REPLACED (not disabled): the cert CN is a cluster
+ * member name, never the dial IP, so we compare the CN to the intended peer.
+ *
+ * Reused by httpsJsonPost (JSON ops) and the disk-streaming transport (cold
+ * migration) so both speak mTLS to a node identically.
+ */
+export function clusterClientTlsOptions (
+  identity: ClusterIdentity,
+  expectedCn: string
+): Pick<https.RequestOptions, 'key' | 'cert' | 'ca' | 'checkServerIdentity'> {
+  return {
+    key: identity.key,
+    cert: identity.cert,
+    ca: identity.ca,
+    checkServerIdentity: (_host: string, cert: PeerCertificate): Error | undefined => {
+      const cn = cert?.subject?.CN
+      if (cn !== expectedCn) {
+        return new Error(`cluster peer CN '${cn ?? '<none>'}' does not match expected '${expectedCn}'`)
+      }
+      return undefined
+    }
+  }
+}
+
+/**
  * POST a JSON body over mTLS, presenting `identity` as the client certificate and
  * authenticating the SERVER by (a) chain verification against `identity.ca` AND
  * (b) pinning the server leaf's CN to `opts.expectedCn`. The default hostname
@@ -169,20 +199,10 @@ export function httpsJsonPost (
         hostname: u.hostname,
         port: u.port,
         path: `${u.pathname}${u.search}`,
-        key: identity.key,
-        cert: identity.cert,
-        ca: identity.ca,
-        // Keep chain verification against our CA AND pin the peer leaf CN to the
-        // intended cluster member (the hostname match is moot — the cert CN is a
-        // node name, not the dial IP). A cert for a DIFFERENT cluster member is
-        // rejected here even though it chains to the CA.
-        checkServerIdentity: (_host, cert) => {
-          const cn = cert?.subject?.CN
-          if (cn !== opts.expectedCn) {
-            return new Error(`cluster peer CN '${cn ?? '<none>'}' does not match expected '${opts.expectedCn}'`)
-          }
-          return undefined
-        },
+        // Present our cert, verify the chain against our CA, and pin the peer leaf
+        // CN to the intended cluster member (a cert for a DIFFERENT member is
+        // rejected even though it chains to the CA).
+        ...clusterClientTlsOptions(identity, opts.expectedCn),
         headers: {
           'content-type': 'application/json',
           'content-length': payload.length

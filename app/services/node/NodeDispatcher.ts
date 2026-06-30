@@ -123,7 +123,7 @@ export class NodeDispatcher {
 let cachedMasterIdentity: ClusterIdentity | null = null
 let masterIdentityRefreshAfter = 0
 const MASTER_IDENTITY_TTL_MS = 60 * 60 * 1000 // 1h
-function masterIdentity (): ClusterIdentity {
+export function masterIdentity (): ClusterIdentity {
   if (!cachedMasterIdentity || Date.now() >= masterIdentityRefreshAfter) {
     const masterName = process.env.INFINIBAY_NODE_NAME || os.hostname()
     cachedMasterIdentity = new ClusterCA().getMasterIdentity(masterName)

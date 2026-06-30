@@ -34,6 +34,7 @@ import { FirewallRuleService } from '../../../services/firewall/FirewallRuleServ
 import { FirewallValidationService } from '../../../services/firewall/FirewallValidationService'
 import { InfinizationFirewallService } from '../../../services/firewall/InfinizationFirewallService'
 import { VMMigrationService } from '../../../services/node/VMMigrationService'
+import { AgentStorageMigrationAdapter } from '../../../services/node/AgentStorageMigrationAdapter'
 import { DomainJoinService } from '../../../services/DomainJoinService'
 import { Machine as PrismaMachine, MachineTemplate as PrismaMachineTemplate, Department as PrismaDepartment, MachineConfiguration, PrismaClient } from '@prisma/client'
 import { SafeUser } from '@utils/context'
@@ -328,7 +329,13 @@ export class MachineMutations {
     @Ctx() context: InfinibayContext
   ): Promise<MachineMigrationResultType> {
     const { prisma, user } = context
-    const migrationService = new VMMigrationService(prisma)
+    // Local (non-shared) storage: physically copy the disk to the target node over
+    // the mTLS disk channel (Phase 3). Shared storage needs no copy — the disk is
+    // already reachable from the target — so we skip the adapter entirely.
+    const sharedStorage = ['1', 'true', 'yes'].includes((process.env.INFINIBAY_SHARED_STORAGE || '').toLowerCase())
+    const migrationService = sharedStorage
+      ? new VMMigrationService(prisma, { storageMode: 'shared' })
+      : new VMMigrationService(prisma, { storageAdapter: new AgentStorageMigrationAdapter(prisma) })
     const result = await migrationService.migrateStoppedMachineToNode(id, targetNodeId)
 
     try {

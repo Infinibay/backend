@@ -38,6 +38,7 @@ import express from 'express'
 import { Infinization } from '@infinibay/infinization'
 import { RpcDatabaseAdapter, HttpDbRpcTransport } from '../app/services/node/RpcDatabaseAdapter'
 import { createAgentVerbRouter } from '../app/services/node/AgentVerbServer'
+import { createAgentDiskRouter, LocalDiskStore } from '../app/services/node/AgentDiskServer'
 import { type NodeExecutor } from '../app/services/node/NodeExecutor'
 import { loadClusterIdentity, httpsJsonPost, clusterServerOptions, type ClusterIdentity } from '../app/services/node/clusterMtls'
 import { generateNodeKeyAndCsr, certFingerprint, certExpiresWithinDays } from '../app/services/node/clusterCrypto'
@@ -205,6 +206,9 @@ function startVerbServer (): void {
   if (MTLS) {
     // Only the master's CN may call verbs (mandatory pin — guaranteed set by main()).
     app.use('/agent', createAgentVerbRouter({ getTarget, auth: 'mtls', masterCn: MASTER_CN }))
+    // Cold-migration disk transfer (pull/push/stat/delete), confined to DISK_DIR and
+    // restricted to the master's verified client cert (Phase 3).
+    app.use('/agent', createAgentDiskRouter({ store: new LocalDiskStore(DISK_DIR), auth: 'mtls', masterCn: MASTER_CN }))
     const server = https.createServer(clusterServerOptions(currentIdentity(), { rejectUnauthorized: true }), app)
     server.on('error', onListenError)
     server.listen(AGENT_PORT, () => {
