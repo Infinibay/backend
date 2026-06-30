@@ -6,6 +6,7 @@ import {
   DB_FACADE_METHODS,
   type DbRpcTransport
 } from '../../../app/services/node/RpcDatabaseAdapter'
+import { isPrismaAdapterError, PrismaAdapterError } from '@infinibay/infinization'
 
 describe('RpcDatabaseAdapter (compute-node DB facade client)', () => {
   it('forwards every one of the 16 facade methods as (name, args) and returns the result', async () => {
@@ -66,5 +67,29 @@ describe('HttpDbRpcTransport', () => {
     const fetchImpl = fakeFetch(() => ({ ok: true, json: async () => ({ ok: false, error: 'node not registered: n' }) }))
     const transport = new HttpDbRpcTransport({ masterUrl: 'http://m', nodeName: 'n', token: 't', fetchImpl })
     await expect(transport.call('findMachine', ['x'])).rejects.toThrow(/node not registered/)
+  })
+
+  it('reconstructs a forwarded PrismaAdapterError as a REAL PrismaAdapterError (F8 — code + instanceof preserved)', async () => {
+    const fetchImpl = fakeFetch(() => ({
+      ok: true,
+      json: async () => ({
+        ok: false,
+        error: { name: 'PrismaAdapterError', code: 'MACHINE_NOT_FOUND', message: 'Machine not found: m1', vmId: 'm1' }
+      })
+    }))
+    const transport = new HttpDbRpcTransport({ masterUrl: 'http://m', nodeName: 'n', token: 't', fetchImpl })
+
+    // The rejection must be a real PrismaAdapterError so infinization's
+    // isPrismaAdapterError / `instanceof` / `.code === MACHINE_NOT_FOUND`
+    // branches fire over RPC exactly as in-process.
+    await expect(transport.call('getFirewallRulesSplit', ['m1'])).rejects.toBeInstanceOf(PrismaAdapterError)
+    try {
+      await transport.call('getFirewallRulesSplit', ['m1'])
+      throw new Error('should have thrown')
+    } catch (e) {
+      expect(isPrismaAdapterError(e)).toBe(true)
+      expect((e as PrismaAdapterError).code).toBe('MACHINE_NOT_FOUND')
+      expect((e as PrismaAdapterError).vmId).toBe('m1')
+    }
   })
 })

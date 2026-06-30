@@ -119,4 +119,25 @@ describe('POST /cluster/db (node DB facade)', () => {
       expect(mockPrisma.machine.findFirst).not.toHaveBeenCalled()
     })
   })
+
+  describe('typed-error forwarding (F8)', () => {
+    it('serializes a thrown PrismaAdapterError (code + message + vmId) as a structured ok:false body', async () => {
+      mockPrisma.node.findFirst.mockResolvedValue({ id: 'node-1-id' } as never)
+      // Ownership passes…
+      mockPrisma.machine.findFirst.mockResolvedValue({ id: 'm1' } as never)
+      // …but getFirewallRulesSplit's own lookup finds no machine → it throws
+      // PrismaAdapterError(MACHINE_NOT_FOUND).
+      mockPrisma.machine.findUnique.mockResolvedValue(null as never)
+
+      const res = await post({ nodeName: 'node-1', method: 'getFirewallRulesSplit', args: ['m1'] })
+
+      // The RPC completed (200) but reports a typed domain error, NOT a generic 500.
+      expect(res.status).toBe(200)
+      expect(res.body.ok).toBe(false)
+      expect(res.body.error).toEqual(
+        expect.objectContaining({ name: 'PrismaAdapterError', code: 'MACHINE_NOT_FOUND', vmId: 'm1' })
+      )
+      expect(res.body.error.message).toMatch(/not found/i)
+    })
+  })
 })

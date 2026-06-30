@@ -1,5 +1,5 @@
 import express, { Request, Response } from 'express'
-import { PrismaAdapter, type InfinizationConfig } from '@infinibay/infinization'
+import { PrismaAdapter, isPrismaAdapterError, type InfinizationConfig } from '@infinibay/infinization'
 import logger from '@main/logger'
 import prisma from '../utils/database'
 import { NodeHeartbeatService } from '../services/node/NodeHeartbeatService'
@@ -125,8 +125,22 @@ router.post('/db', express.json({ limit: '256kb' }), requireClusterToken, async 
     const result = await fn.apply(adapter, callArgs)
     res.json({ ok: true, result })
   } catch (error) {
+    // A facade method that threw is a DOMAIN result, not an infra failure — the
+    // RPC completed. Forward the TYPED PrismaAdapterError (code + message + vmId)
+    // so the node's RpcDatabaseAdapter can reconstruct it and infinization's
+    // `isPrismaAdapterError(e) && e.code === MACHINE_NOT_FOUND` (firewall
+    // default-deny-continue) / VERSION_CONFLICT (concurrent-modification)
+    // branches fire on the remote path exactly as they do single-node (F8).
+    // Erasing it to a generic 500 made every typed branch take the wrong path.
+    if (isPrismaAdapterError(error)) {
+      res.json({
+        ok: false,
+        error: { name: 'PrismaAdapterError', code: error.code, message: error.message, vmId: error.vmId }
+      })
+      return
+    }
     logger.error('cluster db rpc failed', error)
-    res.status(500).json({ error: 'db rpc failed' })
+    res.status(500).json({ ok: false, error: { message: error instanceof Error ? error.message : String(error) } })
   }
 })
 

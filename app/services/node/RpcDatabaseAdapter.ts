@@ -1,4 +1,5 @@
 import type { InfinizationDatabase } from '@infinibay/infinization'
+import { PrismaAdapterError, PrismaAdapterErrorCode } from '@infinibay/infinization'
 
 /**
  * Multi-node Phase 1 (increment 3): the compute-node side of the DB facade.
@@ -147,9 +148,22 @@ export class HttpDbRpcTransport implements DbRpcTransport {
       const text = await res.text().catch(() => '')
       throw new Error(`RPC ${method} failed (${res.status}): ${text}`)
     }
-    const body = (await res.json()) as { ok?: boolean, result?: unknown, error?: string }
+    const body = (await res.json()) as { ok?: boolean, result?: unknown, error?: unknown }
     if (body.ok !== true) {
-      throw new Error(`RPC ${method} error: ${body.error ?? 'unknown'}`)
+      // The master forwards a TYPED PrismaAdapterError as a structured object so
+      // infinization's code-based branches (MACHINE_NOT_FOUND / VERSION_CONFLICT)
+      // work over RPC exactly as in-process. Reconstruct a real PrismaAdapterError
+      // (same class identity → `instanceof` / isPrismaAdapterError pass) so the
+      // remote path doesn't silently diverge from single-node (F8).
+      const err = body.error
+      if (err !== null && typeof err === 'object' && (err as { name?: unknown }).name === 'PrismaAdapterError') {
+        const e = err as { code: PrismaAdapterErrorCode, message?: string, vmId?: string }
+        throw new PrismaAdapterError(e.message ?? `RPC ${method} failed`, e.code, e.vmId)
+      }
+      const message = typeof err === 'string'
+        ? err
+        : (err !== null && typeof err === 'object' && 'message' in err ? String((err as { message: unknown }).message) : 'unknown')
+      throw new Error(`RPC ${method} error: ${message}`)
     }
     return body.result
   }
