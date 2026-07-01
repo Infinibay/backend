@@ -453,6 +453,92 @@ export class DepartmentNetworkService {
   }
 
   /**
+   * Ensure the department's Linux bridge EXISTS and is ready to attach VM TAPs to,
+   * returning its name. Call this from the VM-create path instead of the bare
+   * getBridgeForDepartment(): that only reads the persisted name and does NOT
+   * check the kernel, so a VM would attach its TAP and fail late with a cryptic
+   * `ip link set ... master <bridge> ... Device does not exist`.
+   *
+   * Behavior:
+   *  - No bridgeName OR no ipSubnet  -> the department has no network configured
+   *    (the legacy/seed 'Default' dept has a bridge name but never got a subnet,
+   *    so restoreAllNetworks skips it and its bridge is never created). Throw a
+   *    clear, actionable error.
+   *  - Bridge already exists         -> return it (fast path).
+   *  - Bridge missing but subnet set -> self-heal: (re)provision it (e.g. after a
+   *    container/host recreate wiped the netns bridge), then return it.
+   */
+  async ensureDepartmentBridgeReady (departmentId: string): Promise<string> {
+    const dept = await this.prisma.department.findUnique({ where: { id: departmentId } })
+    if (!dept) {
+      throw new Error(`Department ${departmentId} not found`)
+    }
+
+    if (!dept.bridgeName || !dept.ipSubnet) {
+      throw new Error(
+        `Department '${dept.name}' has no network configured` +
+        (dept.bridgeName && !dept.ipSubnet ? ` (bridge '${dept.bridgeName}' has no subnet assigned)` : '') +
+        '. Configure its network (assign a subnet) before creating VMs here, ' +
+        'or create the VM in a department that already has a working network.'
+      )
+    }
+
+    if (await this.bridgeManager.exists(dept.bridgeName)) {
+      return dept.bridgeName
+    }
+
+    debug.warn(
+      `Bridge '${dept.bridgeName}' for department '${dept.name}' is missing — provisioning it before VM create (self-heal)`
+    )
+    await this.provisionDepartmentBridge(dept)
+
+    if (!(await this.bridgeManager.exists(dept.bridgeName))) {
+      throw new Error(
+        `Failed to provision network bridge '${dept.bridgeName}' for department '${dept.name}'. ` +
+        'Check host networking (NET_ADMIN capability and br_netfilter) and retry.'
+      )
+    }
+    return dept.bridgeName
+  }
+
+  /**
+   * (Re)create the kernel bridge + gateway IP + dnsmasq + NAT for a department
+   * that already has a persisted bridgeName and ipSubnet. Idempotent restore of a
+   * MISSING bridge — mirrors the restore branch of restoreAllNetworks() so both
+   * the startup reconcile and the on-demand VM-create ensure share one recipe.
+   * The prerequisites (netfilter sysctls, NAT init, dirs) are idempotent and run
+   * here too so this is safe to call standalone.
+   */
+  private async provisionDepartmentBridge (dept: Department): Promise<void> {
+    if (!dept.bridgeName || !dept.ipSubnet) {
+      throw new Error(`Cannot provision bridge for department '${dept.name}': missing bridgeName or ipSubnet`)
+    }
+
+    // Idempotent prerequisites (same as restoreAllNetworks does before its loop).
+    await this.configureBridgeNetfilter()
+    await this.natService.initialize()
+    await this.ensureDirectories()
+
+    const config = this.parseSubnet(dept.ipSubnet, dept.id)
+    config.bridgeName = dept.bridgeName // keep the persisted name
+    config.dnsServers = dept.dnsServers
+    config.ntpServers = dept.ntpServers
+    config.mtu = dept.mtu ?? undefined
+
+    await this.bridgeManager.create(config.bridgeName)
+    await this.bridgeManager.assignIP(config.bridgeName, `${config.gatewayIP}/${config.netmask}`)
+    const dnsmasqPid = await this.startDnsmasq(config)
+    await this.natService.addMasquerade(dept.ipSubnet, config.bridgeName)
+
+    await this.prisma.department.update({
+      where: { id: dept.id },
+      data: { dnsmasqPid }
+    })
+
+    debug.info(`Provisioned bridge '${config.bridgeName}' for department '${dept.name}'`)
+  }
+
+  /**
    * Applies the default firewall policy rules to a department.
    * This method creates a firewall rule set if one doesn't exist and applies
    * the policy-based rules.

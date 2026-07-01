@@ -350,18 +350,15 @@ export class CreateMachineServiceV2 {
     const goldenImage = template?.goldenImage ?? null
     const useLinkedClone = Boolean(goldenImage)
 
-    // Get network bridge from the department
-    // Each department has its own isolated bridge with DHCP and NAT
-    // validatePreconditions() already ensures machine.departmentId is valid
-    const departmentBridge = await this.departmentNetworkService.getBridgeForDepartment(machine.departmentId!)
-
-    if (!departmentBridge) {
-      throw new Error(
-        `Department ${machine.departmentId} has no Linux bridge configured. ` +
-        'Run DepartmentNetworkService.configureNetwork() for it before creating VMs.'
-      )
-    }
-    const bridge = departmentBridge
+    // Get network bridge from the department. Each department has its own
+    // isolated bridge with DHCP and NAT. ensureDepartmentBridgeReady() does NOT
+    // just read the persisted name — it verifies the kernel bridge EXISTS (and
+    // self-heals a missing-but-configured one), so a VM never attaches its TAP
+    // and dies late with `ip link set ... master <bridge> ... Device does not
+    // exist`. A department with no configured network throws a clear, actionable
+    // error here (before any disk/QEMU is created).
+    // validatePreconditions() already ensures machine.departmentId is valid.
+    const bridge = await this.departmentNetworkService.ensureDepartmentBridgeReady(machine.departmentId!)
     this.debug.info(`Using bridge '${bridge}' (dept: ${machine.departmentId})`)
 
     // Find available SPICE port

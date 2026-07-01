@@ -26,6 +26,9 @@ jest.mock('../../../app/services/InfinizationService', () => ({
 jest.mock('../../../app/services/network/DepartmentNetworkService', () => ({
   DepartmentNetworkService: jest.fn().mockImplementation(() => ({
     getBridgeForDepartment: jest.fn().mockResolvedValue('br-test'),
+    // The create path now pre-flights the bridge (verifies it exists / self-heals)
+    // via ensureDepartmentBridgeReady instead of the bare name lookup.
+    ensureDepartmentBridgeReady: jest.fn().mockResolvedValue('br-test'),
   })),
 }))
 
