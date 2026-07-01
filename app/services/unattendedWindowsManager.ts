@@ -740,7 +740,11 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
     if (parameters) {
       for (const [key, value] of Object.entries(parameters)) {
         const placeholder = `{{${key}}}`
-        parsedCommand = parsedCommand.replace(new RegExp(placeholder, 'g'), value as string)
+        // Security: use literal split/join instead of `new RegExp(placeholder)`.
+        // The parameter key is free-form admin Json; regex metacharacters in it
+        // would throw a SyntaxError (aborting the ISO build) or cause ReDoS.
+        // String(value) also avoids '[object Object]' and $-group expansion.
+        parsedCommand = parsedCommand.split(placeholder).join(String(value))
       }
     }
     // TODO: Add some script to tell the host that the vm was installed properly if no error was thrown

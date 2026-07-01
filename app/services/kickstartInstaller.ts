@@ -61,7 +61,9 @@ export class KickstartInstaller extends UnattendedManagerBase {
     const family = opts.osProfile?.family === 'rhel' ? 'rhel' : 'fedora'
     this.isoPath = path.join(path.join(process.env.INFINIBAY_BASE_DIR ?? '/opt/infinibay', 'iso'), `${family}.iso`)
     this.username = username
-    this.password = password
+    // Reject passwords that could break out of the double-quoted `--password="..."`
+    // argument or inject extra directives into the line-oriented Kickstart file.
+    this.password = this.validatePasswordStrict(password)
     this.applications = applications
     this.vmId = vmId || ''
 
@@ -72,6 +74,24 @@ export class KickstartInstaller extends UnattendedManagerBase {
     this.timezone = timezone || 'America/New_York'
     this.configFileName = 'ks.cfg'
     this.debug.debug(`KickstartInstaller initialized with locale=${this.locale}, keyboard=${this.keyboard}, timezone=${this.timezone}`)
+  }
+
+  /**
+   * Rejects passwords that could break out of the double-quoted `--password="..."`
+   * argument in the Kickstart `user` directive (redhat_kickstart.cfg.eta:58) or inject
+   * extra Kickstart directives. Kickstart is line-oriented and the value is rendered
+   * unescaped (autoEscape:false), so an embedded newline/control char would terminate the
+   * directive line and start attacker-chosen directives (%pre/%post run as root by Anaconda),
+   * and an embedded double-quote would break out of the quoted argument. We fail the create
+   * cleanly rather than emit a broken/injected ks.cfg — parity with validateUsernameStrict().
+   */
+  private validatePasswordStrict (password: string): string {
+    const p = String(password ?? '')
+    // eslint-disable-next-line no-control-regex
+    if (p.length < 1 || p.length > 128 || /[\x00-\x1f\x7f"]/.test(p)) {
+      throw new Error('Invalid password for unattended install (no control characters or double-quotes; 1-128 chars)')
+    }
+    return p
   }
 
   async generateConfig (): Promise<string> {
@@ -89,9 +109,13 @@ export class KickstartInstaller extends UnattendedManagerBase {
       this.keyboard = 'us'
     }
 
-    // Validate timezone is not empty
-    if (!this.timezone || this.timezone.trim() === '') {
-      this.debug.warn('Empty timezone, using default: America/New_York')
+    // Validate timezone format (IANA zone, e.g. 'America/New_York', 'Europe/Madrid', 'UTC').
+    // The anchored pattern rejects newlines/whitespace/control chars, so it prevents Kickstart
+    // directive injection at redhat_kickstart.cfg.eta ('timezone <%= it.timezone %>' is rendered
+    // unescaped) and also subsumes the previous non-empty check. Falls back to the default,
+    // matching the locale/keyboard handling above.
+    if (!/^[A-Za-z][A-Za-z0-9_+-]*(\/[A-Za-z0-9_+-]+)*$/.test(this.timezone)) {
+      this.debug.warn(`Invalid timezone: ${this.timezone}, using default: America/New_York`)
       this.timezone = 'America/New_York'
     }
 

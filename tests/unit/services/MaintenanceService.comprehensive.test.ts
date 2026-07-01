@@ -46,7 +46,9 @@ describe('MaintenanceService', () => {
       findUnique: jest.fn(),
       findMany: jest.fn(),
       delete: jest.fn(),
-      deleteMany: jest.fn()
+      deleteMany: jest.fn(),
+      // Idempotent fallback lock-release in executeTask's finally block.
+      updateMany: jest.fn(async () => ({ count: 1 }))
     }
 
     mockPrisma = {
@@ -582,7 +584,7 @@ describe('MaintenanceService', () => {
 
     it('should throw for invalid drive parameter', () => {
       const invalidParams = { drive: 123 }
-      expect(() => service['validateTaskParameters'](MaintenanceTaskType.DISK_CLEANUP, invalidParams as any)).toThrow('Drive parameter must be a string')
+      expect(() => service['validateTaskParameters'](MaintenanceTaskType.DISK_CLEANUP, invalidParams as any)).toThrow('Drive must be a single drive letter followed by a colon')
     })
 
     it('should throw for missing script in CUSTOM_SCRIPT', () => {
@@ -592,7 +594,7 @@ describe('MaintenanceService', () => {
 
     it('should throw for invalid timeout', () => {
       const invalidParams = { timeoutMs: 500 }
-      expect(() => service['validateTaskParameters'](MaintenanceTaskType.DISK_CLEANUP, invalidParams as any)).toThrow('Timeout must be a number greater than 1000ms')
+      expect(() => service['validateTaskParameters'](MaintenanceTaskType.DISK_CLEANUP, invalidParams as any)).toThrow('Timeout must be a number between 1000 and 3600000ms')
     })
 
     it('should accept valid timeout', () => {

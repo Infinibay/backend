@@ -15,6 +15,11 @@ const TASK_TIMEOUTS = {
   [MaintenanceTaskType.CUSTOM_SCRIPT]: 600000 // 10 minutes
 }
 
+// Upper bound for a caller-supplied per-task timeout. Equal to the largest built-in
+// TASK_TIMEOUTS value so a task can't tie up its RUNNING slot (and the pending guest
+// command) for days via a huge-but-still-int32 timeout.
+const MAX_TIMEOUT_MS = 3600000 // 1 hour
+
 export interface MaintenanceTaskConfig {
   vmId: string
   taskType: MaintenanceTaskType
@@ -143,94 +148,98 @@ export class MaintenanceService {
       throw new Error('Failed to acquire lock on maintenance task')
     }
 
-    // Check VM connectivity before execution
-    const isConnected = await this.virtioSocketService.isVmConnected(task.machineId)
-    if (!isConnected) {
-      // Release lock before failing
-      await this.prisma.maintenanceTask.update({
-        where: { id: taskId },
-        data: { executionStatus: 'IDLE' }
-      })
-      throw new Error('VM is not connected or powered off')
-    }
-
-    // Create history entry with RUNNING status first
-    const historyEntry = await this.prisma.maintenanceHistory.create({
-      data: {
-        taskId,
-        machineId: task.machineId,
-        taskType: task.taskType,
-        status: MaintenanceStatus.RUNNING,
-        triggeredBy,
-        executedByUserId: executedByUserId || task.createdByUserId
-      }
-    })
-
-    const startTime = Date.now()
-    let result: MaintenanceExecutionResult
-
+    // Everything after the atomic claim runs under try/finally so the RUNNING lock
+    // is ALWAYS released — even if a pre-execution step (connectivity check or the
+    // history create below) throws — otherwise the task would be wedged in RUNNING
+    // forever and could never be re-selected or re-run.
     try {
-      // Execute the maintenance operation without double history logging
-      result = await this.executeMaintenanceOperation(
-        task.machineId,
-        task.taskType,
-        task.parameters as Record<string, unknown> || {}
-      )
-
-      // Update task's last run time and next run time for recurring tasks, and release lock
-      if (task.isRecurring && task.cronSchedule) {
-        const nextRunAt = CronParser.getNextRunTime(task.cronSchedule)
-        await this.prisma.maintenanceTask.update({
-          where: { id: taskId },
-          data: {
-            lastRunAt: new Date(),
-            nextRunAt,
-            executionStatus: 'IDLE' // Release lock
-          }
-        })
-      } else {
-        await this.prisma.maintenanceTask.update({
-          where: { id: taskId },
-          data: {
-            lastRunAt: new Date(),
-            executionStatus: 'IDLE' // Release lock
-          }
-        })
+      // Check VM connectivity before execution
+      const isConnected = await this.virtioSocketService.isVmConnected(task.machineId)
+      if (!isConnected) {
+        throw new Error('VM is not connected or powered off')
       }
-    } catch (error) {
-      result = {
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown error'
-      }
-    }
 
-    const duration = Date.now() - startTime
+      // Create history entry with RUNNING status first
+      const historyEntry = await this.prisma.maintenanceHistory.create({
+        data: {
+          taskId,
+          machineId: task.machineId,
+          taskType: task.taskType,
+          status: MaintenanceStatus.RUNNING,
+          triggeredBy,
+          executedByUserId: executedByUserId || task.createdByUserId
+        }
+      })
 
-    // Update the history entry with final status
-    await this.prisma.maintenanceHistory.update({
-      where: { id: historyEntry.id },
-      data: {
-        status: result.success ? MaintenanceStatus.SUCCESS : MaintenanceStatus.FAILED,
-        duration,
-        result: result.result as Prisma.InputJsonValue,
-        error: result.error
-      }
-    })
+      const startTime = Date.now()
+      let result: MaintenanceExecutionResult
 
-    // Ensure lock is released in case of error (fallback safety)
-    if (!result.success) {
       try {
-        await this.prisma.maintenanceTask.update({
-          where: { id: taskId },
-          data: { executionStatus: 'IDLE' }
-        })
-      } catch (lockReleaseError) {
-        logger.error(`Failed to release lock for task ${taskId}:`, lockReleaseError)
-      }
-    }
+        // Execute the maintenance operation without double history logging
+        result = await this.executeMaintenanceOperation(
+          task.machineId,
+          task.taskType,
+          task.parameters as Record<string, unknown> || {}
+        )
 
-    logger.info(`Maintenance task completed: ${taskId} (${result.success ? 'SUCCESS' : 'FAILED'})`)
-    return { ...result, duration }
+        // Update task's last run time and next run time for recurring tasks, and release lock
+        if (task.isRecurring && task.cronSchedule) {
+          const nextRunAt = CronParser.getNextRunTime(task.cronSchedule)
+          await this.prisma.maintenanceTask.update({
+            where: { id: taskId },
+            data: {
+              lastRunAt: new Date(),
+              nextRunAt,
+              executionStatus: 'IDLE' // Release lock
+            }
+          })
+        } else {
+          // One-time task is complete: null the due timestamps and disable it so
+          // getDueTasks (which requires isEnabled AND a non-null due time) can never
+          // re-select it and re-run the guest operation every minute forever.
+          await this.prisma.maintenanceTask.update({
+            where: { id: taskId },
+            data: {
+              lastRunAt: new Date(),
+              runAt: null,
+              nextRunAt: null,
+              isEnabled: false,
+              executionStatus: 'IDLE' // Release lock
+            }
+          })
+        }
+      } catch (error) {
+        result = {
+          success: false,
+          error: error instanceof Error ? error.message : 'Unknown error'
+        }
+      }
+
+      const duration = Date.now() - startTime
+
+      // Update the history entry with final status
+      await this.prisma.maintenanceHistory.update({
+        where: { id: historyEntry.id },
+        data: {
+          status: result.success ? MaintenanceStatus.SUCCESS : MaintenanceStatus.FAILED,
+          duration,
+          result: result.result as Prisma.InputJsonValue,
+          error: result.error
+        }
+      })
+
+      logger.info(`Maintenance task completed: ${taskId} (${result.success ? 'SUCCESS' : 'FAILED'})`)
+      return { ...result, duration }
+    } finally {
+      // Fallback lock release, guarded on RUNNING so it is idempotent: a run that
+      // already set the task to IDLE above (or a task a concurrent instance has
+      // legitimately re-claimed) is left untouched; only a task still stuck at
+      // RUNNING (a failed operation or a pre-execution throw) is freed here.
+      await this.prisma.maintenanceTask.updateMany({
+        where: { id: taskId, executionStatus: 'RUNNING' },
+        data: { executionStatus: 'IDLE' }
+      }).catch(lockReleaseError => logger.error(`Failed to release lock for task ${taskId}:`, lockReleaseError))
+    }
   }
 
   /**
@@ -342,8 +351,9 @@ export class MaintenanceService {
     taskType: MaintenanceTaskType,
     customTimeout?: number
   ): Promise<MaintenanceExecutionResult> {
-    // Get timeout for this task type or use custom timeout
-    const timeout = customTimeout || TASK_TIMEOUTS[taskType] || 300000
+    // Get timeout for this task type or use custom timeout, clamped so a non-validated
+    // caller can never hold the pending guest command open beyond MAX_TIMEOUT_MS.
+    const timeout = Math.min(customTimeout || TASK_TIMEOUTS[taskType] || 300000, MAX_TIMEOUT_MS)
 
     // Wrap script with PowerShell invocation
     const psCmd = `powershell -NoProfile -ExecutionPolicy Bypass -Command "${script}"`
@@ -670,17 +680,22 @@ export class MaintenanceService {
   }
 
   /**
-   * Validate task parameters based on task type
+   * Validate task parameters based on task type.
+   * Public so the update path can re-validate against the persisted task type,
+   * matching the checks the create path already runs.
    */
-  private validateTaskParameters (taskType: MaintenanceTaskType, parameters?: Prisma.JsonValue) {
+  validateTaskParameters (taskType: MaintenanceTaskType, parameters?: Prisma.JsonValue) {
     if (!parameters) return
 
     const params = parameters as Record<string, unknown>
 
     switch (taskType) {
     case MaintenanceTaskType.DISK_CLEANUP:
-      if (params.drive && typeof params.drive !== 'string') {
-        throw new Error('Drive parameter must be a string')
+      // Whitelist the drive to a single letter + colon. This value is interpolated
+      // (partly unquoted) into the PowerShell chkdsk/Optimize-Volume sinks, so a bare
+      // typeof check would allow command injection into the guest.
+      if (params.drive !== undefined && (typeof params.drive !== 'string' || !/^[A-Za-z]:$/.test(params.drive))) {
+        throw new Error('Drive must be a single drive letter followed by a colon, e.g. C:')
       }
       if (params.targets && !Array.isArray(params.targets)) {
         throw new Error('Targets parameter must be an array')
@@ -689,8 +704,11 @@ export class MaintenanceService {
 
     case MaintenanceTaskType.DEFRAG:
     case MaintenanceTaskType.DISK_CHECK:
-      if (params.drive && typeof params.drive !== 'string') {
-        throw new Error('Drive parameter must be a string')
+      // Whitelist the drive to a single letter + colon. This value is interpolated
+      // (partly unquoted) into the PowerShell chkdsk/Optimize-Volume sinks, so a bare
+      // typeof check would allow command injection into the guest.
+      if (params.drive !== undefined && (typeof params.drive !== 'string' || !/^[A-Za-z]:$/.test(params.drive))) {
+        throw new Error('Drive must be a single drive letter followed by a colon, e.g. C:')
       }
       break
 
@@ -707,9 +725,10 @@ export class MaintenanceService {
       break
     }
 
-    // Validate timeout if provided
-    if (params.timeoutMs && (typeof params.timeoutMs !== 'number' || params.timeoutMs < 1000)) {
-      throw new Error('Timeout must be a number greater than 1000ms')
+    // Validate timeout if provided. Use `!== undefined` (not truthiness) so 0/negative
+    // are rejected too, and enforce an upper bound so a huge value can't pin the task.
+    if (params.timeoutMs !== undefined && (typeof params.timeoutMs !== 'number' || !Number.isFinite(params.timeoutMs) || params.timeoutMs < 1000 || params.timeoutMs > MAX_TIMEOUT_MS)) {
+      throw new Error(`Timeout must be a number between 1000 and ${MAX_TIMEOUT_MS}ms`)
     }
   }
 }

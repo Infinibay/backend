@@ -209,7 +209,14 @@ const storage = multer.diskStorage({
   filename: (req, file, cb) => {
     // Use crypto-random suffix to avoid collisions
     const suffix = Math.random().toString(36).substring(2, 10)
-    cb(null, `${Date.now()}-${suffix}-${file.originalname}`)
+    // Strip any directory components from the client-supplied name before it
+    // reaches multer's `path.join(destination, filename)`. A raw originalname
+    // like `x/../../../../etc/cron.d/evil.iso` would otherwise collapse the `..`
+    // segments and escape the temp dir, writing attacker-controlled bytes to an
+    // arbitrary absolute path (path traversal). path.basename + separator strip
+    // guarantee the name stays confined to tempDir.
+    const safe = path.basename(file.originalname || '').replace(/[/\\]/g, '')
+    cb(null, `${Date.now()}-${suffix}-${safe}`)
   }
 })
 
@@ -245,9 +252,19 @@ export function isoFileFilter (
   file: { originalname: string, mimetype?: string },
   cb: (error: Error | null, acceptFile?: boolean) => void
 ): void {
-  const name = (file.originalname || '').toLowerCase()
+  const originalname = file.originalname || ''
+  const name = originalname.toLowerCase()
   if (!name.endsWith('.iso')) {
     cb(new Error('Invalid file type. Only .iso files are allowed'))
+    return
+  }
+
+  // Defense-in-depth against path traversal: a legitimate upload filename is a
+  // bare basename. Reject any name that carries directory components (`/`, `\`,
+  // or a differing basename) so a crafted `../` payload can't reach the storage
+  // sink even if the filename callback were ever changed.
+  if (originalname !== path.basename(originalname) || /[/\\]/.test(originalname)) {
+    cb(new Error('Invalid file name'))
     return
   }
 

@@ -474,7 +474,17 @@ export class ConnectionManager {
     })
 
     socket.on('data', (data: Buffer) => {
-      this.handleSocketData(connection, data)
+      // SECURITY (dos-resource): the data path is guest-controlled. Guard against
+      // any error thrown while parsing/accumulating (receive-buffer overflow
+      // signal, allocation RangeError, unexpected parse failure) so it can never
+      // escape as an uncaught exception and crash the shared backend for every
+      // tenant. On failure we fail-closed by tearing the connection down.
+      try {
+        this.handleSocketData(connection, data)
+      } catch (error) {
+        this.debug.error(`Error handling socket data for VM ${vmId}: ${error}`)
+        this.closeConnection(vmId, 'data handler error')
+      }
     })
 
     socket.on('error', (error: Error) => {
@@ -626,10 +636,16 @@ export class ConnectionManager {
   expandConnectionPool(connection: VmConnection): void {
     // Add alternative socket paths for the VM
     const vmId = connection.vmId
+    // SECURITY (path-safety): only ever read a VM's socket from the single
+    // root-owned socketDir. The old fallbacks (/tmp, /run) are world-writable, so
+    // an unprivileged local process could plant a listening socket there and, once
+    // the real socket disappears and reconnection rotates onto the fallback,
+    // impersonate this vmId. Inbound agent messages are NOT signed — the socket
+    // path IS the identity binding — so a world-writable candidate must never be
+    // trusted. Confining candidates to socketDir (which equals the primary path)
+    // effectively disables the risky expansion.
     const alternativePaths = [
-      `/opt/infinibay/sockets/${vmId}.socket`,
-      `/tmp/infinibay/${vmId}.socket`,
-      `/run/infinibay/${vmId}.socket`
+      path.join(this.socketDir, `${vmId}.socket`)
     ]
 
     // Add paths that don't already exist in the pool

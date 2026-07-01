@@ -4,6 +4,7 @@ import * as fs from 'fs/promises'
 import * as path from 'path'
 import * as crypto from 'crypto'
 import { ISOEventManager } from './EventManagers/ISOEventManager'
+import { UserInputError } from '@utils/errors'
 
 const prisma = new PrismaClient()
 
@@ -28,6 +29,24 @@ export class ISOService {
       ISOService.instance = new ISOService()
     }
     return ISOService.instance
+  }
+
+  /**
+   * Confine a filesystem path to isoBasePath.
+   *
+   * SECURITY: an ISO row's `path` can originate from a client-supplied GraphQL
+   * arg (registerISO). Before turning any stored/derived path into a filesystem
+   * op (unlink/read/stat) we re-resolve it and reject anything that escapes the
+   * ISO directory, so a poisoned row can never become an arbitrary-file
+   * delete/read primitive on the (root) backend host.
+   */
+  private confinePath (p: string): string {
+    const base = path.resolve(this.isoBasePath)
+    const resolved = path.resolve(p)
+    if (resolved !== base && !resolved.startsWith(base + path.sep)) {
+      throw new UserInputError('ISO path escapes the ISO directory')
+    }
+    return resolved
   }
 
   /**
@@ -157,11 +176,15 @@ export class ISOService {
         throw new Error('ISO not found')
       }
 
+      // SECURITY: confine the stored path to isoBasePath — never access/stat a
+      // path that escaped the ISO directory (defends against poisoned rows).
+      const filePath = this.confinePath(iso.path)
+
       // Check if file exists
-      await fs.access(iso.path)
+      await fs.access(filePath)
 
       // Verify file size
-      const stats = await fs.stat(iso.path)
+      const stats = await fs.stat(filePath)
       if (BigInt(stats.size) !== iso.size) {
         await prisma.iSO.update({
           where: { id: isoId },
@@ -198,9 +221,18 @@ export class ISOService {
       throw new Error('ISO not found')
     }
 
+    // SECURITY: confine to isoBasePath and require a regular file before reading.
+    // This prevents hashing an arbitrary/attacker-influenced path (a file-content
+    // oracle) or a character device / FIFO (e.g. /dev/zero → unbounded read).
+    const filePath = this.confinePath(iso.path)
+    const stats = await fs.stat(filePath)
+    if (!stats.isFile()) {
+      throw new UserInputError('ISO path is not a regular file')
+    }
+
     const hash = crypto.createHash('sha256')
-    const stream = await fs.readFile(iso.path)
-    hash.update(stream)
+    const data = await fs.readFile(filePath)
+    hash.update(data)
     const checksum = hash.digest('hex')
 
     // Update checksum in database
@@ -221,6 +253,24 @@ export class ISOService {
     size: number,
     filePath: string
   ): Promise<ISO> {
+    // SECURITY: the caller-supplied `filePath` is NOT trusted. The real on-disk
+    // location is derived from a sanitized basename confined to isoBasePath, so a
+    // registerISO caller can never point an ISO row at an arbitrary host file
+    // (which removeISO/calculateChecksum would later unlink/read as root).
+    const base = path.basename(filename)
+    if (base !== filename || base.includes('\0') || !/^[\w.\-]+\.iso$/i.test(base)) {
+      throw new UserInputError('Invalid ISO filename')
+    }
+    const safePath = this.confinePath(path.join(this.isoBasePath, base))
+    if (path.resolve(filePath) !== safePath) {
+      // A caller passed a path that isn't the confined location; ignore it.
+      logger.warn(`registerISO: ignoring client-supplied path for ${base}; using confined ISO location`)
+    }
+
+    // The file must already exist inside the ISO directory, so a row can never
+    // reference a non-existent / non-ISO path.
+    await fs.access(safePath)
+
     // Check if ISO already exists
     const existing = await prisma.iSO.findUnique({
       where: { filename }
@@ -232,7 +282,7 @@ export class ISOService {
         where: { id: existing.id },
         data: {
           size: BigInt(size),
-          path: filePath,
+          path: safePath,
           isAvailable: true,
           lastVerified: new Date()
         }
@@ -245,7 +295,7 @@ export class ISOService {
         filename,
         os: os.toUpperCase(),
         size: BigInt(size),
-        path: filePath,
+        path: safePath,
         isAvailable: true,
         lastVerified: new Date()
       }
@@ -269,9 +319,13 @@ export class ISOService {
       throw new Error('ISO not found')
     }
 
-    // Delete file from filesystem
+    // Delete file from filesystem. SECURITY: only unlink when the stored path is
+    // genuinely inside the ISO directory; a poisoned row (client-supplied path)
+    // must never turn this into an arbitrary-file unlink on the root host. If the
+    // path escapes (or unlink fails), skip it and still drop the DB row.
     try {
-      await fs.unlink(iso.path)
+      const filePath = this.confinePath(iso.path)
+      await fs.unlink(filePath)
     } catch (error) {
       logger.error('Failed to delete ISO file:', error)
     }

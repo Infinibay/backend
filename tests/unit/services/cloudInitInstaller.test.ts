@@ -602,7 +602,7 @@ describe('CloudInitInstaller', () => {
 
       const parsed = manager['parseInstallCommand'](command, parameters)
 
-      expect(parsed).toBe('apt install test-package')
+      expect(parsed).toBe("apt install 'test-package'")
     })
 
     it('should handle multiple placeholders', () => {
@@ -617,7 +617,7 @@ describe('CloudInitInstaller', () => {
 
       const parsed = manager['parseInstallCommand'](command, parameters)
 
-      expect(parsed).toBe('apt install pkg1 pkg2')
+      expect(parsed).toBe("apt install 'pkg1' 'pkg2'")
     })
 
     it('should return original command when no parameters', () => {

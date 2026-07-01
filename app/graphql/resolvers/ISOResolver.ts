@@ -194,7 +194,19 @@ export class ISOResolver {
     @Arg('size') size: number,
     @Arg('path') path: string
   ): Promise<ISO> {
+    // Validate metadata before persisting. Kept outside the try/catch so these
+    // specific messages surface instead of being masked by the generic failure.
+    const supportedOS = this.isoService.getSupportedOSTypes()
+    if (!supportedOS.includes(os.toUpperCase())) {
+      throw new UserInputError(`Unsupported OS: ${os}`)
+    }
+    if (!Number.isInteger(size) || size < 0) {
+      throw new UserInputError('size must be a non-negative integer')
+    }
+
     try {
+      // `path` is deliberately not trusted here: ISOService derives the real,
+      // confined on-disk location from the filename (see ISOService.registerISO).
       const iso = await this.isoService.registerISO(filename, os, size, path)
 
       return {

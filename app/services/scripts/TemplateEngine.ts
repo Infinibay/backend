@@ -1,4 +1,3 @@
-import { ShellType } from '@prisma/client';
 import { ScriptInputDefinition } from './ScriptParser';
 
 export class TemplateEngine {
@@ -35,53 +34,6 @@ export class TemplateEngine {
 
       return String(value);
     });
-  }
-
-  /**
-   * Sanitize input value based on shell type to prevent command injection
-   */
-  sanitizeInput(value: any, shellType: ShellType): string {
-    const strValue = String(value);
-
-    switch (shellType) {
-      case ShellType.POWERSHELL:
-        // Escape PowerShell special characters
-        return strValue
-          .replace(/\$/g, '`$')      // Dollar sign
-          .replace(/`/g, '``')       // Backtick
-          .replace(/'/g, "''")       // Single quote
-          .replace(/"/g, '`"');      // Double quote
-
-      case ShellType.CMD:
-        // Escape CMD special characters
-        return strValue
-          .replace(/%/g, '%%')       // Percent
-          .replace(/\^/g, '^^')      // Caret
-          .replace(/&/g, '^&')       // Ampersand
-          .replace(/\|/g, '^|')      // Pipe
-          .replace(/</g, '^<')       // Less than
-          .replace(/>/g, '^>')       // Greater than
-          .replace(/"/g, '""');      // Double quote
-
-      case ShellType.BASH:
-      case ShellType.SH:
-        // Escape Bash/Shell special characters
-        return strValue
-          .replace(/\\/g, '\\\\')    // Backslash
-          .replace(/\$/g, '\\$')     // Dollar sign
-          .replace(/`/g, '\\`')      // Backtick
-          .replace(/!/g, '\\!')      // Exclamation
-          .replace(/"/g, '\\"')      // Double quote
-          .replace(/'/g, "\\'")      // Single quote
-          .replace(/;/g, '\\;')      // Semicolon
-          .replace(/&/g, '\\&')      // Ampersand
-          .replace(/\|/g, '\\|');    // Pipe
-
-      default:
-        // Default: escape common dangerous characters
-        return strValue
-          .replace(/[;&|<>$`"'\\]/g, '\\$&');
-    }
   }
 
   /**
