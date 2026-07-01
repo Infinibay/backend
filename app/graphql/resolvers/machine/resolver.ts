@@ -83,19 +83,25 @@ async function transformMachine (prismaMachine: MachineWithRelations, prisma?: P
     }
   }
 
-  // Build configuration object only if we have valid data
-  // Avoid constructing invalid URLs with port=-1 or undefined
-  let configurationField = null
-  if (prismaMachine.configuration && graphicPort && graphicPort > 0) {
-    const protocol = prismaMachine.configuration.graphicProtocol || 'vnc'
-    const password = prismaMachine.configuration.graphicPassword
-
-    // Build URL without embedding literal 'null' - omit password portion if not set
-    const graphic = password
-      ? `${protocol}://${password}@${graphicHost}:${graphicPort}`
-      : `${protocol}://${graphicHost}:${graphicPort}`
-
-    configurationField = { graphic }
+  // Build the configuration JSON the UI reads. Surface the install/create failure
+  // reason (lastError) WHENEVER it is set — not just when the VM is running — so an
+  // errored VM shows WHY it failed instead of silently looking broken. The SPICE/VNC
+  // `graphic` URL is only added when there is a live display (graphicPort > 0).
+  let configurationField: Record<string, unknown> | null = null
+  if (prismaMachine.configuration) {
+    const cfg: Record<string, unknown> = {}
+    if (prismaMachine.configuration.lastError) {
+      cfg.lastError = prismaMachine.configuration.lastError
+    }
+    if (graphicPort && graphicPort > 0) {
+      const protocol = prismaMachine.configuration.graphicProtocol || 'vnc'
+      const password = prismaMachine.configuration.graphicPassword
+      // Build URL without embedding literal 'null' - omit password portion if not set
+      cfg.graphic = password
+        ? `${protocol}://${password}@${graphicHost}:${graphicPort}`
+        : `${protocol}://${graphicHost}:${graphicPort}`
+    }
+    if (Object.keys(cfg).length > 0) configurationField = cfg
   }
 
   return {

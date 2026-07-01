@@ -419,9 +419,25 @@ export class CreateMachineServiceV2 {
             this.generatedIsoPath = isoPath
           }
         } catch (error: any) {
-          this.debug.warn(`Failed to generate unattended ISO: ${error.message}`)
-          this.debug.warn('Falling back to base ISO (manual installation required)')
-          isoPath = baseIsoPath
+          const reason = error?.message ?? String(error)
+          // A base-ISO fallback boots the INTERACTIVE installer and can NEVER
+          // complete infinibay's unattended setup (no infiniservice handshake →
+          // setupComplete never fires). Silently swallowing this created a doomed
+          // VM the UI showed as "installing" forever. FAIL the create loudly so the
+          // VM is marked 'error' with an actionable reason (surfaced in the UI).
+          // Operators who deliberately want a manual (interactive) install from the
+          // base ISO can opt in with INFINIBAY_ALLOW_UNATTENDED_FALLBACK=1.
+          if (process.env.INFINIBAY_ALLOW_UNATTENDED_FALLBACK === '1') {
+            this.debug.warn(`Unattended ISO generation failed (${reason}); INFINIBAY_ALLOW_UNATTENDED_FALLBACK=1 → booting the base ISO for a MANUAL install`)
+            isoPath = baseIsoPath
+          } else {
+            throw new Error(
+              `Unattended install ISO generation failed for ${effectiveOs}: ${reason}. ` +
+              'The VM would otherwise boot the interactive installer and never finish setup. ' +
+              "Fix the cause (commonly a missing dependency — ensure 'p7zip-full' (7z) and 'xorriso' are installed) " +
+              'or set INFINIBAY_ALLOW_UNATTENDED_FALLBACK=1 to boot the base ISO for a manual install.'
+            )
+          }
         }
       }
 

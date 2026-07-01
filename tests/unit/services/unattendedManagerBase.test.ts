@@ -60,6 +60,18 @@ describe('UnattendedManagerBase', () => {
     jest.spyOn(logger, 'warn').mockImplementation(() => undefined as any)
   })
 
+  describe('pre-flight dependency check (assertRequiredTools)', () => {
+    it('fails generateNewImage with an actionable message when 7z/xorriso are missing', async () => {
+      const prevPath = process.env.PATH
+      process.env.PATH = '' // no tools on PATH → both 7z and xorriso/genisoimage are "missing"
+      try {
+        await expect(manager.testGenerateNewImage()).rejects.toThrow(/missing required tool.*7z.*p7zip-full/i)
+      } finally {
+        process.env.PATH = prevPath
+      }
+    })
+  })
+
   describe('constructor and initialization', () => {
     it('should initialize with default values', () => {
       expect(manager.configFileName).toBe('test.cfg')

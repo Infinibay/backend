@@ -31,6 +31,37 @@ export class UnattendedManagerBase {
     return { valid: true, errors: [] }
   }
 
+  /** True if `bin` is an executable on PATH (no spawn — a cheap pre-flight check). */
+  protected static isToolAvailable (bin: string): boolean {
+    const dirs = (process.env.PATH ?? '').split(path.delimiter).filter(Boolean)
+    return dirs.some((d) => {
+      try { fs.accessSync(path.join(d, bin), fs.constants.X_OK); return true } catch { return false }
+    })
+  }
+
+  /**
+   * Verify the external tools the unattended-ISO pipeline shells out to are actually
+   * installed BEFORE doing any work. Without this, a missing dependency surfaces as a
+   * cryptic "Command failed with exit code 2" deep inside extraction/repack, which the
+   * caller then swallows into a silent base-ISO fallback (a VM that boots the
+   * INTERACTIVE installer and never finishes). Fail early with an actionable message.
+   */
+  protected assertRequiredTools (): void {
+    const missing: string[] = []
+    if (!UnattendedManagerBase.isToolAvailable('7z')) {
+      missing.push("'7z' (install the 'p7zip-full' package)")
+    }
+    if (!UnattendedManagerBase.isToolAvailable('xorriso') && !UnattendedManagerBase.isToolAvailable('genisoimage')) {
+      missing.push("'xorriso' or 'genisoimage'")
+    }
+    if (missing.length > 0) {
+      throw new Error(
+        `Unattended install ISO generation is missing required tool(s): ${missing.join(', ')}. ` +
+        'Install them on the host/agent that builds VM images and retry.'
+      )
+    }
+  }
+
   /**
    * Generates a new image.
    *
@@ -45,6 +76,8 @@ export class UnattendedManagerBase {
       if (!this.isoPath) {
         throw Error('No ISO path specified')
       }
+      // Fail fast with an actionable message if the extract/repack tooling is absent.
+      this.assertRequiredTools()
       this.debug.debug('Generating config')
       const configContent = await this.generateConfig()
       this.debug.debug(this.redactConfigForLog(configContent))
