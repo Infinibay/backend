@@ -7,10 +7,10 @@ import fs from 'fs/promises'
 import multer from 'multer'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
-import * as yaml from 'js-yaml'
 import * as os from 'os'
 
 // Import admin authentication middleware
+import { parseInstallSources } from '../services/install/installSources'
 import { adminAuthMiddleware } from '../middleware/adminAuth'
 
 // Import ISO Service
@@ -146,22 +146,21 @@ async function validateUbuntuDesktopISO (isoPath: string): Promise<{ valid: bool
     }
 
     const content = await fs.readFile(installSourcesPath, 'utf-8')
-    const sources = yaml.load(content) as Array<{ id: string; [key: string]: unknown }>
+    // parseInstallSources handles BOTH the 24.04 top-level-array and the 26.04
+    // `{ sources: [...] }` object shapes. The old `yaml.load as Array` + Array.isArray
+    // check treated the 26.04 desktop file as 'unexpected format' and could not tell
+    // desktop from server on it.
+    const sources = parseInstallSources(content)
 
-    if (!Array.isArray(sources)) {
-      logger.warn('install-sources.yaml has unexpected format')
+    if (sources.length === 0) {
+      logger.warn('install-sources.yaml has no recognizable sources (unexpected format)')
       return { valid: true } // Allow for backwards compatibility
     }
 
-    // Check if this is a Desktop ISO (has ubuntu-desktop or ubuntu-desktop-minimal)
-    const hasDesktopSource = sources.some(
-      source => source.id === 'ubuntu-desktop' || source.id === 'ubuntu-desktop-minimal'
-    )
-
-    // Check if this is a Server ISO (has ubuntu-server or ubuntu-server-minimal)
-    const hasServerSource = sources.some(
-      source => source.id === 'ubuntu-server' || source.id === 'ubuntu-server-minimal'
-    )
+    // Edition is keyed on the structured `variant` field (robust to renamed ids),
+    // with an id-prefix fallback for older ISOs that omit `variant`.
+    const hasDesktopSource = sources.some(s => s.variant === 'desktop' || /^ubuntu-desktop/.test(s.id))
+    const hasServerSource = sources.some(s => s.variant === 'server' || /^ubuntu-server/.test(s.id))
 
     if (hasServerSource && !hasDesktopSource) {
       // Ubuntu Server is SUPPORTED: the cloud-init/autoinstall installer detects

@@ -20,6 +20,7 @@
 import fs from 'fs'
 import path from 'path'
 import crypto from 'crypto'
+import { execFileSync } from 'child_process'
 import si from 'systeminformation'
 import portfinder from 'portfinder'
 
@@ -42,6 +43,7 @@ import { KickstartInstaller } from '@services/kickstartInstaller'
 import { CloudInitInstaller } from '@services/cloudInitInstaller'
 import { UnattendedWindowsManager } from '@services/unattendedWindowsManager'
 import { resolveOsProfile } from '@services/install/osProfiles'
+import { parseInstallSources } from '@services/install/installSources'
 
 const ALLOWED_GPU_VENDORS = [
   'NVIDIA Corporation',
@@ -404,6 +406,19 @@ export class CreateMachineServiceV2 {
         effectiveOs
       )
 
+      // Close the silent media-less-VM path: if we built an unattended installer
+      // (the OS has an install mechanism) but found NO base ISO, FAIL loudly instead
+      // of creating a VM with an empty CD that boots to nothing, never handshakes
+      // infiniservice, and shows 'installing' forever. Mirrors the loud
+      // generation-failure path below.
+      if (unattendedManager && !baseIsoPath) {
+        const isoDir = process.env.INFINIBAY_ISO_DIR ?? path.join(process.env.INFINIBAY_BASE_DIR ?? '/opt/infinibay', 'iso')
+        throw new Error(
+          `No base install ISO found for '${effectiveOs}' in ${isoDir}. ` +
+          'Upload an ISO for this OS via the ISO manager before creating the VM.'
+        )
+      }
+
       if (unattendedManager && baseIsoPath) {
         this.debug.debug(`Generating unattended ISO for ${effectiveOs}`)
         unattendedManager.isoPath = baseIsoPath
@@ -629,34 +644,85 @@ export class CreateMachineServiceV2 {
   private async getOSIsoPath (os: string): Promise<string | undefined> {
     const baseDir = process.env.INFINIBAY_BASE_DIR ?? '/opt/infinibay'
     const isoDir = process.env.INFINIBAY_ISO_DIR ?? path.join(baseDir, 'iso')
+    if (!fs.existsSync(isoDir)) return undefined
 
-    // Map OS to expected ISO filename patterns
+    // Drive patterns + canonical names from the ONE OS catalog (osProfiles), so
+    // every family it supports (ubuntu/debian/fedora/rhel-rebuilds/windows) is
+    // findable and stays in lock-step with createUnattendedManager. Falls back to a
+    // bare token glob for an os the catalog doesn't model.
+    const profile = resolveOsProfile(os)
     const osLower = os.toLowerCase()
-    let patterns: string[] = []
+    const patterns: RegExp[] = profile?.isoPatterns ?? [
+      new RegExp(`${osLower.replace(/[^a-z0-9]+/gi, '.*')}.*\\.iso$`, 'i')
+    ]
+    // The ISO upload route ALWAYS writes the managed ISO as `${os}.iso`; the
+    // installer families also key on `${family}.iso` / `${id}.iso`.
+    const canonicalNames = new Set<string>([`${osLower}.iso`])
+    if (profile) { canonicalNames.add(`${profile.id}.iso`); canonicalNames.add(`${profile.family}.iso`) }
 
-    if (osLower.includes('ubuntu')) {
-      patterns = ['ubuntu-*.iso', 'ubuntu*.iso']
-    } else if (osLower.includes('windows11')) {
-      patterns = ['Win11*.iso', 'windows11*.iso']
-    } else if (osLower.includes('windows10')) {
-      patterns = ['Win10*.iso', 'windows10*.iso']
-    } else if (osLower.includes('fedora')) {
-      patterns = ['Fedora*.iso', 'fedora*.iso']
+    const files = fs.readdirSync(isoDir)
+
+    // 1) CANONICAL FIRST (trusted). The uploaded/managed name is authoritative: if
+    //    an operator deliberately stored a server image as ubuntu.iso, that's their
+    //    choice — we do NOT second-guess the canonical name (which would turn a
+    //    working install into a hard failure). This is what fixes the original bug
+    //    where a leftover `ubuntu-24.04-live-server-amd64.iso` won the `ubuntu-*.iso`
+    //    glob over the uploaded desktop `ubuntu.iso`.
+    const canonical = files.find(f => canonicalNames.has(f.toLowerCase()))
+    if (canonical) {
+      this.debug.debug(`[ISO] selected canonical '${canonical}' for os='${os}'`)
+      return path.join(isoDir, canonical)
     }
 
-    // Find first matching ISO
-    if (fs.existsSync(isoDir)) {
-      const files = fs.readdirSync(isoDir)
-      for (const pattern of patterns) {
-        const regex = new RegExp(pattern.replace('*', '.*'), 'i')
-        const match = files.find(f => regex.test(f))
-        if (match) {
-          return path.join(isoDir, match)
-        }
-      }
+    // 2) No canonical name present — match the family glob(s).
+    const candidates = files.filter(f => patterns.some(rx => rx.test(f)))
+    if (candidates.length === 0) return undefined
+    if (candidates.length === 1) {
+      this.debug.debug(`[ISO] selected only match '${candidates[0]}' for os='${os}'`)
+      return path.join(isoDir, candidates[0])
     }
 
-    return undefined
+    // 3) Multiple candidates — disambiguate DETERMINISTICALLY (the old code took the
+    //    arbitrary first readdir match). For Ubuntu with a desired edition, classify
+    //    each ISO's real edition from its metadata and prefer the match; UNKNOWN
+    //    editions are kept (trusted), never dropped, so a classifier miss can't wipe
+    //    out a valid candidate. Final tie-break: newest file, then name.
+    const ranked = candidates.map(f => {
+      const full = path.join(isoDir, f)
+      const edition = (profile?.family === 'ubuntu') ? this.classifyUbuntuEdition(full) : 'unknown'
+      let mtime = 0
+      try { mtime = fs.statSync(full).mtimeMs } catch { /* ignore */ }
+      return { f, full, edition, mtime }
+    })
+    const want = profile?.expectedEdition
+    const preferred = want ? ranked.filter(c => c.edition === want) : []
+    const pool = preferred.length > 0 ? preferred : ranked
+    pool.sort((a, b) => (b.mtime - a.mtime) || a.f.localeCompare(b.f))
+    const chosen = pool[0]
+    const skipped = candidates.filter(f => f !== chosen.f)
+    this.debug.info(`[ISO] selected '${chosen.f}' (edition=${chosen.edition}${want ? `, wanted=${want}` : ''}) for os='${os}'; skipped: ${skipped.join(', ') || 'none'}`)
+    return chosen.full
+  }
+
+  /**
+   * Best-effort Ubuntu edition ('desktop' | 'server' | 'unknown') from the ISO's
+   * casper/install-sources.yaml `variant` field. Returns 'unknown' on any error
+   * (missing 7z, non-casper ISO). Used ONLY to disambiguate among multiple
+   * non-canonical candidates — never to reject a canonical/uploaded ISO.
+   */
+  private classifyUbuntuEdition (isoPath: string): 'desktop' | 'server' | 'unknown' {
+    try {
+      const yamlText = execFileSync('7z', ['x', '-so', isoPath, 'casper/install-sources.yaml'], {
+        maxBuffer: 4 * 1024 * 1024,
+        stdio: ['ignore', 'pipe', 'ignore']
+      }).toString('utf8')
+      const sources = parseInstallSources(yamlText)
+      if (sources.some(s => s.variant === 'desktop')) return 'desktop'
+      if (sources.some(s => s.variant === 'server')) return 'server'
+      return 'unknown'
+    } catch {
+      return 'unknown'
+    }
   }
 
   private async findAvailablePort (basePort: number): Promise<number> {

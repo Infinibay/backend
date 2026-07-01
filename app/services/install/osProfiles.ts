@@ -36,6 +36,13 @@ export interface OsProfile {
    * ISOs, which have NO 'ubuntu-desktop' source — hardcoding it stalls the install).
    */
   cloudInitPreferredSource?: string
+  /**
+   * The edition the product requires for this OS. For a VDI product Ubuntu must be
+   * 'desktop'. Drives install-source selection (full desktop vs minimized/server)
+   * and base-ISO disambiguation when several ISOs of the same family are present.
+   * Absent → no edition constraint (any matching ISO is acceptable).
+   */
+  expectedEdition?: 'desktop' | 'server'
   /** kickstart only: package group/environment to install (e.g. a server vs workstation env). */
   kickstartEnvironment?: string
   /** Boots via OVMF UEFI by default. */
@@ -55,6 +62,7 @@ const PROFILES: OsProfile[] = [
     // has no 'ubuntu-desktop' source — it safely falls back to the ISO default
     // ('ubuntu-server'). Full desktop is the right default for a VDI product.
     cloudInitPreferredSource: 'ubuntu-desktop',
+    expectedEdition: 'desktop',
     uefi: true
   },
   {

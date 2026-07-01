@@ -220,14 +220,16 @@ describe('CloudInitInstaller', () => {
       expect(parsed.autoinstall.source).toBeUndefined()
     })
 
-    it('picks the FULL ubuntu-desktop source on a Desktop ISO where minimal is default:true (regression: minimized/empty install)', () => {
-      // Real Ubuntu Desktop ISOs (24.04+/26.04) mark the *minimized* desktop as
-      // default:true and the full desktop as default:false. Without a preferred
-      // source the detector honored default:true → 'ubuntu-desktop-minimal' → a
-      // system with no 'ubuntu-desktop' metapackage. The ubuntu profile now pins
-      // cloudInitPreferredSource='ubuntu-desktop'.
+    it('picks the FULL ubuntu-desktop source from the REAL 26.04 OBJECT-shaped install-sources.yaml (regression: object shape → minimized/empty install)', () => {
+      // The real 26.04 Desktop install-sources.yaml is a TOP-LEVEL OBJECT
+      // { kernel, sources:[...], version:2 } — NOT an array — and marks the
+      // *minimized* desktop default:true, the full desktop default:false. The old
+      // array-only parser returned [] here → no source written → subiquity used the
+      // default:true minimized desktop. This fixture uses the object shape so it
+      // FAILS against the old code and locks the fix.
       const ubuntuProfile = resolveOsProfile('ubuntu')!
       expect(ubuntuProfile.cloudInitPreferredSource).toBe('ubuntu-desktop')
+      expect(ubuntuProfile.expectedEdition).toBe('desktop')
 
       const manager = new CloudInitInstaller(
         validUsername, validPassword, mockApplications, undefined, [],
@@ -236,20 +238,23 @@ describe('CloudInitInstaller', () => {
       const extractDir = fs.mkdtempSync(path.join(os.tmpdir(), 'iso-desktop-'))
       try {
         fs.mkdirSync(path.join(extractDir, 'casper'), { recursive: true })
-        fs.writeFileSync(path.join(extractDir, 'casper', 'install-sources.yaml'), yaml.dump([
-          { id: 'ubuntu-desktop-minimal', default: true },
-          { id: 'ubuntu-desktop', default: false }
-        ]))
+        fs.writeFileSync(path.join(extractDir, 'casper', 'install-sources.yaml'), yaml.dump({
+          kernel: { default: 'linux-generic-hwe-24.04' },
+          version: 2,
+          sources: [
+            { id: 'ubuntu-desktop-minimal', default: true, variant: 'desktop', type: 'fsimage-layered', path: 'minimal.squashfs', size: 6484422656, name: { en: 'Ubuntu Desktop (minimized)' } },
+            { id: 'ubuntu-desktop', default: false, variant: 'desktop', type: 'fsimage-layered', path: 'minimal.standard.squashfs', size: 8248336384, name: { en: 'Ubuntu Desktop' } }
+          ]
+        }))
         expect((manager as any).detectInstallSource(extractDir)).toBe('ubuntu-desktop')
       } finally {
         fs.rmSync(extractDir, { recursive: true, force: true })
       }
     })
 
-    it('falls back to the ISO default on a Server ISO (preferred ubuntu-desktop absent → no stall)', () => {
-      // Guards the safety of pinning a preferred source: a Server ISO has no
-      // 'ubuntu-desktop' source, so the detector must ignore the preference and
-      // honor the ISO default ('ubuntu-server') rather than request a missing
+    it('falls back to the ISO default on a Server ISO (array-shaped, no desktop source → ubuntu-server, no stall)', () => {
+      // A Server ISO (24.04 array shape) has no desktop variant; a desktop request
+      // must still complete on the server default rather than request a missing
       // source (which stalls subiquity).
       const ubuntuProfile = resolveOsProfile('ubuntu')!
       const manager = new CloudInitInstaller(
@@ -260,8 +265,8 @@ describe('CloudInitInstaller', () => {
       try {
         fs.mkdirSync(path.join(extractDir, 'casper'), { recursive: true })
         fs.writeFileSync(path.join(extractDir, 'casper', 'install-sources.yaml'), yaml.dump([
-          { id: 'ubuntu-server', default: true },
-          { id: 'ubuntu-server-minimal', default: false }
+          { id: 'ubuntu-server', default: true, variant: 'server' },
+          { id: 'ubuntu-server-minimal', default: false, variant: 'server' }
         ]))
         expect((manager as any).detectInstallSource(extractDir)).toBe('ubuntu-server')
       } finally {
@@ -862,6 +867,75 @@ autoinstall:
       const params = await manager['getXorrisoParamsFromISO']('/nonexistent/iso.iso')
 
       expect(params).toEqual([])
+    })
+  })
+
+  describe('hasBootAnchors (refuse to fabricate boot geometry)', () => {
+    const manager = new CloudInitInstaller(validUsername, validPassword, mockApplications)
+
+    it('accepts params carrying a boot image (-b/-e) AND an appended GPT partition', () => {
+      expect((manager as any).hasBootAnchors(['-b', '/boot/grub/i386-pc/eltorito.img', '-append_partition', '2', 'uuid', '--interval:x'])).toBe(true)
+      expect((manager as any).hasBootAnchors(['-e', '--interval:y', '-append_partition', '2'])).toBe(true)
+    })
+
+    it('rejects empty / partial params (would otherwise trigger fabricated geometry → non-bootable ISO)', () => {
+      expect((manager as any).hasBootAnchors([])).toBe(false)
+      expect((manager as any).hasBootAnchors(['-b', '/eltorito.img'])).toBe(false) // no -append_partition
+      expect((manager as any).hasBootAnchors(['-append_partition', '2'])).toBe(false) // no boot image
+    })
+  })
+
+  describe('verifyGeneratedIso (post-build integrity gate)', () => {
+    function mgr (): CloudInitInstaller {
+      const m = new CloudInitInstaller(validUsername, validPassword, mockApplications)
+      ;(m as any).isoPath = '/opt/infinibay/iso/ubuntu.iso'
+      return m
+    }
+
+    it('THROWS when the output is implausibly smaller than the base (the shipped-bug fingerprint: 3.4GB from a 6.5GB base)', async () => {
+      const m = mgr()
+      const statSpy = jest.spyOn(fs.promises, 'stat') as any
+      statSpy.mockImplementation(async (p: string) =>
+        ({ size: String(p).includes('gen') ? 3_405_469_696 : 6_518_974_464 }))
+      await expect((m as any).verifyGeneratedIso('/tmp/gen.iso')).rejects.toThrow(/outside the sane/)
+      statSpy.mockRestore()
+    })
+
+    it('THROWS when a required squashfs is missing from the generated ISO', async () => {
+      const m = mgr()
+      ;(m as any).detectedSourceInfo = { id: 'ubuntu-desktop', variant: 'desktop', minimal: false, type: 'fsimage-layered', path: 'minimal.standard.squashfs', size: 0, isDefault: false }
+      ;(m as any).allSources = [
+        { id: 'ubuntu-desktop-minimal', variant: 'desktop', minimal: true, type: 'fsimage-layered', path: 'minimal.squashfs', size: 0, isDefault: true },
+        (m as any).detectedSourceInfo
+      ]
+      jest.spyOn(fs.promises, 'stat').mockResolvedValue({ size: 6_400_000_000 } as any)
+      // Listing has the base layer but NOT minimal.standard.squashfs.
+      jest.spyOn(m as any, 'executeCommand').mockResolvedValue('casper/minimal.squashfs\ncasper/vmlinuz')
+      await expect((m as any).verifyGeneratedIso('/tmp/gen.iso')).rejects.toThrow(/MISSING squashfs required by install source 'ubuntu-desktop'.*minimal\.standard\.squashfs/)
+      jest.restoreAllMocks()
+    })
+
+    it('PASSES when size is sane and both the full + base layered squashfs are present', async () => {
+      const m = mgr()
+      ;(m as any).detectedSourceInfo = { id: 'ubuntu-desktop', variant: 'desktop', minimal: false, type: 'fsimage-layered', path: 'minimal.standard.squashfs', size: 0, isDefault: false }
+      ;(m as any).allSources = [
+        { id: 'ubuntu-desktop-minimal', variant: 'desktop', minimal: true, type: 'fsimage-layered', path: 'minimal.squashfs', size: 0, isDefault: true },
+        (m as any).detectedSourceInfo
+      ]
+      jest.spyOn(fs.promises, 'stat').mockResolvedValue({ size: 6_500_000_000 } as any)
+      jest.spyOn(m as any, 'executeCommand').mockResolvedValue('casper/minimal.squashfs\ncasper/minimal.standard.squashfs\ncasper/vmlinuz')
+      await expect((m as any).verifyGeneratedIso('/tmp/gen.iso')).resolves.toBeUndefined()
+      jest.restoreAllMocks()
+    })
+
+    it('is a no-op on the presence check when no source was detected (non-casper distro)', async () => {
+      const m = mgr()
+      ;(m as any).detectedSourceInfo = undefined
+      jest.spyOn(fs.promises, 'stat').mockResolvedValue({ size: 6_500_000_000 } as any)
+      const execSpy = jest.spyOn(m as any, 'executeCommand')
+      await expect((m as any).verifyGeneratedIso('/tmp/gen.iso')).resolves.toBeUndefined()
+      expect(execSpy).not.toHaveBeenCalled() // no 7z listing when there's nothing to verify
+      jest.restoreAllMocks()
     })
   })
 

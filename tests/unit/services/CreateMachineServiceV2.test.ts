@@ -195,6 +195,14 @@ describe('CreateMachineServiceV2', () => {
     jest.clearAllMocks()
     mockPrisma = mockDeep<PrismaClient>()
     service = new CreateMachineServiceV2(mockPrisma as any)
+    // A base ISO must exist for the create path — getOSIsoPath now FAILS LOUDLY when
+    // no ISO is found (previously it silently created a media-less VM). Provide the
+    // canonical ISOs so create()/buildVMConfig tests exercise the real generation
+    // path (CloudInitInstaller.generateNewImage is mocked). The getOSIsoPath describe
+    // overrides readdirSync per-test.
+    const fsMock = require('fs')
+    fsMock.existsSync.mockReturnValue(true)
+    fsMock.readdirSync.mockReturnValue(['ubuntu.iso', 'windows10.iso', 'windows11.iso', 'fedora.iso'])
   })
 
   // ─── validatePreconditions (via create) ────────────────────────────────
@@ -509,6 +517,49 @@ describe('CreateMachineServiceV2', () => {
 
       const result = await service.getGraphicsInfo()
       expect(result).toEqual([])
+    })
+  })
+
+  // ─── getOSIsoPath (base ISO selection robustness) ──────────────────────
+  describe('getOSIsoPath (base ISO selection)', () => {
+    const fs = require('fs')
+    const path = require('path')
+    const isoDir = '/opt/infinibay/iso'
+
+    beforeEach(() => {
+      fs.existsSync.mockReturnValue(true)
+    })
+
+    it('prefers the canonical ubuntu.iso over a leftover server ISO that also matches the glob (the original bug)', async () => {
+      fs.readdirSync.mockReturnValue(['ubuntu-24.04.4-live-server-amd64.iso', 'ubuntu.iso'])
+      const p = await (service as any).getOSIsoPath('ubuntu')
+      expect(p).toBe(path.join(isoDir, 'ubuntu.iso'))
+    })
+
+    it('with NO canonical name, classifies editions and prefers the DESKTOP ISO for the desktop product', async () => {
+      fs.readdirSync.mockReturnValue(['ubuntu-24.04-live-server-amd64.iso', 'ubuntu-26.04-desktop-amd64.iso'])
+      jest.spyOn(service as any, 'classifyUbuntuEdition').mockImplementation((...args: any[]) =>
+        String(args[0]).includes('desktop') ? 'desktop' : 'server')
+      const p = await (service as any).getOSIsoPath('ubuntu')
+      expect(p).toBe(path.join(isoDir, 'ubuntu-26.04-desktop-amd64.iso'))
+    })
+
+    it('keeps an UNKNOWN-edition single candidate rather than dropping it (classifier miss must not wipe a valid ISO)', async () => {
+      fs.readdirSync.mockReturnValue(['ubuntu-mystery.iso'])
+      const p = await (service as any).getOSIsoPath('ubuntu')
+      expect(p).toBe(path.join(isoDir, 'ubuntu-mystery.iso'))
+    })
+
+    it('returns undefined when no ISO for the OS is present (create() then fails loudly instead of a media-less VM)', async () => {
+      fs.readdirSync.mockReturnValue(['fedora.iso', 'notes.txt'])
+      const p = await (service as any).getOSIsoPath('ubuntu')
+      expect(p).toBeUndefined()
+    })
+
+    it('resolves a family that was NOT in the old hardcoded table (rhel/rocky) via osProfiles patterns', async () => {
+      fs.readdirSync.mockReturnValue(['Rocky-9.5-x86_64-dvd.iso'])
+      const p = await (service as any).getOSIsoPath('rhel')
+      expect(p).toBe(path.join(isoDir, 'Rocky-9.5-x86_64-dvd.iso'))
     })
   })
 })

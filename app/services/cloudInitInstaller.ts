@@ -10,6 +10,7 @@ import { deriveVmSecret } from './socket-watcher/AgentMessageSigner'
 
 import { UnattendedManagerBase } from './unattendedManagerBase'
 import { type OsProfile } from './install/osProfiles'
+import { parseInstallSources, selectInstallSource, type NormalizedInstallSource } from './install/installSources'
 
 export interface CloudInitInstallerOptions {
   /** The resolved OS profile (distro/family/version), drives ISO + source choices. */
@@ -38,6 +39,11 @@ export class CloudInitInstaller extends UnattendedManagerBase {
   // The subiquity install source detected from the ISO (set during createISO).
   // Server ISOs have NO 'ubuntu-desktop' source — hardcoding it stalls the install.
   private detectedSource?: string
+  // The full normalized source we selected (id + squashfs path + type), used by
+  // the post-build integrity check to confirm the required squashfs survived.
+  private detectedSourceInfo?: NormalizedInstallSource
+  // All normalized sources parsed from the ISO (for layered base-layer lookup).
+  private allSources: NormalizedInstallSource[] = []
 
   constructor (
     username: string,
@@ -90,19 +96,30 @@ export class CloudInitInstaller extends UnattendedManagerBase {
     try {
       const p = path.join(extractDir, 'casper', 'install-sources.yaml')
       if (!fs.existsSync(p)) return undefined
-      const parsed = yaml.load(fs.readFileSync(p, 'utf8'))
-      const entries = Array.isArray(parsed) ? parsed : []
-      const ids = entries
-        .map((e) => (e && typeof e === 'object' ? (e as Record<string, unknown>) : null))
-        .filter((e): e is Record<string, unknown> => e !== null && typeof e.id === 'string')
-      if (ids.length === 0) return undefined
-
-      const preferred = this.osProfile?.cloudInitPreferredSource
-      if (preferred && ids.some((e) => e.id === preferred)) return preferred
-      const def = ids.find((e) => e.default === true)
-      if (def) return def.id as string
-      const nonMinimal = ids.find((e) => !String(e.id).includes('minimal'))
-      return (nonMinimal ?? ids[0]).id as string
+      // parseInstallSources handles BOTH the 24.04 top-level-array shape AND the
+      // 26.04 `{ sources: [...] }` object shape. The old inline parser assumed an
+      // array, so on 26.04 it yielded [] → undefined → subiquity fell back to the
+      // ISO default (the *minimized* desktop). See install/installSources.ts.
+      const sources = parseInstallSources(fs.readFileSync(p, 'utf8'))
+      this.allSources = sources
+      if (sources.length === 0) {
+        this.debug.warn('[SOURCE] install-sources.yaml parsed to zero sources; letting subiquity use its ISO default')
+        return undefined
+      }
+      const selected = selectInstallSource(sources, {
+        preferredId: this.osProfile?.cloudInitPreferredSource,
+        expectedEdition: this.osProfile?.expectedEdition
+      })
+      if (!selected) return undefined
+      this.detectedSourceInfo = selected
+      // Loud warning when the product wants a desktop but only a minimized (or
+      // non-desktop) source is available — the operator gets an actionable signal
+      // instead of a silently near-empty system.
+      if (this.osProfile?.expectedEdition === 'desktop' && (selected.variant !== 'desktop' || selected.minimal)) {
+        this.debug.warn(`[SOURCE] desktop requested but the ISO's best source is '${selected.id}' (variant=${selected.variant || 'n/a'}, minimal=${selected.minimal}); the full desktop may be unavailable on this ISO. Available: ${sources.map(s => s.id).join(', ')}`)
+      }
+      this.debug.debug(`[SOURCE] selected install source '${selected.id}' (variant=${selected.variant || 'n/a'}, minimal=${selected.minimal}, path=${selected.path || 'n/a'})`)
+      return selected.id
     } catch (err) {
       this.debug.warn(`[SOURCE] Could not detect install source from ISO (${String(err)}); letting subiquity use its default`)
       return undefined
@@ -829,67 +846,50 @@ menuentry "Automatic Install Ubuntu" {
       this.debug.warn('[ISO] EFI boot image not found at EFI/boot/bootx64.efi')
     }
 
-    // Get dynamic xorriso parameters from the original ISO
+    // Get dynamic xorriso parameters from the original ISO. The El Torito boot
+    // geometry (appended GPT partition byte ranges, ESP eltorito image) is
+    // ISO-VERSION-SPECIFIC, so it MUST be read from the actual base ISO.
     const dynamicParams = await this.getXorrisoParamsFromISO(this.isoPath as string)
 
-    let isoCreationCommandParts: string[]
-
-    if (dynamicParams.length > 0) {
-      // Use dynamic parameters from the original ISO
-      // We need to:
-      // 1. Replace the source ISO references with extractDir
-      // 2. Add our output path
-      this.debug.debug('[XORRISO] Using dynamic parameters extracted from original ISO')
-
-      isoCreationCommandParts = [
-        'xorriso',
-        '-as', 'mkisofs',
-        ...dynamicParams.map(param => {
-          // Replace references to the source ISO with the correct path
-          if (param.includes(this.isoPath as string)) {
-            return param // Keep references to original ISO for interval reads
-          }
-          return param
-        }),
-        '-o', newIsoPath,
-        extractDir
-      ]
-    } else {
-      // Fallback to default parameters if extraction failed
-      this.debug.debug('[XORRISO] Using fallback parameters (extraction failed)')
-
-      isoCreationCommandParts = [
-        'xorriso',
-        '-as', 'mkisofs',
-        '-V', 'UBUNTU', // Volume ID (must be ≤ 16 chars)
-        '--grub2-mbr', `--interval:local_fs:0s-15s:zero_mbrpt,zero_gpt:${this.isoPath}`,
-        '--protective-msdos-label',
-        '-partition_cyl_align', 'off',
-        '-partition_offset', '16',
-        '--mbr-force-bootable',
-        '-append_partition', '2', '28732ac11ff8d211ba4b00a0c93ec93b', `--interval:local_fs:4087764d-4097891d::${this.isoPath}`,
-        '-appended_part_as_gpt',
-        '-iso_mbr_part_type', 'a2a0d0ebe5b9334487c068b6b72699c7',
-        '-c', '/boot.catalog',
-        '-b', '/boot/grub/i386-pc/eltorito.img',
-        '-no-emul-boot',
-        '-boot-load-size', '4',
-        '-boot-info-table',
-        '--grub2-boot-info',
-        '-eltorito-alt-boot',
-        '-e', '--interval:appended_partition_2_start_1021941s_size_10128d:all::',
-        '-no-emul-boot',
-        '-boot-load-size', '10128',
-        '-o', newIsoPath,
-        extractDir
-      ]
+    // FAIL LOUDLY if we could not extract real boot parameters. The previous code
+    // fell back to HARDCODED sector/byte constants (--interval:local_fs:4087764d-…,
+    // appended_partition_2_start_1021941s_size_10128d) frozen to one old Ubuntu
+    // release; applied to any other/newer ISO they read the wrong byte ranges and
+    // stamp a wrong-sized appended GPT + ESP → a SILENTLY non-bootable ISO. Refuse
+    // to fabricate geometry: a loud error is surfaced by create() as an actionable
+    // failure instead of shipping a VM that never boots.
+    if (!this.hasBootAnchors(dynamicParams)) {
+      throw new Error(
+        `Failed to extract El Torito boot parameters from base ISO '${this.isoPath}' ` +
+        '(xorriso -report_el_torito produced no usable -b/-e/-append_partition anchors). ' +
+        'Refusing to fabricate boot geometry, which would silently produce a NON-BOOTABLE ISO. ' +
+        'Ensure xorriso is installed and the base ISO is a valid hybrid (BIOS+UEFI) image.'
+      )
     }
+
+    this.debug.debug('[XORRISO] Using dynamic parameters extracted from original ISO')
+    // The --interval targets in dynamicParams reference the ORIGINAL base ISO by
+    // its absolute path (this.isoPath) for the appended-partition byte reads; the
+    // extractDir is grafted as the ISO root. (The old per-param map was a no-op.)
+    const isoCreationCommandParts: string[] = [
+      'xorriso',
+      '-as', 'mkisofs',
+      ...dynamicParams,
+      '-o', newIsoPath,
+      extractDir
+    ]
 
     // Use the executeCommand method from the parent class
     try {
       this.debug.debug(`[XORRISO] Creating ISO with command:\n${isoCreationCommandParts.join(' ')}`)
       await this.executeCommand(isoCreationCommandParts)
       this.debug.debug(`[ISO] Created ISO successfully at ${newIsoPath}`)
+
+      // Post-build integrity gate: confirm the squashfs the chosen install source
+      // depends on actually survived the extract+repack, and the output is sane in
+      // size vs the base. Runs BEFORE we delete extractDir so a failure is loud and
+      // the VM is failed (status=error) rather than booting a broken/empty image.
+      await this.verifyGeneratedIso(newIsoPath)
 
       // Remove the extracted directory
       await this.executeCommand(['rm', '-rf', extractDir])
@@ -898,6 +898,81 @@ menuentry "Automatic Install Ubuntu" {
       this.debug.error(`[ISO] Failed to create ISO: ${error}`)
       throw error
     }
+  }
+
+  /**
+   * True when the extracted xorriso params carry the boot anchors a modern hybrid
+   * Ubuntu ISO needs: a boot image (-b BIOS El Torito or -e ESP) AND the appended
+   * GPT partition (-append_partition) that holds the EFI system partition. Missing
+   * either means report_el_torito under-collected (or failed) and we must NOT
+   * proceed with a fabricated/partial geometry.
+   */
+  private hasBootAnchors (params: string[]): boolean {
+    if (!params || params.length === 0) return false
+    const hasBootImage = params.includes('-b') || params.includes('-e')
+    const hasAppendedPart = params.includes('-append_partition')
+    return hasBootImage && hasAppendedPart
+  }
+
+  /**
+   * Verify the freshly-built ISO actually contains the squashfs image(s) the chosen
+   * install source needs, and is not implausibly smaller than the base (the exact
+   * fingerprint of the shipped bug: a 3.4GB output from a 6.5GB desktop base). Throws
+   * an actionable error on any violation. Best-effort/no-op when we have no detected
+   * source (e.g. a distro without a casper install-sources.yaml).
+   */
+  private async verifyGeneratedIso (newIsoPath: string): Promise<void> {
+    // 1. Whole-ISO size sanity vs the base ISO.
+    try {
+      const [outStat, baseStat] = await Promise.all([
+        fsPromises.stat(newIsoPath),
+        fsPromises.stat(this.isoPath as string)
+      ])
+      const ratio = outStat.size / baseStat.size
+      if (ratio < 0.85 || ratio > 1.25) {
+        throw new Error(
+          `Generated ISO ${newIsoPath} is ${(outStat.size / 1e9).toFixed(2)}GB vs base ` +
+          `${(baseStat.size / 1e9).toFixed(2)}GB (ratio ${ratio.toFixed(2)}). This is outside the ` +
+          'sane [0.85, 1.25] range and indicates the base was mis-selected or content was dropped ' +
+          'during extract/repack (e.g. the install squashfs was truncated). Refusing to ship it.'
+        )
+      }
+    } catch (err) {
+      if (err instanceof Error && err.message.includes('outside the')) throw err
+      this.debug.warn(`[VERIFY] Could not stat ISOs for size sanity (${String(err)}); skipping size check`)
+    }
+
+    // 2. Required-squashfs presence. Resolve the chosen source's on-ISO path and,
+    // for fsimage-layered desktop sources, the base minimal layer it stacks on.
+    const info = this.detectedSourceInfo
+    if (!info || !info.path) {
+      this.debug.debug('[VERIFY] No detected install source with a squashfs path; skipping presence check')
+      return
+    }
+    const toCasper = (p: string): string => (p.startsWith('casper/') ? p : `casper/${p}`)
+    const required = new Set<string>([toCasper(info.path)])
+    if (info.type.includes('layered') && info.variant === 'desktop') {
+      // A layered full desktop stacks on the minimal desktop squashfs — require it too.
+      const baseLayer = this.allSources.find(s => s.variant === 'desktop' && s.minimal && s.path)
+      if (baseLayer) required.add(toCasper(baseLayer.path))
+    }
+
+    let listing: string
+    try {
+      listing = await this.executeCommand(['7z', 'l', newIsoPath])
+    } catch (err) {
+      this.debug.warn(`[VERIFY] Could not list generated ISO to verify squashfs presence (${String(err)}); skipping presence check`)
+      return
+    }
+    const missing = [...required].filter(p => !listing.includes(p))
+    if (missing.length > 0) {
+      throw new Error(
+        `Generated ISO ${newIsoPath} is MISSING squashfs required by install source '${info.id}': ` +
+        `${missing.join(', ')}. The install would produce a broken/near-empty system. ` +
+        'This usually means the extract ran out of space or the base ISO changed layout.'
+      )
+    }
+    this.debug.debug(`[VERIFY] Generated ISO contains required squashfs for '${info.id}': ${[...required].join(', ')}`)
   }
 
   /**
