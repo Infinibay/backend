@@ -154,12 +154,12 @@ async function validateUbuntuDesktopISO (isoPath: string): Promise<{ valid: bool
     )
 
     if (hasServerSource && !hasDesktopSource) {
-      return {
-        valid: false,
-        error: 'Este ISO es Ubuntu Server. Infinibay requiere Ubuntu Desktop para proporcionar ' +
-               'una experiencia de escritorio completa. Por favor descarga Ubuntu Desktop desde ' +
-               'https://ubuntu.com/download/desktop'
-      }
+      // Ubuntu Server is SUPPORTED: the cloud-init/autoinstall installer detects
+      // the available source (`ubuntu-server`) from casper/install-sources.yaml
+      // and installs it. Rejecting it here contradicted the installer and blocked
+      // the most common Ubuntu ISO. Accept it (Server has no default GUI).
+      logger.info('Ubuntu Server ISO detected — supported via autoinstall (installs the ubuntu-server source; no default desktop GUI).')
+      return { valid: true }
     }
 
     if (!hasDesktopSource && !hasServerSource) {

@@ -303,21 +303,30 @@ export class ISOService {
   }
 
   /**
-   * Extract OS type from filename
+   * Extract OS type from a real-world ISO filename.
+   *
+   * Matches SUBSTRINGS/patterns, not exact canonical names: downloaded ISOs are
+   * named like `ubuntu-24.04.4-live-server-amd64.iso` or
+   * `Fedora-Server-netinst-x86_64-42-1.1.iso`, never `ubuntu.iso`. The old exact
+   * lookup (`osMapping[name]`) returned null for every real ISO, so the
+   * filesystem sync silently registered nothing and the UI reported "no ISO"
+   * even with valid ISOs present — while CreateMachineServiceV2.getOSIsoPath
+   * (which globs `ubuntu-*.iso`) would happily boot them. This aligns the two.
+   *
+   * Windows is matched by (win|windows) + version digits so a driver ISO like
+   * `virtio-win.iso` (contains "win" but no "10"/"11") never mis-maps to Windows.
+   * Order matters: the more specific Windows tokens are tested before the
+   * distro substrings.
    */
   private extractOSType (filename: string): string | null {
-    const name = filename.toLowerCase().replace('.iso', '')
+    const name = filename.toLowerCase()
 
-    const osMapping: { [key: string]: string } = {
-      windows10: 'WINDOWS10',
-      windows11: 'WINDOWS11',
-      win10: 'WINDOWS10',
-      win11: 'WINDOWS11',
-      ubuntu: 'UBUNTU',
-      fedora: 'FEDORA'
-    }
+    if (/(?:windows|win)[ ._-]*11/.test(name)) return 'WINDOWS11'
+    if (/(?:windows|win)[ ._-]*10/.test(name)) return 'WINDOWS10'
+    if (name.includes('ubuntu')) return 'UBUNTU'
+    if (name.includes('fedora')) return 'FEDORA'
 
-    return osMapping[name] || null
+    return null
   }
 
   /**

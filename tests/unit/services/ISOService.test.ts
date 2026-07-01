@@ -187,6 +187,44 @@ describe('ISOService', () => {
       await service.syncISOsWithFileSystem()
       expect(mockFs.mkdir).toHaveBeenCalledWith(expect.any(String), { recursive: true })
     })
+
+    // Regression: real-world ISO filenames (never `ubuntu.iso`) must be detected.
+    // The old exact-map returned null for these, so the sync registered NOTHING
+    // and the UI reported "no ISO" while valid ISOs sat on disk.
+    it('detects real-world ISO filenames (version/edition suffixes) by substring', async () => {
+      mockFs.readdir.mockResolvedValueOnce([
+        'ubuntu-24.04.4-live-server-amd64.iso',
+        'Fedora-Server-netinst-x86_64-42-1.1.iso',
+        'Win11_24H2_English_x64.iso',
+        'Windows10_22H2_x64.iso'
+      ])
+      mockPrismaISO.upsert.mockResolvedValue(createMockISO({
+        createdAt: new Date('2026-01-01T00:00:00Z'),
+        updatedAt: new Date('2026-01-01T00:00:00Z')
+      }))
+      mockPrismaISO.findMany.mockResolvedValue([])
+
+      await service.syncISOsWithFileSystem()
+
+      const osByFile = new Map(
+        mockPrismaISO.upsert.mock.calls.map((c: any[]) => [c[0].where.filename, c[0].create.os])
+      )
+      expect(osByFile.get('ubuntu-24.04.4-live-server-amd64.iso')).toBe('UBUNTU')
+      expect(osByFile.get('Fedora-Server-netinst-x86_64-42-1.1.iso')).toBe('FEDORA')
+      expect(osByFile.get('Win11_24H2_English_x64.iso')).toBe('WINDOWS11')
+      expect(osByFile.get('Windows10_22H2_x64.iso')).toBe('WINDOWS10')
+      expect(mockPrismaISO.upsert).toHaveBeenCalledTimes(4)
+    })
+
+    // A driver ISO contains "win" but no version — it must NOT mis-map to Windows.
+    it('does NOT register a non-OS ISO like virtio-win.iso', async () => {
+      mockFs.readdir.mockResolvedValueOnce(['virtio-win.iso', '648fea25-a724-4134-a7fa-34e7154e64ac.iso'])
+      mockPrismaISO.findMany.mockResolvedValue([])
+
+      await service.syncISOsWithFileSystem()
+
+      expect(mockPrismaISO.upsert).not.toHaveBeenCalled()
+    })
   })
 
   describe('checkISOForOS', () => {
