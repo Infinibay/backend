@@ -1,6 +1,7 @@
 import logger from '@main/logger'
 import { Arg, Ctx, Mutation, Query, Resolver } from 'type-graphql'
 import { UserInputError } from '@utils/errors'
+import { sanitizeErrorForUser } from '@utils/sanitizeError'
 import {
   Machine,
   MachineOrderBy,
@@ -91,7 +92,9 @@ async function transformMachine (prismaMachine: MachineWithRelations, prisma?: P
   if (prismaMachine.configuration) {
     const cfg: Record<string, unknown> = {}
     if (prismaMachine.configuration.lastError) {
-      cfg.lastError = prismaMachine.configuration.lastError
+      // Redact host paths / raw command stderr before exposing to the (possibly
+      // non-admin) VM owner — the full detail stays in the DB + server logs.
+      cfg.lastError = sanitizeErrorForUser(prismaMachine.configuration.lastError)
     }
     if (graphicPort && graphicPort > 0) {
       const protocol = prismaMachine.configuration.graphicProtocol || 'vnc'

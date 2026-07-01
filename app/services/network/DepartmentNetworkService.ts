@@ -14,7 +14,7 @@
  */
 
 import { PrismaClient, Department, RuleSetType } from '@prisma/client'
-import { BridgeManager, DepartmentNatService, TapDeviceManager } from '@infinibay/infinization'
+import { BridgeManager, DepartmentNatService, TapDeviceManager, KeyedMutex } from '@infinibay/infinization'
 import { exec, spawn } from 'child_process'
 import { promisify } from 'util'
 import { createHash } from 'crypto'
@@ -212,6 +212,9 @@ export class DepartmentNetworkService {
   private prisma: PrismaClient
   private bridgeManager: BridgeManager
   private natService: DepartmentNatService
+  // Serializes per-department bridge self-heal so two concurrent VM-creates in
+  // the same department don't both try to create the same missing bridge.
+  private readonly bridgeLock = new KeyedMutex()
   private firewallRuleService?: FirewallRuleService
   private firewallPolicyService?: FirewallPolicyService
   private firewallOrchestrationService?: FirewallOrchestrationService
@@ -482,23 +485,56 @@ export class DepartmentNetworkService {
         'or create the VM in a department that already has a working network.'
       )
     }
+    const bridgeName = dept.bridgeName
 
-    if (await this.bridgeManager.exists(dept.bridgeName)) {
-      return dept.bridgeName
-    }
+    // Serialize per-department: two concurrent VM-creates in the same department
+    // could otherwise both see exists()==false and both run provisioning — the
+    // loser's `ip link add` throws 'Bridge already exists' and fails that whole
+    // create, and a second dnsmasq fights for :67. KeyedMutex chains same-key
+    // calls; other departments still provision in parallel.
+    return this.bridgeLock.runExclusive(departmentId, async () => {
+      if (await this.bridgeManager.exists(bridgeName)) {
+        // The bridge is up, but a container/host recreate or a crash can leave it
+        // WITHOUT its DHCP server or NAT. Repair those (best-effort) so we never
+        // hand back a bridge that looks ready yet silently drops VMs onto a
+        // DHCP/NAT-less L2 with no error at create time.
+        await this.ensureDepartmentServices(dept)
+        return bridgeName
+      }
 
-    debug.warn(
-      `Bridge '${dept.bridgeName}' for department '${dept.name}' is missing — provisioning it before VM create (self-heal)`
-    )
-    await this.provisionDepartmentBridge(dept)
-
-    if (!(await this.bridgeManager.exists(dept.bridgeName))) {
-      throw new Error(
-        `Failed to provision network bridge '${dept.bridgeName}' for department '${dept.name}'. ` +
-        'Check host networking (NET_ADMIN capability and br_netfilter) and retry.'
+      debug.warn(
+        `Bridge '${bridgeName}' for department '${dept.name}' is missing — provisioning it before VM create (self-heal)`
       )
+      await this.provisionDepartmentBridge(dept)
+
+      if (!(await this.bridgeManager.exists(bridgeName))) {
+        throw new Error(
+          `Failed to provision network bridge '${bridgeName}' for department '${dept.name}'. ` +
+          'Check host networking (NET_ADMIN capability and br_netfilter) and retry.'
+        )
+      }
+      return bridgeName
+    })
+  }
+
+  /**
+   * Best-effort repair of the DHCP (dnsmasq) + NAT services for a department
+   * whose bridge already EXISTS (mirrors the "bridge exists" branch of
+   * restoreAllNetworks). Non-fatal: the bridge is up and a TAP can attach at L2,
+   * so a transient dnsmasq/NAT hiccup must not fail an otherwise-valid VM create —
+   * it is logged, not thrown.
+   */
+  private async ensureDepartmentServices (dept: Department): Promise<void> {
+    if (!dept.bridgeName || !dept.ipSubnet) return
+    try {
+      await this.natService.initialize()
+      await this.ensureDnsmasqRunning(dept)
+      if (!(await this.natService.hasMasquerade(dept.bridgeName))) {
+        await this.natService.addMasquerade(dept.ipSubnet, dept.bridgeName)
+      }
+    } catch (err) {
+      debug.warn(`Best-effort DHCP/NAT repair for department '${dept.name}' failed: ${String(err)}`)
     }
-    return dept.bridgeName
   }
 
   /**
@@ -508,6 +544,12 @@ export class DepartmentNetworkService {
    * the startup reconcile and the on-demand VM-create ensure share one recipe.
    * The prerequisites (netfilter sysctls, NAT init, dirs) are idempotent and run
    * here too so this is safe to call standalone.
+   *
+   * ROLLBACK: like configureNetwork(), any step failure (e.g. dnsmasq can't bind
+   * :67, NAT insert fails) tears down the resources already created and rethrows.
+   * Without this the bridge from step 1 would be left up but DHCP/NAT-less, and
+   * ensureDepartmentBridgeReady's fast path (exists()==true) would then return it
+   * as "ready" and quietly attach VMs to a broken network.
    */
   private async provisionDepartmentBridge (dept: Department): Promise<void> {
     if (!dept.bridgeName || !dept.ipSubnet) {
@@ -525,17 +567,28 @@ export class DepartmentNetworkService {
     config.ntpServers = dept.ntpServers
     config.mtu = dept.mtu ?? undefined
 
-    await this.bridgeManager.create(config.bridgeName)
-    await this.bridgeManager.assignIP(config.bridgeName, `${config.gatewayIP}/${config.netmask}`)
-    const dnsmasqPid = await this.startDnsmasq(config)
-    await this.natService.addMasquerade(dept.ipSubnet, config.bridgeName)
+    const created = { bridge: false, ip: false, dnsmasq: false, nat: false }
+    try {
+      await this.bridgeManager.create(config.bridgeName)
+      created.bridge = true
+      await this.bridgeManager.assignIP(config.bridgeName, `${config.gatewayIP}/${config.netmask}`)
+      created.ip = true
+      const dnsmasqPid = await this.startDnsmasq(config)
+      created.dnsmasq = true
+      await this.natService.addMasquerade(dept.ipSubnet, config.bridgeName)
+      created.nat = true
 
-    await this.prisma.department.update({
-      where: { id: dept.id },
-      data: { dnsmasqPid }
-    })
+      await this.prisma.department.update({
+        where: { id: dept.id },
+        data: { dnsmasqPid }
+      })
 
-    debug.info(`Provisioned bridge '${config.bridgeName}' for department '${dept.name}'`)
+      debug.info(`Provisioned bridge '${config.bridgeName}' for department '${dept.name}'`)
+    } catch (error) {
+      debug.error(`Self-heal provisioning failed for department '${dept.name}', rolling back: ${String(error)}`)
+      await this.rollback(config, created)
+      throw error
+    }
   }
 
   /**

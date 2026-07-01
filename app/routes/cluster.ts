@@ -11,6 +11,7 @@ import { ClusterCA } from '../services/node/ClusterCA'
 import type { TLSSocket } from 'node:tls'
 import { NodeEnrollmentService } from '../services/node/NodeEnrollmentService'
 import { PrismaClient } from '@prisma/client'
+import { isValidMachineStatus } from '../constants/machine-status'
 
 const service = new NodeHeartbeatService(prisma as unknown as PrismaClient)
 
@@ -60,6 +61,17 @@ const MACHINE_ID_KEYED_METHODS = new Set<string>([
   'getFirewallRulesSplit',
   'getDepartmentFirewallPolicy',
   'getFirewallRuleSetId'
+])
+
+// Methods whose SECOND argument (callArgs[1]) is the target machine status. A
+// compromised node could otherwise persist an arbitrary status on its own VMs
+// (e.g. a 200 KB blob or a bogus literal like 'running_fake'); the master's
+// reconcilers only ever match KNOWN statuses, so such a row becomes invisible to
+// crash/orphan cleanup and reconcile and can never be started again — a stuck,
+// unmanageable VM. Validate the status against the canonical machine-status set.
+const STATUS_WRITE_METHODS = new Set<string>([
+  'updateMachineStatus',
+  'transitionVMStatus'
 ])
 
 /**
@@ -205,6 +217,19 @@ export function createClusterRouter (opts: { mode?: ClusterRouterMode } = {}): e
         const owned = await prisma.machine.findFirst({ where: { id: vmId, nodeId: node.id }, select: { id: true } })
         if (!owned) {
           res.status(403).json({ error: `node ${nodeName} does not own machine ${vmId}` })
+          return
+        }
+      }
+
+      // Reject a bogus/oversized status BEFORE it reaches the DB. Without this a
+      // compromised node could strand its own VM in an unknown status invisible
+      // to every reconciler. (callArgs[1] is the target status for both
+      // updateMachineStatus(id, status, opts?) and
+      // transitionVMStatus(id, newStatus, expectedStatus, version).)
+      if (STATUS_WRITE_METHODS.has(method)) {
+        const status = callArgs[1]
+        if (typeof status !== 'string' || !isValidMachineStatus(status)) {
+          res.status(400).json({ error: `method ${method} received an invalid machine status` })
           return
         }
       }

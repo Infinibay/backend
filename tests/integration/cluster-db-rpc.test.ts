@@ -87,6 +87,51 @@ describe('POST /cluster/db (node DB facade)', () => {
     )
   })
 
+  describe('status-write validation gate (compromised-node hardening)', () => {
+    it('rejects a bogus status literal (400) — never persists an unknown status', async () => {
+      mockPrisma.node.findFirst.mockResolvedValue({ id: 'node-1-id' } as never)
+      mockPrisma.machine.findFirst.mockResolvedValue({ id: 'm1' } as never)
+
+      const res = await post({ nodeName: 'node-1', method: 'updateMachineStatus', args: ['m1', 'running_fake'] })
+
+      expect(res.status).toBe(400)
+      // A row stuck in an unknown status is invisible to every reconciler — the
+      // write must be blocked before it reaches the DB.
+      expect(mockPrisma.machine.updateMany).not.toHaveBeenCalled()
+    })
+
+    it('rejects an oversized status blob (400)', async () => {
+      mockPrisma.node.findFirst.mockResolvedValue({ id: 'node-1-id' } as never)
+      mockPrisma.machine.findFirst.mockResolvedValue({ id: 'm1' } as never)
+
+      const res = await post({ nodeName: 'node-1', method: 'updateMachineStatus', args: ['m1', 'z'.repeat(200000)] })
+
+      expect(res.status).toBe(400)
+      expect(mockPrisma.machine.updateMany).not.toHaveBeenCalled()
+    })
+
+    it('rejects a non-string status (400)', async () => {
+      mockPrisma.node.findFirst.mockResolvedValue({ id: 'node-1-id' } as never)
+      mockPrisma.machine.findFirst.mockResolvedValue({ id: 'm1' } as never)
+
+      const res = await post({ nodeName: 'node-1', method: 'updateMachineStatus', args: ['m1', { evil: true }] })
+
+      expect(res.status).toBe(400)
+      expect(mockPrisma.machine.updateMany).not.toHaveBeenCalled()
+    })
+
+    it('still accepts a valid non-trivial status like "moving" (200) — not over-restricted to the 8 DBVMStatus', async () => {
+      mockPrisma.node.findFirst.mockResolvedValue({ id: 'node-1-id' } as never)
+      mockPrisma.machine.findFirst.mockResolvedValue({ id: 'm1' } as never)
+      mockPrisma.machine.updateMany.mockResolvedValue({ count: 1 } as never)
+
+      const res = await post({ nodeName: 'node-1', method: 'updateMachineStatus', args: ['m1', 'moving'] })
+
+      expect(res.status).toBe(200)
+      expect(mockPrisma.machine.updateMany).toHaveBeenCalledWith({ where: { id: 'm1' }, data: { status: 'moving' } })
+    })
+  })
+
   describe('node-ownership gate (G0 — F3/F4/F5)', () => {
     it('rejects an id-keyed method with an EMPTY id (400) — blocks the cluster-wide mass wipe', async () => {
       mockPrisma.node.findFirst.mockResolvedValue({ id: 'node-1-id' } as never)

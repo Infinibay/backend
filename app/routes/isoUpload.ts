@@ -5,7 +5,7 @@ import path from 'node:path'
 import cors from 'cors'
 import fs from 'fs/promises'
 import multer from 'multer'
-import { exec } from 'child_process'
+import { execFile } from 'child_process'
 import { promisify } from 'util'
 import * as yaml from 'js-yaml'
 import * as os from 'os'
@@ -16,7 +16,13 @@ import { adminAuthMiddleware } from '../middleware/adminAuth'
 // Import ISO Service
 import ISOService from '../services/ISOService'
 
-const execAsync = promisify(exec)
+// execFile (NOT exec): the ISO path is derived from the user-controlled upload
+// filename. exec runs the string through /bin/sh, so a crafted filename like
+// `a$(reboot).iso` or `a";rm -rf /;".iso` would break out of the double quotes
+// and execute — an OS command injection (admin-gated, but worst-case RCE as the
+// backend user). execFile passes argv directly with NO shell, so metacharacters
+// in the path are inert.
+const execFileAsync = promisify(execFile)
 
 // Types
 interface UploadMetadata {
@@ -71,12 +77,14 @@ async function validateMetadata (
  */
 async function validateFedoraNetinstallISO (isoPath: string): Promise<{ valid: boolean; error?: string }> {
   try {
-    // Use isoinfo to get the Volume ID
-    const { stdout } = await execAsync(`isoinfo -d -i "${isoPath}" 2>/dev/null | grep -i "Volume id"`, {
+    // Use isoinfo to get the Volume ID. execFile (no shell) + grep the output in
+    // JS instead of piping through the shell, so the path can't be abused.
+    const { stdout } = await execFileAsync('isoinfo', ['-d', '-i', isoPath], {
       timeout: 30000
     })
 
-    const volumeId = stdout.trim().replace(/^Volume id:\s*/i, '')
+    const volLine = stdout.split('\n').find(l => /volume id/i.test(l)) ?? ''
+    const volumeId = volLine.trim().replace(/^Volume id:\s*/i, '')
     logger.info(`Fedora ISO Volume ID: ${volumeId}`)
 
     // Check if this is a Live ISO (Live ISOs don't support kickstart)
@@ -112,9 +120,11 @@ async function validateUbuntuDesktopISO (isoPath: string): Promise<{ valid: bool
     // Create temp directory for extraction
     await fs.mkdir(tempDir, { recursive: true })
 
-    // Extract only casper/install-sources.yaml from the ISO using 7z
+    // Extract only casper/install-sources.yaml from the ISO using 7z.
+    // execFile (no shell): argv is passed directly, so a hostile ISO path can't
+    // splice shell commands.
     try {
-      await execAsync(`7z e "${isoPath}" "casper/install-sources.yaml" -o"${tempDir}" -y`, {
+      await execFileAsync('7z', ['e', isoPath, 'casper/install-sources.yaml', `-o${tempDir}`, '-y'], {
         timeout: 30000 // 30 second timeout
       })
     } catch (extractError) {
