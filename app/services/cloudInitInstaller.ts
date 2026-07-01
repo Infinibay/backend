@@ -345,9 +345,11 @@ EOF`,
    * @returns Array of late commands for InfiniService installation
    */
   private generateInfiniServiceInstallCommands (): string[] {
-    const backendHost = process.env.APP_HOST || 'localhost'
     const backendPort = process.env.PORT || '4000'
-    const baseUrl = `http://${backendHost}:${backendPort}`
+    // Fallback ONLY. The real host is resolved at runtime inside the guest as its
+    // default gateway (see below) — APP_HOST is the host's LAN IP and is NOT
+    // routable from the VM's isolated department network (it times out).
+    const fallbackHost = process.env.APP_HOST || 'localhost'
 
     // Per-VM HMAC secret derived from the host master secret. The installer
     // reads it from its environment and writes it to a root-only EnvironmentFile.
@@ -358,18 +360,35 @@ EOF`,
       : '# INFINISERVICE_SHARED_SECRET not provisioned (no master secret); agent will run LOCKED'
 
     const commands = [
-      // Create InfiniService installation script
+      // The installer script. It resolves the backend from the VM's DEFAULT GATEWAY
+      // (the department bridge IP, where the backend listens on :PORT) — NOT
+      // APP_HOST, which is the host's LAN IP and is unreachable from the VM's
+      // isolated department network. `set -o pipefail` makes a failing `curl | tee`
+      // actually fail (previously the pipe returned tee's success, masking the
+      // curl error → it "succeeded" then chmod'd a non-existent file → the whole
+      // OS install aborted). It runs both as a curtin in-target fast path AND as a
+      // first-boot systemd oneshot, so a transient installer-time network failure
+      // never fails the OS install.
       `cat > /target/var/lib/cloud/scripts/per-instance/install_infiniservice.sh << 'EOF'
 #!/bin/bash
-set -e
+set -o pipefail
 
 LOG_FILE="/var/log/infiniservice_install.log"
 MAX_DOWNLOAD_RETRIES=5
 RETRY_DELAY=3
 
 log_message() {
-    echo "\$(date '+%Y-%m-%d %H:%M:%S') - \$1" | tee -a \$LOG_FILE
+    echo "\$(date '+%Y-%m-%d %H:%M:%S') - \$1" | tee -a "\$LOG_FILE"
 }
+
+# The VM reaches the backend at its default gateway (= the department bridge IP,
+# where the backend binds :${backendPort}); it is on the same L2 segment so it is
+# always reachable, unlike the host LAN IP. Fall back to the configured host only
+# when there is no default route.
+GW="\$(ip route 2>/dev/null | awk '/^default/{print \$3; exit}')"
+BACKEND_HOST="\${GW:-${fallbackHost}}"
+BASE_URL="http://\${BACKEND_HOST}:${backendPort}"
+log_message "InfiniService backend: \$BASE_URL (gateway=\${GW:-none})"
 
 download_with_retry() {
     local url=\$1
@@ -378,73 +397,76 @@ download_with_retry() {
     local current_delay=\$RETRY_DELAY
 
     for attempt in \$(seq 1 \$MAX_DOWNLOAD_RETRIES); do
-        log_message "Downloading \$description (attempt \$attempt/\$MAX_DOWNLOAD_RETRIES)..."
-
-        if curl -f --connect-timeout 10 --max-time 60 -o "\$output" "\$url" 2>&1 | tee -a \$LOG_FILE; then
-            log_message "[OK] \$description downloaded successfully"
+        log_message "Downloading \$description (attempt \$attempt/\$MAX_DOWNLOAD_RETRIES) from \$url ..."
+        # No pipe here: the if must see curl's OWN exit status, not tee's.
+        if curl -fsS --connect-timeout 10 --max-time 120 -o "\$output" "\$url" 2>>"\$LOG_FILE"; then
+            log_message "[OK] \$description downloaded"
             return 0
         fi
-
-        log_message "[FAIL] Download failed, retrying in \${current_delay}s..."
+        log_message "[FAIL] download failed (exit \$?), retrying in \${current_delay}s..."
         sleep \$current_delay
         current_delay=\$((current_delay * 2))
         [ \$current_delay -gt 30 ] && current_delay=30
     done
-
-    log_message "[FAIL] Failed to download \$description after \$MAX_DOWNLOAD_RETRIES attempts"
+    log_message "[FAIL] could not download \$description after \$MAX_DOWNLOAD_RETRIES attempts"
     return 1
 }
 
-log_message "=== Starting InfiniService Installation ==="
+log_message "=== Starting InfiniService installation ==="
 
-# Wait for network connectivity
-log_message "Validating network connectivity..."
-if ! /usr/local/bin/wait-for-network.sh 15 2 2>&1 | tee -a \$LOG_FILE; then
-    log_message "[FAIL] Network validation failed, cannot proceed"
-    exit 1
-fi
-
-# Create temp directory
 mkdir -p /tmp/infiniservice
-cd /tmp/infiniservice
+cd /tmp/infiniservice || exit 1
 
-# Download InfiniService binary with retry
-if ! download_with_retry "${baseUrl}/infiniservice/linux/binary" "infiniservice" "InfiniService binary"; then
-    exit 1
-fi
+if ! download_with_retry "\${BASE_URL}/infiniservice/linux/binary" "infiniservice" "InfiniService binary"; then exit 1; fi
+if ! download_with_retry "\${BASE_URL}/infiniservice/linux/script" "install-linux.sh" "InfiniService installer"; then exit 1; fi
 
-# Download installation script with retry
-if ! download_with_retry "${baseUrl}/infiniservice/linux/script" "install-linux.sh" "InfiniService installation script"; then
-    exit 1
-fi
-
-# Make files executable
-chmod +x infiniservice install-linux.sh
+chmod +x infiniservice install-linux.sh || exit 1
 
 # Provide the per-VM HMAC secret to the installer (root-only EnvironmentFile).
 ${agentSecretExport}
 
-# Run installation script with VM ID
-log_message "Installing InfiniService with VM ID: ${this.vmId}"
-if ./install-linux.sh normal "${this.vmId}" 2>&1 | tee -a \$LOG_FILE; then
-    log_message "[OK] InfiniService installed successfully"
+log_message "Installing InfiniService (VM ${this.vmId})"
+if ./install-linux.sh normal "${this.vmId}" 2>&1 | tee -a "\$LOG_FILE"; then
+    log_message "[OK] InfiniService installed"
 else
-    log_message "[FAIL] InfiniService installation failed"
+    log_message "[FAIL] InfiniService install script failed"
     exit 1
 fi
 
-# Clean up temp files
 cd /
 rm -rf /tmp/infiniservice
-
-log_message "=== InfiniService Installation Completed ==="
+# Success — stop the first-boot retry oneshot from running on later boots.
+systemctl disable infiniservice-install.service 2>/dev/null || true
+log_message "=== InfiniService installation completed ==="
 EOF`,
-
-      // Make the InfiniService installation script executable
       'chmod +x /target/var/lib/cloud/scripts/per-instance/install_infiniservice.sh',
 
-      // Run the InfiniService installation script
-      'curtin in-target -- /var/lib/cloud/scripts/per-instance/install_infiniservice.sh'
+      // First-boot retry oneshot: the GUARANTEED path. Desktop images may not re-run
+      // cloud-init per-instance scripts on later boots, so we install a systemd unit
+      // that runs the installer once the network is up in the fully-booted system.
+      // It self-disables on success (above). This makes infiniservice installation
+      // independent of installer-time backend reachability.
+      `cat > /target/etc/systemd/system/infiniservice-install.service << 'EOF'
+[Unit]
+Description=Install Infinibay InfiniService agent (first boot)
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/var/lib/cloud/scripts/per-instance/install_infiniservice.sh
+
+[Service]
+Type=oneshot
+ExecStart=/var/lib/cloud/scripts/per-instance/install_infiniservice.sh
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target
+EOF`,
+      'curtin in-target -- systemctl enable infiniservice-install.service',
+
+      // Fast path — try to install now, but NON-FATAL: if the installer environment
+      // can't reach the backend the OS install STILL completes and the oneshot above
+      // installs infiniservice on first boot.
+      'curtin in-target -- /var/lib/cloud/scripts/per-instance/install_infiniservice.sh || echo "[infinibay] in-target infiniservice install failed; first-boot oneshot will retry"'
     ]
 
     return commands

@@ -460,17 +460,41 @@ describe('CloudInitInstaller', () => {
       expect(commandString).toContain('retry')
     })
 
-    it('should use backend URL from environment', async () => {
-      const manager = new CloudInitInstaller(
-        validUsername,
-        validPassword,
-        mockApplications
-      )
+    it('resolves the backend from the VM default GATEWAY at runtime, not the unreachable host LAN IP', () => {
+      // The VM cannot reach APP_HOST (host LAN IP) from its isolated department
+      // network — it must use its default gateway (the bridge IP where the backend
+      // listens). The script resolves it at runtime; APP_HOST is only a fallback.
+      const manager = new CloudInitInstaller(validUsername, validPassword, mockApplications)
+      const s = manager['generateInfiniServiceInstallCommands']().join('\n')
 
-      const commands = manager['generateInfiniServiceInstallCommands']()
-      const commandString = commands.join('\n')
+      expect(s).toContain("ip route") // default-gateway resolution
+      expect(s).toMatch(/awk '\/\^default\/\{print \$3/) // parse the gateway
+      expect(s).toContain('BASE_URL="http://${BACKEND_HOST}:' + (process.env.PORT || '4000')) // runtime host
+      expect(s).toContain('${GW:-') // gateway with a fallback host
+    })
 
-      expect(commandString).toContain(`http://${process.env.APP_HOST || 'localhost'}:${process.env.PORT || '4000'}`)
+    it('does not mask curl failures (set -o pipefail + curl exit checked directly)', () => {
+      // The old `curl ... | tee` returned tee\'s success, masking curl errors → a
+      // failed download reported OK then chmod\'d a missing file and aborted the OS
+      // install. Guard against that regression.
+      const manager = new CloudInitInstaller(validUsername, validPassword, mockApplications)
+      const s = manager['generateInfiniServiceInstallCommands']().join('\n')
+
+      expect(s).toContain('set -o pipefail')
+      // curl for the download is NOT piped into tee (its own exit gates the if).
+      expect(s).toMatch(/if curl -fsS[^\n]*-o "\$output"[^\n]*; then/)
+      expect(s).not.toMatch(/curl -f[^\n]*-o "\$output"[^\n]*\| tee/)
+    })
+
+    it('is resilient: first-boot systemd oneshot + NON-FATAL in-target run (a failure never nukes the OS install)', () => {
+      const manager = new CloudInitInstaller(validUsername, validPassword, mockApplications)
+      const s = manager['generateInfiniServiceInstallCommands']().join('\n')
+
+      expect(s).toContain('/target/etc/systemd/system/infiniservice-install.service')
+      expect(s).toContain('curtin in-target -- systemctl enable infiniservice-install.service')
+      expect(s).toContain('systemctl disable infiniservice-install.service') // self-disable on success
+      // The in-target fast-path run must be non-fatal.
+      expect(s).toMatch(/curtin in-target -- \S*install_infiniservice\.sh \|\| echo/)
     })
 
     it('should include VM ID in installation', async () => {
