@@ -551,7 +551,12 @@ export class FirewallValidationService {
   private isValidCIDRMask (mask: string, isIPv4Addr: boolean): boolean {
     const maskNum = parseInt(mask, 10)
 
-    if (isNaN(maskNum)) {
+    // parseInt is lax: parseInt('24x')===24, parseInt('32; drop')===32, parseInt('024')===24.
+    // Require the WHOLE string to be exactly the integer, mirroring infinization's
+    // isValidSubnetMask numeric branch (mask === numericMask.toString()). Otherwise a
+    // mask accepted here is rejected at nft-apply and the (e.g. DROP) rule is silently
+    // skipped, leaving the intended traffic unfiltered — a fail-open DB/kernel drift.
+    if (isNaN(maskNum) || mask !== String(maskNum)) {
       return false
     }
 

@@ -6,6 +6,8 @@ import * as path from 'path'
 import { SystemResources, GPU } from './type'
 import { InfinibayContext } from '../../../utils/context'
 import { Can } from '@main/permissions'
+import { ApolloError } from '@utils/errors'
+import { sanitizeErrorForUser } from '@utils/sanitizeError'
 
 /**
  * Mirrors CreateMachineServiceV2.validateGpuPassthrough. Returns a non-null
@@ -83,6 +85,13 @@ export class SystemResolver {
         targetDisk = diskData.find(d => d.mount === '/') || diskData[0]
       }
 
+      // If the probe returned no filesystems at all, surface a real error
+      // instead of dereferencing undefined and masking it with fabricated
+      // capacity numbers (see catch block rationale below).
+      if (!targetDisk) {
+        throw new ApolloError('No filesystem information available', 'SYSTEM_RESOURCES_UNAVAILABLE')
+      }
+
       // Calculate available cores (total cores minus some reserve for system)
       const totalCores = cpuData.cores
       const availableCores = Math.max(1, totalCores - 1) // Reserve 1 core for system
@@ -114,22 +123,15 @@ export class SystemResolver {
     } catch (error) {
       logger.error('Error getting system resources:', error)
 
-      // Return default values if there's an error
-      return {
-        cpu: {
-          total: 8,
-          available: 7
-        },
-        memory: {
-          total: 16,
-          available: 8
-        },
-        disk: {
-          total: 500,
-          used: 100,
-          available: 400
-        }
-      }
+      // Do NOT fabricate capacity on failure: hard-coded defaults (16 GB RAM,
+      // 500 GB disk, …) can exceed the real host and let the create-VM wizard
+      // over-commit into OOM. Surface a real error so the client renders a
+      // capacity-unavailable state instead of masked, invented numbers.
+      if (error instanceof ApolloError) throw error
+      throw new ApolloError(
+        sanitizeErrorForUser(error instanceof Error ? error.message : String(error)) ?? 'System resources unavailable',
+        'SYSTEM_RESOURCES_UNAVAILABLE'
+      )
     }
   }
 

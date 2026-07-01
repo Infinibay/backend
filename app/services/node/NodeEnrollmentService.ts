@@ -1,7 +1,8 @@
 import os from 'os'
-import { createHash, randomBytes } from 'crypto'
+import { createHash, randomBytes, timingSafeEqual } from 'crypto'
 import { PrismaClient } from '@prisma/client'
 import logger from '@main/logger'
+import { UserInputError, AuthenticationError } from '@utils/errors'
 import { ClusterCA } from './ClusterCA'
 import { computeSas } from './clusterCrypto'
 
@@ -57,6 +58,21 @@ export class NodeEnrollmentService {
     return createHash('sha256').update(sasCode).digest('hex')
   }
 
+  // The node name becomes the persisted identity, the X.509 CommonName of the
+  // CA-signed leaf (signNodeCsr → setSubject commonName) AND the verbatim mTLS
+  // pin value compared on the ops channel (clusterMtls: cn !== node.name). It is
+  // the whole authorization basis, so REJECT — never normalize — anything that
+  // isn't a plain hostname-style label: normalizing would desync the persisted
+  // name from the CSR-bound / self-computed identity. This bars control chars,
+  // whitespace (incl. trailing), DN metacharacters (, + = " \), NUL bytes, and
+  // homoglyph/over-length abuse while still allowing FQDN-style names.
+  private static readonly NODE_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$/
+  private static assertValidName (name: string): void {
+    if (!NodeEnrollmentService.NODE_NAME_RE.test(name)) {
+      throw new Error('invalid node name (must be 1-63 chars: letters, digits, and _.- , not leading with _.-)')
+    }
+  }
+
   /**
    * Step 1: a node requests to join. Upserts a PENDING node bound to the CSR's
    * public key and returns the SAS material the node displays on its terminal.
@@ -69,6 +85,8 @@ export class NodeEnrollmentService {
     if (req.name === masterName) {
       throw new Error(`'${req.name}' is reserved for the master node and cannot be enrolled`)
     }
+    // Validate before req.name touches the DB / SAS / eventual CN (see assertValidName).
+    NodeEnrollmentService.assertValidName(req.name)
 
     const pubKeyFp = ClusterCA.csrPublicKeyFingerprint(req.csrPem) // also verifies the CSR self-signature
     const joinNonce = randomBytes(16).toString('hex')
@@ -130,14 +148,24 @@ export class NodeEnrollmentService {
       where: { id: nodeId },
       select: { id: true, name: true, status: true, joinCodeHash: true }
     })
+    // approve() crosses the GraphQL boundary (approveNode resolver); throw the
+    // machine-coded error classes so clients get BAD_USER_INPUT/UNAUTHENTICATED
+    // instead of INTERNAL_SERVER_ERROR leaking raw internal state strings.
     if (!node) {
-      throw new Error(`node not found: ${nodeId}`)
+      throw new UserInputError('Node not found')
     }
     if (node.status !== 'pending') {
-      throw new Error(`node ${node.name} is not pending (status=${node.status})`)
+      throw new UserInputError(`Node ${node.name} is not pending (status=${node.status})`)
     }
-    if (typedSas !== undefined && NodeEnrollmentService.hashSas(typedSas) !== node.joinCodeHash) {
-      throw new Error('SAS code mismatch — the typed pairing code does not match the node')
+    if (typedSas !== undefined) {
+      // Constant-time compare of the two fixed-length SHA-256 hex digests (the
+      // SAS is a pairing/out-of-band identity control): a null stored hash means
+      // we cannot confirm the code, so treat it as a mismatch.
+      const typedHash = Buffer.from(NodeEnrollmentService.hashSas(typedSas), 'hex')
+      if (node.joinCodeHash == null ||
+          !timingSafeEqual(typedHash, Buffer.from(node.joinCodeHash, 'hex'))) {
+        throw new AuthenticationError('Pairing code mismatch')
+      }
     }
     await this.prisma.node.update({ where: { id: nodeId }, data: { status: 'approved' } })
     logger.info(`✅ Node '${node.name}' approved for the cluster`)
@@ -189,6 +217,9 @@ export class NodeEnrollmentService {
    * already-issued cert.
    */
   async poll (req: EnrollmentRequest): Promise<EnrollmentResult> {
+    // Defensive: never let an unvalidated name reach signNodeCsr as the CN, even
+    // if a row were somehow created via another path (see assertValidName).
+    NodeEnrollmentService.assertValidName(req.name)
     const node = await this.prisma.node.findFirst({
       where: { name: req.name },
       select: { id: true, name: true, status: true, fingerprint: true, certPem: true }
@@ -239,6 +270,9 @@ export class NodeEnrollmentService {
    * onboarded (or was rejected) must go through enrollment, not renewal.
    */
   async renew (nodeName: string, csrPem: string): Promise<Extract<EnrollmentResult, { status: 'issued' }>> {
+    // Defensive: never let an unvalidated name reach signNodeCsr as the CN, even
+    // if a row were somehow created via another path (see assertValidName).
+    NodeEnrollmentService.assertValidName(nodeName)
     const node = await this.prisma.node.findFirst({
       where: { name: nodeName },
       select: { id: true, name: true, status: true, certPem: true }

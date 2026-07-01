@@ -85,8 +85,20 @@ export function getJWTSecret (): string {
     return 'development-fallback-secret'
   }
 
-  if (secret.length < 8) {
-    logger.warn('⚠️ JWT Warning - TOKENKEY is too short, consider using a longer secret')
+  // The HMAC secret is the single factor preventing access-token forgery (tokens
+  // carry userRole), so a short/low-entropy secret is offline-brute-forceable.
+  // Fail closed in production; keep the soft warning in development.
+  if (secret.length < 32) {
+    if (process.env.NODE_ENV === 'production') {
+      const error = new JWTAuthError(
+        'weak_secret_production',
+        'TOKENKEY must be at least 32 characters in production'
+      )
+      logger.error('🚨 JWT Critical Error - TOKENKEY too weak in production')
+      throw error
+    }
+
+    logger.warn('⚠️ JWT Warning - TOKENKEY is short/low-entropy; use >= 32 chars')
   }
 
   return secret

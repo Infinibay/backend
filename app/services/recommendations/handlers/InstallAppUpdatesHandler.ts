@@ -15,12 +15,38 @@ function extractUpdates (ctx: Parameters<ResolutionHandler['run']>[0]): AppUpdat
   return Array.isArray(list) ? list : []
 }
 
-function pickPackages (entries: AppUpdateEntry[], explicit?: string[], securityOnly?: boolean): string[] {
-  if (explicit && explicit.length > 0) return explicit
+// Guest package commands run sequentially with a 5-minute timeout each, so an
+// unbounded caller-supplied list would allow a very long-lived RUNNING resolution.
+const MAX_PACKAGES = 200
+// Same charset infiniservice's validate_package_name enforces on the guest side.
+const PACKAGE_NAME_RE = /^[A-Za-z0-9._:+-]{1,100}$/
+
+function eligibleNames (entries: AppUpdateEntry[], securityOnly?: boolean): string[] {
   const filtered = securityOnly
     ? entries.filter(e => e.isSecurity === true || e.is_security === true)
     : entries
   return filtered.map(e => e.package || e.name).filter((v): v is string => Boolean(v))
+}
+
+function pickPackages (entries: AppUpdateEntry[], explicit?: string[], securityOnly?: boolean): string[] {
+  const eligible = eligibleNames(entries, securityOnly)
+  if (explicit && explicit.length > 0) {
+    // Do not let an explicit list bypass validation: names must be well-formed,
+    // in scope of this recommendation's pending updates, and (when securityOnly)
+    // limited to the security-flagged entries. Also cap the list length so the
+    // sequential guest-command loop stays bounded.
+    if (explicit.length > MAX_PACKAGES) {
+      throw new Error(`Too many packages requested (max ${MAX_PACKAGES})`)
+    }
+    const allowed = new Set(eligible)
+    return explicit.map(p => {
+      if (typeof p !== 'string' || !PACKAGE_NAME_RE.test(p) || !allowed.has(p)) {
+        throw new Error(`Invalid or out-of-scope package: ${String(p)}`)
+      }
+      return p
+    })
+  }
+  return eligible
 }
 
 async function runPackageUpdates (

@@ -27,6 +27,18 @@ const MIN_RAM = 1
 const MAX_STORAGE = 1024
 const MIN_STORAGE = 1
 
+// Server-side cap on the number of rows a single machineTemplates page may
+// return, so an unbounded `take` can't be used to exhaust the DB pool / heap.
+const MAX_PAGE_SIZE = 100
+const DEFAULT_PAGE_SIZE = 10
+
+// Documented allowlists for the free-form template string fields (see type.ts).
+// These values later drive guest provisioning (install pipeline routing and
+// FIRST_BOOT script inputs), so they are validated at the trust boundary.
+const VALID_OS_TYPES = ['windows10', 'windows11', 'ubuntu', 'fedora']
+const VALID_POWER_PLANS = ['balanced', 'high-performance', 'power-saver']
+const MAX_WALLPAPER_URL_LENGTH = 1024
+
 @Resolver(() => MachineTemplateType)
 export class MachineTemplateResolver implements MachineTemplateResolverInterface {
   /**
@@ -142,11 +154,17 @@ export class MachineTemplateResolver implements MachineTemplateResolverInterface
   }
 
   private resolveSkip (pagination: PaginationInputType | undefined) {
-    return pagination && pagination.skip ? pagination.skip : 0
+    // Clamp to a non-negative value so a negative skip never reaches Prisma
+    // (which would otherwise throw a raw validation error leaked to the client).
+    return Math.max(0, pagination?.skip ?? 0)
   }
 
   private resolveTake (pagination: PaginationInputType | undefined) {
-    return pagination && pagination.take ? pagination.take : 10
+    // Cap the page size server-side: an unbounded take lets an authenticated
+    // caller load every row and fire one machine.count per row, exhausting the
+    // connection pool / heap. Also fixes take=0 previously falling back to the
+    // default instead of being treated as an at-least-one page.
+    return Math.min(Math.max(1, pagination?.take ?? DEFAULT_PAGE_SIZE), MAX_PAGE_SIZE)
   }
 
   /**
@@ -172,6 +190,8 @@ export class MachineTemplateResolver implements MachineTemplateResolverInterface
     this.checkConstraintValidity(input.cores, MIN_CORES, MAX_CORES, 'Cores must be between 1 and 64')
     this.checkConstraintValidity(input.ram, MIN_RAM, MAX_RAM, 'RAM must be between 1 and 512')
     this.checkConstraintValidity(input.storage, MIN_STORAGE, MAX_STORAGE, 'Storage must be between 1 and 1024')
+    this.checkTemplateInputValidity(input)
+    await this.checkReferencesExist(prisma, input)
 
     const createdMachineTemplate = await prisma.machineTemplate.create({
       data: {
@@ -226,6 +246,66 @@ export class MachineTemplateResolver implements MachineTemplateResolverInterface
     }
   }
 
+  // Validate the free-form string fields against their documented allowlists
+  // before they are persisted and later fed into guest provisioning. osType
+  // routes the install pipeline (a garbage value silently mis-provisions the
+  // VM); wallpaperUrl/powerPlan are injected verbatim as FIRST_BOOT script
+  // inputs. Nullable fields are only checked when actually provided so legacy
+  // blueprints (and partial updates that omit them) keep working unchanged.
+  checkTemplateInputValidity = (input: MachineTemplateInputType): void => {
+    if (input.osType != null && !VALID_OS_TYPES.includes(input.osType)) {
+      throw new UserInputError('Invalid osType')
+    }
+    if (input.powerPlan != null && !VALID_POWER_PLANS.includes(input.powerPlan)) {
+      throw new UserInputError('Invalid powerPlan')
+    }
+    if (input.wallpaperUrl != null) {
+      // Reject control characters (incl. newlines) so the value cannot break out
+      // of the guest script input it is later interpolated into, and cap length.
+      if (input.wallpaperUrl.length > MAX_WALLPAPER_URL_LENGTH || this.hasControlChar(input.wallpaperUrl)) {
+        throw new UserInputError('Invalid wallpaperUrl')
+      }
+    }
+  }
+
+  private hasControlChar (value: string): boolean {
+    for (let i = 0; i < value.length; i++) {
+      const code = value.charCodeAt(i)
+      if (code < 0x20 || code === 0x7f) return true
+    }
+    return false
+  }
+
+  // Verify the foreign-key references (category / applications / scripts) exist
+  // before persisting, so a bogus id surfaces as a clean UserInputError instead
+  // of a raw Prisma P2003 foreign-key error (which leaks DB schema internals).
+  checkReferencesExist = async (prisma: PrismaClient, input: MachineTemplateInputType): Promise<void> => {
+    if (input.categoryId) {
+      const categoryCount = await prisma.machineTemplateCategory.count({ where: { id: input.categoryId } })
+      if (!categoryCount) {
+        throw new UserInputError('Category not found')
+      }
+    }
+
+    const appIds = input.applications?.map((a) => a.applicationId) ?? []
+    if (appIds.length > 0) {
+      const distinctAppIds = new Set(appIds)
+      const foundApps = await prisma.application.count({ where: { id: { in: [...distinctAppIds] } } })
+      if (foundApps !== distinctAppIds.size) {
+        throw new UserInputError('One or more applications not found')
+      }
+    }
+
+    const scriptIds = input.scripts?.map((s) => s.scriptId) ?? []
+    if (scriptIds.length > 0) {
+      const distinctScriptIds = new Set(scriptIds)
+      const foundScripts = await prisma.script.count({ where: { id: { in: [...distinctScriptIds] } } })
+      if (foundScripts !== distinctScriptIds.size) {
+        throw new UserInputError('One or more scripts not found')
+      }
+    }
+  }
+
   /**
    * Updates a machine template with the specified ID.
    *
@@ -254,6 +334,8 @@ export class MachineTemplateResolver implements MachineTemplateResolverInterface
     this.checkConstraintValidity(input.cores, MIN_CORES, MAX_CORES, 'Cores must be between 1 and 64')
     this.checkConstraintValidity(input.ram, MIN_RAM, MAX_RAM, 'RAM must be between 1 and 512')
     this.checkConstraintValidity(input.storage, MIN_STORAGE, MAX_STORAGE, 'Storage must be between 1 and 1024')
+    this.checkTemplateInputValidity(input)
+    await this.checkReferencesExist(prisma, input)
 
     // Use a single call to update the machineTemplate, no need to update properties one-by-one
     return await this.updateMachineTemplateInDb(prisma, id, input)

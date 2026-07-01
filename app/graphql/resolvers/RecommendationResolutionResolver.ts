@@ -4,6 +4,7 @@ import { Can } from '@main/permissions'
 import { InfinibayContext } from '../../utils/context'
 import { RecommendationResolutionType, ResolveRecommendationParamsInput } from '../types/RecommendationResolutionTypes'
 import { RecommendationResolverService } from '../../services/recommendations/RecommendationResolverService'
+import { sanitizeErrorForUser } from '../../utils/sanitizeError'
 
 function toGql (r: any): RecommendationResolutionType {
   return {
@@ -58,7 +59,9 @@ export class RecommendationResolutionResolver {
       if (msg === 'Access denied') {
         throw new GraphQLError(msg, { extensions: { code: 'FORBIDDEN' } })
       }
-      throw new GraphQLError(msg, { extensions: { code: 'BAD_USER_INPUT' } })
+      // Sanitize the fallback so an unexpected internal error message (raw host
+      // paths / stderr) is never surfaced verbatim to the tenant.
+      throw new GraphQLError(sanitizeErrorForUser(msg) || 'Failed to resolve recommendation', { extensions: { code: 'BAD_USER_INPUT' } })
     }
   }
 
@@ -74,8 +77,22 @@ export class RecommendationResolutionResolver {
       throw new GraphQLError('Not authorized', { extensions: { code: 'UNAUTHORIZED' } })
     }
     const service = new RecommendationResolverService(context.prisma)
-    const resolution = await service.cancel(id, context.user.id, context.user.role)
-    return toGql(resolution)
+    try {
+      const resolution = await service.cancel(id, context.user.id, context.user.role)
+      return toGql(resolution)
+    } catch (err: any) {
+      // Mirror resolveRecommendation's mapping so authz denials surface as
+      // FORBIDDEN and unexpected internal errors are sanitized before reaching
+      // the tenant (no raw host paths / stderr leaks).
+      const msg = err?.message || 'Failed to cancel resolution'
+      if (msg === 'Resolution not found') {
+        throw new GraphQLError(msg, { extensions: { code: 'NOT_FOUND' } })
+      }
+      if (msg === 'Access denied') {
+        throw new GraphQLError(msg, { extensions: { code: 'FORBIDDEN' } })
+      }
+      throw new GraphQLError(sanitizeErrorForUser(msg) || 'Failed to cancel resolution', { extensions: { code: 'BAD_USER_INPUT' } })
+    }
   }
 
   @Query(() => RecommendationResolutionType, {

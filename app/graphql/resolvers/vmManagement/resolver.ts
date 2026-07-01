@@ -192,6 +192,21 @@ export class VMManagementResolver {
       throw new UserInputError('VM not found')
     }
 
+    // Validate the request up front and fail with a clear UserInputError instead of
+    // letting a malformed command reach the guest (where it would be silently
+    // dropped and reported as an opaque failure — or, worse, a fabricated success
+    // for a security-relevant service that was never actually touched). The guest
+    // ServiceOperation enum is serde rename_all="lowercase", so normalise here.
+    const serviceName = input.serviceName.trim()
+    const operation = input.action.trim().toLowerCase()
+    const allowedOperations = ['start', 'stop', 'restart', 'enable', 'disable', 'status']
+    if (!serviceName) {
+      throw new UserInputError('Service name is required')
+    }
+    if (!allowedOperations.includes(operation)) {
+      throw new UserInputError(`Invalid service action; expected one of ${allowedOperations.join(', ')}`)
+    }
+
     try {
       // Use InfiniService to control service
       const result = await this.virtioSocketWatcher.sendSafeCommand(
@@ -199,8 +214,8 @@ export class VMManagementResolver {
         {
           action: 'ServiceControl',
           params: {
-            service_name: input.serviceName,
-            action: input.action
+            service_name: serviceName,
+            action: operation
           }
         },
         30000

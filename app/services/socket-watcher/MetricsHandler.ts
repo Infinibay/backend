@@ -14,6 +14,7 @@ import { Logger } from 'winston'
  */
 
 import { EventEmitter } from 'events'
+import { isIP } from 'net'
 import type {
   MetricsMessage,
   ResponseMessage,
@@ -145,27 +146,81 @@ export class MetricsHandler {
         return
       }
 
+      // SECURITY (input-validation): the remaining sub-objects are dereferenced
+      // unconditionally below. A malformed/malicious agent message that omits any
+      // of them would throw a TypeError mid-write and silently drop metrics, so
+      // guard their existence up-front like memory above.
+      if (!data.system.cpu) {
+        this.debug.error(`Missing 'system.cpu' field in metrics data for VM ${vmId}`)
+        return
+      }
+      if (!data.system.disk) {
+        this.debug.error(`Missing 'system.disk' field in metrics data for VM ${vmId}`)
+        return
+      }
+      if (!data.system.network || !data.system.network.interfaces) {
+        this.debug.error(`Missing 'system.network.interfaces' field in metrics data for VM ${vmId}`)
+        return
+      }
+
+      // SECURITY (input-validation): the numbers below are attacker-controlled and
+      // fed straight into Float/BigInt/DateTime columns. Sanitize so a malicious
+      // value (NaN/Infinity/negative, BigInt('1.5') RangeError, non-integer, or an
+      // Invalid Date) cannot throw mid-write (leaving partially-persisted rows) or
+      // corrupt stored dashboards. Valid values pass through unchanged.
+      const finitePercent = (n: number): number =>
+        Number.isFinite(n) ? Math.min(100, Math.max(0, n)) : 0
+      const finiteFloat = (n: number | undefined | null): number | null =>
+        typeof n === 'number' && Number.isFinite(n) ? n : null
+      const toBigIntSafe = (n: unknown): bigint => {
+        const v = Math.trunc(Number(n))
+        return Number.isFinite(v) && v >= 0 && v <= Number.MAX_SAFE_INTEGER ? BigInt(v) : BigInt(0)
+      }
+      const toDateSafe = (v: unknown): Date | null => {
+        if (v === undefined || v === null || v === '') return null
+        const d = new Date(v as string | number | Date)
+        return isNaN(d.getTime()) ? null : d
+      }
+      // Timestamp is used across all rows written here; reject an invalid one.
+      const tsCandidate = new Date(message.timestamp)
+      const ts = isNaN(tsCandidate.getTime()) ? new Date() : tsCandidate
+
+      // SECURITY (dos-resource): the agent-supplied collections have no upper
+      // bound and each drives per-element DB round-trips (sequential upserts for
+      // applications/windows_services). Clamp them so one guest cannot saturate
+      // the shared Postgres pool with a single message.
+      const MAX_METRIC_ITEMS = 1000
+      const clampMetricArray = <T>(arr: T[] | undefined, label: string): T[] | undefined => {
+        if (Array.isArray(arr) && arr.length > MAX_METRIC_ITEMS) {
+          this.debug.warn(`Truncating ${label} array for VM ${vmId} from ${arr.length} to ${MAX_METRIC_ITEMS} items`)
+          return arr.slice(0, MAX_METRIC_ITEMS)
+        }
+        return arr
+      }
+      data.processes = clampMetricArray(data.processes, 'processes')
+      data.applications = clampMetricArray(data.applications, 'applications')
+      data.ports = clampMetricArray(data.ports, 'ports')
+      data.windows_services = clampMetricArray(data.windows_services, 'windows_services')
+
       // Store system metrics
       // InfiniService now correctly sends memory values in KB as the field names indicate
       const systemMetrics = await this.prisma.systemMetrics.create({
         data: {
           machineId: vmId,
-          cpuUsagePercent: data.system.cpu.usage_percent,
+          cpuUsagePercent: finitePercent(data.system.cpu.usage_percent),
           cpuCoresUsage: data.system.cpu.cores_usage,
-          cpuTemperature: data.system.cpu.temperature,
-          totalMemoryKB: BigInt(data.system.memory.total_kb),
-          usedMemoryKB: BigInt(data.system.memory.used_kb),
-          availableMemoryKB: BigInt(data.system.memory.available_kb),
-          swapTotalKB: data.system.memory.swap_total_kb ? BigInt(data.system.memory.swap_total_kb) : null,
-          swapUsedKB: data.system.memory.swap_used_kb ? BigInt(data.system.memory.swap_used_kb) : null,
+          cpuTemperature: finiteFloat(data.system.cpu.temperature),
+          totalMemoryKB: toBigIntSafe(data.system.memory.total_kb),
+          usedMemoryKB: toBigIntSafe(data.system.memory.used_kb),
+          availableMemoryKB: toBigIntSafe(data.system.memory.available_kb),
+          swapTotalKB: data.system.memory.swap_total_kb ? toBigIntSafe(data.system.memory.swap_total_kb) : null,
+          swapUsedKB: data.system.memory.swap_used_kb ? toBigIntSafe(data.system.memory.swap_used_kb) : null,
           diskUsageStats: data.system.disk.usage_stats,
           diskIOStats: data.system.disk.io_stats,
           networkStats: data.system.network.interfaces,
-          uptime: data.system.uptime_seconds !== undefined && data.system.uptime_seconds !== null
-            ? BigInt(data.system.uptime_seconds)
-            : BigInt(0),
+          uptime: toBigIntSafe(data.system.uptime_seconds),
           loadAverage: data.system.load_average,
-          timestamp: new Date(message.timestamp)
+          timestamp: ts
         }
       })
 
@@ -183,12 +238,12 @@ export class MetricsHandler {
             executablePath: proc.exe_path,
             commandLine: proc.cmd_line,
             cpuUsagePercent: proc.cpu_percent,
-            memoryUsageKB: BigInt(proc.memory_kb), // Now correctly in KB
-            diskReadBytes: proc.disk_read_bytes ? BigInt(proc.disk_read_bytes) : null,
-            diskWriteBytes: proc.disk_write_bytes ? BigInt(proc.disk_write_bytes) : null,
+            memoryUsageKB: toBigIntSafe(proc.memory_kb), // Now correctly in KB
+            diskReadBytes: proc.disk_read_bytes ? toBigIntSafe(proc.disk_read_bytes) : null,
+            diskWriteBytes: proc.disk_write_bytes ? toBigIntSafe(proc.disk_write_bytes) : null,
             status: proc.status,
-            startTime: proc.start_time ? new Date(proc.start_time) : null,
-            timestamp: new Date(message.timestamp)
+            startTime: toDateSafe(proc.start_time),
+            timestamp: ts
           }))
         })
       }
@@ -208,11 +263,11 @@ export class MetricsHandler {
               version: app.version,
               description: app.description,
               publisher: app.publisher,
-              lastAccessTime: app.last_access ? new Date(app.last_access) : null,
-              lastModifiedTime: app.last_modified ? new Date(app.last_modified) : null,
+              lastAccessTime: toDateSafe(app.last_access),
+              lastModifiedTime: toDateSafe(app.last_modified),
               accessCount: app.access_count,
               totalUsageMinutes: app.usage_minutes,
-              fileSize: app.file_size ? BigInt(app.file_size) : null,
+              fileSize: app.file_size ? toBigIntSafe(app.file_size) : null,
               isActive: app.is_active,
               lastSeen: new Date()
             },
@@ -223,11 +278,11 @@ export class MetricsHandler {
               version: app.version,
               description: app.description,
               publisher: app.publisher,
-              lastAccessTime: app.last_access ? new Date(app.last_access) : null,
-              lastModifiedTime: app.last_modified ? new Date(app.last_modified) : null,
+              lastAccessTime: toDateSafe(app.last_access),
+              lastModifiedTime: toDateSafe(app.last_modified),
               accessCount: app.access_count,
               totalUsageMinutes: app.usage_minutes,
-              fileSize: app.file_size ? BigInt(app.file_size) : null,
+              fileSize: app.file_size ? toBigIntSafe(app.file_size) : null,
               isActive: app.is_active
             }
           })
@@ -258,7 +313,7 @@ export class MetricsHandler {
             executablePath: port.exe_path,
             isListening: port.is_listening,
             connectionCount: port.connection_count,
-            timestamp: new Date(message.timestamp)
+            timestamp: ts
           }))
         })
       }
@@ -283,7 +338,7 @@ export class MetricsHandler {
                 fromState: existingService.currentState,
                 toState: service.state,
                 reason: 'automatic',
-                timestamp: new Date(message.timestamp)
+                timestamp: ts
               }
             })
           }
@@ -306,7 +361,7 @@ export class MetricsHandler {
               currentState: service.state,
               processId: service.pid,
               lastStateChange: existingService?.currentState !== service.state
-                ? new Date(message.timestamp)
+                ? ts
                 : existingService?.lastStateChange,
               stateChangeCount: existingService?.currentState !== service.state
                 ? (existingService?.stateChangeCount || 0) + 1
@@ -326,7 +381,7 @@ export class MetricsHandler {
               currentState: service.state,
               processId: service.pid,
               isDefaultService: service.is_default,
-              lastStateChange: new Date(message.timestamp)
+              lastStateChange: ts
             }
           })
         }
@@ -592,6 +647,15 @@ export class MetricsHandler {
 
       if (diskData.drives && Array.isArray(diskData.drives)) {
         for (const drive of diskData.drives) {
+          // SECURITY (input-validation): total_gb/used_gb are agent-controlled.
+          // total_gb=0 would yield Infinity ('Drive X is Infinity% full' — a false
+          // critical alert) and NaN inputs would silently misreport. Skip drives
+          // whose figures are not finite positives.
+          if (!Number.isFinite(drive.total_gb) || drive.total_gb <= 0 || !Number.isFinite(drive.used_gb)) {
+            this.debug.debug(`Skipping drive ${drive.drive_letter} with invalid capacity (total_gb=${drive.total_gb}, used_gb=${drive.used_gb})`)
+            continue
+          }
+
           const usagePercent = (drive.used_gb / drive.total_gb) * 100
 
           if (usagePercent > 90) {
@@ -968,20 +1032,24 @@ export class MetricsHandler {
   }
 
   private isValidIPAddress(ip: string): boolean {
-    // Basic IPv4 validation
-    if (!ip.includes(':')) {
-      const parts = ip.split('.')
-      if (parts.length !== 4) return false
+    // SECURITY (input-validation): use Node's strict parser. The old hand-rolled
+    // IPv4 check used parseInt(), which accepts trailing garbage
+    // (parseInt('12abc',10) === 12), so '12abc.0.0.1' passed as valid; the IPv6
+    // path never validated the zone id after '%'. isIP() rejects both. We validate
+    // only the address part and separately allow a link-local IPv6 zone suffix, so
+    // an attacker-chosen string can no longer pollute machine.localIP/publicIP.
+    if (typeof ip !== 'string' || ip.length === 0) return false
 
-      for (const part of parts) {
-        const num = parseInt(part, 10)
-        if (isNaN(num) || num < 0 || num > 255) return false
-      }
-      return true
-    } else {
-      // Enhanced IPv6 validation
-      return this.isValidIPv6(ip)
+    const zoneIndex = ip.indexOf('%')
+    if (zoneIndex === -1) {
+      return isIP(ip) !== 0
     }
+
+    // Zone id only makes sense for IPv6; require a valid IPv6 address part and a
+    // non-empty, restricted zone id (interface name).
+    const addr = ip.slice(0, zoneIndex)
+    const zone = ip.slice(zoneIndex + 1)
+    return isIP(addr) === 6 && /^[A-Za-z0-9._-]+$/.test(zone)
   }
 
   private shouldPreferIP(newIP: string, currentIP: string): boolean {

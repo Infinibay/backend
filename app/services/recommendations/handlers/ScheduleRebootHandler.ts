@@ -15,7 +15,21 @@ export const scheduleRebootHandler: ResolutionHandler = {
     }
 
     await ctx.reportProgress(40, 'Creating maintenance task')
-    const triggeredBy = (ctx.recommendation as any).triggeredByUserId || ctx.machineId
+    // The triggering user id lives on RecommendationResolution, NOT on VMRecommendation
+    // (the old `(ctx.recommendation as any).triggeredByUserId` was always undefined and
+    // fell back to ctx.machineId — a Machine UUID — which is never a valid User.id and made
+    // MaintenanceTask.createdByUserId's FK throw a Prisma P2003 on every invocation).
+    // Derive the real user server-side from the in-flight resolution so a Machine id can
+    // never reach the User FK.
+    const resolution = await ctx.prisma.recommendationResolution.findFirst({
+      where: { recommendationId: ctx.recommendation.id },
+      orderBy: { createdAt: 'desc' },
+      select: { triggeredByUserId: true }
+    })
+    const triggeredBy = resolution?.triggeredByUserId
+    if (!triggeredBy) {
+      throw new Error('Unable to determine the triggering user for schedule_reboot')
+    }
 
     const task = await ctx.prisma.maintenanceTask.create({
       data: {

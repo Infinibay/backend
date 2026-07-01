@@ -2,7 +2,7 @@ import logger from '@main/logger'
 import { Arg, Ctx, Mutation, Query, Resolver } from 'type-graphql'
 import { ApplicationType, CreateApplicationInputType } from './type'
 import { InfinibayContext } from '@main/utils/context'
-import { Application } from '@prisma/client'
+import { Application, Prisma } from '@prisma/client'
 import { getEventManager } from '../../../services/EventManager'
 import { Can } from '@main/permissions'
 
@@ -45,7 +45,9 @@ export class ApplicationMutations {
         description: input.description,
         os: input.os,
         installCommand: input.installCommand,
-        parameters: input.parameters
+        // `parameters` is a required (non-nullable) Json column; Prisma rejects a
+        // plain JS `null`, so coalesce an omitted value to the DB null sentinel.
+        parameters: (input.parameters ?? Prisma.JsonNull) as Prisma.InputJsonValue
       }
     })
 
@@ -77,7 +79,9 @@ export class ApplicationMutations {
         description: input.description,
         os: input.os,
         installCommand: input.installCommand,
-        parameters: input.parameters
+        // `parameters` is a required (non-nullable) Json column; Prisma rejects a
+        // plain JS `null`, so coalesce an omitted value to the DB null sentinel.
+        parameters: (input.parameters ?? Prisma.JsonNull) as Prisma.InputJsonValue
       }
     })
 

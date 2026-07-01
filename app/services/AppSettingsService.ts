@@ -179,11 +179,14 @@ export class AppSettingsService {
     const validThemes = ['light', 'dark', 'system']
     const validInterfaceSizes = ['sm', 'md', 'lg', 'xl']
 
-    if (input.theme && !validThemes.includes(input.theme)) {
+    // Guard on presence, not truthiness: an empty string is falsy but is
+    // still forwarded by the resolver and persisted to the non-null column,
+    // so it must be checked against the enum whitelist and rejected.
+    if (input.theme != null && !validThemes.includes(input.theme)) {
       throw new Error(`Invalid theme. Must be one of: ${validThemes.join(', ')}`)
     }
 
-    if (input.interfaceSize && !validInterfaceSizes.includes(input.interfaceSize)) {
+    if (input.interfaceSize != null && !validInterfaceSizes.includes(input.interfaceSize)) {
       throw new Error(`Invalid interface size. Must be one of: ${validInterfaceSizes.join(', ')}`)
     }
 
@@ -193,6 +196,26 @@ export class AppSettingsService {
 
     if (input.logoUrl !== undefined && input.logoUrl !== null && typeof input.logoUrl !== 'string') {
       throw new Error('Logo URL must be a string or null')
+    }
+
+    // Bound the unbounded text fields. This row is served by getAppSettings to
+    // every authenticated user (appSettings:view is universal), so a single
+    // write of an oversized/hostile value would be amplified to all clients.
+    const tooLong = (v: unknown, max: number): boolean =>
+      typeof v === 'string' && v.length > max
+    if (tooLong(input.wallpaper, 255)) {
+      throw new Error('Wallpaper is too long (max 255 characters)')
+    }
+    if (tooLong(input.brandName, 128)) {
+      throw new Error('Brand name is too long (max 128 characters)')
+    }
+    if (tooLong(input.themePreset, 64)) {
+      throw new Error('Theme preset is too long (max 64 characters)')
+    }
+    // Constrain logoUrl to http(s) or a relative ("/") URL so a persisted
+    // javascript:/data: URI can't be fanned out to every client's UI.
+    if (input.logoUrl && (input.logoUrl.length > 2048 || !/^(https?:\/\/|\/)/i.test(input.logoUrl))) {
+      throw new Error('Logo URL must be an http(s) or relative ("/") URL (max 2048 characters)')
     }
 
     const HEX = /^#([a-f0-9]{3}|[a-f0-9]{6})$/i

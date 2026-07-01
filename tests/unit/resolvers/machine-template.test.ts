@@ -173,6 +173,7 @@ describe('MachineTemplateResolver', () => {
       const createdTemplate = createMockMachineTemplate(input)
 
       mockPrisma.machineTemplate.findFirst.mockResolvedValue(null) // Name doesn't exist
+      mockPrisma.machineTemplateCategory.count.mockResolvedValue(1) // Referenced category exists
       mockPrisma.machineTemplate.create.mockResolvedValue(createdTemplate)
 
       const result = await resolver.createMachineTemplate(input, ctx)
