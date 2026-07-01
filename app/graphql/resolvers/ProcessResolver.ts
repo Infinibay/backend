@@ -6,6 +6,7 @@ import { VirtioSocketWatcherService } from '@services/VirtioSocketWatcherService
 import { getSocketService } from '@services/SocketService'
 import { Can } from '@main/permissions'
 import { InfinibayContext } from '@utils/context'
+import { UserInputError } from '@utils/errors'
 
 type Context = InfinibayContext & {
   virtioSocketWatcher: VirtioSocketWatcherService
@@ -99,15 +100,24 @@ export class ProcessResolver {
     @Arg('force', { defaultValue: false }) force: boolean,
     @Ctx() ctx?: Context
   ): Promise<ProcessControlResult[]> {
+    // Bound the fan-out: killProcesses processes each pid sequentially with a
+    // per-pid DB + VM-status check and a 30s socket timeout, so an unbounded
+    // pids array is an amplification-DoS vector. Reject before doing any work
+    // and dedupe so we never process the same pid twice.
+    const uniquePids = [...new Set(pids)]
+    if (uniquePids.length === 0 || uniquePids.length > 100) {
+      throw new UserInputError('pids must contain between 1 and 100 unique process IDs')
+    }
+
     try {
       if (!ctx) {
         throw new Error('Context not available')
       }
 
-      logger.debug(`Killing ${pids.length} processes on machine ${machineId} (force: ${force})`)
+      logger.debug(`Killing ${uniquePids.length} processes on machine ${machineId} (force: ${force})`)
 
       const manager = this.getProcessManager(ctx)
-      const internalResults = await manager.killProcesses(machineId, pids, force)
+      const internalResults = await manager.killProcesses(machineId, uniquePids, force)
 
       // Emit WebSocket event for successful kills
       const successfulKills = internalResults.filter(r => r.success)
@@ -142,7 +152,7 @@ export class ProcessResolver {
     } catch (error) {
       logger.debug(`Failed to kill processes: ${error}`)
       // Return error results for all PIDs
-      return pids.map(pid => ({
+      return uniquePids.map(pid => ({
         success: false,
         message: `Failed to kill process: ${error}`,
         pid,

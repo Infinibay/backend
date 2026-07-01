@@ -61,6 +61,27 @@ export class VMRecommendationService {
   }
 
   /**
+   * Process-wide shared instance. This service owns an hourly maintenance
+   * setInterval (see startMaintenanceTimer) which pins the whole instance for
+   * the process lifetime until dispose() clears it. It must therefore NOT be
+   * created per request: doing so leaks one live instance + one hourly timer on
+   * every call, a trivially triggerable memory/CPU DoS. Per-request callers
+   * (e.g. GraphQL resolvers) should reuse getShared() instead of `new`.
+   */
+  private static sharedInstance: VMRecommendationService | null = null
+
+  /**
+   * Get a lazily-created, process-wide shared VMRecommendationService.
+   * Reusing a single instance avoids leaking a maintenance timer per request.
+   */
+  public static getShared (prisma: PrismaClient): VMRecommendationService {
+    if (!VMRecommendationService.sharedInstance) {
+      VMRecommendationService.sharedInstance = new VMRecommendationService(prisma)
+    }
+    return VMRecommendationService.sharedInstance
+  }
+
+  /**
    * Initialize the PackageManager asynchronously
    * This loads all package checkers for use in recommendations
    */
@@ -1114,6 +1135,11 @@ export class VMRecommendationService {
     try {
       logger.info('🔄 Disposing VMRecommendationService...')
 
+      // Mark service as disposed up front so any in-flight caller fails closed
+      // immediately (see generateRecommendations/getRecommendations guards) rather
+      // than running against a half-torn-down state (empty checkers / null package manager).
+      this.isDisposed = true
+
       // Stop maintenance timer
       if (this.maintenanceTimer) {
         clearInterval(this.maintenanceTimer)
@@ -1137,8 +1163,6 @@ export class VMRecommendationService {
       // Reset performance metrics
       this.performanceTracker.reset()
       logger.info('✓ Performance metrics reset')
-
-      // Mark service as disposed
 
       logger.info('✅ VMRecommendationService disposed successfully')
     } catch (error) {

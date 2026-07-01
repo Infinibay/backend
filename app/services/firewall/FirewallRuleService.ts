@@ -1,11 +1,21 @@
 import { FirewallRule, FirewallRuleSet, Prisma, PrismaClient, RuleSetType, RuleAction, RuleDirection } from '@prisma/client'
 
-import logger from '@main/logger'// Type for FirewallRuleSet with rules included
+import logger from '@main/logger'
+import { UserInputError } from '@utils/errors'
+// Type for FirewallRuleSet with rules included
 export type FirewallRuleSetWithRules = Prisma.FirewallRuleSetGetPayload<{
   include: { rules: true }
 }>
 
 const debug = logger.child({ module: 'infinibay:service:firewall:rule' })
+
+// Bounds enforced at the data layer so they hold regardless of caller.
+// Names/descriptions are echoed back in error strings and re-serialized on every
+// O(n^2) conflict pass, and each persisted rule materializes one nft line per VM,
+// so an unbounded rule set is a resource/DoS amplifier — cap it.
+const MAX_RULE_NAME_LENGTH = 128
+const MAX_RULE_DESCRIPTION_LENGTH = 1024
+const MAX_RULES_PER_SET = 500
 
 export interface CreateRuleData {
   action: RuleAction;
@@ -118,6 +128,15 @@ export class FirewallRuleService {
    * Creates a new firewall rule within a rule set
    */
   async createRule (ruleSetId: string, ruleData: CreateRuleData): Promise<FirewallRule> {
+    this.assertRuleTextWithinBounds(ruleData.name, ruleData.description)
+
+    // Cap the number of rules per set so a scripted flood can't bloat the DB and turn
+    // every subsequent O(n^2) conflict pass / per-VM nft apply into a DoS amplifier.
+    const existingCount = await this.prisma.firewallRule.count({ where: { ruleSetId } })
+    if (existingCount >= MAX_RULES_PER_SET) {
+      throw new UserInputError(`Rule set already has the maximum of ${MAX_RULES_PER_SET} rules; delete some before adding more`)
+    }
+
     const rule = await this.prisma.firewallRule.create({
       data: {
         ruleSetId,
@@ -130,9 +149,25 @@ export class FirewallRuleService {
   }
 
   /**
+   * Rejects rule name/description that exceed sane length bounds. Persisting a
+   * multi-megabyte name bloats the DB and inflates every future conflict-detection
+   * pass and error payload, an unbounded resource-amplification vector.
+   */
+  private assertRuleTextWithinBounds (name?: string, description?: string): void {
+    if (name !== undefined && name !== null && name.length > MAX_RULE_NAME_LENGTH) {
+      throw new UserInputError(`Rule name must be ${MAX_RULE_NAME_LENGTH} characters or fewer`)
+    }
+    if (description !== undefined && description !== null && description.length > MAX_RULE_DESCRIPTION_LENGTH) {
+      throw new UserInputError(`Rule description must be ${MAX_RULE_DESCRIPTION_LENGTH} characters or fewer`)
+    }
+  }
+
+  /**
    * Updates an existing firewall rule
    */
   async updateRule (ruleId: string, ruleData: UpdateRuleData): Promise<FirewallRule> {
+    this.assertRuleTextWithinBounds(ruleData.name, ruleData.description)
+
     const rule = await this.prisma.firewallRule.update({
       where: { id: ruleId },
       data: ruleData

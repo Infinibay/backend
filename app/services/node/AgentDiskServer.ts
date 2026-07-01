@@ -84,15 +84,25 @@ export class LocalDiskStore {
     return fs.createReadStream(this.resolveWithin(p))
   }
 
-  /** Stream `src` into `p` atomically (temp file → fsync-on-close → rename), returning the sha256 of what was written. */
-  async writeFrom (p: string, src: NodeJS.ReadableStream): Promise<{ size: number, sha256: string }> {
+  /**
+   * Stream `src` into `p` atomically (temp file → fsync-on-close → rename), returning the
+   * sha256 of what was written. When `maxBytes` is given the stream is aborted the moment
+   * the cumulative body exceeds that ceiling — a caller that lies about (or omits) its size
+   * can otherwise write an unbounded body that fills the node filesystem and ENOSPC-fails
+   * co-located VMs. On abort pipeline() rejects and the temp file is rm'd in the catch below.
+   */
+  async writeFrom (p: string, src: NodeJS.ReadableStream, maxBytes?: number): Promise<{ size: number, sha256: string }> {
     const abs = this.resolveWithin(p)
     fs.mkdirSync(path.dirname(abs), { recursive: true })
     const tmp = `${abs}.part-${process.pid}-${Date.now()}`
     const hash = crypto.createHash('sha256')
     let size = 0
     const meter = new Transform({
-      transform (chunk: Buffer, _enc, cb) { size += chunk.length; hash.update(chunk); cb(null, chunk) }
+      transform (chunk: Buffer, _enc, cb) {
+        size += chunk.length
+        if (maxBytes !== undefined && size > maxBytes) { cb(new Error('push body exceeds declared size')); return }
+        hash.update(chunk); cb(null, chunk)
+      }
     })
     try {
       await pipeline(src, meter, fs.createWriteStream(tmp))
@@ -148,36 +158,61 @@ export function createAgentDiskRouter (opts: AgentDiskServerOptions): express.Ro
       res.setHeader('content-type', 'application/octet-stream')
       res.setHeader('content-length', String(store.size(p)))
       const rs = store.createReadStream(p)
-      rs.on('error', (err) => { if (!res.headersSent) res.status(500); res.destroy(err) })
-      rs.pipe(res)
+      // Use pipeline() (not raw rs.pipe): pipe() does NOT destroy the source when the
+      // response errors or the client aborts mid-transfer, leaking the open file fd on
+      // the long-lived agent. pipeline() tears down rs on any res error / premature
+      // close and routes read errors through the same catch, so a flurry of aborted
+      // migrations can't exhaust the node's descriptor limit.
+      void pipeline(rs, res).catch((err) => { if (!res.headersSent) res.status(500); res.destroy(err) })
     } catch (err) { badPath(res, err) }
   })
 
   router.post('/disk/push', auth, async (req: Request, res: Response) => {
     try {
       const p = String(req.query.path ?? '')
-      const expected = req.query.sha256 != null ? String(req.query.sha256) : undefined
       store.resolveWithin(p) // validate before consuming the body
+      // The honest master always declares BOTH the exact byte size and the sha256 of the
+      // image it pushes (see AgentStorageMigrationAdapter.pushUrl). Require and strictly
+      // validate both BEFORE reading a single body byte: an omitted/understated size or a
+      // missing integrity target is exactly how a rogue caller (holding the master cert)
+      // would slip an unbounded body past the free-space guard and ENOSPC-fail co-located VMs.
+      if (Array.isArray(req.query.sha256) || req.query.sha256 == null || String(req.query.sha256).length === 0) {
+        res.status(400).json({ ok: false, error: 'sha256 query param is required' })
+        return
+      }
+      const expected = String(req.query.sha256)
+      if (Array.isArray(req.query.size)) {
+        res.status(400).json({ ok: false, error: 'size query param must be a single value' })
+        return
+      }
+      const expectedSize = req.query.size != null ? Number(req.query.size) : NaN
+      if (!Number.isFinite(expectedSize) || expectedSize <= 0) {
+        res.status(400).json({ ok: false, error: 'size query param is required and must be a positive number' })
+        return
+      }
       // Refuse before consuming the body if the target FS cannot hold the incoming
       // disk (with a 5% margin) — otherwise a too-big migration fills the node disk
       // and ENOSPC-fails OTHER VMs' writes that share it (507 Insufficient Storage).
-      const expectedSize = req.query.size != null ? Number(req.query.size) : NaN
-      if (Number.isFinite(expectedSize) && expectedSize > 0) {
-        const free = store.freeBytes()
-        if (free < Math.ceil(expectedSize * 1.05)) {
-          res.status(507).json({ ok: false, error: `insufficient disk space on target: need ~${expectedSize} bytes, ${free} free` })
-          return
-        }
+      const maxBytes = Math.ceil(expectedSize * 1.05)
+      const free = store.freeBytes()
+      if (free < maxBytes) {
+        res.status(507).json({ ok: false, error: `insufficient disk space on target: need ~${expectedSize} bytes, ${free} free` })
+        return
       }
-      const written = await store.writeFrom(p, req)
-      if (expected !== undefined && expected !== written.sha256) {
+      // …and enforce that ceiling DURING the write, not just against the declared value:
+      // writeFrom aborts + rm's the temp file the instant the body overruns maxBytes.
+      const written = await store.writeFrom(p, req, maxBytes)
+      if (expected !== written.sha256) {
         await store.unlink(p)
         res.status(422).json({ ok: false, error: 'sha256 mismatch on received disk', expected, actual: written.sha256 })
         return
       }
       res.json({ ok: true, ...written })
     } catch (err) {
-      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) })
+      const msg = err instanceof Error ? err.message : String(err)
+      // A body that overran its declared size is a caller fault (413), not a server 500.
+      const status = /exceeds declared size/.test(msg) ? 413 : 500
+      res.status(status).json({ ok: false, error: msg })
     }
   })
 

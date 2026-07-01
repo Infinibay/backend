@@ -15,6 +15,15 @@ import { isValidMachineStatus } from '../constants/machine-status'
 
 const service = new NodeHeartbeatService(prisma as unknown as PrismaClient)
 
+// A joining node's `name` becomes the issued certificate CN, the persisted
+// Node.name, the mTLS identity later compared by the CN pin, AND an enrollment log
+// line. Constrain it to a DNS-style label (1-63 chars, no control chars / CRLF /
+// whitespace) so it can't be an oversized/degenerate CN or a log-forging string.
+// (X.509 CN is capped at 64 chars; a DNS label at 63.)
+function isValidNodeLabel (name: string): boolean {
+  return /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,62}$/.test(name)
+}
+
 /**
  * Auth mode for the cluster router:
  *   - 'token' — the pre-mTLS path: a shared bootstrap bearer token, `nodeName`
@@ -152,7 +161,42 @@ export function createClusterRouter (opts: { mode?: ClusterRouterMode } = {}): e
         res.status(400).json({ error: 'name (string) and hardware (object) are required' })
         return
       }
-      const result = await service.recordHeartbeat({ ...body, name })
+      // Vet the self-reported capacity + identity BEFORE it reaches the Node row.
+      // ram/cores are exactly what NodePlacementService/NodeCapacity use to rank
+      // nodes, so an unbounded/negative value here would poison cluster-wide VM
+      // placement (funnel every create onto this node, or silently remove it). Bound
+      // them, constrain role to the known enum (also fixes a role={} → .toLowerCase()
+      // 500), and stop forwarding unvetted body fields to the DB. Same house style as
+      // the /db STATUS_WRITE / MACHINE_ID_KEYED guards below.
+      const hw = body.hardware
+      const MAX_CORES = 4096
+      const MAX_RAM_MB = 64 * 1024 * 1024 // 64 TiB in MB — well above any real host
+      if (!Number.isInteger(hw.cores) || hw.cores <= 0 || hw.cores > MAX_CORES ||
+          !Number.isInteger(hw.ram) || hw.ram <= 0 || hw.ram > MAX_RAM_MB ||
+          typeof hw.currentRaid !== 'string') {
+        res.status(400).json({ error: 'hardware.cores/ram must be positive integers within bounds and currentRaid a string' })
+        return
+      }
+      const role = body.role === undefined ? 'compute' : body.role
+      if (role !== 'compute' && role !== 'master') {
+        res.status(400).json({ error: 'role must be compute or master' })
+        return
+      }
+      if (body.address != null && typeof body.address !== 'string') {
+        res.status(400).json({ error: 'address must be a string' })
+        return
+      }
+      if (body.agentVersion != null && typeof body.agentVersion !== 'string') {
+        res.status(400).json({ error: 'agentVersion must be a string' })
+        return
+      }
+      const result = await service.recordHeartbeat({
+        name,
+        role,
+        address: body.address ?? null,
+        agentVersion: body.agentVersion ?? null,
+        hardware: { ram: hw.ram, cores: hw.cores, currentRaid: hw.currentRaid, cpuFlags: hw.cpuFlags ?? {} }
+      })
       res.json({ ok: true, nodeId: result.nodeId, created: result.created })
     } catch (error) {
       logger.error('cluster heartbeat failed', error)
@@ -309,6 +353,10 @@ export function createClusterRouter (opts: { mode?: ClusterRouterMode } = {}): e
         res.status(400).json({ error: 'name (string) and csrPem (string) are required' })
         return
       }
+      if (!isValidNodeLabel(name)) {
+        res.status(400).json({ error: 'invalid node name: must be a 1-63 char DNS-style label' })
+        return
+      }
       const result = await enrollment().requestEnrollment({ name, csrPem })
       res.json({ status: result.status, joinNonce: result.joinNonce, caCertPem: result.caCertPem })
     } catch (error) {
@@ -328,6 +376,10 @@ export function createClusterRouter (opts: { mode?: ClusterRouterMode } = {}): e
       const { name, csrPem } = (req.body ?? {}) as { name?: unknown, csrPem?: unknown }
       if (typeof name !== 'string' || name.length === 0 || typeof csrPem !== 'string' || csrPem.length === 0) {
         res.status(400).json({ error: 'name (string) and csrPem (string) are required' })
+        return
+      }
+      if (!isValidNodeLabel(name)) {
+        res.status(400).json({ error: 'invalid node name: must be a 1-63 char DNS-style label' })
         return
       }
       const result = await enrollment().poll({ name, csrPem })

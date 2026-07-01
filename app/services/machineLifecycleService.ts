@@ -50,6 +50,23 @@ export class MachineLifecycleService {
       if (!input.customCores || !input.customRam || !input.customStorage) {
         throw new UserInputError('Custom hardware specifications are required when not using a template')
       }
+      // The falsy check above rejects 0/undefined but NOT negatives, floats, or
+      // absurd values. These are persisted on the Machine row and summed into a
+      // node's reserved capacity by calculateNodeCapacity, so a negative value
+      // would inflate availableCores (defeating the overcommit guard → OOM) and a
+      // huge value would deflate the node (co-tenant scheduling DoS). Validate as
+      // positive integers within sane upper bounds, mirroring updateMachineHardware.
+      const isPosIntWithin = (v: unknown, max: number): boolean =>
+        Number.isInteger(v) && (v as number) > 0 && (v as number) <= max
+      if (!isPosIntWithin(input.customCores, 256)) {
+        throw new UserInputError('customCores must be a positive integer within allowed limits (1-256)')
+      }
+      if (!isPosIntWithin(input.customRam, 1048576)) {
+        throw new UserInputError('customRam must be a positive integer within allowed limits (1-1048576 GB)')
+      }
+      if (!isPosIntWithin(input.customStorage, 1048576)) {
+        throw new UserInputError('customStorage must be a positive integer within allowed limits (1-1048576 GB)')
+      }
       cpuCores = input.customCores
       ramGB = input.customRam
       diskSizeGB = input.customStorage
@@ -388,20 +405,30 @@ export class MachineLifecycleService {
 
     const machine = await this.prisma.machine.findUnique({
       where: { id },
-      include: { configuration: true }
+      include: { configuration: true, node: true }
     })
 
     if (!machine) {
       throw new ApolloError(`Machine with ID ${id} not found`)
     }
 
+    // Upper bounds so a value can never poison a node's reserved-capacity sum
+    // (calculateNodeCapacity sums cpuCores/ramGB per node with no cap). Bound
+    // against the owning node's physical capacity when placed; fall back to a
+    // hard sanity cap for an unplaced VM (mirrors the createMachine custom path).
+    // node.ram is MB, matching NodeCapacity.totalRamGB = floor(node.ram / 1024).
+    const maxCores = machine.node ? machine.node.cores : 256
+    const maxRamGB = machine.node ? Math.floor(machine.node.ram / 1024) : 1048576
+
     const updateData: Prisma.MachineUpdateInput = {}
     if (cpuCores !== undefined) {
       if (cpuCores <= 0) throw new ApolloError('CPU cores must be positive.')
+      if (cpuCores > maxCores) throw new ApolloError(`CPU cores cannot exceed node capacity (${maxCores}).`)
       updateData.cpuCores = cpuCores
     }
     if (ramGB !== undefined) {
       if (ramGB <= 0) throw new ApolloError('RAM must be positive.')
+      if (ramGB > maxRamGB) throw new ApolloError(`RAM cannot exceed node capacity (${maxRamGB} GB).`)
       updateData.ramGB = ramGB
     }
 

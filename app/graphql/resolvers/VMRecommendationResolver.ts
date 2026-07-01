@@ -10,6 +10,7 @@ import {
   SnoozeRecommendationResult
 } from '../types/RecommendationTypes'
 import { VMRecommendationService } from '../../services/VMRecommendationService'
+import { UserInputError } from '../../utils/errors'
 
 @Resolver()
 export class VMRecommendationResolver {
@@ -113,6 +114,11 @@ export class VMRecommendationResolver {
     // Restrict to machines the caller can access (own/department/any)
     whereClause.machine = await context.scopedWhere!('recommendation:view', {})
 
+    // Clamp the client-supplied limit to prevent over-fetch / memory DoS.
+    // Mirrors VMRecommendationService.getRecommendations: non-positive/absent -> default, cap at max.
+    const maxLimit = parseInt(process.env.RECOMMENDATION_MAX_LIMIT || '100')
+    const take = limit && limit > 0 ? Math.min(limit, maxLimit) : 50
+
     const recommendations = await context.prisma.vMRecommendation.findMany({
       where: whereClause,
       include: {
@@ -121,7 +127,7 @@ export class VMRecommendationResolver {
         }
       },
       orderBy: { createdAt: 'desc' },
-      take: limit || 50
+      take
     })
 
     // Determine severity from data or type
@@ -290,18 +296,29 @@ export class VMRecommendationResolver {
     const match = duration.match(/^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?)?$/)
 
     if (!match) {
-      // Default to 1 hour if invalid
-      now.setHours(now.getHours() + 1)
-      return now
+      // Reject malformed durations at the boundary instead of silently defaulting,
+      // so bad input surfaces as a clean validation error rather than a downstream Prisma RangeError.
+      throw new UserInputError('Invalid snooze duration')
     }
 
     const days = parseInt(match[1] || '0', 10)
     const hours = parseInt(match[2] || '0', 10)
     const minutes = parseInt(match[3] || '0', 10)
 
+    // Bound each component so an oversized value can't overflow Date into an Invalid Date (NaN),
+    // which would otherwise reach prisma.update as a RangeError: Invalid time value.
+    if (days > 3650 || hours > 100000 || minutes > 6000000) {
+      throw new UserInputError('Invalid snooze duration')
+    }
+
     now.setDate(now.getDate() + days)
     now.setHours(now.getHours() + hours)
     now.setMinutes(now.getMinutes() + minutes)
+
+    // Guard against any residual overflow producing an Invalid Date before it hits persistence.
+    if (isNaN(now.getTime())) {
+      throw new UserInputError('Invalid snooze duration')
+    }
 
     return now
   }

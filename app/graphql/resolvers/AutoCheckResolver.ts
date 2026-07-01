@@ -2,6 +2,7 @@ import { Resolver, Query, Mutation, Arg, ID, Ctx } from 'type-graphql'
 import { getVirtioSocketWatcherService, VirtioSocketWatcherService } from '@services/VirtioSocketWatcherService'
 import { Can } from '@main/permissions'
 import { InfinibayContext } from '@utils/context'
+import { UserInputError } from '@utils/errors'
 import { parseInfiniServiceTimestamp, InfiniServiceTimestamp } from '@utils/dateHelpers'
 import {
   HealthCheckStatus,
@@ -28,6 +29,10 @@ import {
 
 // Constants for command timeouts
 const LONG_RUNNING_COMMAND_TIMEOUT = 300000 // 5 minutes for WMI-heavy operations
+
+// Whitelist of disk-cleanup targets accepted from clients and forwarded to the guest agent.
+// Defined once and reused as the default, the validation set, and the error-path fallback.
+const ALLOWED_CLEANUP_TARGETS = ['temp_files', 'browser_cache', 'system_cache', 'recycle_bin']
 
 // Interface for InfiniService health check responses
 interface InfiniServiceHealthCheckData {
@@ -660,12 +665,20 @@ export class AutoCheckResolver {
       if (result.stdout) {
         summary = result.stdout
 
+        // Guest stdout is untrusted: bound the parsed counts to the GraphQL Int (signed
+        // 32-bit) range so an oversized value can't crash response serialization. Out-of-range
+        // or non-numeric input coerces to undefined, which the nullable field already accepts.
+        const toInt32 = (s: string): number | undefined => {
+          const n = parseInt(s, 10)
+          return Number.isInteger(n) && n >= 0 && n <= 2147483647 ? n : undefined
+        }
+
         // Extract counts from summary like: "Found 113 applications with available updates | Sources: Windows Update: 2, Microsoft Store: 111"
         const windowsMatch = result.stdout.match(/Windows Update:\s*(\d+)/)
         const storeMatch = result.stdout.match(/Microsoft Store:\s*(\d+)/)
 
-        if (windowsMatch) windowsUpdatesCount = parseInt(windowsMatch[1], 10)
-        if (storeMatch) microsoftStoreUpdatesCount = parseInt(storeMatch[1], 10)
+        if (windowsMatch) windowsUpdatesCount = toInt32(windowsMatch[1])
+        if (storeMatch) microsoftStoreUpdatesCount = toInt32(storeMatch[1])
       }
 
       return {
@@ -744,8 +757,17 @@ export class AutoCheckResolver {
     @Ctx() _ctx: InfinibayContext,
     @Arg('targets', () => [String], { nullable: true }) targets?: string[]
   ): Promise<DiskCleanupResult> {
+    // Validate caller-supplied values before forwarding them to the privileged guest agent:
+    // `drive` must be a bare drive-letter root (e.g. "C:" / "C:\"), and every requested target
+    // must belong to the known cleanup set — rejecting arbitrary/oversized guest-bound payloads.
+    if (!/^[A-Za-z]:\\?$/.test(drive)) {
+      throw new UserInputError('Invalid drive')
+    }
+    if (targets && (targets.length > ALLOWED_CLEANUP_TARGETS.length || !targets.every(t => ALLOWED_CLEANUP_TARGETS.includes(t)))) {
+      throw new UserInputError('Invalid cleanup targets')
+    }
     try {
-      const targetsToProcess = targets || ['temp_files', 'browser_cache', 'system_cache', 'recycle_bin']
+      const targetsToProcess = targets || ALLOWED_CLEANUP_TARGETS
       const result = await this.getVirtioSocketService().sendSafeCommand(
         vmId,
         {
@@ -776,7 +798,7 @@ export class AutoCheckResolver {
         vmId,
         drive,
         spaceClearedMB: 0,
-        targetsProcessed: targets || ['temp_files', 'browser_cache', 'system_cache', 'recycle_bin'],
+        targetsProcessed: targets || ALLOWED_CLEANUP_TARGETS,
         filesDeleted: 0,
         error: errorMessage,
         timestamp: new Date()

@@ -15,7 +15,11 @@ export interface NodeHeartbeatHardware {
 
 export interface NodeHeartbeatPayload {
   name: string
-  role?: string // 'compute' (default) | 'master'
+  // IGNORED on the heartbeat path — always persisted as 'compute' (see
+  // recordHeartbeat). A heartbeat only ever originates from a compute agent; the
+  // master registers itself locally via LocalNodeRegistrationService and never
+  // heartbeats, so a wire-supplied 'master' can only be a self-escalation attempt.
+  role?: string
   address?: string | null
   agentVersion?: string | null
   hardware: NodeHeartbeatHardware
@@ -35,9 +39,28 @@ export class NodeHeartbeatService {
     if (!payload.name || !payload.hardware) {
       throw new Error('heartbeat requires name and hardware')
     }
-    const role = (payload.role || 'compute').toLowerCase()
-    const now = new Date()
     const hw = payload.hardware
+    // SECURITY / defense-in-depth: ram/cores are self-reported by the agent and are
+    // exactly the values NodeCapacity/NodePlacementService use to rank nodes for VM
+    // placement. An unbounded / negative / NaN / float value would poison cluster-wide
+    // scheduling (funnel every create onto one host, or corrupt fleet totals). The
+    // route (cluster.ts) already vets these; guard here too so the service can never
+    // write a garbage capacity for ANY caller. Bounds mirror the route: positive
+    // integers, cores <= 4096, ram <= 64 TiB expressed in MB.
+    const MAX_CORES = 4096
+    const MAX_RAM_MB = 64 * 1024 * 1024
+    if (!Number.isInteger(hw.cores) || hw.cores <= 0 || hw.cores > MAX_CORES ||
+        !Number.isInteger(hw.ram) || hw.ram <= 0 || hw.ram > MAX_RAM_MB) {
+      throw new Error('heartbeat hardware.cores/ram must be positive integers within bounds')
+    }
+    // SECURITY: never trust the wire-supplied role. `role` is a trust-bearing field
+    // (NodeEnrollmentService refuses re-enrolling a 'master' row; orphan-VM adoption
+    // gates on role==='master'), and a heartbeat always comes from a compute agent —
+    // the master never heartbeats. Persisting the reported role would let a compromised
+    // compute node flip its own row to 'master' and self-escalate, so always persist
+    // 'compute'.
+    const role = 'compute'
+    const now = new Date()
 
     const existing = await this.prisma.node.findFirst({
       where: { name: payload.name },

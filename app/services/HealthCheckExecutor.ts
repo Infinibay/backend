@@ -13,6 +13,15 @@ export const NON_CONNECTION_BACKOFF_MS = 10_000
 export const MAX_BACKOFF_MS = 300_000
 export const BACKOFF_MULTIPLIER = 1.5
 
+// ─── Persisted-result size caps ─────────────────────────────────────────────
+// The CommandResponse comes from infiniservice INSIDE the tenant guest and is
+// fully attacker-controllable, yet is written verbatim into Postgres. Cap the
+// blobs before persistence so a single VM cannot exhaust shared DB storage.
+/** Max bytes persisted for a single stdout/stderr stream in the queue row. */
+export const MAX_RESULT_STREAM_BYTES = 256 * 1024   // 256 KB
+/** Max serialized bytes persisted for result.data in the queue row. */
+export const MAX_RESULT_DATA_BYTES = 512 * 1024     // 512 KB
+
 /** Timeout per check type (ms), indexed by HealthCheckType */
 export const HEALTH_CHECK_TIMEOUTS: Record<HealthCheckType, number> = {
   OVERALL_STATUS: 300_000,          // 5 min
@@ -72,6 +81,11 @@ export interface SnapshotStore {
     machineId: string,
     checkType: HealthCheckType,
     result: CommandResponse,
+    executionTimeMs: number,
+  ): Promise<void>
+  storeFailure(
+    machineId: string,
+    checkType: HealthCheckType,
     executionTimeMs: number,
   ): Promise<void>
 }
@@ -145,6 +159,25 @@ export class HealthCheckExecutor {
     task.attempts++
 
     if (task.attempts >= task.maxAttempts) {
+      // Persist a TERMINAL status on exhaustion. Without this the row stays stuck
+      // in RUNNING forever: findExistingTask treats RUNNING as an in-flight
+      // duplicate, so the idempotency guard would silently refuse to ever
+      // re-enqueue this check type again for the VM. Marking FAILED (excluded by
+      // findExistingTask) unblocks re-enqueue, and storeFailure increments the
+      // snapshot's checksFailed so failures are actually reflected in monitoring.
+      const executionTimeMs = 0
+      await this.repository.markTaskFailed(task.id, error.message, executionTimeMs)
+      if (this.snapshotStore) {
+        await this.snapshotStore
+          .storeFailure(task.machineId, task.checkType, executionTimeMs)
+          .catch((err: unknown) => {
+            logger.error(
+              `❌ Failed to store health failure snapshot for VM ${task.machineId} check ${task.checkType}:`,
+              err,
+            )
+          })
+      }
+
       await this.eventManager.dispatchEvent('vms', 'update', {
         id: task.machineId,
         healthCheckStatusChanged: {
@@ -282,7 +315,11 @@ export class HealthCheckExecutor {
     result: CommandResponse,
     executionTime: number,
   ): Promise<void> {
-    await this.repository.markTaskCompleted(task.id, result, executionTime)
+    // Bound the (attacker-controllable) guest response before it is persisted
+    // verbatim into the queue row. The original `result` is left untouched for
+    // downstream snapshot consumers.
+    const persistable = this.boundResultForPersistence(result, task.machineId)
+    await this.repository.markTaskCompleted(task.id, persistable, executionTime)
 
     await this.eventManager.dispatchEvent('vms', 'update', {
       id: task.machineId,
@@ -298,6 +335,50 @@ export class HealthCheckExecutor {
       `\ud83e\ude7a Completed health check ${task.checkType} for VM ${task.machineId} ` +
       `(${executionTime}ms) \u2014 Success: ${result.success}`,
     )
+  }
+
+  /**
+   * Return a size-bounded shallow copy of a guest-supplied CommandResponse safe
+   * to persist. `stdout`/`stderr` are byte-truncated and an oversize `data` blob
+   * is replaced with a compact marker, so a malicious guest cannot write
+   * unbounded payloads into `vMHealthCheckQueue.result`. The original object is
+   * not mutated; happy-path (in-bounds) responses are copied through unchanged.
+   */
+  private boundResultForPersistence(result: CommandResponse, machineId: string): CommandResponse {
+    const bounded: CommandResponse = { ...result }
+    bounded.stdout = this.truncateUtf8(result.stdout, MAX_RESULT_STREAM_BYTES)
+    bounded.stderr = this.truncateUtf8(result.stderr, MAX_RESULT_STREAM_BYTES)
+
+    if (result.data !== undefined && result.data !== null) {
+      let serializedBytes = 0
+      try {
+        serializedBytes = Buffer.byteLength(JSON.stringify(result.data) ?? '', 'utf8')
+      } catch {
+        // Non-serializable data (e.g. circular) — treat as oversize/invalid.
+        serializedBytes = MAX_RESULT_DATA_BYTES + 1
+      }
+      if (serializedBytes > MAX_RESULT_DATA_BYTES) {
+        logger.warn(
+          `⚠️ Oversize/invalid health-check result.data (${serializedBytes} bytes) from VM ${machineId} ` +
+          `— persisting a truncated marker instead`,
+        )
+        bounded.data = { error: 'oversize', bytes: serializedBytes }
+      }
+    }
+
+    return bounded
+  }
+
+  /** Byte-truncate a UTF-8 string to at most `maxBytes`, appending a marker when cut. */
+  private truncateUtf8(value: string | undefined, maxBytes: number): string | undefined {
+    if (value === undefined) return undefined
+    if (Buffer.byteLength(value, 'utf8') <= maxBytes) return value
+    // Char-slice first (each char is ≥1 byte, so this caps allocation), then
+    // byte-cap the smaller slice to guarantee a strict byte bound.
+    const truncated = Buffer.from(value.slice(0, maxBytes), 'utf8')
+      .subarray(0, maxBytes)
+      .toString('utf8')
+    return `${truncated}…[truncated]`
   }
 
   /**

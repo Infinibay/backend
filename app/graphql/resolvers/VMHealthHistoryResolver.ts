@@ -3,6 +3,7 @@ import { GraphQLJSONObject } from 'graphql-type-json'
 import { TaskStatus, TaskPriority, HealthCheckType } from '@prisma/client'
 import { InfinibayContext } from '@utils/context'
 import { Can } from '@main/permissions'
+import { UserInputError } from '@utils/errors'
 
 @ObjectType()
 export class VMHealthSnapshotType {
@@ -161,11 +162,15 @@ export class VMHealthHistoryResolver {
     @Arg('offset', () => Int, { nullable: true, defaultValue: 0 }) offset: number,
     @Ctx() context: InfinibayContext
   ): Promise<VMHealthSnapshotType[]> {
+    // Clamp pagination to prevent unbounded over-fetch of large JSON snapshot blobs
+    // and to reject negative offsets that Prisma would surface as a raw 500.
+    const take = Math.min(Math.max(limit ?? 20, 1), 100)
+    const skip = Math.max(offset ?? 0, 0)
     const snapshots = await context.prisma.vMHealthSnapshot.findMany({
       where: { machineId },
       orderBy: { snapshotDate: 'desc' },
-      take: limit,
-      skip: offset
+      take,
+      skip
     })
 
     return snapshots as VMHealthSnapshotType[]
@@ -224,14 +229,23 @@ export class VMHealthHistoryResolver {
     }
 
     if (status) {
+      // Validate against the enum so an unknown value yields a clean input error
+      // rather than an opaque Prisma validation 500.
+      if (!Object.values(TaskStatus).includes(status as TaskStatus)) {
+        throw new UserInputError('Invalid status')
+      }
       where.status = status as TaskStatus
     }
 
+    // Clamp pagination to prevent unbounded over-fetch of large payload/result JSON
+    // blobs and to reject negative offsets that Prisma would surface as a raw 500.
+    const take = Math.min(Math.max(limit ?? 20, 1), 100)
+    const skip = Math.max(offset ?? 0, 0)
     const queueItems = await context.prisma.vMHealthCheckQueue.findMany({
       where,
       orderBy: { createdAt: 'desc' },
-      take: limit,
-      skip: offset
+      take,
+      skip
     })
 
     return queueItems as VMHealthCheckQueueType[]

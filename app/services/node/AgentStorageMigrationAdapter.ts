@@ -87,19 +87,26 @@ export class AgentStorageMigrationAdapter implements VMStorageMigrationAdapter {
     const sourceLocal = sourceNodeId == null || (localNodeId != null && sourceNodeId === localNodeId)
     const targetLocal = localNodeId != null && targetNodeId === localNodeId
 
-    // CRITICAL data-safety: when BOTH legs resolve to the master's own disk store,
-    // source and target are the SAME file at the SAME path. Copying it onto itself
-    // (temp → rename back) and then unlinking the "source" would destroy the VM's
-    // only qcow2 — the sha256 self-check cannot protect against this. This happens
-    // for a VM with nodeId=null (never scoped) migrated to the master's own node id,
-    // where the raw id no-op check (null === masterId) is false. Treat it as a no-op.
-    if (sourceLocal && targetLocal) {
-      logger.info(`Migration ${machineId}: source and target are the same local disk store — disk already in place, no copy needed`)
-      return
-    }
-
     const sourceNode = sourceLocal ? null : await this.requireNode(sourceNodeId as string, 'source')
     const targetNode = targetLocal ? null : await this.requireNode(targetNodeId, 'target')
+
+    // CRITICAL data-safety: no-op when BOTH legs resolve to the SAME physical disk
+    // store. diskDir is uniform cluster-wide (see file header), so a leg's physical
+    // identity is `local` for the master's own node, else `${address}:${agentPort}`.
+    // When the keys match, source and target are the SAME file at the SAME path:
+    // copying it onto itself (temp → rename back) and then unlinking the "source"
+    // would destroy the VM's only qcow2 — the sha256 self-check cannot detect this.
+    // This subsumes the master-local&&local case (a VM with nodeId=null migrated to
+    // the master's own node id, where the raw id no-op check null===masterId is false)
+    // AND two distinct Node rows (re-onboarded / cloned host) that share an
+    // address+agentPort, which would otherwise pull-then-push over the same inode and
+    // then delete it during the I2 source reclaim.
+    const srcKey = sourceLocal ? 'local' : `${sourceNode!.address}:${sourceNode!.agentPort}`
+    const tgtKey = targetLocal ? 'local' : `${targetNode!.address}:${targetNode!.agentPort}`
+    if (srcKey === tgtKey) {
+      logger.info(`Migration ${machineId}: source and target resolve to the same physical disk store (${srcKey}) — disk already in place, no copy needed`)
+      return
+    }
 
     logger.info(`Migration ${machineId}: copying ${diskPaths.length} disk(s) ${sourceLocal ? 'master(local)' : sourceNode!.name} → ${targetLocal ? 'master(local)' : targetNode!.name}`)
 
@@ -146,26 +153,35 @@ export class AgentStorageMigrationAdapter implements VMStorageMigrationAdapter {
       srcStream = await this.streamGet(this.pullUrl(ctx.sourceNode!, p), this.identity(), ctx.sourceNode!.name)
     }
 
-    // Target write + its own sha256 of what landed.
+    // Target write + its own sha256 of what landed. Any failure here MUST release the
+    // source byte stream: once streamGet resolved, the pull connection's deadline timer
+    // was cleared, so a leaked srcStream keeps the source agent's fd/socket half-open
+    // until an OS-level idle timeout — a per-failed-migration leak toward fd exhaustion
+    // (e.g. a 507/422 rejection from the target). destroy() is a harmless no-op on an
+    // already-ended stream (the happy path fully drains it), so wrap the whole block.
     let tgtSha: string
-    if (ctx.targetLocal) {
-      // Refuse if the master's own disk store can't hold the incoming image (5%
-      // margin) — don't fill the filesystem out from under other local VMs.
-      if (srcSize > 0 && this.store.freeBytes() < Math.ceil(srcSize * 1.05)) {
-        srcStream.destroy()
-        throw new Error(`insufficient disk space on master for ${p}: need ~${srcSize} bytes, ${this.store.freeBytes()} free`)
+    try {
+      if (ctx.targetLocal) {
+        // Refuse if the master's own disk store can't hold the incoming image (5%
+        // margin) — don't fill the filesystem out from under other local VMs.
+        if (srcSize > 0 && this.store.freeBytes() < Math.ceil(srcSize * 1.05)) {
+          throw new Error(`insufficient disk space on master for ${p}: need ~${srcSize} bytes, ${this.store.freeBytes()} free`)
+        }
+        const written = await this.store.writeFrom(p, srcStream)
+        tgtSha = written.sha256
+        if (tgtSha !== srcSha) { await this.store.unlink(p); throw new Error(`sha256 mismatch writing ${p} on master (src ${srcSha}, dst ${tgtSha})`) }
+      } else {
+        const r = await this.streamPost(this.pushUrl(ctx.targetNode!, p, srcSha, srcSize), srcStream, this.identity(), ctx.targetNode!.name)
+        const body = this.parseJson(r.text)
+        if (r.status !== 200 || body?.ok !== true) {
+          throw new Error(`disk push to node ${ctx.targetNode!.name} failed (${r.status}): ${r.text.slice(0, 300)}`)
+        }
+        tgtSha = String(body.sha256 ?? '')
+        if (tgtSha !== srcSha) throw new Error(`sha256 mismatch pushing ${p} to ${ctx.targetNode!.name} (src ${srcSha}, dst ${tgtSha})`)
       }
-      const written = await this.store.writeFrom(p, srcStream)
-      tgtSha = written.sha256
-      if (tgtSha !== srcSha) { await this.store.unlink(p); throw new Error(`sha256 mismatch writing ${p} on master (src ${srcSha}, dst ${tgtSha})`) }
-    } else {
-      const r = await this.streamPost(this.pushUrl(ctx.targetNode!, p, srcSha, srcSize), srcStream, this.identity(), ctx.targetNode!.name)
-      const body = this.parseJson(r.text)
-      if (r.status !== 200 || body?.ok !== true) {
-        throw new Error(`disk push to node ${ctx.targetNode!.name} failed (${r.status}): ${r.text.slice(0, 300)}`)
-      }
-      tgtSha = String(body.sha256 ?? '')
-      if (tgtSha !== srcSha) throw new Error(`sha256 mismatch pushing ${p} to ${ctx.targetNode!.name} (src ${srcSha}, dst ${tgtSha})`)
+    } catch (err) {
+      srcStream.destroy() // release the source pull connection on any target-write failure
+      throw err
     }
     return srcSha
   }

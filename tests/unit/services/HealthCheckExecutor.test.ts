@@ -87,6 +87,10 @@ describe('HealthCheckExecutor', () => {
 
     mockSnapshotStore = {
       storeSuccess: jest.fn().mockResolvedValue(undefined),
+      // storeFailure is now part of the SnapshotStore contract: the executor
+      // marks a check FAILED (instead of leaving it stuck RUNNING) when retries
+      // are exhausted or the task crashes.
+      storeFailure: jest.fn().mockResolvedValue(undefined),
     }
 
     executor = new HealthCheckExecutor(mockRepository, mockEventManager, mockSnapshotStore)

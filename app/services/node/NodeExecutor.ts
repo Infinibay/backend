@@ -124,6 +124,15 @@ export class RemoteNodeExecutor implements NodeExecutor {
 }
 
 /**
+ * Response guards for the pre-mTLS token branch, mirroring the values baked into
+ * clusterMtls.ts's httpsJsonPost (16 MiB cap + 15s absolute deadline). The agent
+ * response comes from a lower-trust compute node, so both auth modes must bound it
+ * identically — otherwise a hostile/stalled peer could OOM or hang the master.
+ */
+const VM_RPC_MAX_RESPONSE_BYTES = 16 * 1024 * 1024
+const VM_RPC_TIMEOUT_MS = 15000
+
+/**
  * HTTP transport: POSTs {verb, args} to a node agent's verb server and returns
  * the `result`.
  *
@@ -160,14 +169,49 @@ export class HttpVmRpcTransport implements VmRpcTransport {
       status = r.status
       text = r.text
     } else {
+      // Pre-mTLS token fallback over plain HTTP. The response comes from a
+      // lower-trust compute node agent, so bound it the SAME way the mTLS path
+      // (httpsJsonPost) does: an absolute deadline plus a response-body size cap,
+      // so a hostile or stalled peer cannot hang or OOM the master control plane.
       const doFetch = this.opts.fetchImpl ?? fetch
-      const res = await doFetch(url, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', authorization: `Bearer ${this.opts.token ?? ''}` },
-        body: JSON.stringify(payload)
-      })
-      status = res.status
-      text = await res.text().catch(() => '')
+      const ctrl = new AbortController()
+      const deadline = setTimeout(() => ctrl.abort(), VM_RPC_TIMEOUT_MS)
+      if (typeof deadline.unref === 'function') deadline.unref() // don't keep the process alive for an in-flight RPC
+      try {
+        const res = await doFetch(url, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', authorization: `Bearer ${this.opts.token ?? ''}` },
+          body: JSON.stringify(payload),
+          signal: ctrl.signal
+        })
+        status = res.status
+        const reader = res.body?.getReader()
+        if (reader) {
+          // Bounded drain instead of res.text(): abort once the body exceeds the
+          // cap rather than buffering an unbounded response into master memory.
+          const chunks: Uint8Array[] = []
+          let total = 0
+          for (;;) {
+            const { done, value } = await reader.read()
+            if (done) break
+            if (value) {
+              total += value.length
+              if (total > VM_RPC_MAX_RESPONSE_BYTES) {
+                await reader.cancel().catch(() => {})
+                ctrl.abort()
+                throw new Error(`VM RPC ${verb} response exceeded ${VM_RPC_MAX_RESPONSE_BYTES} bytes`)
+              }
+              chunks.push(value)
+            }
+          }
+          text = Buffer.concat(chunks.map(c => Buffer.from(c))).toString('utf8')
+        } else {
+          // No readable body stream (e.g. an injected fetch mock or an empty body).
+          text = await res.text().catch(() => '')
+        }
+      } finally {
+        clearTimeout(deadline)
+      }
     }
 
     if (status < 200 || status >= 300) {

@@ -226,6 +226,34 @@ export class ScriptParser {
         }
       });
     }
+
+    // ReDoS hardening (author-time gate): validation.pattern is author-controlled and
+    // is later compiled and run with regex.test() against executor-supplied values on
+    // the single-threaded event loop. Node's backtracking engine can hang for
+    // exponential time on a catastrophic pattern (e.g. (a+)+), freezing the whole
+    // backend for all tenants. Reject over-long patterns and the classic nested-quantifier
+    // construct at save time so such a pattern can never be stored, and reject patterns
+    // that fail to compile.
+    if (input.validation?.pattern !== undefined) {
+      const pattern = input.validation.pattern;
+      if (typeof pattern !== 'string') {
+        throw new Error(`Input '${input.name}' validation.pattern must be a string`);
+      }
+      if (pattern.length > 200) {
+        throw new Error(`Input '${input.name}' validation.pattern is too long (max 200 characters)`);
+      }
+      // Catastrophic backtracking comes from a quantified GROUP that itself contains an
+      // unbounded quantifier, e.g. (a+)+ or ([a-z]+)+ . A quantified character class such
+      // as [a-z]+ is linear-time and MUST NOT be flagged, so only the group form is matched.
+      if (/\([^)]*[+*][^)]*\)[+*]/.test(pattern)) {
+        throw new Error(`Input '${input.name}' validation.pattern contains a nested quantifier that risks catastrophic backtracking`);
+      }
+      try {
+        new RegExp(pattern);
+      } catch {
+        throw new Error(`Input '${input.name}' has an invalid validation pattern`);
+      }
+    }
   }
 
   /**
@@ -285,6 +313,18 @@ export class ScriptParser {
         if (typeof value !== 'string') {
           throw new Error(`Input '${input.name}' must be a string`);
         }
+        // Reject control characters that would break out of a single command line
+        // once the value is interpolated into a shell/PowerShell body. 'text' and
+        // 'password' are single-line by nature, so a CR/LF/NUL is never legitimate
+        // and would inject a whole new command regardless of any escaping. 'textarea'
+        // is intentionally multi-line, so only NUL is rejected there.
+        if (input.type === 'textarea') {
+          if (value.includes('\0')) {
+            throw new Error(`Input '${input.name}' must not contain NUL characters`);
+          }
+        } else if (/[\r\n\0]/.test(value)) {
+          throw new Error(`Input '${input.name}' must not contain newline or NUL characters`);
+        }
         if (input.validation?.minLength && value.length < input.validation.minLength) {
           throw new Error(`Input '${input.name}' must be at least ${input.validation.minLength} characters`);
         }
@@ -292,7 +332,18 @@ export class ScriptParser {
           throw new Error(`Input '${input.name}' must be at most ${input.validation.maxLength} characters`);
         }
         if (input.validation?.pattern) {
-          const regex = new RegExp(input.validation.pattern);
+          // ReDoS hardening: cap the tested value length and fail closed on an
+          // un-compilable pattern (rather than an unhandled 500). Catastrophic
+          // patterns themselves are rejected at author time in validateInputDefinition.
+          if (value.length > 10000) {
+            throw new Error(`Input '${input.name}' is too long to validate (max 10000 characters)`);
+          }
+          let regex: RegExp;
+          try {
+            regex = new RegExp(input.validation.pattern);
+          } catch {
+            throw new Error(`Input '${input.name}' has an invalid validation pattern`);
+          }
           if (!regex.test(value)) {
             const errorMessage = input.validation.patternDescription
               ? `Input '${input.name}': ${input.validation.patternDescription}`
@@ -303,6 +354,18 @@ export class ScriptParser {
         break;
 
       case 'number':
+        // parseFloat is lenient and stops at the first non-numeric character, so
+        // "80; rm -rf /" would coerce to 80 and pass the range check — while the
+        // ORIGINAL untouched string is what later gets interpolated into the script
+        // body. Number() (unlike parseFloat) requires the WHOLE string to be a valid
+        // numeric literal, so it rejects any embedded shell metacharacters; also
+        // reject embedded control chars, which trim()/Number() would otherwise ignore.
+        if (typeof value === 'string') {
+          const trimmed = value.trim();
+          if (trimmed === '' || !Number.isFinite(Number(trimmed)) || /[\r\n\0]/.test(value)) {
+            throw new Error(`Input '${input.name}' must be a number`);
+          }
+        }
         const numValue = typeof value === 'string' ? parseFloat(value) : value;
         if (typeof numValue !== 'number' || isNaN(numValue)) {
           throw new Error(`Input '${input.name}' must be a number`);
@@ -390,6 +453,32 @@ export class ScriptParser {
         // Basic path validation - just check it's not empty and doesn't have invalid characters
         if (value.length === 0) {
           throw new Error(`Input '${input.name}' must be a valid path`);
+        }
+        // A path is single-line; CR/LF/NUL are never legitimate and would break out
+        // of the command line when the value is interpolated into a shell body.
+        if (/[\r\n\0]/.test(value)) {
+          throw new Error(`Input '${input.name}' must not contain newline or NUL characters`);
+        }
+        // Enforce the author-declared allowlist pattern. 'path' is a free-text input
+        // interpolated into the body, so TemplateEngine.validateTemplateVariables
+        // requires it to declare a validation.pattern; previously that pattern was
+        // parsed but never applied here. Same ReDoS guards as the text case.
+        if (input.validation?.pattern) {
+          if (value.length > 10000) {
+            throw new Error(`Input '${input.name}' is too long to validate (max 10000 characters)`);
+          }
+          let regex: RegExp;
+          try {
+            regex = new RegExp(input.validation.pattern);
+          } catch {
+            throw new Error(`Input '${input.name}' has an invalid validation pattern`);
+          }
+          if (!regex.test(value)) {
+            const errorMessage = input.validation.patternDescription
+              ? `Input '${input.name}': ${input.validation.patternDescription}`
+              : `Input '${input.name}' does not match the required pattern`;
+            throw new Error(errorMessage);
+          }
         }
         break;
     }

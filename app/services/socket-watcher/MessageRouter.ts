@@ -24,6 +24,21 @@ import type { MetricsHandler } from './MetricsHandler'
 import type { KeepAliveManager } from './KeepAliveManager'
 
 // ────────────────────────────────────────────────────────────────────────────────
+// Receive-buffer safety limits
+// ────────────────────────────────────────────────────────────────────────────────
+//
+// SECURITY (dos-resource): the agent side of the virtio-serial socket is fully
+// guest-controlled (a tenant is root inside their own VM and can write arbitrary
+// bytes to the port), and inbound frames are NOT authenticated. Without a hard
+// cap, a guest that streams bytes with no newline grows connection.buffer without
+// bound until the shared backend is OOM-killed, or the `+=` append throws a
+// RangeError ('Invalid string length') and crashes the process for every tenant.
+// We cap the accumulated buffer and drop oversized single messages instead.
+// Configurable via env, with safe fallbacks so boot never fails.
+const MAX_BUFFER_BYTES = Number(process.env.VIRTIO_MAX_BUFFER_BYTES) || 8 * 1024 * 1024   // 8 MB total receive buffer
+const MAX_MESSAGE_BYTES = Number(process.env.VIRTIO_MAX_MESSAGE_BYTES) || 4 * 1024 * 1024 // 4 MB per newline-delimited message
+
+// ────────────────────────────────────────────────────────────────────────────────
 // Types for injected dependencies
 // ────────────────────────────────────────────────────────────────────────────────
 
@@ -99,7 +114,21 @@ export class MessageRouter {
     const receiveTime = new Date()
     const dataSize = data.length
 
-    connection.buffer += data.toString()
+    const chunk = data.toString()
+
+    // SECURITY (dos-resource): enforce a hard cap on the accumulated receive
+    // buffer BEFORE appending. A guest-controlled stream with no newline would
+    // otherwise grow connection.buffer without bound (OOM) or overflow V8's max
+    // string length (synchronous RangeError). On breach we drop the buffer and
+    // throw so the socket 'data' handler tears the connection down (fail-closed).
+    if (connection.buffer.length + chunk.length > MAX_BUFFER_BYTES) {
+      connection.messageStats.errors++
+      this.debug.error(`Receive buffer overflow for VM ${connection.vmId} (${connection.buffer.length + chunk.length} > ${MAX_BUFFER_BYTES} bytes) — closing connection`)
+      connection.buffer = ''
+      throw new Error(`Receive buffer overflow for VM ${connection.vmId}`)
+    }
+
+    connection.buffer += chunk
     this.debug.debug(`📥 Received raw data (${dataSize} bytes) from VM ${connection.vmId}`)
     connection.lastMessageTime = receiveTime
 
@@ -120,6 +149,15 @@ export class MessageRouter {
     while ((newlineIndex = connection.buffer.indexOf('\n')) !== -1) {
       const messageStr = connection.buffer.slice(0, newlineIndex)
       connection.buffer = connection.buffer.slice(newlineIndex + 1)
+
+      // SECURITY (dos-resource): drop a single oversized message rather than
+      // feeding an unbounded attacker-controlled blob to the JSON parser and the
+      // downstream DB writers. Keeps the connection alive for well-formed traffic.
+      if (messageStr.length > MAX_MESSAGE_BYTES) {
+        connection.messageStats.errors++
+        this.debug.warn(`Dropping oversized message (${messageStr.length} bytes) from VM ${connection.vmId}`)
+        continue
+      }
 
       if (messageStr.trim()) {
         const messageStartTime = Date.now()

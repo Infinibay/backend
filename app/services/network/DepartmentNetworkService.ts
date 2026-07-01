@@ -203,7 +203,17 @@ export interface DhcpTrafficCapture {
     requestPackets: number
     ackPackets: number
   }
+  /** True if the capture hit MAX_CAPTURED_PACKETS and was stopped early (packet list is capped). */
+  truncated: boolean
 }
+
+/**
+ * Upper bound on captured DHCP lines. tcpdump output on the bridge is
+ * attacker-influenced (a VM flooding DHCPDISCOVER), so without a cap the
+ * `packets` array grows unbounded for the whole capture window and is then
+ * returned in full over GraphQL — heap OOM + multi-hundred-MB response.
+ */
+const MAX_CAPTURED_PACKETS = 5000
 
 /** Flag to track if bridge netfilter has been configured in this process */
 let bridgeNetfilterConfigured = false
@@ -938,6 +948,7 @@ export class DepartmentNetworkService {
       let offerPackets = 0
       let requestPackets = 0
       let ackPackets = 0
+      let truncated = false
 
       // Spawn tcpdump process with line-buffered output
       const tcpdumpProcess = spawn('tcpdump', [
@@ -962,6 +973,17 @@ export class DepartmentNetworkService {
         // Skip tcpdump header/footer lines
         if (line.includes('listening on') || line.includes('packets captured') ||
             line.includes('packets received') || line.includes('packets dropped')) {
+          return
+        }
+
+        // Bound accumulation: stop capturing once the cap is hit so a DHCP flood on
+        // the bridge can't drive unbounded heap growth (and a huge GraphQL response).
+        // Return before push AND before counting so the summary matches the packet list.
+        if (packets.length >= MAX_CAPTURED_PACKETS) {
+          if (!truncated) {
+            truncated = true
+            tcpdumpProcess.kill('SIGTERM')
+          }
           return
         }
 
@@ -1020,7 +1042,7 @@ export class DepartmentNetworkService {
           parseLine(stderrBuffer)
         }
 
-        debug.info(`DHCP capture complete: ${packets.length} packets captured (exit code: ${code})`)
+        debug.info(`DHCP capture complete: ${packets.length} packets captured (exit code: ${code})${truncated ? ` — truncated at cap of ${MAX_CAPTURED_PACKETS}` : ''}`)
 
         resolve({
           bridgeName,
@@ -1032,7 +1054,8 @@ export class DepartmentNetworkService {
             offerPackets,
             requestPackets,
             ackPackets
-          }
+          },
+          truncated
         })
       })
 
@@ -1445,10 +1468,21 @@ net.bridge.bridge-nf-call-arptables=0
     // Calculate network addresses for DHCP options
     const networkAddresses = this.calculateNetworkAddresses(config)
 
-    // DNS and NTP servers with fallback to public defaults
-    const dnsServers = config.dnsServers && config.dnsServers.length > 0
-      ? config.dnsServers
+    // DNS and NTP servers with fallback to public defaults.
+    // Defense-in-depth: dnsmasq's `dhcp-option=6` / `server=` directives require IP
+    // addresses. The updateDepartmentNetwork resolver accepts hostnames for dnsServers,
+    // and a non-IP value here makes `dnsmasq --test` (validateDnsmasqConfig) fail — which
+    // aborts startDnsmasq and tears down the whole department network on a restart/reboot.
+    // Filter to valid IPv4 only (mirroring the ntpServers handling below) and fall back to
+    // public defaults if nothing valid remains, so the config always starts.
+    const validDnsServers = (config.dnsServers ?? []).filter(dns => this.isValidIPv4(dns))
+    const dnsServers = validDnsServers.length > 0
+      ? validDnsServers
       : ['8.8.8.8', '8.8.4.4', '1.1.1.1']
+    if (config.dnsServers && config.dnsServers.length > validDnsServers.length) {
+      const droppedDns = config.dnsServers.filter(dns => !this.isValidIPv4(dns))
+      debug.warn(`Filtered out invalid DNS servers (not IP addresses): ${droppedDns.join(', ')}`)
+    }
     // Filter NTP servers to only include valid IP addresses (DHCP option 42 requires IPs, not hostnames)
     const ntpServers = config.ntpServers && config.ntpServers.length > 0
       ? config.ntpServers.filter(ntp => this.isValidIPv4(ntp))

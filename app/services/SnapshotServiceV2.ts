@@ -25,6 +25,7 @@ import { Logger } from 'winston'
 import logger from '@main/logger'
 import { getInfinization } from '@services/InfinizationService'
 import { assertVmStopped } from '@utils/assertVmStopped'
+import sanitizeErrorForUser from '@utils/sanitizeError'
 import {
   OFF_STATUS,
   ERROR_STATUS,
@@ -141,7 +142,24 @@ export class SnapshotServiceV2 {
         // Get disk path
         const diskPath = this.getDiskPath(vm.internalName)
         if (!fs.existsSync(diskPath)) {
-          return { success: false, message: `Disk image not found: ${diskPath}` }
+          // Don't leak the absolute host disk path (or the VM's internal UUID
+          // basename) to the tenant — it's host-layout reconnaissance.
+          return { success: false, message: 'Disk image not found for this VM.' }
+        }
+
+        // Per-VM snapshot cap (audit: unbounded snapshot creation can exhaust the
+        // shared host disk via metadata bloat + copy-on-write divergence). Count
+        // existing internal snapshots under the SNAPSHOTTING lock and refuse once
+        // the cap is reached. Env-tunable; defaults to 20, falls back to 20 for a
+        // non-positive / non-numeric override (never disables the guard).
+        const rawMax = Number(process.env.MAX_SNAPSHOTS_PER_VM ?? 20)
+        const maxSnapshots = Number.isFinite(rawMax) && rawMax > 0 ? rawMax : 20
+        const existing = await this.snapshotManager.listSnapshots(diskPath)
+        if (existing.length >= maxSnapshots) {
+          return {
+            success: false,
+            message: `Snapshot limit reached (${maxSnapshots}). Delete an old snapshot first.`
+          }
         }
 
         // Create snapshot via SnapshotManager
@@ -180,11 +198,13 @@ export class SnapshotServiceV2 {
     } catch (error: any) {
       this.debug.error(`Failed to create snapshot: ${error.message}`)
 
+      // StorageError / qemu-img messages embed the absolute imagePath and raw
+      // stderr; redact host paths + stderr dumps before returning to the tenant.
       if (error instanceof StorageError) {
-        return { success: false, message: error.message }
+        return { success: false, message: sanitizeErrorForUser(error.message) ?? 'Failed to create snapshot.' }
       }
 
-      return { success: false, message: `Failed to create snapshot: ${error.message}` }
+      return { success: false, message: sanitizeErrorForUser(`Failed to create snapshot: ${error.message}`) ?? 'Failed to create snapshot.' }
     }
   }
 
@@ -229,7 +249,8 @@ export class SnapshotServiceV2 {
       return { success: true, snapshots }
     } catch (error: any) {
       this.debug.error(`Failed to list snapshots: ${error.message}`)
-      return { success: false, snapshots: [], message: error.message }
+      // Redact host paths / raw qemu-img stderr before returning to the tenant.
+      return { success: false, snapshots: [], message: sanitizeErrorForUser(error.message) ?? 'Failed to list snapshots.' }
     }
   }
 
@@ -290,7 +311,8 @@ export class SnapshotServiceV2 {
 
         const diskPath = this.getDiskPath(vm.internalName)
         if (!fs.existsSync(diskPath)) {
-          return { success: false, message: `Disk image not found: ${diskPath}` }
+          // Don't leak the absolute host disk path to the tenant.
+          return { success: false, message: 'Disk image not found for this VM.' }
         }
 
         // Verify snapshot exists
@@ -320,11 +342,13 @@ export class SnapshotServiceV2 {
     } catch (error: any) {
       this.debug.error(`Failed to restore snapshot: ${error.message}`)
 
+      // StorageError / qemu-img messages embed the absolute imagePath and raw
+      // stderr; redact host paths + stderr dumps before returning to the tenant.
       if (error instanceof StorageError) {
-        return { success: false, message: error.message }
+        return { success: false, message: sanitizeErrorForUser(error.message) ?? 'Failed to restore snapshot.' }
       }
 
-      return { success: false, message: `Failed to restore snapshot: ${error.message}` }
+      return { success: false, message: sanitizeErrorForUser(`Failed to restore snapshot: ${error.message}`) ?? 'Failed to restore snapshot.' }
     }
   }
 
@@ -349,7 +373,8 @@ export class SnapshotServiceV2 {
 
       const diskPath = this.getDiskPath(vm.internalName)
       if (!fs.existsSync(diskPath)) {
-        return { success: false, message: `Disk image not found: ${diskPath}` }
+        // Don't leak the absolute host disk path to the tenant.
+        return { success: false, message: 'Disk image not found for this VM.' }
       }
 
       // Delete snapshot (handles non-existent gracefully)
@@ -363,11 +388,13 @@ export class SnapshotServiceV2 {
     } catch (error: any) {
       this.debug.error(`Failed to delete snapshot: ${error.message}`)
 
+      // StorageError / qemu-img messages embed the absolute imagePath and raw
+      // stderr; redact host paths + stderr dumps before returning to the tenant.
       if (error instanceof StorageError) {
-        return { success: false, message: error.message }
+        return { success: false, message: sanitizeErrorForUser(error.message) ?? 'Failed to delete snapshot.' }
       }
 
-      return { success: false, message: `Failed to delete snapshot: ${error.message}` }
+      return { success: false, message: sanitizeErrorForUser(`Failed to delete snapshot: ${error.message}`) ?? 'Failed to delete snapshot.' }
     }
   }
 

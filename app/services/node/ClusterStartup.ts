@@ -23,7 +23,15 @@ export async function startClusterHeartbeat (prisma: PrismaClient): Promise<void
   const registration = new LocalNodeRegistrationService(prisma)
   const node = await registration.registerLocalNode()
 
-  const intervalMs = parseInt(process.env.NODE_HEARTBEAT_INTERVAL_MS || '30000', 10)
+  // Guard against a non-numeric / zero / negative NODE_HEARTBEAT_INTERVAL_MS:
+  // setInterval coerces NaN or <=0 to ~1ms, which would turn this best-effort
+  // heartbeat into a busy loop hammering Postgres. Floor to a sane minimum.
+  const rawInterval = process.env.NODE_HEARTBEAT_INTERVAL_MS
+  const parsedInterval = Number(rawInterval)
+  const intervalMs = Number.isFinite(parsedInterval) && parsedInterval >= 1000 ? parsedInterval : 30000
+  if (rawInterval !== undefined && intervalMs !== parsedInterval) {
+    logger.warn(`Ignoring invalid NODE_HEARTBEAT_INTERVAL_MS='${rawInterval}'; falling back to ${intervalMs}ms (must be a number >= 1000)`)
+  }
   const refresh = async (): Promise<void> => {
     try {
       await prisma.node.update({

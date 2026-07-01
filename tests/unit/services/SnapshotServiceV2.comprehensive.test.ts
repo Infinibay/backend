@@ -39,6 +39,11 @@ describe('SnapshotServiceV2', () => {
     // count===1, then releases it (snapshotting → off) in a finally. Default
     // both updateMany calls to count:1 so the happy path proceeds.
     mockPrisma.machine.updateMany.mockResolvedValue({ count: 1 } as never)
+    // createSnapshot now enforces a per-VM snapshot cap: before creating it lists
+    // existing snapshots and refuses once MAX_SNAPSHOTS_PER_VM is reached. Default
+    // the listing to empty so the cap is not hit and the happy path proceeds;
+    // listSnapshots-specific tests override this with their own values.
+    mockSnapshotManager.listSnapshots.mockResolvedValue([])
     service = new SnapshotServiceV2(mockPrisma)
   })
 

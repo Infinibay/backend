@@ -220,21 +220,48 @@ export class ScheduleOverallScansJob {
    */
   private async raiseHealthAlert (machineId: string, failureCount: number, backoffMinutes: number): Promise<void> {
     try {
-      // Create VMHealthAlert record
-      await this.prisma.vMHealthAlert.create({
-        data: {
+      const severity = failureCount >= 5 ? 'CRITICAL' : 'WARNING'
+      const description = `VM has ${failureCount} consecutive overall scan failures. Next retry in ${backoffMinutes} minutes.`
+      const metadata = {
+        failureCount,
+        backoffMinutes,
+        checkType: 'OVERALL_STATUS'
+      }
+
+      // Dedup: reuse the existing open alert instead of inserting a new row on
+      // every 30-minute tick for a persistently-failing VM (avoids unbounded
+      // alert-table growth / operator alert fatigue). Keeps one live alert per
+      // machine while refreshing it with the latest failure count / backoff.
+      const existing = await this.prisma.vMHealthAlert.findFirst({
+        where: {
           machineId,
           type: 'REPEATED_SCAN_FAILURES',
-          severity: failureCount >= 5 ? 'CRITICAL' : 'WARNING',
-          title: 'Repeated Health Scan Failures',
-          description: `VM has ${failureCount} consecutive overall scan failures. Next retry in ${backoffMinutes} minutes.`,
-          metadata: {
-            failureCount,
-            backoffMinutes,
-            checkType: 'OVERALL_STATUS'
-          }
+          resolved: false
         }
       })
+
+      if (existing) {
+        await this.prisma.vMHealthAlert.update({
+          where: { id: existing.id },
+          data: {
+            severity,
+            description,
+            metadata
+          }
+        })
+      } else {
+        // Create VMHealthAlert record
+        await this.prisma.vMHealthAlert.create({
+          data: {
+            machineId,
+            type: 'REPEATED_SCAN_FAILURES',
+            severity,
+            title: 'Repeated Health Scan Failures',
+            description,
+            metadata
+          }
+        })
+      }
 
       logger.warn(`🚨 Health alert raised for VM ${machineId}: ${failureCount} consecutive scan failures`)
     } catch (error) {

@@ -162,14 +162,30 @@ export class HttpDbRpcTransport implements DbRpcTransport {
       status = r.status
       text = r.text
     } else {
+      // Token mode runs over PLAIN HTTP and is unauthenticated at the transport
+      // layer, so a network MITM (or an impersonated master endpoint) can return a
+      // huge or never-terminating body. Bound it exactly like the mTLS path
+      // (httpsJsonPost): an absolute deadline via AbortController + a streamed byte
+      // budget, so the node can neither OOM nor hang on a hostile response.
       const doFetch = this.opts.fetchImpl ?? fetch
-      const res = await doFetch(url, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', authorization: `Bearer ${this.opts.token ?? ''}` },
-        body: JSON.stringify(payload)
-      })
-      status = res.status
-      text = await res.text().catch(() => '')
+      const ctrl = new AbortController()
+      const deadline = setTimeout(
+        () => ctrl.abort(new Error('cluster token RPC deadline exceeded')),
+        TOKEN_RPC_DEADLINE_MS
+      )
+      if (typeof deadline.unref === 'function') deadline.unref() // don't keep the process alive for an in-flight RPC
+      try {
+        const res = await doFetch(url, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', authorization: `Bearer ${this.opts.token ?? ''}` },
+          body: JSON.stringify(payload),
+          signal: ctrl.signal
+        })
+        status = res.status
+        text = await readBounded(res, TOKEN_RPC_MAX_RESPONSE_BYTES, ctrl.signal)
+      } finally {
+        clearTimeout(deadline)
+      }
     }
     return this.parseResponse(method, status, text)
   }
@@ -202,5 +218,52 @@ export class HttpDbRpcTransport implements DbRpcTransport {
       throw new Error(`RPC ${method} error: ${message}`)
     }
     return body.result
+  }
+}
+
+// Same bounds the mTLS path (httpsJsonPost) applies, so BOTH auth modes cap memory
+// and time identically — a hostile/MITM master cannot OOM or hang the node agent.
+const TOKEN_RPC_MAX_RESPONSE_BYTES = 16 * 1024 * 1024
+const TOKEN_RPC_DEADLINE_MS = 15000
+
+/** Marks the "response exceeded the byte budget" case so it fails closed (never swallowed). */
+class RpcResponseTooLargeError extends Error {}
+
+/**
+ * Read a fetch `Response` body under a hard byte budget, streaming via the reader so
+ * an oversized body is aborted BEFORE it is fully buffered (the token path is plain
+ * HTTP and unauthenticated at the transport layer). Fails closed on oversize and on
+ * a deadline abort (`signal.aborted`) by throwing; any other transient body-read
+ * error degrades to '' exactly as the previous `res.text().catch(() => '')` did, so
+ * parseResponse still reports it as a non-JSON/status error.
+ */
+async function readBounded (res: Response, maxBytes: number, signal?: AbortSignal): Promise<string> {
+  const body = res.body
+  if (body == null) {
+    // No stream to meter (e.g. a lightweight test double); fall back to the prior
+    // read, still surfacing a deadline abort so the caller fails closed.
+    try { return await res.text() } catch (e) { if (signal?.aborted === true) throw e; return '' }
+  }
+  const reader = body.getReader()
+  const decoder = new TextDecoder()
+  let total = 0
+  let out = ''
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done === true) break
+      if (value !== undefined) {
+        total += value.byteLength
+        if (total > maxBytes) {
+          throw new RpcResponseTooLargeError(`cluster token RPC response exceeded ${maxBytes} bytes`)
+        }
+        out += decoder.decode(value, { stream: true })
+      }
+    }
+    return out + decoder.decode()
+  } catch (e) {
+    await reader.cancel().catch(() => {}) // stop buffering / release the stream
+    if (e instanceof RpcResponseTooLargeError || signal?.aborted === true) throw e
+    return ''
   }
 }

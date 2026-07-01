@@ -20,7 +20,7 @@ import jwt from 'jsonwebtoken'
 import prisma from './utils/database'
 
 // Configuration Imports
-import { configureServer } from './config/server'
+import { configureServer, buildCorsOptions } from './config/server'
 import { createApolloServer } from './config/apollo'
 import { configureRoutes } from './config/routes'
 import { expressMiddleware } from '@as-integrations/express5'
@@ -129,7 +129,11 @@ async function bootstrap (): Promise<void> {
 
     // Intercept WebSocket upgrade requests for /graphql path only
     httpServer.on('upgrade', (request, socket, head) => {
-      const pathname = new URL(request.url ?? '/', `http://${request.headers.host}`).pathname
+      // Parse only the path — never build a WHATWG URL from the attacker-
+      // controlled Host header. `new URL(..., 'http://<host>')` throws on a
+      // malformed host (e.g. containing a space), and this synchronous listener
+      // runs before auth, so an uncaught throw here would crash the process.
+      const pathname = (request.url ?? '/').split('?')[0]
       if (pathname === '/graphql') {
         wsServer.handleUpgrade(request, socket, head, (ws) => {
           wsServer.emit('connection', ws, request)
@@ -143,10 +147,7 @@ async function bootstrap (): Promise<void> {
     // Apply Apollo middleware
     app.use(
       '/graphql',
-      cors({
-        origin: process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : '*',
-        credentials: true
-      }),
+      cors(buildCorsOptions()),
       expressMiddleware(apolloServer, {
         context: async ({ req, res }: { req: express.Request, res: express.Response }): Promise<InfinibayContext> => {
           const debugAuth = process.env.DEBUG_AUTH === '1' || process.env.NODE_ENV !== 'production'
@@ -410,6 +411,16 @@ async function shutdown (): Promise<void> {
 // Handle shutdown signals
 process.on('SIGTERM', shutdown)
 process.on('SIGINT', shutdown)
+
+// Defense-in-depth: never let a stray synchronous throw in an EventEmitter
+// listener (e.g. a malformed WebSocket upgrade) or an unhandled promise
+// rejection take down the whole datacenter backend. Log and keep serving.
+process.on('uncaughtException', (error) => {
+  logger.error('🛑 Uncaught exception (kept alive):', error)
+})
+process.on('unhandledRejection', (reason) => {
+  logger.error('🛑 Unhandled promise rejection (kept alive):', reason)
+})
 
 void bootstrap().catch((error) => {
   logger.error('Unhandled error during bootstrap:', error)
