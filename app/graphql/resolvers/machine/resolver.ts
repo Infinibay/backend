@@ -595,7 +595,11 @@ export class MachineMutations {
           - Machine ID: ${id}
           - Action: ${action}
           - Error: ${result.error || 'Unknown error'}`)
-        return { success: false, message: result.error || `Error performing ${action} on machine` }
+        // Sanitize before returning: this message is now surfaced verbatim in the
+        // UI toast (the frontend used to swallow it), and result.error can carry
+        // raw host paths / command stderr from infinization. Redact for the
+        // (possibly non-admin) VM owner; full detail stays in the server logs.
+        return { success: false, message: sanitizeErrorForUser(result.error) || `Error performing ${action} on machine` }
       }
 
       // Post-shutdown verification: Confirm QEMU process is actually dead
@@ -713,7 +717,8 @@ export class MachineMutations {
         - Action: ${action}
         - Error: ${(error as Error).message || error}
         - Stack: ${(error as Error).stack || 'N/A'}`)
-      return { success: false, message: (error as Error).message || 'Error changing machine state' }
+      // Sanitize: surfaced in the UI toast; may carry host paths / raw stderr.
+      return { success: false, message: sanitizeErrorForUser((error as Error).message) || 'Error changing machine state' }
     }
   }
 
