@@ -1,7 +1,9 @@
 import { Arg, Ctx, ID, Mutation, Query, Resolver } from 'type-graphql'
+import { GraphQLError } from 'graphql'
 import { Disk, Node } from '@prisma/client'
 
 import { InfinibayContext } from '@utils/context'
+import { UserInputError } from '@utils/errors'
 import { NodeInventorySummary, NodeType, PendingNodeType } from './type'
 import { Can } from '@main/permissions'
 import { calculateNodeCapacity, nodeHealth } from '../../../services/node/NodeCapacity'
@@ -145,6 +147,12 @@ export class NodeResolver {
       @Ctx() context: InfinibayContext
   ): Promise<NodeType> {
     const { prisma } = context
+    // Return a clean NOT_FOUND rather than letting Prisma's P2025 for a bogus id
+    // reach the client as a raw internal error (with a stack trace in dev).
+    const existing = await prisma.node.findUnique({ where: { id }, select: { id: true } })
+    if (!existing) {
+      throw new GraphQLError('Node not found', { extensions: { code: 'NOT_FOUND' } })
+    }
     const node = await prisma.node.update({
       where: { id },
       data: { maintenanceMode: enabled },
@@ -189,7 +197,21 @@ export class NodeResolver {
       @Ctx() context: InfinibayContext
   ): Promise<boolean> {
     const enrollment = new NodeEnrollmentService(context.prisma, new ClusterCA())
-    await enrollment.approve(id, pairingCode ?? undefined)
+    try {
+      await enrollment.approve(id, pairingCode ?? undefined)
+    } catch (err: any) {
+      // Map the service's plain Error(s) to typed GraphQL errors so the boundary
+      // returns a clean NOT_FOUND / BAD_USER_INPUT instead of masking them to a
+      // generic "Internal server error".
+      const msg: string = err?.message ?? ''
+      if (msg.startsWith('node not found')) {
+        throw new GraphQLError('Node not found', { extensions: { code: 'NOT_FOUND' } })
+      }
+      if (msg.includes('is not pending') || msg.includes('SAS code mismatch')) {
+        throw new UserInputError(msg)
+      }
+      throw err
+    }
     return true
   }
 
@@ -200,6 +222,24 @@ export class NodeResolver {
     @Arg('id', () => ID) id: string,
       @Ctx() context: InfinibayContext
   ): Promise<boolean> {
+    const { prisma } = context
+    // Guard before delegating: reject() unconditionally nulls the row's identity
+    // material (certPem/joinNonce/joinCodeHash). Load the target first so we (a)
+    // return a clean NOT_FOUND for a bogus id and (b) refuse to reject the master
+    // node — doing so would strip the control-plane row's cert and drop it out of
+    // healthy inventory, a cluster-wide availability event from a single call.
+    // Rejecting an already-approved compute node stays allowed (the documented
+    // re-enrollment reset).
+    const target = await prisma.node.findUnique({
+      where: { id },
+      select: { id: true, role: true }
+    })
+    if (!target) {
+      throw new GraphQLError('Node not found', { extensions: { code: 'NOT_FOUND' } })
+    }
+    if (target.role === 'master') {
+      throw new UserInputError('The master node cannot be rejected')
+    }
     const enrollment = new NodeEnrollmentService(context.prisma, new ClusterCA())
     await enrollment.reject(id)
     return true

@@ -79,7 +79,7 @@ export class CommandDispatcher {
     commandType: SafeCommandType,
     timeout: number = 30000
   ): Promise<CommandResponse> {
-    const connection = this.connections.get(vmId)
+    let connection = this.connections.get(vmId)
     if (!connection) {
       throw new Error(`No connection to VM ${vmId}`)
     }
@@ -100,6 +100,11 @@ export class CommandDispatcher {
         if (!updatedConnection || !updatedConnection.isConnected) {
           throw new Error(`VM ${vmId} is not connected and reconnection failed`)
         }
+        // reconnectFn/connectToVm REPLACES the VmConnection in the map with a new
+        // instance and destroys the old socket. Retarget the live handle so the
+        // pending command and sendMessage below don't hit the stale (destroyed)
+        // object — which would silently drop the write and hang until timeout.
+        connection = updatedConnection
       } else {
         throw new Error(`VM ${vmId} is not connected and socket file not found`)
       }
@@ -153,7 +158,7 @@ export class CommandDispatcher {
     options: Partial<UnsafeCommandRequest> = {},
     timeout: number = 30000
   ): Promise<CommandResponse> {
-    const connection = this.connections.get(vmId)
+    let connection = this.connections.get(vmId)
     if (!connection) {
       throw new Error(`No connection to VM ${vmId}`)
     }
@@ -174,6 +179,11 @@ export class CommandDispatcher {
         if (!updatedConnection || !updatedConnection.isConnected) {
           throw new Error(`VM ${vmId} is not connected and reconnection failed`)
         }
+        // reconnectFn/connectToVm REPLACES the VmConnection in the map with a new
+        // instance and destroys the old socket. Retarget the live handle so the
+        // pending command and sendMessage below don't hit the stale (destroyed)
+        // object — which would silently drop the write and hang until timeout.
+        connection = updatedConnection
       } else {
         throw new Error(`VM ${vmId} is not connected and socket file not found`)
       }

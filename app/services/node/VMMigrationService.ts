@@ -1,10 +1,31 @@
 import { PrismaClient } from '@prisma/client'
 import logger from '@main/logger'
 import { calculateNodeCapacity } from './NodeCapacity'
-import { MOVING_STATUS } from '../../constants/machine-status'
+import { MOVING_STATUS, OFF_STATUS } from '../../constants/machine-status'
 
 export interface VMStorageMigrationAdapter {
   prepareMachineStorage(params: {
+    machineId: string
+    sourceNodeId: string | null
+    targetNodeId: string
+    diskPaths: string[]
+    // When true, copy + checksum-verify the disk(s) onto the target but DO NOT
+    // delete the source yet — the caller reclaims it via reclaimSourceStorage
+    // strictly AFTER the Machine.nodeId ownership commit is durable. This keeps
+    // the only destructive step from running before the commit, so a failed or
+    // interrupted commit can never strand the VM pointing at a node whose disk
+    // was already deleted. Adapters predating this flag ignore it (legacy: they
+    // still delete inside prepareMachineStorage and omit reclaimSourceStorage).
+    deferReclaim?: boolean
+  }): Promise<void>
+  /**
+   * Best-effort reclaim (delete) of the now-migrated source disk(s), invoked by
+   * migrateStoppedMachineToNode ONLY after the ownership commit succeeds. Must be
+   * a no-op when source and target resolve to the same physical store. Optional:
+   * legacy adapters that still delete inside prepareMachineStorage omit it, and
+   * the service falls back to the pre-commit delete (deferReclaim stays false).
+   */
+  reclaimSourceStorage?(params: {
     machineId: string
     sourceNodeId: string | null
     targetNodeId: string
@@ -140,12 +161,21 @@ export class VMMigrationService {
         }
       }
 
-      // ── Relocate the disk (verified copy + I2 source reclaim) ─────────────────
+      // ── Relocate the disk (verified copy; source reclaim deferred) ────────────
+      // Copy + checksum-verify every disk onto the target but keep the source
+      // INTACT for now (when the adapter supports a separate reclaim step). The
+      // destructive source delete must happen strictly after the nodeId commit
+      // below — otherwise a failed/interrupted commit leaves the disk on the
+      // target, the source copy deleted, and the DB still pointing at the source
+      // node (VM un-startable, real copy orphaned). A commit failure at this
+      // point is safely retryable because no disk has been destroyed yet.
+      const deferReclaim = typeof this.options.storageAdapter?.reclaimSourceStorage === 'function'
       await this.prepareStorageForMigration({
         machineId,
         sourceNodeId,
         targetNodeId,
-        diskPaths
+        diskPaths,
+        deferReclaim
       })
 
       // ── Commit the new owner + release the lock in one write ──────────────────
@@ -153,6 +183,22 @@ export class VMMigrationService {
         where: { id: machineId },
         data: { nodeId: targetNodeId, status: priorStatus }
       })
+
+      // ── I2 source reclaim ─────────────────────────────────────────────────────
+      // Delete the source disk(s) ONLY now that ownership is durably committed to
+      // the target. Best-effort: a surviving source is a storage leak to sweep
+      // later, never a reason to fail an already-committed migration (and never a
+      // reason to re-lock the row). Legacy adapters without reclaimSourceStorage
+      // already deleted inside prepareMachineStorage above — deferReclaim is false
+      // and this is skipped, preserving their behaviour exactly.
+      if (deferReclaim) {
+        await this.options.storageAdapter!.reclaimSourceStorage!({
+          machineId,
+          sourceNodeId,
+          targetNodeId,
+          diskPaths
+        }).catch((e) => logger.warn(`Migration ${machineId}: source storage reclaim failed (left in place): ${String(e)}`))
+      }
 
       return {
         success: true,
@@ -175,6 +221,7 @@ export class VMMigrationService {
     sourceNodeId: string | null
     targetNodeId: string
     diskPaths: string[]
+    deferReclaim?: boolean
   }): Promise<void> {
     if (this.options.storageAdapter) {
       await this.options.storageAdapter.prepareMachineStorage(params)
@@ -197,5 +244,57 @@ export class VMMigrationService {
   private parseDiskPaths (value: unknown): string[] {
     if (!Array.isArray(value)) return []
     return value.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0)
+  }
+}
+
+/**
+ * Startup reaper for the 'moving' status-as-lock — the migration mirror of
+ * reconcileOrphanedDiskOpMarkers. A cold cross-node migration claims the VM row
+ * by flipping status → 'moving' for the duration of the disk copy (which can
+ * legitimately run up to ~1h). The claim is released only by migrate()'s success
+ * path or its catch rollback; if the master process is killed / restarted / OOMs
+ * mid-copy, NEITHER runs and the row is left STUCK in 'moving' forever. Every
+ * power-on and re-migrate path refuses 'moving' (isPowerActionLocked), so the VM
+ * becomes permanently unusable with no live copy still holding the lock.
+ *
+ * On a fresh boot the in-process migration that set the marker is gone (the
+ * master is the sole migration orchestrator — nodes never coordinate peer-to-
+ * peer), so no copy can still be in flight. The row's nodeId is still the source
+ * (only committed to the target on success) and the source disk is reclaimed
+ * strictly AFTER that commit (I2 / deferReclaim), so resetting to 'off' leaves a
+ * clean, retryable state. Errors are logged and swallowed so startup never
+ * blocks. Intended to be wired into InfinizationService startup right after
+ * reconcileOrphanedDiskOpMarkers.
+ *
+ * @returns the count of rows reset (for logging/tests)
+ */
+export async function reconcileOrphanedMoveMarkers (prisma: PrismaClient): Promise<number> {
+  try {
+    const stuck = await prisma.machine.findMany({
+      where: { status: MOVING_STATUS },
+      select: { id: true, name: true, status: true }
+    })
+
+    if (stuck.length === 0) {
+      return 0
+    }
+
+    for (const vm of stuck) {
+      logger.warn(
+        `🔧 VM ${vm.name} (${vm.id}) left in transient migration status '${vm.status}' ` +
+        `by a crash — resetting to '${OFF_STATUS}' (migration can be retried)`
+      )
+    }
+
+    const result = await prisma.machine.updateMany({
+      where: { status: MOVING_STATUS },
+      data: { status: OFF_STATUS }
+    })
+
+    logger.info(`🔧 Migration marker reconcile: reset ${result.count} orphaned VM(s) to '${OFF_STATUS}'`)
+    return result.count
+  } catch (error) {
+    logger.error('❌ Migration marker reconciliation failed:', error)
+    return 0
   }
 }

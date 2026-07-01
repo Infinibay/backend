@@ -217,6 +217,11 @@ export class UnattendedManagerBase {
       // Per-VM infiniservice HMAC secret, injected as `export FOO='...'` (Linux)
       // or `$env:FOO='...'` (Windows CommandLine). Mask the single-quoted value.
       .replace(/(INFINISERVICE_SHARED_SECRET\s*=\s*')[^']*(')/gi, '$1**redacted**$2')
+      // Windows product key: specialize <ProductKey>KEY</ProductKey> and windowsPE
+      // <ProductKey><Key>KEY</Key>...</ProductKey>. Mask the whole block — the
+      // non-greedy inner match also redacts the nested <Key> (a real purchased
+      // license key must never reach the logs).
+      .replace(/(<ProductKey>)[\s\S]*?(<\/ProductKey>)/gi, '$1**redacted**$2')
   }
 
   /**
@@ -226,8 +231,13 @@ export class UnattendedManagerBase {
    * @returns {Promise<string>} The path to the directory where the ISO file was extracted.
    */
   protected async extractISO (isoPath: string): Promise<string> {
-    const extractDir = path.join(os.tmpdir(), 'extracted_iso_' + Date.now())
-    await fsPromises.mkdir(extractDir, { recursive: true })
+    // mkdtemp atomically creates a fresh, exclusive dir. A Date.now() suffix +
+    // recursive mkdir silently MERGES when two concurrent builds hit the same
+    // millisecond, letting them share one extraction dir — one VM's autounattend
+    // (its cleartext credentials) could bake into another's ISO, and whichever
+    // finishes first would rm -rf the dir out from under the other. Same reason
+    // generateRandomFileName() uses randomUUID for the output name.
+    const extractDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'extracted_iso_'))
     await this.executeCommand(['7z', 'x', isoPath, '-o' + extractDir])
     return extractDir
   }

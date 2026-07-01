@@ -73,24 +73,75 @@ export class RecommendationResolverService {
       throw new Error(`Action ${actionKey} requires confirmed=true in params`)
     }
 
-    const resolution = await this.prisma.$transaction(async (tx) => {
-      const created = await tx.recommendationResolution.create({
-        data: {
-          recommendationId,
-          machineId: rec.machineId,
-          actionKey,
-          status: ResolutionStatus.PENDING,
-          progress: 0,
-          params: (params ?? undefined) as Prisma.InputJsonValue | undefined,
-          triggeredByUserId: userId
+    // Atomic claim-and-run: create the resolution and take the recommendation's
+    // active-resolution slot in the same transaction, using the affected-row count
+    // as a compare-and-set. This closes the TOCTOU window between the idempotency
+    // read above and this write — two concurrent resolve() calls could otherwise
+    // both observe a free/terminal slot and both spawn a destructive handler (double
+    // reboot / double install). We rely on the row lock updateMany takes under the
+    // default READ COMMITTED isolation: the losing writer blocks on the row, then
+    // re-evaluates the WHERE against the winner's committed row and gets count 0.
+    let resolution: RecommendationResolution
+    try {
+      resolution = await this.prisma.$transaction(async (tx) => {
+        const created = await tx.recommendationResolution.create({
+          data: {
+            recommendationId,
+            machineId: rec.machineId,
+            actionKey,
+            status: ResolutionStatus.PENDING,
+            progress: 0,
+            params: (params ?? undefined) as Prisma.InputJsonValue | undefined,
+            triggeredByUserId: userId
+          }
+        })
+        const claim = await tx.vMRecommendation.updateMany({
+          where: {
+            id: recommendationId,
+            // Only claim when the slot is free or still holds a terminal resolution
+            // (REQUIRES_REBOOT / CANCELLED leave activeResolutionId set but must stay
+            // re-claimable — matching the line-61 idempotency semantics).
+            OR: [
+              { activeResolutionId: null },
+              {
+                activeResolution: {
+                  status: {
+                    in: [
+                      ResolutionStatus.SUCCEEDED,
+                      ResolutionStatus.FAILED,
+                      ResolutionStatus.CANCELLED,
+                      ResolutionStatus.REQUIRES_REBOOT
+                    ]
+                  }
+                }
+              }
+            ]
+          },
+          data: { activeResolutionId: created.id }
+        })
+        if (claim.count === 0) {
+          // A concurrent resolve() already won the slot; roll back this transaction
+          // (which discards `created`) and return the winner's resolution below.
+          throw new ResolutionRaceLostError()
         }
+        return created
       })
-      await tx.vMRecommendation.update({
-        where: { id: recommendationId },
-        data: { activeResolutionId: created.id }
-      })
-      return created
-    })
+    } catch (err) {
+      if (err instanceof ResolutionRaceLostError) {
+        // Lost the claim race: return the winner's in-flight resolution instead of
+        // spawning a second handler, preserving the documented idempotency contract.
+        const fresh = await this.prisma.vMRecommendation.findUnique({
+          where: { id: recommendationId },
+          include: { activeResolution: true }
+        })
+        if (fresh?.activeResolution && !isTerminalStatus(fresh.activeResolution.status)) {
+          this.debug.info(`Lost claim race for recommendation ${recommendationId}; returning in-flight resolution ${fresh.activeResolution.id}`)
+          return fresh.activeResolution
+        }
+        throw new Error('Another resolution is already in progress for this recommendation')
+      }
+      throw err
+    }
 
     // Fire-and-forget: run the handler asynchronously
     void this.runHandler(handler, resolution.id, rec, params ?? {}, userId)
@@ -263,6 +314,18 @@ export class RecommendationResolverService {
         status: 'failed'
       }, triggeredBy)
     }
+  }
+}
+
+/**
+ * Internal sentinel thrown to roll back the claim transaction when a concurrent
+ * resolve() has already taken the recommendation's active-resolution slot. Never
+ * surfaced to callers — it is caught and translated to the winner's resolution.
+ */
+class ResolutionRaceLostError extends Error {
+  constructor () {
+    super('recommendation resolution slot already claimed')
+    this.name = 'ResolutionRaceLostError'
   }
 }
 

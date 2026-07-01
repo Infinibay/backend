@@ -2,6 +2,7 @@ import { PrismaClient } from '@prisma/client'
 import { TapDeviceManager, generateVMChainName } from '@infinibay/infinization'
 
 import logger from '@main/logger'
+import { sanitizeErrorForUser } from '@utils/sanitizeError'
 import { DepartmentNetworkService, ForceDestroyResult } from '../network/DepartmentNetworkService'
 import { getInfinization } from '../InfinizationService'
 
@@ -176,14 +177,17 @@ export class DepartmentCleanupService {
               result.errors.push(`Force cleanup partial failure: ${failedOps.join(', ')}`)
             }
 
-            // Abort DB deletion if force cleanup failed and continueOnPartialFailure is false
+            // Abort DB deletion if force cleanup failed and continueOnPartialFailure is false.
+            // Sanitize the user-facing message: failedOps embeds raw ip/nft/dnsmasq stderr and
+            // absolute host paths. Full raw text is retained in this.debug/result.errors above.
             if (!continueOnPartialFailure) {
-              throw new Error(`Network cleanup failed and force cleanup was incomplete: ${failedOps.join(', ')}`)
+              throw new Error(`Network cleanup failed and force cleanup was incomplete: ${sanitizeErrorForUser(failedOps.join(', '))}`)
             }
           }
         } else if (!continueOnPartialFailure) {
-          // Not attempting force cleanup and not continuing on failure
-          throw networkError
+          // Not attempting force cleanup and not continuing on failure.
+          // Sanitize before surfacing: the raw networkError may embed host paths / tooling stderr.
+          throw new Error(sanitizeErrorForUser(errorMessage) ?? 'Network cleanup failed')
         }
       }
     }
@@ -195,6 +199,15 @@ export class DepartmentCleanupService {
         // Delete firewall rules and ruleset (if exists)
         await this.cleanupFirewallRuleSet(tx, department.firewallRuleSetId)
 
+        // Re-verify machine count inside the transaction to close a TOCTOU gap: the guard at the
+        // top of cleanupDepartment reads a snapshot loaded before this tx, so a VM created
+        // concurrently would otherwise have its departmentId silently nulled (Machine.department
+        // is SetNull) and be orphaned instead of blocking the delete.
+        const remaining = await tx.machine.count({ where: { departmentId } })
+        if (remaining > 0) {
+          throw new Error(`Cannot cleanup department ${departmentId}: ${remaining} VM(s) created concurrently`)
+        }
+
         // Delete department
         await tx.department.delete({ where: { id: departmentId } })
 
@@ -205,7 +218,8 @@ export class DepartmentCleanupService {
       const errorMessage = e instanceof Error ? e.message : String(e)
       this.debug.error(`Error removing DB records: ${errorMessage}`)
       result.errors.push(`Database cleanup failed: ${errorMessage}`)
-      throw e
+      // Sanitize before surfacing: raw Prisma errors can embed host paths / internal detail.
+      throw new Error(sanitizeErrorForUser(errorMessage) ?? 'Database cleanup failed')
     }
 
     // Log summary

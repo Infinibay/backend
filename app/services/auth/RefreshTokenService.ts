@@ -65,7 +65,15 @@ export async function rotateRefreshToken (
   const now = new Date()
 
   const existing = await prisma.refreshToken.findUnique({ where: { tokenHash } })
-  if (!existing || existing.revokedAt !== null || existing.expiresAt < now) {
+  if (!existing || existing.expiresAt < now) {
+    return null
+  }
+
+  // Reuse of an already-revoked (but still unexpired) token signals theft: this
+  // one-time-use token was already rotated. Revoke the whole family so no stolen
+  // descendant token remains usable.
+  if (existing.revokedAt !== null) {
+    await revokeAllForUser(prisma, existing.userId)
     return null
   }
 
@@ -73,21 +81,29 @@ export async function rotateRefreshToken (
   const raw = crypto.randomBytes(48).toString('base64url')
   const expiresAt = new Date(Date.now() + REFRESH_TOKEN_TTL_DAYS * DAY_MS)
 
-  await prisma.$transaction([
-    prisma.refreshToken.update({
-      where: { id: existing.id },
+  // Atomic compare-and-set: the conditional updateMany takes a row lock and only
+  // flips revokedAt from null once, so concurrent/double-submitted requests for
+  // the same token are redeemed exactly once. Losers get count 0 and are rejected
+  // as invalid, preserving the one-time-use rotation invariant under READ COMMITTED.
+  const result = await prisma.$transaction(async (tx) => {
+    const revoked = await tx.refreshToken.updateMany({
+      where: { id: existing.id, revokedAt: null, expiresAt: { gt: now } },
       data: { revokedAt: now }
-    }),
-    prisma.refreshToken.create({
+    })
+    if (revoked.count !== 1) {
+      return null
+    }
+    await tx.refreshToken.create({
       data: {
         userId,
         tokenHash: hashToken(raw),
         expiresAt
       }
     })
-  ])
+    return { userId, token: raw, expiresAt }
+  })
 
-  return { userId, token: raw, expiresAt }
+  return result
 }
 
 export async function revokeAllForUser (

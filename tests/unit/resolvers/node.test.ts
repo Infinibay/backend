@@ -138,6 +138,9 @@ describe('NodeResolver', () => {
       machines: []
     }
 
+    // The resolver now pre-checks existence (clean NOT_FOUND instead of a raw
+    // Prisma P2025) before updating; provide the existence lookup.
+    mockPrisma.node.findUnique.mockResolvedValue({ id: node.id } as never)
     mockPrisma.node.update.mockResolvedValue(nodeWithDisks)
 
     const result = await resolver.setNodeMaintenanceMode(node.id, true, ctx)

@@ -254,13 +254,28 @@ async function runDetectStuckInstalls (): Promise<void> {
   }
 }
 
+// In-process re-entrancy guard. Each tick can spend PROGRESS_SAMPLE_WINDOW_MS
+// (5s) plus a QMP round-trip PER candidate, so a mass of simultaneously-stuck
+// installs can push a single tick past the 2-minute interval. Without this flag
+// a second tick would fire and iterate the same still-'running' candidates,
+// wasting QMP connections and issuing duplicate force-stops. This single
+// registered instance is the only detector, so an in-process flag is sufficient.
+let detectStuckInstallsRunning = false
+
 // Every 2 minutes. Cheap: a single indexed query that returns nothing once all
 // installs have completed.
 const DetectStuckInstallsJob = new CronJob('*/2 * * * *', async () => {
+  if (detectStuckInstallsRunning) {
+    debug.debug('Previous DetectStuckInstalls tick still running — skipping')
+    return
+  }
+  detectStuckInstallsRunning = true
   try {
     await runDetectStuckInstalls()
   } catch (error) {
     debug.error(`DetectStuckInstalls tick failed: ${(error as Error).message}`)
+  } finally {
+    detectStuckInstallsRunning = false
   }
 })
 

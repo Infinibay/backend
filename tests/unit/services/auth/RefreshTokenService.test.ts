@@ -123,7 +123,9 @@ describe('RefreshTokenService', () => {
         createdAt: new Date()
       }
       prisma.refreshToken.findUnique.mockResolvedValue(existing as never)
-      prisma.refreshToken.update.mockResolvedValue({} as never)
+      // Rotation is now an atomic compare-and-set: the old row is revoked via a
+      // conditional updateMany that must match exactly one row (count === 1).
+      prisma.refreshToken.updateMany.mockResolvedValue({ count: 1 } as never)
       prisma.refreshToken.create.mockResolvedValue({} as never)
 
       const result = await rotateRefreshToken(prisma, rawToken)
@@ -139,13 +141,18 @@ describe('RefreshTokenService', () => {
         where: { tokenHash: hashToken(rawToken) }
       })
 
-      // old row revoked via update with a revokedAt Date
-      expect(prisma.refreshToken.update).toHaveBeenCalledTimes(1)
-      const updateArg = prisma.refreshToken.update.mock.calls[0][0] as {
-        where: { id: string }
+      // old row revoked via the atomic conditional updateMany (only flips a still
+      // -valid, non-revoked row → revokedAt Date), redeeming the token exactly once
+      expect(prisma.refreshToken.updateMany).toHaveBeenCalledTimes(1)
+      const updateArg = prisma.refreshToken.updateMany.mock.calls[0][0] as {
+        where: { id: string, revokedAt: null, expiresAt: { gt: Date } }
         data: { revokedAt: Date }
       }
-      expect(updateArg.where).toEqual({ id: 'token-row-1' })
+      expect(updateArg.where).toEqual({
+        id: 'token-row-1',
+        revokedAt: null,
+        expiresAt: { gt: expect.any(Date) }
+      })
       expect(updateArg.data.revokedAt).toBeInstanceOf(Date)
 
       // new row created with hash of the returned token
