@@ -46,7 +46,15 @@ const PROFILES: OsProfile[] = [
   {
     id: 'ubuntu', family: 'ubuntu', mechanism: 'cloud-init', displayName: 'Ubuntu',
     isoPatterns: [/ubuntu.*\.iso$/i],
-    // No preferred source → auto-detect from the ISO (works for Server AND Desktop).
+    // Prefer the FULL desktop source on Desktop ISOs. Ubuntu Desktop ISOs expose
+    // BOTH 'ubuntu-desktop-minimal' (marked default:true — a minimized desktop with
+    // no 'ubuntu-desktop' metapackage) and 'ubuntu-desktop' (the full desktop). The
+    // auto-detector honors the ISO's default:true entry, so without this it picked
+    // the *minimal* source and produced a near-empty system. detectInstallSource only
+    // uses this when the ISO actually lists it (ids.some), so on a Server ISO — which
+    // has no 'ubuntu-desktop' source — it safely falls back to the ISO default
+    // ('ubuntu-server'). Full desktop is the right default for a VDI product.
+    cloudInitPreferredSource: 'ubuntu-desktop',
     uefi: true
   },
   {

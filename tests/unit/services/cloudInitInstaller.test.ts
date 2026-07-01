@@ -1,5 +1,6 @@
 import { Application } from '@prisma/client'
 import { CloudInitInstaller } from '../../../app/services/cloudInitInstaller'
+import { resolveOsProfile } from '../../../app/services/install/osProfiles'
 import * as fs from 'fs'
 import * as os from 'os'
 import * as path from 'path'
@@ -217,6 +218,55 @@ describe('CloudInitInstaller', () => {
       const parsed = yaml.load(config) as any
 
       expect(parsed.autoinstall.source).toBeUndefined()
+    })
+
+    it('picks the FULL ubuntu-desktop source on a Desktop ISO where minimal is default:true (regression: minimized/empty install)', () => {
+      // Real Ubuntu Desktop ISOs (24.04+/26.04) mark the *minimized* desktop as
+      // default:true and the full desktop as default:false. Without a preferred
+      // source the detector honored default:true → 'ubuntu-desktop-minimal' → a
+      // system with no 'ubuntu-desktop' metapackage. The ubuntu profile now pins
+      // cloudInitPreferredSource='ubuntu-desktop'.
+      const ubuntuProfile = resolveOsProfile('ubuntu')!
+      expect(ubuntuProfile.cloudInitPreferredSource).toBe('ubuntu-desktop')
+
+      const manager = new CloudInitInstaller(
+        validUsername, validPassword, mockApplications, undefined, [],
+        { osProfile: ubuntuProfile }
+      )
+      const extractDir = fs.mkdtempSync(path.join(os.tmpdir(), 'iso-desktop-'))
+      try {
+        fs.mkdirSync(path.join(extractDir, 'casper'), { recursive: true })
+        fs.writeFileSync(path.join(extractDir, 'casper', 'install-sources.yaml'), yaml.dump([
+          { id: 'ubuntu-desktop-minimal', default: true },
+          { id: 'ubuntu-desktop', default: false }
+        ]))
+        expect((manager as any).detectInstallSource(extractDir)).toBe('ubuntu-desktop')
+      } finally {
+        fs.rmSync(extractDir, { recursive: true, force: true })
+      }
+    })
+
+    it('falls back to the ISO default on a Server ISO (preferred ubuntu-desktop absent → no stall)', () => {
+      // Guards the safety of pinning a preferred source: a Server ISO has no
+      // 'ubuntu-desktop' source, so the detector must ignore the preference and
+      // honor the ISO default ('ubuntu-server') rather than request a missing
+      // source (which stalls subiquity).
+      const ubuntuProfile = resolveOsProfile('ubuntu')!
+      const manager = new CloudInitInstaller(
+        validUsername, validPassword, mockApplications, undefined, [],
+        { osProfile: ubuntuProfile }
+      )
+      const extractDir = fs.mkdtempSync(path.join(os.tmpdir(), 'iso-server-'))
+      try {
+        fs.mkdirSync(path.join(extractDir, 'casper'), { recursive: true })
+        fs.writeFileSync(path.join(extractDir, 'casper', 'install-sources.yaml'), yaml.dump([
+          { id: 'ubuntu-server', default: true },
+          { id: 'ubuntu-server-minimal', default: false }
+        ]))
+        expect((manager as any).detectInstallSource(extractDir)).toBe('ubuntu-server')
+      } finally {
+        fs.rmSync(extractDir, { recursive: true, force: true })
+      }
     })
 
     it('honors parameterized locale / keyboard / timezone (no longer hardcoded us/en_US/UTC)', async () => {
