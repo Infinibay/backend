@@ -62,9 +62,9 @@ router.get('/', async (_req, res) => {
     res.json(wallpapers)
   } catch (error) {
     logger.error('Error reading wallpapers directory:', error)
+    // Do not leak raw fs error strings (absolute host path / OS detail) to unauthenticated callers
     res.status(500).json({
-      error: 'Failed to load wallpapers',
-      message: error instanceof Error ? error.message : 'Unknown error'
+      error: 'Failed to load wallpapers'
     })
   }
 })
@@ -118,9 +118,9 @@ router.get('/image/:filename', async (req, res) => {
     fileStream.pipe(res)
   } catch (error) {
     logger.error('Error serving wallpaper image:', error)
+    // Do not leak raw fs error strings (absolute host path / OS detail) to unauthenticated callers
     res.status(500).json({
-      error: 'Failed to serve wallpaper',
-      message: error instanceof Error ? error.message : 'Unknown error'
+      error: 'Failed to serve wallpaper'
     })
   }
 })

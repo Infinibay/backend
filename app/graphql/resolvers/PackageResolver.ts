@@ -16,6 +16,8 @@ import {
   CommandResult
 } from '../types/PackageType'
 import { getSocketService } from '@services/SocketService'
+import { sanitizeErrorForUser } from '@utils/sanitizeError'
+import { GraphQLError } from 'graphql'
 
 
 @Resolver()
@@ -49,7 +51,9 @@ export class PackageResolver {
     result.message = internal.message
     result.stdout = internal.stdout
     result.stderr = internal.stderr
-    result.error = internal.error
+    // Sanitize the error diagnostic (a non-throwing failure result can embed
+    // raw host socket paths / guest stderr) before it reaches the tenant.
+    result.error = sanitizeErrorForUser(internal.error) ?? undefined
     if (internal.packages) {
       result.packages = internal.packages.map(pkg => this.mapToGraphQLPackageInfo(pkg))
     }
@@ -83,7 +87,10 @@ export class PackageResolver {
         throw new Error('Unable to connect to the virtual machine. Please ensure the VM agent is running.')
       }
 
-      throw error
+      // Fall-through for unrecognized errors: sanitize before surfacing so raw
+      // host socket paths / Prisma internals / guest stderr never reach the
+      // tenant. The full raw error is already logged server-side above.
+      throw new GraphQLError(sanitizeErrorForUser(String(error)) ?? 'Package operation failed')
     }
   }
 
@@ -115,7 +122,10 @@ export class PackageResolver {
         throw new Error('Unable to connect to the virtual machine. Please ensure the VM agent is running.')
       }
 
-      throw error
+      // Fall-through for unrecognized errors: sanitize before surfacing so raw
+      // host socket paths / Prisma internals / guest stderr never reach the
+      // tenant. The full raw error is already logged server-side above.
+      throw new GraphQLError(sanitizeErrorForUser(String(error)) ?? 'Package operation failed')
     }
   }
 
@@ -203,7 +213,8 @@ export class PackageResolver {
       return {
         success: false,
         message: 'Failed to manage package',
-        error: String(error)
+        // Sanitize before returning so raw host paths / stderr don't leak to the tenant.
+        error: sanitizeErrorForUser(String(error)) ?? 'Package operation failed'
       }
     }
   }
@@ -267,13 +278,16 @@ export class PackageResolver {
       result.output = internalResult.message
       result.stdout = internalResult.stdout
       result.stderr = internalResult.stderr
-      result.error = internalResult.error
+      // Sanitize the error diagnostic (a non-throwing failure result can embed
+      // raw host socket paths / guest stderr) before it reaches the tenant.
+      result.error = sanitizeErrorForUser(internalResult.error) ?? undefined
       return result
     } catch (error) {
       logger.error('Error installing package:', error)
       return {
         success: false,
-        error: String(error)
+        // Sanitize before returning so raw host paths / stderr don't leak to the tenant.
+        error: sanitizeErrorForUser(String(error)) ?? 'Package operation failed'
       }
     }
   }
@@ -337,13 +351,16 @@ export class PackageResolver {
       result.output = internalResult.message
       result.stdout = internalResult.stdout
       result.stderr = internalResult.stderr
-      result.error = internalResult.error
+      // Sanitize the error diagnostic (a non-throwing failure result can embed
+      // raw host socket paths / guest stderr) before it reaches the tenant.
+      result.error = sanitizeErrorForUser(internalResult.error) ?? undefined
       return result
     } catch (error) {
       logger.error('Error removing package:', error)
       return {
         success: false,
-        error: String(error)
+        // Sanitize before returning so raw host paths / stderr don't leak to the tenant.
+        error: sanitizeErrorForUser(String(error)) ?? 'Package operation failed'
       }
     }
   }
@@ -407,13 +424,16 @@ export class PackageResolver {
       result.output = internalResult.message
       result.stdout = internalResult.stdout
       result.stderr = internalResult.stderr
-      result.error = internalResult.error
+      // Sanitize the error diagnostic (a non-throwing failure result can embed
+      // raw host socket paths / guest stderr) before it reaches the tenant.
+      result.error = sanitizeErrorForUser(internalResult.error) ?? undefined
       return result
     } catch (error) {
       logger.error('Error updating package:', error)
       return {
         success: false,
-        error: String(error)
+        // Sanitize before returning so raw host paths / stderr don't leak to the tenant.
+        error: sanitizeErrorForUser(String(error)) ?? 'Package operation failed'
       }
     }
   }

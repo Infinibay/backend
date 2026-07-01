@@ -2,6 +2,7 @@ import { FirewallRule, PrismaClient } from '@prisma/client'
 
 import { type FirewallApplyResult } from '@infinibay/infinization'
 import logger from '@main/logger'
+import { sanitizeErrorForUser } from '@utils/sanitizeError'
 import { FirewallRuleService } from './FirewallRuleService'
 import { FirewallValidationService } from './FirewallValidationService'
 import { InfinizationFirewallService } from './InfinizationFirewallService'
@@ -245,7 +246,9 @@ export class FirewallOrchestrationService {
       vmsProcessed: totalVms,
       vmsSkipped: vmsSkippedNoTap,
       vmsUpdated,
-      errors
+      // Infinization-sourced error strings can embed raw nft stderr / host paths;
+      // sanitize before they reach the GraphQL client (full raw text stays in logs).
+      errors: errors.map(e => sanitizeErrorForUser(e) ?? e)
     }
   }
 
@@ -330,7 +333,9 @@ export class FirewallOrchestrationService {
         vmsFailed++
         const errorMsg = `Failed to sync VM ${machine.id} (${machine.name}): ${err}`
         debug.error(errorMsg)
-        errors.push(errorMsg)
+        // Keep the raw error in the server log above, but push a sanitized copy to the
+        // user-facing errors[] — raw nft command/stderr must not leak to the client.
+        errors.push(`Failed to sync VM ${machine.id} (${machine.name}): ${sanitizeErrorForUser(String(err)) ?? String(err)}`)
       }
     }
 

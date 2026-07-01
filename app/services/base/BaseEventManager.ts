@@ -224,9 +224,18 @@ export abstract class BaseEventManager {
 
       // Special handling for delete events
       if (action === 'delete') {
-        const targetUsers = await this.getTargetUsersForDeleted(resourceData)
+        // Guard the id up-front: a partial event payload lacking an id would
+        // otherwise build buildDeletePayload(undefined) and broadcast a delete
+        // for `undefined` to every recipient (pruning nothing, confusing clients).
+        // Bail out instead of fanning out a meaningless delete.
         const id = typeof resourceData === 'string' ? resourceData : resourceData?.id
-        const payload = this.buildDeletePayload(id as string)
+        if (!id) {
+          logger.warn(`⚠️ ${this.getResourceName()} delete event missing id; skipping`)
+          return
+        }
+
+        const targetUsers = await this.getTargetUsersForDeleted(resourceData)
+        const payload = this.buildDeletePayload(id)
 
         logger.info(`🗑️ Sending ${this.getResourceName()} delete event to ${targetUsers.length} users`)
         this.sendToTargetUsers(targetUsers, this.getResourceName(), 'delete', payload)

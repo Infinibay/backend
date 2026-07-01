@@ -1,5 +1,6 @@
 import logger from '@main/logger'
 import { PrismaClient } from '@prisma/client'
+import { sanitizeErrorForUser } from '@utils/sanitizeError'
 import { SocketService } from './SocketService'
 
 // Event action types
@@ -67,11 +68,15 @@ export class EventManager {
     } catch (error) {
       logger.error(`❌ Error dispatching event ${resource}:${action}:`, error)
 
-      // Send error event to triggering user if available
+      // Send error event to triggering user if available.
+      // Sanitize the user-facing message: handler errors flow from libvirt/virsh,
+      // fs, and Prisma and routinely embed host paths / raw stderr / schema detail
+      // that a (possibly non-admin) tenant must not receive. Full raw error is
+      // still logged server-side above.
       if (triggeredBy) {
         this.socketService.sendToUser(triggeredBy, resource, action, {
           status: 'error',
-          error: error instanceof Error ? error.message : 'Unknown error occurred'
+          error: sanitizeErrorForUser(error instanceof Error ? error.message : 'Unknown error occurred') ?? 'Unknown error occurred'
         })
       }
     }

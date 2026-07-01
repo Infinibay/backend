@@ -251,6 +251,27 @@ function resolveRoleFromGroups (memberOf: string[], mappings: IdentityGroupRoleM
 export class IdentityProviderService {
   constructor (private readonly prisma: PrismaClient) {}
 
+  // Refuse an LDAP simple bind over a plaintext (non-TLS) connection in
+  // production: the end-user password (on login) and the service bind password
+  // (on sync) would otherwise traverse the network in cleartext. Mirrors the
+  // other NODE_ENV production guards in this file.
+  private assertBindTransportSecure (provider: Pick<IdentityProvider, 'useTls'>): void {
+    if (process.env.NODE_ENV === 'production' && !provider.useTls) {
+      throw new Error('Bind over a non-TLS connection is refused in production')
+    }
+  }
+
+  // SSRF guard for the operational connect paths. isHostAllowed() was previously
+  // only reached from testConnection, so a connector persisted with an internal
+  // host could still be dialed by authenticateUser/syncProvider. Enforce it on
+  // every path that opens an outbound directory connection (also covers rows
+  // that predate any persist-time host validation).
+  private async assertHostAllowed (host: string): Promise<void> {
+    if (!(await isHostAllowed(host))) {
+      throw new Error('Target host is not allowed')
+    }
+  }
+
   buildCreateData (input: IdentityProviderConfig): Prisma.IdentityProviderCreateInput {
     const host = cleanString(input.host)
     const baseDn = cleanString(input.baseDn)
@@ -382,6 +403,15 @@ export class IdentityProviderService {
       return { success: false, message: 'Bind DN is required for strict directory validation' }
     }
 
+    // Strict validation performs a real bind — refuse it over plaintext in prod
+    // and re-check the SSRF host guard before opening the connection.
+    try {
+      this.assertBindTransportSecure(provider)
+      await this.assertHostAllowed(provider.host)
+    } catch (error) {
+      return { success: false, message: error instanceof Error ? error.message : String(error), latencyMs: endpoint.latencyMs }
+    }
+
     const client = new Client({
       url: directoryUrl(provider),
       timeout: 10000,
@@ -415,6 +445,15 @@ export class IdentityProviderService {
 
     const provider = await this.prisma.identityProvider.findUnique({ where: { id: providerId } })
     if (!provider || !provider.enabled) return false
+
+    // Refuse plaintext bind in prod and block SSRF to internal hosts. Both guards
+    // throw; authenticateUser preserves its boolean contract by returning false.
+    try {
+      this.assertBindTransportSecure(provider)
+      await this.assertHostAllowed(provider.host)
+    } catch {
+      return false
+    }
 
     const client = new Client({
       url: directoryUrl(provider),
@@ -459,6 +498,11 @@ export class IdentityProviderService {
     })
 
     try {
+      // Refuse plaintext bind in prod and block SSRF to internal hosts. A throw
+      // here is handled by the catch below, which marks the sync run ERROR.
+      this.assertBindTransportSecure(provider)
+      await this.assertHostAllowed(provider.host)
+
       if (provider.bindDn) {
         const password = provider.bindPasswordSecret ? decryptSecret(provider.bindPasswordSecret) : ''
         await client.bind(provider.bindDn, password)

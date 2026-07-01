@@ -171,14 +171,15 @@ export class IdentityProviderResolver {
     @Ctx() context: InfinibayContext
   ): Promise<IdentityProviderType> {
     const { prisma } = context
+    // buildUpdateData throws validation errors that are safe to surface verbatim.
+    const data = this.service(prisma).buildUpdateData(input)
     try {
-      const provider = await prisma.identityProvider.update({
-        where: { id },
-        data: this.service(prisma).buildUpdateData(input)
-      })
+      const provider = await prisma.identityProvider.update({ where: { id }, data })
       return toIdentityProviderType(provider)
     } catch (error) {
-      throw new UserInputError((error as Error).message)
+      // Don't echo raw directory/database errors to the client; log them instead.
+      logger.error(`Failed to update identity provider: ${(error as Error).message}`)
+      throw new UserInputError('Unable to update the identity provider. Please verify the configuration.')
     }
   }
 

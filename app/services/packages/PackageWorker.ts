@@ -78,8 +78,15 @@ export class PackageWorker extends EventEmitter {
       this.packagePath
     ], {
       stdio: ['pipe', 'pipe', 'pipe'],
+      // SECURITY: external packages are untrusted ("workers aislados"). Never spread
+      // the full backend process.env — that would leak DATABASE_URL, INFINIBAY_LICENSE_SECRET,
+      // JWT/session secrets and cluster mTLS material to third-party plugin code, bypassing the
+      // CapabilityManager trust boundary. Pass only an explicit, minimal allowlist. PATH is kept
+      // so `node` resolves; capability-scoped secrets (if ever needed) must be injected per-capability
+      // under a namespaced key after CapabilityManager authorizes them, never blanket-forwarded.
       env: {
-        ...process.env,
+        PATH: process.env.PATH,
+        NODE_ENV: process.env.NODE_ENV,
         PACKAGE_PATH: this.packagePath,
         PACKAGE_NAME: this.manifest.name,
         PACKAGE_CAPABILITIES: JSON.stringify(this.manifest.capabilities || {})

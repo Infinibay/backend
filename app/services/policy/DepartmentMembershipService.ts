@@ -1,4 +1,5 @@
 import { DepartmentRole, PrismaClient } from '@prisma/client'
+import { UserInputError } from '@utils/errors'
 
 const MEMBERSHIP_USER_SELECT = {
   id: true,
@@ -29,9 +30,12 @@ export class DepartmentMembershipService {
 
   async setMember (departmentId: string, userId: string, role: DepartmentRole) {
     const department = await this.prisma.department.findUnique({ where: { id: departmentId } })
-    if (!department) throw new Error('Department not found')
+    // Use a mapped GraphQLError (BAD_USER_INPUT) rather than a plain Error so the
+    // apollo formatError boundary returns a clean error instead of an
+    // INTERNAL_SERVER_ERROR carrying a stacktrace extension on non-prod deploys.
+    if (!department) throw new UserInputError('Department not found')
     const user = await this.prisma.user.findUnique({ where: { id: userId } })
-    if (!user || user.deleted) throw new Error('User not found')
+    if (!user || user.deleted) throw new UserInputError('User not found')
 
     return this.prisma.departmentMembership.upsert({
       where: { departmentId_userId: { departmentId, userId } },

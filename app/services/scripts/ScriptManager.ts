@@ -2,6 +2,7 @@ import logger from '@main/logger'
 import { PrismaClient, Prisma, Script, OS, ShellType } from '@prisma/client';
 import fs from 'fs/promises';
 import path from 'path';
+import { sanitizeErrorForUser } from '@utils/sanitizeError';
 import { ScriptParser, ParsedScript, ScriptInputDefinition } from './ScriptParser';
 import { TemplateEngine } from './TemplateEngine';
 
@@ -137,7 +138,17 @@ export class ScriptManager {
 
     // Generate unique filename with collision handling
     const extension = data.format === 'yaml' ? '.yaml' : '.json';
-    let fileName = this.sanitizeFileName(data.name) + extension;
+    const baseFileName = this.sanitizeFileName(data.name);
+
+    // Validate that the sanitized name is not empty (mirrors updateScript's guard).
+    // An all-symbol name (e.g. '***' or an emoji) collapses to '', which would
+    // otherwise write a bare '.yaml' dotfile with a meaningless DB fileName and
+    // collide as '-1.yaml', '-2.yaml' for every subsequent empty-sanitizing name.
+    if (!baseFileName) {
+      throw new Error(`Invalid script name '${data.name}': name must contain at least one alphanumeric character`);
+    }
+
+    let fileName = baseFileName + extension;
 
     // Ensure library directory exists
     await this.ensureDirectoryExists(LIBRARY_DIR);
@@ -146,8 +157,7 @@ export class ScriptManager {
     let filePath = path.join(LIBRARY_DIR, fileName);
     let counter = 1;
     while (await this.fileExists(filePath)) {
-      const baseName = this.sanitizeFileName(data.name);
-      fileName = `${baseName}-${counter}${extension}`;
+      fileName = `${baseFileName}-${counter}${extension}`;
       filePath = path.join(LIBRARY_DIR, fileName);
       counter++;
       if (counter > 100) {
@@ -255,7 +265,10 @@ export class ScriptManager {
             newFileName = null;
           }
         } catch (error) {
-          throw new Error(`Failed to rename script file: ${(error as Error).message}`);
+          // Log the full fs error (with absolute host paths) server-side only; the
+          // client-facing message must not leak the backend filesystem layout.
+          logger.error('Failed to rename script file', { id, oldFilePath, newFilePath, error });
+          throw new Error(`Failed to rename script file: ${sanitizeErrorForUser((error as Error).message)}`);
         }
 
         // Add fileName to updateData if rename was successful
@@ -446,7 +459,10 @@ export class ScriptManager {
         content = await fs.readFile(templatePath, 'utf-8');
         filePath = templatePath; // Update path for error messages
       } catch (templateError) {
-        throw new Error(`Failed to read script file from both library and templates directories: ${(error as Error).message}`);
+        // Log the full fs errors (with absolute host paths) server-side only; the
+        // client-facing message must not leak the backend filesystem layout.
+        logger.error('Failed to read script file from both library and templates directories', { id, error, templateError });
+        throw new Error(`Failed to read script file: ${sanitizeErrorForUser((error as Error).message)}`);
       }
     }
 

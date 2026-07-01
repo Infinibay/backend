@@ -12,6 +12,7 @@ import { SuccessType } from './machine/type'
 import { getSnapshotServiceV2 } from '@services/SnapshotServiceV2'
 import { VMOperationsService } from '@services/VMOperationsService'
 import { UserInputError } from '@utils/errors'
+import { sanitizeErrorForUser } from '@utils/sanitizeError'
 import { getSocketService } from '@services/SocketService'
 import { InfinibayContext } from '@utils/context'
 import { Can } from '@main/permissions'
@@ -61,9 +62,11 @@ export class SnapshotResolver {
       )
 
       if (!result.success) {
+        // Sanitize: the service message can embed host disk paths / raw qemu-img
+        // stderr; keep the full raw error server-side (logged) only.
         return {
           success: false,
-          message: result.message
+          message: sanitizeErrorForUser(result.message) || 'Failed to create snapshot'
         }
       }
 
@@ -107,7 +110,7 @@ export class SnapshotResolver {
       }
     } catch (error) {
       logger.error( `Failed to create snapshot: ${error}`)
-      throw new UserInputError(`Failed to create snapshot: ${error}`)
+      throw new UserInputError(sanitizeErrorForUser(String(error)) || 'Failed to create snapshot')
     }
   }
 
@@ -172,11 +175,12 @@ export class SnapshotResolver {
 
       return {
         success: result.success,
-        message: result.message
+        // Sanitize: service failure messages can embed host disk paths / qemu-img stderr.
+        message: sanitizeErrorForUser(result.message) || 'Failed to restore snapshot'
       }
     } catch (error) {
       logger.error( `Failed to restore snapshot: ${error}`)
-      throw new UserInputError(`Failed to restore snapshot: ${error}`)
+      throw new UserInputError(sanitizeErrorForUser(String(error)) || 'Failed to restore snapshot')
     }
   }
 
@@ -241,11 +245,12 @@ export class SnapshotResolver {
 
       return {
         success: result.success,
-        message: result.message
+        // Sanitize: service failure messages can embed host disk paths / qemu-img stderr.
+        message: sanitizeErrorForUser(result.message) || 'Failed to delete snapshot'
       }
     } catch (error) {
       logger.error( `Failed to delete snapshot: ${error}`)
-      throw new UserInputError(`Failed to delete snapshot: ${error}`)
+      throw new UserInputError(sanitizeErrorForUser(String(error)) || 'Failed to delete snapshot')
     }
   }
 
@@ -282,7 +287,8 @@ export class SnapshotResolver {
       if (!result.success || result.snapshots.length === 0) {
         return {
           success: true,
-          message: result.message || 'No snapshots found for this virtual machine',
+          // Sanitize: service message can embed host disk paths / raw stderr.
+          message: sanitizeErrorForUser(result.message) || 'No snapshots found for this virtual machine',
           snapshots: []
         }
       }
@@ -313,7 +319,7 @@ export class SnapshotResolver {
       }
     } catch (error) {
       logger.error( `Failed to list snapshots: ${error}`)
-      throw new UserInputError(`Failed to list snapshots: ${error}`)
+      throw new UserInputError(sanitizeErrorForUser(String(error)) || 'Failed to list snapshots')
     }
   }
 
@@ -367,7 +373,7 @@ export class SnapshotResolver {
       return result
     } catch (error) {
       logger.error( `Failed to get current snapshot: ${error}`)
-      throw new UserInputError(`Failed to get current snapshot: ${error}`)
+      throw new UserInputError(sanitizeErrorForUser(String(error)) || 'Failed to get current snapshot')
     }
   }
 
@@ -406,7 +412,8 @@ export class SnapshotResolver {
         if (!stopResult.success) {
           return {
             success: false,
-            message: `Failed to stop VM before restore: ${stopResult.error}`
+            // Sanitize: stopResult.error can embed host paths / raw libvirt/qemu stderr.
+            message: sanitizeErrorForUser(`Failed to stop VM before restore: ${stopResult.error}`) || 'Failed to stop VM before restore'
           }
         }
 
@@ -431,13 +438,17 @@ export class SnapshotResolver {
 
       logger.info( `VM ${input.machineId} force-restored to snapshot '${input.snapshotName}'`)
 
+      // Derive the message from the actual outcome so an 'emergency recovery'
+      // that failed can never be reported to the operator as a success.
       return {
         success: result.success,
-        message: `Virtual machine force-restored to snapshot '${input.snapshotName}' successfully`
+        message: result.success
+          ? `Virtual machine force-restored to snapshot '${input.snapshotName}' successfully`
+          : (sanitizeErrorForUser(result.message) || `Failed to force-restore VM to snapshot '${input.snapshotName}'`)
       }
     } catch (error) {
       logger.error( `Failed to force restore snapshot: ${error}`)
-      throw new UserInputError(`Failed to force restore snapshot: ${error}`)
+      throw new UserInputError(sanitizeErrorForUser(String(error)) || 'Failed to force restore snapshot')
     }
   }
 }

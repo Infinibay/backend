@@ -35,14 +35,32 @@ export class DataVersionResolver {
   @Query(() => DataVersions)
   @Can('system:view')
   async dataVersions (
-    @Ctx() { prisma }: InfinibayContext
+    @Ctx() ctx: InfinibayContext
   ): Promise<DataVersions> {
+    const { prisma } = ctx
     try {
+      // The USER preset holds system:view@ANY, so any end user can poll this
+      // fingerprint. But USER is narrowed to vm:view@OWN and user:view@OWN
+      // everywhere else, so bare instance-wide aggregates would leak the global
+      // VM/user counts (and a lastUpdated polling side-channel) to own-scoped
+      // callers. Scope the two narrowed entities to the caller's visible rows so
+      // the fingerprint tracks exactly what they can otherwise see. ANY-scope
+      // holders (admins) get {} → global counts, unchanged. department/
+      // application/appSettings stay global because USER already holds :view@ANY.
+      const [vmWhere, userWhere] = await Promise.all([
+        ctx.scopedWhere!('vm:view'),
+        // Users are non-department resources (see LOADERS.user, departmentId=null):
+        // a user "owns" its own row via `id`, and DEPARTMENT scope falls back to
+        // own-row, so map both owner and dept fields to `id`.
+        ctx.scopedWhere!('user:view', {}, { ownerField: 'id', deptField: 'id' })
+      ])
+
       // Get both count and maximum updatedAt for each entity type
       // This creates a comprehensive version fingerprint that detects all changes
       const [vmStats, departmentStats, applicationStats, userStats, appSettingsStats] = await Promise.all([
-        // Machine - count and max updatedAt
+        // Machine - count and max updatedAt (scoped to the caller's visible VMs)
         prisma.machine.aggregate({
+          where: vmWhere,
           _count: { id: true },
           _max: { updatedAt: true }
         }),
@@ -56,8 +74,9 @@ export class DataVersionResolver {
           _count: { id: true },
           _max: { updatedAt: true }
         }),
-        // User - count and max updatedAt (now available)
+        // User - count and max updatedAt (scoped to the caller's visible users)
         prisma.user.aggregate({
+          where: userWhere,
           _count: { id: true },
           _max: { updatedAt: true }
         }),
