@@ -215,36 +215,56 @@ const storage = multer.diskStorage({
 })
 
 // Allowed MIME types for ISO files
+// Known MIME types browsers/OSes report for .iso files. This list is NOT
+// exhaustive and is used only to keep logs quiet — the MIME type is
+// client-supplied (so never a security boundary) and varies wildly by platform
+// (e.g. application/vnd.efi.iso on some Linux desktops). Acceptance is decided by
+// the .iso EXTENSION plus the downstream content validation (7z/isoinfo actually
+// parse the image); MIME is advisory only.
 const ALLOWED_MIME_TYPES = [
   'application/x-iso9660-image',
   'application/x-cd-image',
   'application/x-dvd-image',
   'application/iso',
+  'application/vnd.efi.iso',
   'application/octet-stream', // Many browsers send this for .iso files
   'binary/octet-stream'
 ]
+
+/**
+ * multer fileFilter for ISO uploads. Exported for testing.
+ *
+ * AUTHORITATIVE gate: the filename extension. The browser-supplied MIME type is
+ * unreliable for ISOs (application/octet-stream, x-iso9660-image, vnd.efi.iso,
+ * empty, …) and client-controlled, so rejecting on it only blocked legitimate
+ * uploads (e.g. vnd.efi.iso on Linux desktops) without adding any security — the
+ * real content check is downstream (7z/isoinfo actually parse the image). MIME is
+ * therefore ADVISORY: log an unrecognised value, never reject on it.
+ */
+export function isoFileFilter (
+  _req: unknown,
+  file: { originalname: string, mimetype?: string },
+  cb: (error: Error | null, acceptFile?: boolean) => void
+): void {
+  const name = (file.originalname || '').toLowerCase()
+  if (!name.endsWith('.iso')) {
+    cb(new Error('Invalid file type. Only .iso files are allowed'))
+    return
+  }
+
+  if (file.mimetype && !ALLOWED_MIME_TYPES.includes(file.mimetype)) {
+    logger.info(`ISO upload '${file.originalname}' has unrecognised MIME type '${file.mimetype}' — accepting on .iso extension (content validated downstream)`)
+  }
+
+  cb(null, true)
+}
 
 const upload = multer({
   storage,
   limits: {
     fileSize: 1024 * 1024 * 1024 * 100 // 100GB
   },
-  fileFilter: (_req, file, cb) => {
-    // Validate file extension
-    const ext = file.originalname.toLowerCase()
-    if (!ext.endsWith('.iso')) {
-      return cb(new Error('Invalid file type. Only ISO files are allowed'))
-    }
-
-    // Validate MIME type if provided (some clients don't send a useful MIME type)
-    if (file.mimetype && file.mimetype !== 'application/octet-stream') {
-      if (!ALLOWED_MIME_TYPES.includes(file.mimetype)) {
-        return cb(new Error(`Invalid MIME type: ${file.mimetype}. Only ISO files are allowed`))
-      }
-    }
-
-    cb(null, true)
-  }
+  fileFilter: isoFileFilter as unknown as multer.Options['fileFilter']
 })
 
 /**
