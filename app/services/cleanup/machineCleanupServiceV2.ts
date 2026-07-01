@@ -138,7 +138,10 @@ export class MachineCleanupServiceV2 {
 
     // 2. Clean up disk files
     this.debug.info(`[2/6] Cleaning disk files`)
-    const diskResult = await this.cleanupDiskFiles(machine.internalName, summary)
+    const storedDiskPaths = Array.isArray(machine.configuration?.diskPaths)
+      ? (machine.configuration?.diskPaths as unknown[]).filter((p): p is string => typeof p === 'string' && p.length > 0)
+      : []
+    const diskResult = await this.cleanupDiskFiles(machine.internalName, storedDiskPaths, summary)
     summary.operations.push(diskResult)
     if (diskResult.error) summary.errors.push(diskResult.error)
 
@@ -292,7 +295,7 @@ export class MachineCleanupServiceV2 {
   /**
    * Cleans up disk files for the VM.
    */
-  private async cleanupDiskFiles (internalName: string, summary: CleanupSummary): Promise<ResourceCleanupResult> {
+  private async cleanupDiskFiles (internalName: string, storedDiskPaths: string[], summary: CleanupSummary): Promise<ResourceCleanupResult> {
     const startTime = Date.now()
     const result: ResourceCleanupResult = {
       resource: 'Disk Files',
@@ -300,14 +303,25 @@ export class MachineCleanupServiceV2 {
       duration: 0
     }
 
-    const diskDir = process.env.INFINIZATION_DISK_DIR ?? '/var/lib/infinization/disks'
-    const diskPatterns = [
+    // The AUTHORITATIVE disk locations are the absolute paths persisted on the
+    // machine configuration at create time (the same paths infinization boots).
+    // Delete those first. The pattern-based reconstruction below is only a legacy
+    // fallback for rows that never stored diskPaths — and it must be rooted at the
+    // REAL disk dir. The old default (`/var/lib/infinization/disks`) did not match
+    // where disks actually live (`$INFINIBAY_BASE_DIR/disks`, e.g.
+    // /opt/infinibay/disks), so when INFINIZATION_DISK_DIR was unset every delete
+    // silently missed the disk (ENOENT) and LEAKED it while reporting success.
+    const baseDir = process.env.INFINIBAY_BASE_DIR ?? '/opt/infinibay'
+    const diskDir = process.env.INFINIZATION_DISK_DIR ?? path.join(baseDir, 'disks')
+    const candidates = new Set<string>([
+      ...storedDiskPaths,
       path.join(diskDir, `${internalName}.qcow2`),
       path.join(diskDir, `${internalName}-main.qcow2`),
       path.join(diskDir, `${internalName}-0.qcow2`)
-    ]
+    ])
+    const diskPatterns = Array.from(candidates)
 
-    this.debug.info(`Removing disk files for ${internalName}`)
+    this.debug.info(`Removing disk files for ${internalName} (${storedDiskPaths.length} stored path(s) + fallbacks)`)
     const removedFiles: string[] = []
     const errors: string[] = []
 
@@ -607,7 +621,8 @@ export class MachineCleanupServiceV2 {
     this.debug.info(`Cleaning runtime resources for VM ${machineId} (deleteDisks: ${deleteDisks})`)
 
     const machine = await this.prisma.machine.findUnique({
-      where: { id: machineId }
+      where: { id: machineId },
+      include: { configuration: true }
     })
 
     if (!machine) {
@@ -637,7 +652,10 @@ export class MachineCleanupServiceV2 {
     summary.operations.push(vmResult)
 
     if (deleteDisks) {
-      const diskResult = await this.cleanupDiskFiles(machine.internalName, summary)
+      const storedDiskPaths = Array.isArray(machine.configuration?.diskPaths)
+        ? (machine.configuration?.diskPaths as unknown[]).filter((p): p is string => typeof p === 'string' && p.length > 0)
+        : []
+      const diskResult = await this.cleanupDiskFiles(machine.internalName, storedDiskPaths, summary)
       summary.operations.push(diskResult)
     }
 

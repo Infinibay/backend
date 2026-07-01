@@ -73,6 +73,38 @@ describe('MachineCleanupService - Comprehensive Tests', () => {
       await expect(service.cleanupVM('non-existent-vm')).resolves.toBeUndefined()
     })
 
+    it('deletes the AUTHORITATIVE stored diskPaths, not just reconstructed guesses (no disk leak)', async () => {
+      // Regression: cleanup used to rebuild disk paths from internalName under
+      // INFINIZATION_DISK_DIR (default /var/lib/infinization/disks). When that env
+      // was unset it looked in the wrong dir, missed the real qcow2 (ENOENT,
+      // silently ignored) and LEAKED the disk while reporting success. The real
+      // path lives on configuration.diskPaths.
+      const { unlink } = require('fs/promises') as { unlink: jest.Mock }
+      const realDisk = '/opt/infinibay/disks/1be60d0f-c4d1-4e48-853c-16eaffb56bdf.qcow2'
+      const mockMachine = {
+        id: mockVMId,
+        internalName: `vm-${mockVMId}`,
+        status: 'off',
+        configuration: {
+          id: 'config-1',
+          machineId: mockVMId,
+          qmpSocketPath: null,
+          qemuPid: null,
+          tapDeviceName: null,
+          guestAgentSocketPath: null,
+          infiniServiceSocketPath: null,
+          tpmSocketPath: null,
+          diskPaths: [realDisk]
+        }
+      }
+      prisma.machine.findUnique.mockResolvedValue(mockMachine as any)
+
+      await service.cleanupVM(mockVMId)
+
+      // The exact stored absolute path must be unlinked.
+      expect(unlink).toHaveBeenCalledWith(realDisk)
+    })
+
     it('should successfully clean up VM with configuration', async () => {
       const mockMachine = {
         id: mockVMId,
