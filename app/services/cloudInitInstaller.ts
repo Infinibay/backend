@@ -305,10 +305,15 @@ NETWORK_HELPER_EOF`,
       // Create directory for per-instance scripts
       'mkdir -p /target/var/lib/cloud/scripts/per-instance',
 
-      // Create InfiniService installation script
-      // Custom scripts are NOT executed here during installation.
-      // InfiniService (installed above) handles all FIRST_BOOT scripts post-boot
-      // via VirtioSocketWatcherService — this is the standard path for ALL OS types.
+      // Install InfiniService (the in-guest agent). This connects over the
+      // org.infinibay.agent virtio-serial channel on first boot; its first message
+      // is what flips the VM's setupComplete=true and drives status transitions.
+      // WITHOUT this the OS installs fine but the VM never reports "ready" — the
+      // install script was previously generated but never spread into late-commands
+      // (lost in the CloudInitInstaller refactor), so infiniservice was never
+      // installed. curl/wget were installed above and the network was validated, so
+      // the in-target download can run here.
+      ...this.generateInfiniServiceInstallCommands(),
 
       // Create post-installation script
       `cat > /target/var/lib/cloud/scripts/per-instance/post_install.py << 'EOF'

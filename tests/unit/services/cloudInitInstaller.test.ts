@@ -304,6 +304,25 @@ describe('CloudInitInstaller', () => {
       expect(Array.isArray(parsed.autoinstall['late-commands'])).toBe(true)
     })
 
+    it('INSTALLS infiniservice in late-commands (regression: the install script was generated but never wired → OS installed but VM never reported ready)', async () => {
+      const manager = new CloudInitInstaller(
+        validUsername,
+        validPassword,
+        mockApplications,
+        'vm-abc-123' // vmId → per-VM secret + install
+      )
+
+      const parsed = yaml.load(await manager.generateConfig()) as any
+      const late = (parsed.autoinstall['late-commands'] as string[]).join('\n')
+
+      // The install script must be created AND executed in-target, and it must
+      // download the infiniservice binary + installer from the backend endpoints.
+      expect(late).toContain('/target/var/lib/cloud/scripts/per-instance/install_infiniservice.sh')
+      expect(late).toContain('curtin in-target -- /var/lib/cloud/scripts/per-instance/install_infiniservice.sh')
+      expect(late).toContain('/infiniservice/linux/binary')
+      expect(late).toContain('/infiniservice/linux/script')
+    })
+
     it('should set keyboard layout to US', async () => {
       const manager = new CloudInitInstaller(
         validUsername,
