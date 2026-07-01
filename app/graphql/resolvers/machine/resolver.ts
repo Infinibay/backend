@@ -3,6 +3,7 @@ import { Arg, Ctx, Mutation, Query, Resolver } from 'type-graphql'
 import { UserInputError } from '@utils/errors'
 import { sanitizeErrorForUser } from '@utils/sanitizeError'
 import { resolveConnectHost, hostFromHeader } from '@utils/resolveConnectHost'
+import { getSpiceProxyService } from '../../../services/console/SpiceProxyService'
 import {
   Machine,
   MachineOrderBy,
@@ -239,17 +240,56 @@ export class MachineQueries {
       )
     }
 
-    const connectHost = resolveConnectHost({
+    const protocol = machine.configuration.graphicProtocol || 'vnc'
+    const password = machine.configuration.graphicPassword || ''
+
+    // The address the CLIENT dials is always the master (where the relay runs),
+    // resolved from the host it reached the API on (never the node — that is the
+    // upstream). configuredHost/nodeAddress are intentionally omitted here.
+    const ingressHost = resolveConnectHost({
+      envHost: process.env.GRAPHIC_HOST,
+      requestHost: hostFromHeader(req?.headers['x-forwarded-host'] ?? req?.headers.host)
+    })
+
+    // The UPSTREAM is where the VM's SPICE server actually listens. For a VM on
+    // the master that is loopback (QEMU binds 0.0.0.0/lo locally); for a VM on a
+    // remote compute node it is that node's reachable address. Both are resolved
+    // server-side — never from client input — so the relay can only ever forward
+    // to this one VM's console (no open relay / SSRF).
+    const isLocal = machine.node == null || machine.node.role === 'master'
+    const upstreamHost = isLocal ? '127.0.0.1' : (machine.node?.address ?? '')
+
+    const proxyEnabled = (process.env.SPICE_PROXY_ENABLED ?? '1') !== '0'
+    if (proxyEnabled) {
+      if (!isLocal && (upstreamHost === '' || upstreamHost === '0.0.0.0')) {
+        throw new UserInputError('Console unavailable: the node hosting this VM has no reachable address yet.')
+      }
+      try {
+        const session = await getSpiceProxyService().ensureSession(id, upstreamHost, port)
+        return {
+          link: `${protocol}://${ingressHost}:${session.listenPort}`,
+          password,
+          protocol
+        }
+      } catch (err) {
+        // The relay is an enhancement, not a hard dependency: on capacity/bind
+        // failure fall back to a direct link so the console still works where the
+        // node is directly reachable.
+        this.debug.warn(`SPICE proxy session failed for VM ${id}, falling back to direct: ${(err as Error).message}`)
+      }
+    }
+
+    // Direct fallback (proxy disabled or unavailable): dial the hosting host.
+    const directHost = resolveConnectHost({
       configuredHost: machine.configuration.graphicHost,
       nodeAddress: machine.node?.address,
       envHost: process.env.GRAPHIC_HOST,
       requestHost: hostFromHeader(req?.headers['x-forwarded-host'] ?? req?.headers.host)
     })
-
     return {
-      link: `${machine.configuration.graphicProtocol}://${connectHost}:${port}`,
-      password: machine.configuration.graphicPassword || '',
-      protocol: machine.configuration.graphicProtocol || 'vnc'
+      link: `${protocol}://${directHost}:${port}`,
+      password,
+      protocol
     }
   }
 }
