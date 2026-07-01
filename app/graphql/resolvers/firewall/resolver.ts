@@ -227,7 +227,11 @@ export class FirewallResolver {
   }
 
   @Query(() => [NftablesChainInfoType])
-  @Can('firewallRule:view')
+  // Fleet-wide diagnostic: listVMChains() enumerates EVERY VM's nft chain across the
+  // whole deployment (unscoped machine scan). Require the verb at ANY scope so an
+  // OWN/DEPARTMENT grant no longer leaks the full cross-tenant VM inventory — matching
+  // the sibling fleet ops syncFirewallToLibvirt / cleanupInfinibayFirewall.
+  @Can('firewallRule:view', { minScope: 'ANY' })
   async listInfinibayFilters (
     @Ctx() ctx: InfinibayContext
   ): Promise<NftablesChainInfoType[]> {

@@ -353,6 +353,15 @@ export class PolicyResolver {
     @Arg('permission') permission: string,
     @Ctx() ctx: InfinibayContext
   ): Promise<boolean> {
+    // Anti-escalation (#1): removing a DENY re-widens the target's access back to
+    // whatever their role grants, so it is a widening (escalation) operation — the
+    // actor must itself be able to grant that permission/scope. Clearing an ALLOW
+    // only narrows, so it stays freely clearable for a `permission:grantUser` holder.
+    const rows = await ctx.prisma.userPermissionOverride.findMany({ where: { userId, permission }, select: { permission: true, scope: true, effect: true } })
+    if (rows.length === 0) return false
+    for (const r of rows) {
+      if (r.effect === 'DENY') await assertActorCanGrant(ctx, [{ permission: r.permission, scope: r.scope }])
+    }
     const res = await ctx.prisma.userPermissionOverride.deleteMany({ where: { userId, permission } })
     if (res.count > 0) {
       await new PolicyAuditService(ctx.prisma).record({
@@ -386,7 +395,10 @@ export class PolicyResolver {
 
   // ── Department membership (department-scoped roles) ────────────────────────
   @Query(() => [DepartmentMemberType])
-  @Can('department:view')
+  // Bind the requested department so the scope check runs (matching the sibling
+  // membership mutations); without `id` the guard takes the possession-only path
+  // and a DEPARTMENT/OWN-scoped viewer could read any department's member PII.
+  @Can('department:view', { id: (a) => a.departmentId })
   async departmentMembers (@Arg('departmentId') departmentId: string, @Ctx() ctx: InfinibayContext): Promise<DepartmentMemberType[]> {
     const rows = await new DepartmentMembershipService(ctx.prisma).list(departmentId)
     return rows.map(toMemberDto)

@@ -1,5 +1,6 @@
 import { Resolver, Subscription, Root, Arg, Authorized } from 'type-graphql'
 import { pubsub, TOPICS } from '@main/utils/pubsub'
+import { getUserAccessibleDepartments } from '@main/utils/authChecker'
 import { SystemMetrics } from './type'
 
 @Resolver()
@@ -8,9 +9,31 @@ export class MetricsResolver {
   // Subscription for real-time metrics updates
   @Subscription(() => SystemMetrics, {
     topics: TOPICS.SYSTEM_METRICS_UPDATED,
-    filter: ({ payload, args }) => {
-      // Filter by machineId if specified
-      return !args.machineId || payload.machineId === args.machineId
+    // Security: this stream carries sensitive per-machine/host telemetry
+    // (CPU/memory/disk/network/uptime). Fail closed and scope every payload to
+    // the subscribing user. `@Authorized(['ADMIN','USER'])` only proves the
+    // caller is authenticated, so an unscoped filter would let any user read
+    // every tenant's metrics — and an omitted machineId must NOT act as a
+    // match-all wildcard for non-admins (cross-tenant leak / IDOR).
+    filter: async ({ payload, args, context }: { payload: { machineId: string, metrics: SystemMetrics }, args: { machineId?: string }, context: any }) => {
+      const user = context?.user
+      if (!user) return false
+      const matchesArg = !args.machineId || payload.machineId === args.machineId
+      // Admins/super-admins see the whole fleet.
+      if (user.role === 'ADMIN' || user.role === 'SUPER_ADMIN') {
+        return matchesArg
+      }
+      // Non-admins: drop any payload whose machine scope can't be established.
+      if (!payload.machineId) return false
+      const machine = await context.prisma.machine.findUnique({
+        where: { id: payload.machineId },
+        select: { userId: true, departmentId: true }
+      })
+      if (!machine) return false
+      // Owner of the VM, or a manager of the VM's department.
+      if (machine.userId === user.id) return matchesArg
+      const depts = await getUserAccessibleDepartments(context.prisma, user.id)
+      return depts.includes(machine.departmentId) && matchesArg
     }
   })
   @Authorized(['ADMIN', 'USER'])

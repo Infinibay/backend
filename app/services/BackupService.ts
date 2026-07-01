@@ -39,6 +39,7 @@ import logger from '@main/logger'
 import { getEventManager } from '@services/EventManager'
 import { VMOperationsService } from '@services/VMOperationsService'
 import { assertVmStopped } from '@utils/assertVmStopped'
+import { ForbiddenError, NotFoundError, UserInputError } from '@utils/errors'
 import {
   OFF_STATUS,
   ERROR_STATUS,
@@ -346,7 +347,20 @@ export class BackupService {
         'destinationDir'
       )
       const diskBaseDir = path.resolve(process.env.INFINIZATION_DISK_DIR ?? '/var/lib/infinization/disks')
-      const safeDiskPaths = diskPaths.map((p) => this.assertWithinBase(p, diskBaseDir, 'diskPath'))
+      // Cross-tenant IDOR guard (authz): every VM's qcow2 lives flat in the shared
+      // disk base dir, so base-dir confinement alone would let a caller name another
+      // VM's disk. Additionally bind each requested diskPath to THIS VM's own
+      // configured disks — @Can only authorized the caller against input.vmId.
+      const ownDisks = new Set(
+        this.resolveDiskPaths(vm.configuration?.diskPaths).map((d) => path.resolve(d))
+      )
+      const safeDiskPaths = diskPaths.map((p) => {
+        const resolved = this.assertWithinBase(p, diskBaseDir, 'diskPath')
+        if (!ownDisks.has(resolved)) {
+          throw new ForbiddenError(`diskPath does not belong to VM ${vm.id}: ${p}`)
+        }
+        return resolved
+      })
       const compression = params.compression ?? DEFAULT_BACKUP_COMPRESSION
 
       // Pre-insert a row so in-flight backups are visible to the UI.
@@ -561,6 +575,20 @@ export class BackupService {
     })
     if (!vm) throw new Error(`VM ${params.vmId} not found`)
 
+    // Cross-tenant restore guard (authz): the @Can decorator authorized the caller
+    // only against params.vmId — the supplied backupId is otherwise unbound, and
+    // infinization's metadata lookup scans ALL VM directories and restores the
+    // first match. Bind the backupId to THIS VM via the DB (match either the
+    // infinization backupId column or the DB row id) before touching any disk.
+    const backupRow = await this.prisma.backup.findFirst({
+      where: { vmId: params.vmId, OR: [{ backupId: params.backupId }, { id: params.backupId }] },
+      select: { backupId: true }
+    })
+    if (!backupRow) throw new NotFoundError(`Backup ${params.backupId} not found for VM ${params.vmId}`)
+    const resolvedBackupId = backupRow.backupId
+    // Defense-in-depth: never let a backupId become a path-traversal segment.
+    if (/[\\/]|\.\./.test(resolvedBackupId)) throw new UserInputError('invalid backupId')
+
     // Empty array means "restore every disk to its original location" — the UI
     // sends [] for a full restore. infinization requires the target list to
     // match the backup's disk count, so resolve the paths from the VM record.
@@ -573,7 +601,19 @@ export class BackupService {
     // Restore OVERWRITES these target paths — validate them (no path-traversal,
     // no leading-dash arg-injection) before any disk is touched.
     const diskBaseDir = path.resolve(process.env.INFINIZATION_DISK_DIR ?? '/var/lib/infinization/disks')
-    const diskPaths = rawDiskPaths.map((p) => this.assertWithinBase(p, diskBaseDir, 'diskPath'))
+    // Cross-tenant IDOR guard (authz): restore OVERWRITES these targets, so bind
+    // each requested diskPath to THIS VM's own configured disks — base-dir
+    // confinement alone would let a caller clobber another tenant's live disk.
+    const ownDisks = new Set(
+      this.resolveDiskPaths(vm.configuration?.diskPaths).map((d) => path.resolve(d))
+    )
+    const diskPaths = rawDiskPaths.map((p) => {
+      const resolved = this.assertWithinBase(p, diskBaseDir, 'diskPath')
+      if (!ownDisks.has(resolved)) {
+        throw new ForbiddenError(`diskPath does not belong to VM ${vm.id}: ${p}`)
+      }
+      return resolved
+    })
 
     // ── Atomic claim (audit H1) ──────────────────────────────────────────────
     // Claim the STOPPED VM as RESTORING before touching any disk. A concurrent
@@ -610,7 +650,7 @@ export class BackupService {
 
       const result = await this.infinization.restoreBackup({
         vmId: vm.id,
-        backupId: params.backupId,
+        backupId: resolvedBackupId,
         diskPaths,
         overwriteExisting: params.overwriteExisting ?? false,
         // Default false: a normal restore of a SNAPSHOT-type backup never clobbers

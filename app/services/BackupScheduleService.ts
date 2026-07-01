@@ -16,7 +16,7 @@
 import path from 'path'
 
 import { BackupType, BackupCompression, DEFAULT_BACKUP_DIR } from '@infinibay/infinization'
-import type { PrismaClient, BackupSchedule as PrismaSchedule } from '@prisma/client'
+import type { PrismaClient, BackupSchedule as PrismaSchedule, Prisma } from '@prisma/client'
 
 import logger from '@main/logger'
 import { CronExpression, Scheduler, getScheduler, ScheduledHandle } from '@main/lib/scheduler'
@@ -151,9 +151,21 @@ export class BackupScheduleService {
     this.dispatch('delete', existing, triggeredBy)
   }
 
-  async listSchedules (vmId?: string): Promise<PrismaSchedule[]> {
+  /**
+   * Lists backup schedules, newest first. `vmWhere` is a Prisma filter applied
+   * to the schedule's VM relation so the caller (resolver) can narrow rows to the
+   * machines the user may see — the resolver passes ctx.scopedWhere('backup:view')
+   * mapped through the `vm` relation. Defaults to `{}` (no extra narrowing) so a
+   * bare call is unchanged, but the resolver always scopes: an OWN/DEPARTMENT
+   * holder no longer enumerates every tenant's schedules, and an absent grant
+   * fails closed (scopedWhere returns a deny sentinel).
+   */
+  async listSchedules (vmId?: string, vmWhere: Record<string, unknown> = {}): Promise<PrismaSchedule[]> {
     return this.prisma.backupSchedule.findMany({
-      where: vmId ? { vmId } : undefined,
+      where: {
+        ...(vmId ? { vmId } : {}),
+        vm: vmWhere as Prisma.MachineWhereInput
+      },
       orderBy: { createdAt: 'desc' }
     })
   }

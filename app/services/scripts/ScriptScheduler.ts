@@ -472,6 +472,12 @@ export class ScriptScheduler {
     status?: ExecutionStatus | ExecutionStatus[];
     scheduleType?: 'one-time' | 'periodic';
     limit?: number;
+    /**
+     * Optional Prisma MachineWhereInput narrowing results to the machines the
+     * caller is allowed to see (row-level scope). Defaults to {} so existing
+     * internal/automation callers keep their current behaviour unchanged.
+     */
+    machineWhere?: Prisma.MachineWhereInput;
   }): Promise<any[]> {
     const where: Prisma.ScriptExecutionWhereInput = {
       executionType: ExecutionType.SCHEDULED,
@@ -481,10 +487,20 @@ export class ScriptScheduler {
       where.machineId = filters.machineId;
     }
 
+    // Combine the caller-scope machine filter with an optional departmentId
+    // filter. Intersecting (AND) ensures an out-of-scope department can never
+    // widen the result set beyond the machines the caller may access.
+    const machineConstraints: Prisma.MachineWhereInput[] = [];
+    if (filters.machineWhere && Object.keys(filters.machineWhere).length > 0) {
+      machineConstraints.push(filters.machineWhere);
+    }
     if (filters.departmentId) {
-      where.machine = {
-        departmentId: filters.departmentId,
-      };
+      machineConstraints.push({ departmentId: filters.departmentId });
+    }
+    if (machineConstraints.length === 1) {
+      where.machine = machineConstraints[0];
+    } else if (machineConstraints.length > 1) {
+      where.machine = { AND: machineConstraints };
     }
 
     if (filters.scriptId) {
@@ -513,7 +529,9 @@ export class ScriptScheduler {
       orderBy: {
         scheduledFor: 'asc',
       },
-      take: filters.limit ?? 50,
+      // Clamp the page size defensively (shared internal method): a caller-
+      // supplied limit must not force an arbitrarily large joined fetch.
+      take: Math.min(Math.max(filters.limit ?? 50, 1), 100),
     });
 
     return executions;

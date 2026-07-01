@@ -2,6 +2,7 @@ import logger from '@main/logger'
 import { PrismaClient } from '@prisma/client'
 import { Resolver, Query, Mutation, Arg, Ctx, Int } from 'type-graphql'
 import { UserInputError } from '../../../utils/errors'
+import { sanitizeErrorForUser } from '../../../utils/sanitizeError'
 import { DepartmentType, UpdateDepartmentNameInput, UpdateDepartmentNetworkInput, CreateDepartmentFirewallInput, UpdateDepartmentFirewallPolicyInput, DepartmentNetworkDiagnosticsType, DhcpTrafficCaptureType } from './type'
 import { InfinibayContext } from '../../../utils/context'
 import { getEventManager } from '../../../services/EventManager'
@@ -19,9 +20,16 @@ export class DepartmentResolver {
   @Query(() => [DepartmentType])
   @Can('department:view')
   async departments (
-    @Ctx() { prisma }: InfinibayContext
+    @Ctx() ctx: InfinibayContext
   ): Promise<DepartmentType[]> {
-    const departments = await prisma.department.findMany({ include: { machines: true } })
+    const { prisma } = ctx
+    // Narrow to the caller's granted scope. Departments have no owner column, so
+    // BOTH scope fields map to the department's own id: DEPARTMENT scope resolves
+    // to `id ∈ accessibleDepartments`, no grant to `__no_access__`, ANY to `{}`.
+    // Without this, any holder of `department:view` sees every tenant's network +
+    // firewall config (cross-tenant reconnaissance).
+    const where = await ctx.scopedWhere!('department:view', {}, { ownerField: 'id', deptField: 'id' })
+    const departments = await prisma.department.findMany({ where, include: { machines: true } })
     const response = []
     for (let index = 0; index < departments.length; index++) {
       const dep = departments[index]
@@ -181,7 +189,8 @@ export class DepartmentResolver {
       logger.error(`Failed to configure network for department ${department.id}:`, networkError)
       await prisma.department.delete({ where: { id: department.id } })
       const errorMessage = networkError instanceof Error ? networkError.message : String(networkError)
-      throw new UserInputError(`Failed to configure department network: ${errorMessage}`)
+      // Sanitize before exposing: raw service errors embed host paths + command stderr.
+      throw new UserInputError(`Failed to configure department network: ${sanitizeErrorForUser(errorMessage)}`)
     }
 
     // Get updated department with network info
@@ -369,15 +378,19 @@ export class DepartmentResolver {
   @Can('department:view')
   async findDepartmentByName (
     @Arg('name') name: string,
-    @Ctx() { prisma }: InfinibayContext
+    @Ctx() ctx: InfinibayContext
   ): Promise<DepartmentType | null> {
+    const { prisma } = ctx
+    // Enforce per-department scope so the by-name lookup can't be used to
+    // enumerate/read departments the caller has no grant for. Same id-based
+    // scope mapping as the `departments` list (no owner column on Department).
+    const where = await ctx.scopedWhere!(
+      'department:view',
+      { name: { equals: name, mode: 'insensitive' } },
+      { ownerField: 'id', deptField: 'id' }
+    )
     const department = await prisma.department.findFirst({
-      where: {
-        name: {
-          equals: name,
-          mode: 'insensitive'
-        }
-      },
+      where,
       include: { machines: true }
     })
     if (!department) {
@@ -640,8 +653,11 @@ export class DepartmentResolver {
     try {
       return await networkService.diagnoseDepartmentNetwork(departmentId)
     } catch (error) {
+      // Log the full raw error server-side; expose only a sanitized message
+      // (raw ip/ss/bridge stderr + host paths must not reach the tenant).
+      logger.error(`Failed to get network diagnostics for department ${departmentId}:`, error)
       const errorMessage = error instanceof Error ? error.message : String(error)
-      throw new UserInputError(`Failed to get network diagnostics: ${errorMessage}`)
+      throw new UserInputError(`Failed to get network diagnostics: ${sanitizeErrorForUser(errorMessage)}`)
     }
   }
 
@@ -667,8 +683,11 @@ export class DepartmentResolver {
     try {
       return await networkService.captureDhcpTraffic(departmentId, durationSeconds)
     } catch (error) {
+      // Log the full raw error server-side; expose only a sanitized message
+      // (raw tcpdump/command stderr + host paths must not reach the tenant).
+      logger.error(`Failed to capture DHCP traffic for department ${departmentId}:`, error)
       const errorMessage = error instanceof Error ? error.message : String(error)
-      throw new UserInputError(`Failed to capture DHCP traffic: ${errorMessage}`)
+      throw new UserInputError(`Failed to capture DHCP traffic: ${sanitizeErrorForUser(errorMessage)}`)
     }
   }
 

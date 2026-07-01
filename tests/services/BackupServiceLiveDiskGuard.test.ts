@@ -217,6 +217,9 @@ describe('BackupService — H6 live-disk guard wiring', () => {
         userId: 'user-1',
         configuration: { diskPaths: ['/disks/web-1.qcow2'] }
       } as never)
+      // restoreBackup now binds the supplied backupId to THIS VM (cross-tenant
+      // restore guard) before touching any disk; provide the matching row.
+      prisma.backup.findFirst.mockResolvedValue({ backupId: 'bkp-1' } as never)
 
       const service = new BackupService(prisma)
       const lib = service.getInfinizationService() as unknown as FakeLibBackupService
@@ -244,6 +247,9 @@ describe('BackupService — H6 live-disk guard wiring', () => {
         userId: 'user-1',
         configuration: { diskPaths: ['/disks/web-1.qcow2'] }
       } as never)
+      // restoreBackup now binds the supplied backupId to THIS VM (cross-tenant
+      // restore guard) before touching any disk; provide the matching row.
+      prisma.backup.findFirst.mockResolvedValue({ backupId: 'bkp-1' } as never)
 
       const service = new BackupService(prisma)
       const lib = service.getInfinizationService() as unknown as FakeLibBackupService

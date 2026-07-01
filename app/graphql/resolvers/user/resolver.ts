@@ -11,7 +11,7 @@ import {
 } from 'type-graphql'
 import { UserInputError, AuthenticationError } from '@utils/errors'
 import { UserType, LoginResponse, RefreshAuthResponse, UserOrderByInputType, CreateUserInputType, UpdateUserInputType, UserRole } from './type'
-import { PaginationInputType } from '@utils/pagination'
+import { PaginationInputType, MAX_TAKE } from '@utils/pagination'
 import { InfinibayContext } from '@utils/context'
 import { getEventManager } from '../../../services/EventManager'
 import { Can } from '@main/permissions'
@@ -103,19 +103,28 @@ export class UserResolver implements UserResolverInterface {
   Require auth('ADMIN')
   */
   @Query(() => [UserType])
-  @Can('user:view')
+  // Admin directory listing (doc: "Require auth('ADMIN')"). The body does not
+  // narrow rows per-caller, so require the verb at ANY scope: an OWN/DEPARTMENT
+  // holder (e.g. the default USER preset's user:view@OWN) must not enumerate
+  // every account across departments/tenants via possession alone.
+  @Can('user:view', { minScope: 'ANY' })
   async users (
     @Arg('orderBy', { nullable: true }) orderBy: UserOrderByInputType,
     @Arg('pagination', { nullable: true }) pagination: PaginationInputType,
     @Ctx() context: InfinibayContext
   ): Promise<UserType[]> {
     const prisma = context.prisma
+    // `pagination` is nullable, so a client may omit it entirely (undefined).
+    // Resolve defaults with optional chaining before validating, otherwise
+    // `pagination.take` dereferences undefined and throws a TypeError.
+    const rawTake = pagination?.take ?? 20
+    const skip = pagination?.skip ?? 0
     // Check if pagination is valid
-    if (pagination.take < 0 || pagination.skip < 0) {
+    if (rawTake < 0 || skip < 0) {
       throw new UserInputError('Invalid pagination')
     }
-    const take = pagination.take || 20
-    const skip = pagination.skip || 0
+    // Cap the page size so `take: 2e9` can't drive an unbounded user fetch (DoS).
+    const take = Math.min(rawTake, MAX_TAKE)
     let order: Record<string, string> = {}
     if (orderBy && orderBy.fieldName && orderBy.direction) {
       order = {

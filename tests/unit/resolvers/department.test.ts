@@ -65,6 +65,13 @@ jest.mock('../../../app/services/firewall/InfinizationFirewallService', () => ({
 describe('DepartmentResolver', () => {
   let resolver: DepartmentResolver
   const ctx = createAdminContext() as InfinibayContext
+  // The `departments` and `findDepartmentByName` resolvers now narrow rows to the
+  // caller's scope via `ctx.scopedWhere` (attached by the @Can middleware in prod).
+  // Direct-call unit tests bypass that middleware, so provide a permissive helper
+  // that returns the baseWhere unchanged — keeping the prisma query assertions exact.
+  ;(ctx as any).scopedWhere = jest.fn(
+    async (_permission: string, baseWhere: Record<string, unknown> = {}) => baseWhere
+  )
 
   // Helper to build expected department response from a mock department
   function expectedDepartmentResponse (dept: any, totalMachines: number = 0) {
@@ -141,7 +148,7 @@ describe('DepartmentResolver', () => {
 
       const result = await resolver.departments(ctx)
 
-      expect(mockPrisma.department.findMany).toHaveBeenCalledWith({ include: { machines: true } })
+      expect(mockPrisma.department.findMany).toHaveBeenCalledWith({ where: {}, include: { machines: true } })
       expect(result).toHaveLength(5)
       expect(result[0]).toEqual(expect.objectContaining({
         id: departments[0].id,

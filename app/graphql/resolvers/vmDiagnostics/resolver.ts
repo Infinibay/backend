@@ -4,6 +4,8 @@ import { InfinibayContext } from '@main/utils/context'
 import { Can } from '@main/permissions'
 import { getQemuGuestAgentService } from '@services/QemuGuestAgentService'
 import { getVirtioSocketWatcherService } from '@services/VirtioSocketWatcherService'
+import { ApolloError, isDomainError } from '@utils/errors'
+import { sanitizeErrorForUser } from '@utils/sanitizeError'
 import { VmDiagnostics, SocketConnectionStats, VmConnectionInfo } from './type'
 
 @Resolver()
@@ -112,7 +114,11 @@ export class VmDiagnosticsResolver {
       }
     } catch (error) {
       this.debug.error(`Diagnostics failed for VM ${vmId}: ${error}`)
-      throw error
+      // Preserve domain-error semantics, but never rethrow the raw error to the
+      // tenant: libvirt/prisma/socket-watcher messages can embed host paths and
+      // internal stack detail, so surface a sanitized message instead.
+      if (isDomainError(error)) throw error
+      throw new ApolloError(sanitizeErrorForUser((error as Error).message) ?? 'Failed to run VM diagnostics')
     }
   }
 
@@ -120,7 +126,10 @@ export class VmDiagnosticsResolver {
     description: 'Get current socket connection statistics for all VMs',
     nullable: true
   })
-  @Can('vmHealth:view')
+  // Fleet-wide diagnostic: getConnectionStats() enumerates every VM on the host
+  // regardless of owner/department, so require an ANY-scope grant — an OWN/
+  // DEPARTMENT-scoped vmHealth:view must not enumerate other tenants' VMs.
+  @Can('vmHealth:view', { minScope: 'ANY' })
   async socketConnectionStats (): Promise<SocketConnectionStats | null> {
     try {
       const socketWatcher = getVirtioSocketWatcherService()

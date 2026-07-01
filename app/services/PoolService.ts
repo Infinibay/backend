@@ -21,11 +21,20 @@ import { Logger } from 'winston'
 import { PrismaClient, Pool, Machine, Prisma } from '@prisma/client'
 import logger from '@main/logger'
 import { SafeUser } from '../utils/context'
+import { UserInputError } from '../utils/errors'
 import { MachineLifecycleService } from './machineLifecycleService'
 import { MachineCleanupServiceV2 } from './cleanup/machineCleanupServiceV2'
 import { VMOperationsService } from './VMOperationsService'
 import { getEventManager, type EventAction } from './EventManager'
 import { OsEnum } from '../graphql/resolvers/machine/type'
+
+/**
+ * Absolute ceiling on a pool's sizeMin/sizeMax/targetSize. Each unit spawned by
+ * the create-time refill or a scale-up is a real qcow2 clone + libvirt define, so
+ * without a cap a single request (e.g. sizeMax=100000) could batch-boot enough
+ * VMs to exhaust host disk/inodes/DB rows. Bounds every synchronous spawn loop.
+ */
+const MAX_POOL_SIZE = 128
 
 export interface CreatePoolInput {
   name: string
@@ -63,8 +72,9 @@ export class PoolService {
   // Queries
   // -------------------------------------------------------------------
 
-  async list (): Promise<Array<Pool & { currentSize: number }>> {
+  async list (where: Prisma.PoolWhereInput = {}): Promise<Array<Pool & { currentSize: number }>> {
     const pools = await this.prisma.pool.findMany({
+      where,
       orderBy: [{ departmentId: 'asc' }, { name: 'asc' }]
     })
     return await Promise.all(
@@ -114,8 +124,12 @@ export class PoolService {
 
     const sizeMin = input.sizeMin ?? 0
     const sizeMax = input.sizeMax ?? 10
-    if (sizeMin > sizeMax) {
-      throw new Error('sizeMin cannot exceed sizeMax')
+    // Bound both sizes: the create-time refill below spawns min(sizeMin,sizeMax)
+    // VMs synchronously, so an uncapped size is a mass-provisioning DoS vector.
+    if (sizeMin < 0 || sizeMax < 0 || sizeMin > sizeMax || sizeMax > MAX_POOL_SIZE) {
+      throw new UserInputError(
+        `Invalid pool size: sizeMin and sizeMax must be between 0 and ${MAX_POOL_SIZE}, with sizeMin <= sizeMax`
+      )
     }
 
     const pool = await this.prisma.pool.create({
@@ -150,6 +164,12 @@ export class PoolService {
     const pool = await this.prisma.pool.findUnique({ where: { id } })
     if (!pool) throw new Error(`Pool not found: ${id}`)
     if (targetSize < 0) throw new Error('targetSize cannot be negative')
+    // Absolute cap in addition to sizeMax: the scale-up loop below provisions
+    // (targetSize - current) VMs synchronously, so bound it hard against DoS even
+    // if a pool's sizeMax was somehow persisted above the ceiling.
+    if (targetSize > MAX_POOL_SIZE) {
+      throw new UserInputError(`targetSize ${targetSize} exceeds the maximum pool size ${MAX_POOL_SIZE}`)
+    }
     if (targetSize > pool.sizeMax) {
       throw new Error(`targetSize ${targetSize} exceeds pool.sizeMax ${pool.sizeMax}`)
     }
@@ -200,6 +220,21 @@ export class PoolService {
   }
 
   async update (id: string, input: UpdatePoolInput): Promise<Pool> {
+    // Validate size bounds against the merged (current + provided) values so a
+    // partial update can't set an unbounded or inverted min/max that a later
+    // refill/scale tick would batch-boot into an unbounded VM spawn. Only touch
+    // the DB for the pre-read when a size is actually being changed.
+    if (input.sizeMin !== undefined || input.sizeMax !== undefined) {
+      const current = await this.prisma.pool.findUnique({ where: { id } })
+      if (!current) throw new Error(`Pool not found: ${id}`)
+      const sizeMin = input.sizeMin ?? current.sizeMin
+      const sizeMax = input.sizeMax ?? current.sizeMax
+      if (sizeMin < 0 || sizeMax < 0 || sizeMin > sizeMax || sizeMax > MAX_POOL_SIZE) {
+        throw new UserInputError(
+          `Invalid pool size: sizeMin and sizeMax must be between 0 and ${MAX_POOL_SIZE}, with sizeMin <= sizeMax`
+        )
+      }
+    }
     const pool = await this.prisma.pool.update({
       where: { id },
       data: {

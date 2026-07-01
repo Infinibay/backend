@@ -1,7 +1,8 @@
-import { Resolver, Query, Mutation, Arg, Ctx, ID } from 'type-graphql'
+import { Resolver, Query, Mutation, Arg, Ctx, ID, Int } from 'type-graphql'
 import { MaintenanceTaskType, MaintenanceStatus, MaintenanceTrigger, Prisma } from '@prisma/client'
 import { InfinibayContext, requireUser } from '@utils/context'
 import { MaintenanceService } from '@services/MaintenanceService'
+import { CronParser } from '@utils/cronParser'
 import { Can } from '@main/permissions'
 import {
   MaintenanceTask,
@@ -94,7 +95,7 @@ export class MaintenanceResolver {
   @Can('maintenanceTask:view', { id: (a) => a.machineId, scopeVia: 'vm' })
   async maintenanceHistory (
     @Arg('machineId', () => ID) machineId: string,
-    @Arg('limit', { nullable: true, defaultValue: 50 }) limit: number,
+    @Arg('limit', () => Int, { nullable: true, defaultValue: 50 }) limit: number,
     @Arg('taskType', () => MaintenanceTaskType, { nullable: true }) taskType: MaintenanceTaskType | undefined,
     @Arg('status', () => MaintenanceStatus, { nullable: true }) status: MaintenanceStatus | undefined,
     @Ctx() ctx: InfinibayContext
@@ -107,7 +108,9 @@ export class MaintenanceResolver {
     const history = await ctx.prisma.maintenanceHistory.findMany({
       where,
       orderBy: { executedAt: 'desc' },
-      take: limit
+      // Clamp the client-supplied page size to a sane bound; an unclamped `take`
+      // lets an authorized caller request a huge/fractional page and exhaust heap.
+      take: Math.min(Math.max(1, Math.floor(limit)), 200)
     })
 
     // Transform database results to match GraphQL types
@@ -266,14 +269,35 @@ export class MaintenanceResolver {
     @Ctx() ctx: InfinibayContext
   ): Promise<MaintenanceTaskResponse> {
     try {
+      // Validate against the PERSISTED task so an update can't slip unvalidated
+      // parameters or an unparseable cron past the create-path checks and reach
+      // the PowerShell execution sink (validateTaskParameters was previously only
+      // run on the create path).
+      const existing = await ctx.prisma.maintenanceTask.findUnique({
+        where: { id: input.id }
+      })
+      if (!existing) {
+        return {
+          success: false,
+          error: 'Maintenance task not found'
+        }
+      }
+
       const updateData: Prisma.MaintenanceTaskUpdateInput = {}
       if (input.name !== undefined) updateData.name = input.name
       if (input.description !== undefined) updateData.description = input.description
       if (input.isEnabled !== undefined) updateData.isEnabled = input.isEnabled
       if (input.isRecurring !== undefined) updateData.isRecurring = input.isRecurring
-      if (input.cronSchedule !== undefined) updateData.cronSchedule = input.cronSchedule
+      if (input.cronSchedule !== undefined) {
+        if (input.cronSchedule && !CronParser.isValidCronExpression(input.cronSchedule)) {
+          throw new Error('Invalid cron expression')
+        }
+        updateData.cronSchedule = input.cronSchedule
+      }
       if (input.runAt !== undefined) updateData.runAt = input.runAt
       if (input.parameters !== undefined) {
+        const maintenanceService = new MaintenanceService(ctx.prisma)
+        maintenanceService.validateTaskParameters(existing.taskType, input.parameters as Prisma.JsonValue)
         updateData.parameters = input.parameters || Prisma.JsonNull
       }
 
@@ -460,7 +484,11 @@ export class MaintenanceResolver {
    * Get all due maintenance tasks across all VMs (for cron processing)
    */
   @Query(() => [MaintenanceTask])
-  @Can('maintenanceTask:view')
+  // Fleet-wide list (every VM in every department): getDueTasks does not narrow by
+  // owner/department, so gate it to ANY-scope holders. An OWN/DEPARTMENT grant is
+  // insufficient here, preventing cross-tenant disclosure of tasks/scripts. The
+  // per-minute cron calls MaintenanceService.getDueTasks() directly, not this query.
+  @Can('maintenanceTask:view', { minScope: 'ANY' })
   async dueMaintenanceTasks (
     @Ctx() ctx: InfinibayContext
   ): Promise<MaintenanceTask[]> {

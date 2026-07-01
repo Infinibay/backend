@@ -47,7 +47,12 @@ export class PoolResolver {
   @Can('pool:view')
   async pools (@Ctx() ctx?: InfinibayContext): Promise<PoolGql[]> {
     if (!ctx) throw new UserInputError('Context not available')
-    const rows = await getService(ctx).list()
+    // Narrow rows to the caller's scope. Pool has no owner column, so match by
+    // department: DEPARTMENT holders see their accessible departments' pools,
+    // OWN-only holders fail closed (departmentId === userId never matches → empty),
+    // ANY sees all, and no grant yields the '__no_access__' sentinel.
+    const where = await ctx.scopedWhere!('pool:view', {}, { ownerField: 'departmentId', deptField: 'departmentId' })
+    const rows = await getService(ctx).list(where)
     return rows.map(toGql)
   }
 
@@ -67,7 +72,9 @@ export class PoolResolver {
   // -----------------------------------------------------------------------
 
   @Mutation(() => PoolResult)
-  @Can('pool:create')
+  // Scope the create to the target department so a DEPARTMENT-scoped grant can't
+  // provision pools/VMs into a department the caller can't otherwise touch.
+  @Can('pool:create', { id: (a) => a.input.departmentId, scopeVia: 'department' })
   async createPool (
     @Arg('input') input: CreatePoolInput,
     @Ctx() ctx?: InfinibayContext

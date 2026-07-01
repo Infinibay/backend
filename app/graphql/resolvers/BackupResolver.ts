@@ -170,7 +170,13 @@ export class BackupResolver {
 
     const backupService = getBackupService(ctx.prisma)
     const scheduleService = getBackupScheduleService(ctx.prisma, backupService)
-    const rows = await scheduleService.listSchedules(vmId)
+    // Row scoping (authz): narrow schedules to the machines the caller may view.
+    // scopedWhere mapped through the `vm` relation returns {} for ANY-scope (no-op,
+    // admins keep seeing everything), an owner/department OR for OWN/DEPARTMENT, or
+    // a deny sentinel when the grant is absent (fail closed). An explicit vmId no
+    // longer bypasses ownership — both filters are ANDed.
+    const machineWhere = await ctx.scopedWhere!('backup:view')
+    const rows = await scheduleService.listSchedules(vmId, machineWhere)
     return {
       success: true,
       message: `Found ${rows.length} schedule(s)`,

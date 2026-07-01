@@ -26,6 +26,35 @@ import {
 import { InfinibayContext, requireUser } from '../../../utils/context';
 import { ExecutionStatus, ExecutionType } from '@prisma/client';
 import { Can } from '@main/permissions';
+import { validateUsernameStrict } from '../../../services/shellEscape';
+
+// OS-level pseudo-accounts that may always be selected as a "Run As" target.
+// Anything else must be an account that actually exists on the target VM.
+const ALLOWED_RUNAS = new Set(['system', 'administrator', 'root']);
+
+/**
+ * Validate/normalize a caller-supplied `runAs` value before it reaches
+ * ScriptExecutor / ScriptScheduler.
+ *
+ * runAs is forwarded to the guest agent as the impersonation user (and, on
+ * Windows, `administrator`/`system` force privilege elevation), so an
+ * unvalidated value lets a caller with only `script:execute` inject shell
+ * metacharacters into the agent's impersonation command or name an arbitrary
+ * elevated account. We accept only the OS pseudo-accounts or a user that the
+ * VM actually reports (`allowedUsers`); everything else is rejected.
+ * validateUsernameStrict additionally restricts the result to [A-Za-z0-9_-],
+ * closing agent-side command injection even for allow-listed values.
+ */
+function normalizeRunAs(runAs?: string | null, allowedUsers: string[] = []): string | undefined {
+  if (runAs == null || runAs.trim() === '') {
+    return undefined;
+  }
+  const value = runAs.trim();
+  if (ALLOWED_RUNAS.has(value.toLowerCase()) || allowedUsers.includes(value)) {
+    return validateUsernameStrict(value);
+  }
+  throw new UserInputError('Invalid runAs: must be system, administrator, root, or a known machine user');
+}
 
 // Helper function to extract request metadata
 function extractRequestMetadata(ctx: InfinibayContext): { ipAddress?: string; userAgent?: string } {
@@ -160,6 +189,15 @@ export class ScriptResolver {
     @Arg('limit', () => Int, { nullable: true, defaultValue: 50 }) limit: number,
     @Ctx() ctx: InfinibayContext
   ): Promise<any[]> {
+    // Bound the page size (mirrors scriptExecutionsFiltered) to prevent a single
+    // request from forcing an arbitrarily large joined fetch.
+    if (limit > 100) {
+      throw new UserInputError('Limit cannot exceed 100');
+    }
+    if (limit < 1) {
+      throw new UserInputError('Limit must be positive');
+    }
+
     const where: any = { machineId };
     if (status) {
       where.status = status;
@@ -242,15 +280,11 @@ export class ScriptResolver {
     // Filter by machine ID (prefer specific machine over department)
     if (filters.machineId) {
       where.machineId = filters.machineId;
-    } else if (filters.departmentId) {
-      // Filter by department (expand to all VMs in department) only if no specific machine
-      const machines = await ctx.prisma.machine.findMany({
-        where: { departmentId: filters.departmentId },
-        select: { id: true }
-      });
-      const machineIds = machines.map(m => m.id);
-      where.machineId = { in: machineIds };
     }
+    // NOTE: departmentId is expanded to the caller's *accessible* machines in the
+    // scope gate below (after the ctx.user check, since scopedWhere needs a user).
+    // Expanding to ALL department machines here would leak other users' executions
+    // (owning one VM in the dept must not expose the whole department — IDOR).
 
     // Filter by status
     if (filters.status) {
@@ -315,13 +349,20 @@ export class ScriptResolver {
       }
     }
 
-    if (filters.departmentId) {
-      // Restrict the result set to the caller's accessible machines in the department.
+    if (filters.departmentId && !filters.machineId) {
+      // Restrict the result set to the caller's accessible machines in the
+      // department, and constrain the query to exactly those machine ids.
+      // (Counting alone was insufficient: it let a caller who owns a single VM
+      //  in the department read every VM's executions in that department.)
       const accessibleWhere = await ctx.scopedWhere!('script:view', { departmentId: filters.departmentId });
-      const machineCount = await ctx.prisma.machine.count({ where: accessibleWhere });
-      if (machineCount === 0) {
+      const accessibleMachines = await ctx.prisma.machine.findMany({
+        where: accessibleWhere,
+        select: { id: true }
+      });
+      if (accessibleMachines.length === 0) {
         return emptyResult;
       }
+      where.machineId = { in: accessibleMachines.map(m => m.id) };
     }
 
     // Get total count
@@ -442,6 +483,17 @@ export class ScriptResolver {
     @Arg('machineId', () => ID) machineId: string,
     @Ctx() ctx: InfinibayContext
   ): Promise<string[]> {
+    return this.resolveVmUsers(ctx, machineId)
+  }
+
+  /**
+   * Helper: Resolve the list of valid "Run As" users for a VM (OS-aware
+   * defaults plus any live accounts reported by infiniservice). This is the
+   * authoritative allowlist for `runAs`: the same set the client offers in the
+   * "Run As" dropdown, so validating against it never rejects a legitimate
+   * selection. Falls back to OS-aware defaults on any error.
+   */
+  private async resolveVmUsers(ctx: InfinibayContext, machineId: string): Promise<string[]> {
     // Initialize with Windows defaults (fallback)
     let defaultUsers: string[] = ['administrator', 'system']
 
@@ -497,6 +549,27 @@ export class ScriptResolver {
       // Return OS-aware defaults on error
       return defaultUsers
     }
+  }
+
+  /**
+   * Helper: Validate a caller-supplied `runAs` for a single machine. Cheap for
+   * the common cases (unset or an OS pseudo-account); only performs the live
+   * VM user lookup when a custom account name is supplied.
+   */
+  private async normalizeRunAsForMachine(
+    ctx: InfinibayContext,
+    machineId: string,
+    runAs?: string | null
+  ): Promise<string | undefined> {
+    if (runAs == null || runAs.trim() === '') {
+      return undefined
+    }
+    if (ALLOWED_RUNAS.has(runAs.trim().toLowerCase())) {
+      return normalizeRunAs(runAs)
+    }
+    // Custom account: validate against the machine's actual user list.
+    const allowedUsers = await this.resolveVmUsers(ctx, machineId)
+    return normalizeRunAs(runAs, allowedUsers)
   }
 
   /**
@@ -712,6 +785,10 @@ export class ScriptResolver {
         }
       }
 
+      // Validate runAs against the OS pseudo-accounts + this VM's real users
+      // before it reaches the executor / guest agent (impersonation + elevation).
+      const runAs = await this.normalizeRunAsForMachine(ctx, input.machineId, input.runAs)
+
       // Extract request metadata
       const { ipAddress, userAgent } = extractRequestMetadata(ctx)
 
@@ -725,7 +802,7 @@ export class ScriptResolver {
         inputValues: input.inputValues || {},
         executionType: ExecutionType.ON_DEMAND,
         triggeredById: user.id,
-        runAs: input.runAs,
+        runAs,
         ipAddress,
         userAgent
       });
@@ -912,6 +989,19 @@ export class ScriptResolver {
     @Arg('filters', () => ScheduledScriptsFiltersInput, { nullable: true }) filters: ScheduledScriptsFiltersInput | null,
     @Ctx() ctx: InfinibayContext
   ): Promise<any[]> {
+    // scopedWhere requires an authenticated user; bail closed otherwise.
+    if (!ctx.user) {
+      return [];
+    }
+
+    // Bound the page size (this filter is otherwise uncapped).
+    if (filters?.limit != null && filters.limit > 100) {
+      throw new UserInputError('Limit cannot exceed 100');
+    }
+    if (filters?.limit != null && filters.limit < 1) {
+      throw new UserInputError('Limit must be positive');
+    }
+
     const scheduler = new ScriptScheduler(ctx.prisma);
 
     // Convert ScheduleType enum to query filters
@@ -919,6 +1009,13 @@ export class ScriptResolver {
     if (filters?.scheduleType) {
       queryFilters.scheduleType = filters.scheduleType === ScheduleType.PERIODIC ? 'periodic' : 'one-time';
     }
+
+    // Row-level scope narrowing: constrain results to the machines the caller may
+    // view (own/department/any). Without this the list leaked every tenant's
+    // scheduled executions (including their inputValues). Any machineId/departmentId
+    // filter is intersected with this scope inside getScheduledScripts, so an
+    // out-of-scope target simply yields no rows.
+    queryFilters.machineWhere = await ctx.scopedWhere!('script:view', {});
 
     const executions = await scheduler.getScheduledScripts(queryFilters);
 
@@ -1094,13 +1191,18 @@ export class ScriptResolver {
       // Create scheduler instance
       const scheduler = new ScriptScheduler(ctx.prisma);
 
+      // Validate runAs before it is persisted / forwarded to the guest agent.
+      // Scheduling may target many (possibly offline) machines, so we accept
+      // only the OS pseudo-accounts here and reject arbitrary values.
+      const runAs = normalizeRunAs(input.runAs)
+
       // Build config (scheduleType set below based on input)
       const config: ScheduleScriptConfig = {
         scriptId: input.scriptId,
         scheduleType: 'immediate', // default, overridden below
         inputValues: input.inputValues || {},
         userId: user.id,
-        runAs: input.runAs
+        runAs
       };
       // Map ScheduleType enum to scheduleType string
       if (input.scheduleType === ScheduleType.IMMEDIATE) {
@@ -1226,6 +1328,10 @@ export class ScriptResolver {
           error: `Cannot update execution with status ${execution.status}. Only PENDING executions can be updated.`
         };
       }
+
+      // Validate runAs before it is persisted / forwarded to the guest agent.
+      // (undefined stays undefined = "leave unchanged"; invalid values throw.)
+      input.runAs = normalizeRunAs(input.runAs);
 
       // Create scheduler instance
       const scheduler = new ScriptScheduler(ctx.prisma);

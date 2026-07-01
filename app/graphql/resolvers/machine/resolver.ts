@@ -200,8 +200,17 @@ export class MachineQueries {
     const whereClause = await ctx.scopedWhere!('vm:view')
     const order = { [(orderBy?.fieldName ?? 'createdAt')]: orderBy?.direction ?? 'desc' }
 
+    // Clamp an explicitly-supplied page size so a single request can't ask Prisma
+    // for billions of rows (each pulling 5 relations + a possible libvirt lookup
+    // in transformMachine) — DoS via `machines(pagination: { take: 2e9 })`. When
+    // pagination is omitted we intentionally keep the prior "return all in-scope"
+    // behavior (existing clients depend on it).
+    const take = pagination?.take != null ? Math.min(Math.max(pagination.take, 1), 1000) : undefined
+    const skip = pagination?.skip != null ? Math.max(pagination.skip, 0) : undefined
+
     const prismaMachines = await prisma.machine.findMany({
-      ...pagination,
+      take,
+      skip,
       orderBy: [order],
       where: whereClause,
       include: { configuration: true, department: true, template: true, user: true, node: true }
@@ -819,6 +828,15 @@ export class MachineMutations {
       }
       return transformMachine(existingMachine, prisma)
     }
+
+    // Authorize the caller for the TARGET department, not just the source VM.
+    // @Can('vm:move', { scopeVia: 'vm' }) above only proves the caller's scope
+    // covers the SOURCE VM; without this a scoped mover could relocate their VM
+    // onto another tenant's isolated bridge/firewall (cross-tenant IDOR). ANY
+    // passes; DEPARTMENT requires the target dept be in the caller's accessible
+    // departments; otherwise assertCan throws ForbiddenError. The same-department
+    // no-op is short-circuited above so it stays permitted for all scopes.
+    await context.assertCan!('vm:move', { departmentId })
 
     // Initialize firewall services for VMMoveService
     const ruleService = new FirewallRuleService(prisma)

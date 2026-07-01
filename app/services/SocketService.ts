@@ -150,9 +150,14 @@ export class SocketService {
 
   // Generate unique namespace for user (fallback for users without stored namespace)
   private generateUserNamespace (userId: string): string {
-    // Format: user_<userId_prefix>
-    // This creates a consistent namespace for the user across sessions
-    return `user_${userId.substring(0, 8)}`
+    // Format: user_<full userId>
+    // SECURITY: key the personal Socket.IO room on the FULL user id. User ids are
+    // v4 UUIDs, so an 8-char prefix is only 32 bits and collides at scale (birthday
+    // bound ~65k users); two distinct users sharing that prefix would join the same
+    // room and receive each other's per-user events (VM metrics, script results,
+    // firewall/remediation payloads), breaking tenant isolation. The full id is
+    // collision-free and Socket.IO room names are unbounded, so no length concern.
+    return `user_${userId}`
   }
 
   // Send event to specific user namespace

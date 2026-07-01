@@ -36,6 +36,8 @@ export interface SpiceProxyConfig {
   maxLifetimeMs: number
   /** Max concurrent sessions (port-exhaustion / resource guard). */
   maxSessions: number
+  /** Max concurrent client connections a single session listener will accept. */
+  maxConnsPerSession: number
 }
 
 export interface ProxySession {
@@ -67,7 +69,13 @@ export function defaultConfig (): SpiceProxyConfig {
     portMax: envInt('SPICE_PROXY_PORT_MAX', 6199),
     idleMs: envInt('SPICE_PROXY_IDLE_MS', 5 * 60 * 1000),
     maxLifetimeMs: envInt('SPICE_PROXY_MAX_LIFETIME_MS', 12 * 60 * 60 * 1000),
-    maxSessions: envInt('SPICE_PROXY_MAX_SESSIONS', 200)
+    maxSessions: envInt('SPICE_PROXY_MAX_SESSIONS', 200),
+    // Bound the client connections a single console listener will accept. A SPICE
+    // session legitimately opens a handful of channels (main/display/inputs/cursor,
+    // plus optional audio/usbredir/smartcard for multi-monitor use), so the default
+    // leaves headroom for those while capping abusive fan-out far below the
+    // fd-exhausting "thousands". Tunable via SPICE_PROXY_MAX_CONNS_PER_SESSION.
+    maxConnsPerSession: envInt('SPICE_PROXY_MAX_CONNS_PER_SESSION', 32)
   }
 }
 
@@ -157,6 +165,14 @@ export class SpiceProxyService {
       const sockets = new Set<net.Socket>()
 
       const server = net.createServer((client) => {
+        // Defensive per-session fan-out guard for the rare race where a burst of
+        // clients slips past server.maxConnections (set below): tear the client
+        // down BEFORE opening any upstream socket. Each live connection contributes
+        // two sockets (client + upstream), so the ceiling is 2x the per-session cap.
+        if (sockets.size >= 2 * this.cfg.maxConnsPerSession) {
+          client.destroy()
+          return
+        }
         // Relay one client <-> a fresh upstream connection. Errors on either leg
         // tear down BOTH; a failure here must never crash the process.
         const upstream = net.connect(upstreamPort, upstreamHost)
@@ -182,6 +198,13 @@ export class SpiceProxyService {
         const live = this.sessions.get(vmId)
         if (live) this.touch(live)
       })
+
+      // Cap concurrent client connections on this listener so a single authorized
+      // console port cannot be used to open an unbounded number of upstream
+      // sockets (fd / memory exhaustion, checklist 6). Node closes sockets beyond
+      // the cap WITHOUT invoking the handler above, so no upstream net.connect is
+      // ever spawned for the excess.
+      server.maxConnections = this.cfg.maxConnsPerSession
 
       server.on('error', (err: any) => {
         server.close()

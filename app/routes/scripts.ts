@@ -21,13 +21,16 @@ router.get('/:scriptId/content', async (req, res) => {
     const { scriptId } = req.params
     const { vmId, executionId, format } = req.query
 
-    // Validate required parameters
-    if (!vmId || !executionId) {
-      return res.status(400).json({ error: 'vmId and executionId are required' })
+    // Reject non-string query params before use. Express parses e.g.
+    // ?executionId[x]=1 into an object; passing that to prisma.findUnique throws a
+    // PrismaClientValidationError whose text (model/field names) would leak to this
+    // unauthenticated caller. This also removes the need for the `as string` casts.
+    if (typeof vmId !== 'string' || typeof executionId !== 'string' || typeof format !== 'string') {
+      return res.status(400).json({ error: 'vmId, executionId and format must be provided as strings' })
     }
 
     // Validate format parameter
-    if (!format || (format !== 'bash' && format !== 'powershell')) {
+    if (format !== 'bash' && format !== 'powershell') {
       return res.status(400).json({
         error: 'format parameter is required and must be either "bash" or "powershell"'
       })
@@ -35,17 +38,15 @@ router.get('/:scriptId/content', async (req, res) => {
 
     // Fetch script execution record
     const execution = await prisma.scriptExecution.findUnique({
-      where: { id: executionId as string },
+      where: { id: executionId },
       include: { script: true }
     })
 
-    if (!execution || execution.scriptId !== scriptId) {
+    // Fail closed with an IDENTICAL 404 for every mismatch (missing row, wrong
+    // scriptId, wrong machineId). Returning distinct 404-vs-403 codes previously
+    // formed an enumeration oracle for this unauthenticated endpoint.
+    if (!execution || execution.scriptId !== scriptId || execution.machineId !== vmId) {
       return res.status(404).json({ error: 'Script execution not found' })
-    }
-
-    // Verify VM ID matches
-    if (execution.machineId !== vmId) {
-      return res.status(403).json({ error: 'VM ID mismatch' })
     }
 
     // Read script file from disk
@@ -81,11 +82,11 @@ router.get('/:scriptId/content', async (req, res) => {
     // Send interpolated script
     res.send(interpolated)
   } catch (error) {
+    // Log server-side only; never return raw error text (fs ENOENT with absolute
+    // host paths, js-yaml parse errors, or Prisma internals) to this unauthenticated
+    // caller — that hands an anonymous client host-layout reconnaissance.
     logger.error('Error serving script content:', error)
-    res.status(500).json({
-      error: 'Internal server error',
-      details: error instanceof Error ? error.message : String(error)
-    })
+    res.status(500).json({ error: 'Internal server error' })
   }
 })
 
