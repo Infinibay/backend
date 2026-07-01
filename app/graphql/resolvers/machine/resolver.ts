@@ -2,6 +2,7 @@ import logger from '@main/logger'
 import { Arg, Ctx, Mutation, Query, Resolver } from 'type-graphql'
 import { UserInputError } from '@utils/errors'
 import { sanitizeErrorForUser } from '@utils/sanitizeError'
+import { resolveConnectHost, hostFromHeader } from '@utils/resolveConnectHost'
 import {
   Machine,
   MachineOrderBy,
@@ -38,7 +39,7 @@ import { VMMigrationService } from '../../../services/node/VMMigrationService'
 import { AgentStorageMigrationAdapter } from '../../../services/node/AgentStorageMigrationAdapter'
 import { NodeDispatcher } from '../../../services/node/NodeDispatcher'
 import { DomainJoinService } from '../../../services/DomainJoinService'
-import { Machine as PrismaMachine, MachineTemplate as PrismaMachineTemplate, Department as PrismaDepartment, MachineConfiguration, PrismaClient } from '@prisma/client'
+import { Machine as PrismaMachine, MachineTemplate as PrismaMachineTemplate, Department as PrismaDepartment, MachineConfiguration, Node as PrismaNode, PrismaClient } from '@prisma/client'
 import { SafeUser } from '@utils/context'
 import { Can } from '@main/permissions'
 
@@ -47,14 +48,24 @@ type MachineWithRelations = PrismaMachine & {
   department?: PrismaDepartment | null
   template?: PrismaMachineTemplate | null
   user?: SafeUser | null
+  node?: PrismaNode | null
 }
 
-async function transformMachine (prismaMachine: MachineWithRelations, prisma?: PrismaClient): Promise<Machine> {
+async function transformMachine (prismaMachine: MachineWithRelations, prisma?: PrismaClient, requestHost?: string | null): Promise<Machine> {
   // Use included relations from Prisma query instead of individual DB lookups (fixes N+1)
   const user = prismaMachine.user ?? null
   const template = prismaMachine.template ?? null
   const department = prismaMachine.department ?? null
-  const graphicHost = (prismaMachine.configuration?.graphicHost) || process.env.GRAPHIC_HOST || 'localhost'
+  // Client-facing SPICE/VNC connect host for the .vv file: the reachable IP of
+  // the host that RUNS this VM (its Node.address), NOT the QEMU bind address
+  // (which is 0.0.0.0/loopback after self-heal and is not dialable). See
+  // resolveConnectHost for the full precedence.
+  const graphicHost = resolveConnectHost({
+    configuredHost: prismaMachine.configuration?.graphicHost,
+    nodeAddress: prismaMachine.node?.address,
+    envHost: process.env.GRAPHIC_HOST,
+    requestHost
+  })
   let graphicPort: number | undefined
 
   // Get graphic port from configuration if valid, regardless of VM status
@@ -167,13 +178,14 @@ export class MachineQueries {
   @Can('vm:view', { id: (a) => a.id })
   async machine (
     @Arg('id') id: string,
-    @Ctx() { prisma }: InfinibayContext
+    @Ctx() { prisma, req }: InfinibayContext
   ): Promise<Machine | null> {
     const prismaMachine = await prisma.machine.findFirst({
       where: { id },
-      include: { configuration: true, department: true, template: true, user: true }
+      include: { configuration: true, department: true, template: true, user: true, node: true }
     })
-    return prismaMachine ? await transformMachine(prismaMachine, prisma) : null
+    const requestHost = hostFromHeader(req?.headers['x-forwarded-host'] ?? req?.headers.host)
+    return prismaMachine ? await transformMachine(prismaMachine, prisma, requestHost) : null
   }
 
   @Query(() => [Machine])
@@ -191,21 +203,22 @@ export class MachineQueries {
       ...pagination,
       orderBy: [order],
       where: whereClause,
-      include: { configuration: true, department: true, template: true, user: true }
+      include: { configuration: true, department: true, template: true, user: true, node: true }
     })
 
-    return Promise.all(prismaMachines.map(m => transformMachine(m, prisma)))
+    const requestHost = hostFromHeader(ctx.req?.headers['x-forwarded-host'] ?? ctx.req?.headers.host)
+    return Promise.all(prismaMachines.map(m => transformMachine(m, prisma, requestHost)))
   }
 
   @Query(() => GraphicConfigurationType, { nullable: true })
   @Can('vm:console', { id: (a) => a.id })
   async graphicConnection (
     @Arg('id') id: string,
-    @Ctx() { prisma }: InfinibayContext
+    @Ctx() { prisma, req }: InfinibayContext
   ): Promise<GraphicConfigurationType | null> {
     const machine = await prisma.machine.findFirst({
       where: { id },
-      include: { configuration: true, department: true, template: true, user: true }
+      include: { configuration: true, department: true, template: true, user: true, node: true }
     })
 
     if (!machine || !machine.configuration) return null
@@ -226,8 +239,15 @@ export class MachineQueries {
       )
     }
 
+    const connectHost = resolveConnectHost({
+      configuredHost: machine.configuration.graphicHost,
+      nodeAddress: machine.node?.address,
+      envHost: process.env.GRAPHIC_HOST,
+      requestHost: hostFromHeader(req?.headers['x-forwarded-host'] ?? req?.headers.host)
+    })
+
     return {
-      link: `${machine.configuration.graphicProtocol}://${machine.configuration.graphicHost || process.env.GRAPHIC_HOST || 'localhost'}:${port}`,
+      link: `${machine.configuration.graphicProtocol}://${connectHost}:${port}`,
       password: machine.configuration.graphicPassword || '',
       protocol: machine.configuration.graphicProtocol || 'vnc'
     }
