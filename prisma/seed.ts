@@ -16,6 +16,12 @@ import createScripts from './seeds/scripts'
 
 import installCallbacks from '../app/utils/modelsCallbacks'
 import { applyRolePresets } from '../app/permissions/presets'
+import { DepartmentNetworkService } from '../app/services/network/DepartmentNetworkService'
+import { FirewallRuleService } from '../app/services/firewall/FirewallRuleService'
+import { FirewallPolicyService } from '../app/services/firewall/FirewallPolicyService'
+import { FirewallOrchestrationService } from '../app/services/firewall/FirewallOrchestrationService'
+import { FirewallValidationService } from '../app/services/firewall/FirewallValidationService'
+import { InfinizationFirewallService } from '../app/services/firewall/InfinizationFirewallService'
 
 // Register path mappings for ts-node to resolve @utils and other aliases
 register({
@@ -80,16 +86,121 @@ async function createAdminUser () {
   }
 }
 
+// Mirror of DepartmentResolver.getNextAvailableSubnet: departments live on
+// 10.10.X.0/24, one per third octet. Pick the first free octet so the seeded
+// Default department gets the same deterministic subnet the UI would assign.
+async function getNextAvailableSubnet (): Promise<string> {
+  const departments = await prisma.department.findMany({
+    where: { ipSubnet: { not: null } },
+    select: { ipSubnet: true }
+  })
+  const usedOctets = new Set<number>()
+  for (const dept of departments) {
+    const match = dept.ipSubnet?.match(/^10\.10\.(\d+)\.0\/24$/)
+    if (match && match[1]) usedOctets.add(parseInt(match[1], 10))
+  }
+  for (let octet = 1; octet <= 254; octet++) {
+    if (!usedOctets.has(octet)) return `10.10.${octet}.0/24`
+  }
+  throw new Error('No available subnets remaining (max 254 departments reached).')
+}
+
+// Create the Default department WITH an ipSubnet so its Linux bridge can be
+// provisioned. The actual bridge (dnsmasq/NAT) is built AFTER the seed
+// transaction commits, in provisionDefaultDepartmentNetwork() — kernel side
+// effects must not run inside a DB transaction. firewallPolicy (BLOCK_ALL) and
+// firewallDefaultConfig (allow_outbound) come from their schema defaults, so the
+// seeded department matches one created via the createDepartment mutation.
 async function createDefaultDepartment () {
   try {
-    await prisma.department.create({
-      data: {
-        name: 'Default'
-      }
+    const existing = await prisma.department.findFirst({
+      where: { name: { equals: 'Default', mode: 'insensitive' } }
     })
-    console.log('Default department created successfully')
+    if (existing) {
+      // Legacy Default departments (seeded before network provisioning existed)
+      // have no subnet, so neither restoreAllNetworks nor the VM-create path can
+      // ever build their bridge. Backfill a subnet so the provisioning step below
+      // can create it — makes re-running the seed self-healing.
+      if (!existing.ipSubnet) {
+        const ipSubnet = await getNextAvailableSubnet()
+        await prisma.department.update({ where: { id: existing.id }, data: { ipSubnet } })
+        console.log(`Default department already existed — backfilled subnet ${ipSubnet}`)
+      } else {
+        console.log('Default department already exists')
+      }
+      return
+    }
+
+    const ipSubnet = await getNextAvailableSubnet()
+    await prisma.department.create({
+      data: { name: 'Default', ipSubnet }
+    })
+    console.log(`Default department created successfully (subnet ${ipSubnet})`)
   } catch (error) {
     console.error('Error creating default department:', error)
+  }
+}
+
+// Provision the Default department's network (Linux bridge + dnsmasq/DHCP + NAT +
+// default firewall rule set), mirroring the createDepartment GraphQL mutation.
+// Runs OUTSIDE the seed transaction: configureNetwork() creates kernel resources
+// and updates the DB itself, so wrapping it in an interactive transaction would
+// both risk the transaction timeout and mix real side effects with a rollback-able
+// unit. Idempotent — skips a department that already has a bridge.
+async function provisionDefaultDepartmentNetwork () {
+  const department = await prisma.department.findFirst({
+    where: { name: { equals: 'Default', mode: 'insensitive' } }
+  })
+  if (!department) return
+  if (department.bridgeName) {
+    console.log(`Default department network already provisioned (bridge ${department.bridgeName})`)
+    return
+  }
+  if (!department.ipSubnet) {
+    console.warn('Default department has no subnet — skipping network provisioning')
+    return
+  }
+
+  // Wire the same firewall stack the createDepartment resolver uses so the seeded
+  // department gets an identical default firewall rule set (configureNetwork skips
+  // firewall setup silently if these are omitted).
+  const firewallRuleService = new FirewallRuleService(prisma)
+  const firewallPolicyService = new FirewallPolicyService(prisma, firewallRuleService)
+  const firewallValidationService = new FirewallValidationService()
+  const infinizationFirewallService = new InfinizationFirewallService(prisma)
+  const firewallOrchestrationService = new FirewallOrchestrationService(
+    prisma,
+    firewallRuleService,
+    firewallValidationService,
+    infinizationFirewallService
+  )
+  const networkService = new DepartmentNetworkService(
+    prisma,
+    firewallRuleService,
+    firewallPolicyService,
+    firewallOrchestrationService
+  )
+
+  try {
+    console.log(`Provisioning Default department network (${department.ipSubnet})…`)
+    await networkService.configureNetwork(department.id, department.ipSubnet)
+    console.log('Default department network provisioned successfully')
+  } catch (error) {
+    // Host networking may be unavailable here (control-plane-only / no NET_ADMIN,
+    // e.g. Docker Desktop). Don't fail the whole seed. configureNetwork persists
+    // bridgeName BEFORE creating kernel resources and its rollback does NOT clear
+    // that pointer, so reset the network columns to null — otherwise the VM-create
+    // check would see a bridgeName and try to attach VMs to a bridge that does not
+    // exist. Leaving ipSubnet lets a later provision (UI recreate, or a KVM-host
+    // boot) build the bridge cleanly.
+    console.warn(
+      'Could not provision Default department network (host networking may be ' +
+      `unavailable in this environment): ${error instanceof Error ? error.message : String(error)}`
+    )
+    await prisma.department.update({
+      where: { id: department.id },
+      data: { bridgeName: null, gatewayIP: null, dhcpRangeStart: null, dhcpRangeEnd: null, dnsmasqPid: null }
+    }).catch(() => { /* best-effort cleanup */ })
   }
 }
 
@@ -176,6 +287,12 @@ async function main () {
       // Create default app settings
       await createDefaultAppSettings(transactionPrisma)
     })
+
+    // Provision the Default department's Linux bridge AFTER the transaction: this
+    // touches the host network (bridge/dnsmasq/NAT) and must not run inside a DB
+    // transaction. Non-fatal — a host without KVM/NET_ADMIN still gets a seeded DB.
+    await provisionDefaultDepartmentNetwork()
+
     console.log('Seeding completed successfully')
   } catch (error) {
     console.error('Error during seeding:', error)
