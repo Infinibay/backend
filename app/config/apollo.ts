@@ -2,7 +2,7 @@
 // Official Docs: https://www.apollographql.com/docs/apollo-server/
 // Repository: https://github.com/apollographql/apollo-server
 import logger from '@main/logger'
-import { ApolloServer } from '@apollo/server'
+import { ApolloServer, type ApolloServerPlugin } from '@apollo/server'
 import {
   GraphQLError,
   GraphQLSchema,
@@ -15,7 +15,7 @@ import {
   type ValidationRule
 } from 'graphql'
 import { buildSchema } from 'type-graphql'
-import { createComplexityRule, simpleEstimator } from 'graphql-query-complexity'
+import { getComplexity, simpleEstimator } from 'graphql-query-complexity'
 import path from 'node:path'
 import { InfinibayContext } from '@main/utils/context'
 import { authChecker } from '@main/utils/authChecker'
@@ -92,16 +92,6 @@ const createDepthLimitRule = (maxDepth: number): ValidationRule =>
     }
   })
 
-// Field-count based complexity ceiling (graphql-query-complexity). The cast is
-// the documented integration shape — the rule instance is a graphql visitor.
-const complexityRule = createComplexityRule({
-  maximumComplexity: GRAPHQL_MAX_COMPLEXITY,
-  estimators: [simpleEstimator({ defaultComplexity: 1 })],
-  createError: (max: number, actual: number) => new GraphQLError(
-    `Query is too complex: ${actual} exceeds the maximum allowed complexity of ${max}.`
-  )
-}) as unknown as ValidationRule
-
 // Client-safe error codes whose (sanitized) message may reach the tenant. Every
 // other error is masked to avoid leaking host paths / raw stderr / schema detail.
 const SAFE_ERROR_CODES = new Set<string>([
@@ -122,15 +112,44 @@ export const createApolloServer = async (): Promise<ApolloServerBundle> => {
     pubSub: pubsub
   })
 
+  // Field-count complexity ceiling, evaluated PER REQUEST (at didResolveOperation,
+  // after parse+validate) so it sees the request's real variables. It MUST NOT be a
+  // static validationRule: graphql-query-complexity coerces the operation's declared
+  // variables against the variables it was given, so a rule built once with no
+  // variables makes every operation that declares a required variable fail with
+  // "Variable $x of required type … was not provided" — which broke all mutations.
+  const complexityPlugin: ApolloServerPlugin = {
+    async requestDidStart () {
+      return {
+        async didResolveOperation ({ request, document }) {
+          const complexity = getComplexity({
+            schema,
+            operationName: request.operationName ?? undefined,
+            query: document,
+            variables: request.variables ?? {},
+            estimators: [simpleEstimator({ defaultComplexity: 1 })]
+          })
+          if (complexity > GRAPHQL_MAX_COMPLEXITY) {
+            throw new GraphQLError(
+              `Query is too complex: ${complexity} exceeds the maximum allowed complexity of ${GRAPHQL_MAX_COMPLEXITY}.`,
+              { extensions: { code: 'GRAPHQL_VALIDATION_FAILED' } }
+            )
+          }
+        }
+      }
+    }
+  }
+
   const server = new ApolloServer({
     schema,
     csrfPrevention: true,
     cache: 'bounded',
     // Only expose the full schema graph to dev tooling; hide it in production.
     introspection: process.env.NODE_ENV !== 'production',
-    // Depth + complexity limits bound the CPU/memory a single query can consume.
-    validationRules: [createDepthLimitRule(GRAPHQL_MAX_DEPTH), complexityRule],
-    plugins: [],
+    // Depth limit (static, variable-independent) bounds nested resolver fan-out;
+    // the complexity ceiling runs per-request in complexityPlugin below.
+    validationRules: [createDepthLimitRule(GRAPHQL_MAX_DEPTH)],
+    plugins: [complexityPlugin],
     formatError: (error: any): GraphQLError => {
       logger.error(error)
 
