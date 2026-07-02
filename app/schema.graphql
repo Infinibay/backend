@@ -1361,6 +1361,7 @@ enum MaintenanceTrigger {
 }
 
 type Mutation {
+  approveNode(id: ID!, pairingCode: String): Boolean!
   assignScriptToDepartment(departmentId: ID!, scriptId: ID!): Boolean!
   assignUserRole(input: AssignUserRoleInput!): Boolean!
 
@@ -1431,6 +1432,7 @@ type Mutation {
   destroyMachine(id: String!): SuccessType!
   destroyMachineTemplate(id: String!): Boolean!
   destroyMachineTemplateCategory(id: String!): Boolean!
+  destroyUser(id: String!): Boolean!
 
   """Disable a plugin package"""
   disablePackage(name: String!): PackageType
@@ -1477,6 +1479,7 @@ type Mutation {
 
   """Register uploaded ISO"""
   registerISO(filename: String!, os: String!, path: String!, size: Float!): ISO!
+  rejectNode(id: ID!): Boolean!
   removeDepartmentMember(departmentId: String!, userId: String!): Boolean!
 
   """Remove ISO file"""
@@ -1639,6 +1642,7 @@ type NodeInventorySummary {
 }
 
 type NodeType {
+  address: String
   availableCores: Int!
   availableRamGB: Int!
   cores: Int!
@@ -1647,6 +1651,7 @@ type NodeType {
   currentRaid: String!
   diskCount: Int!
   disks: [DiskType!]!
+  fingerprint: String
   health: String!
   healthyDiskCount: Int!
   id: ID!
@@ -1655,7 +1660,9 @@ type NodeType {
   name: String!
   nextRaid: String
   ram: Int!
+  role: String!
   runningMachineCount: Int!
+  status: String!
   updatedAt: DateTimeISO!
 }
 
@@ -1810,6 +1817,16 @@ type PackageType {
 input PaginationInputType {
   skip: Int = 0
   take: Int = 20
+}
+
+type PendingNodeType {
+  address: String
+  createdAt: DateTimeISO!
+  fingerprint: String
+  id: ID!
+  name: String!
+  pairingCode: String!
+  role: String!
 }
 
 type PermissionGrantType {
@@ -2018,7 +2035,7 @@ type Query {
   machineTemplateCategory(id: String!): MachineTemplateCategoryType
   machineTemplates(orderBy: MachineTemplateOrderBy, pagination: PaginationInputType): [MachineTemplateType!]!
   machines(orderBy: MachineOrderBy, pagination: PaginationInputType): [Machine!]!
-  maintenanceHistory(limit: Float = 50, machineId: ID!, status: MaintenanceStatus, taskType: MaintenanceTaskType): [MaintenanceHistory!]!
+  maintenanceHistory(limit: Int = 50, machineId: ID!, status: MaintenanceStatus, taskType: MaintenanceTaskType): [MaintenanceHistory!]!
   maintenanceStats(machineId: ID!): MaintenanceStats!
   maintenanceTask(id: ID!): MaintenanceTask
   maintenanceTasks(machineId: ID!, status: String): [MaintenanceTask!]!
@@ -2037,6 +2054,7 @@ type Query {
 
   """List all installed plugin packages"""
   packages: [PackageType!]!
+  pendingNodes: [PendingNodeType!]!
 
   """
   Get the count of pending (non-dismissed, non-snoozed) recommendations across all VMs
