@@ -248,6 +248,20 @@ export class HealthSnapshotManager {
         return
       }
 
+      // Bound the number of applications a single (possibly-hostile) guest agent
+      // can push in one update: an unbounded list would bloat the persisted
+      // snapshot JSON blob and the in-memory merge maps. A real inventory is far
+      // below this cap; truncate rather than reject so a legitimate-but-large host
+      // still records its first MAX_APPS entries.
+      const MAX_APPS = Number(process.env.HEALTH_MAX_APPS) || 5000
+      if (updateInventory.applications.length > MAX_APPS) {
+        logger.warn(
+          `\u26a0\ufe0f APPLICATION_UPDATES for snapshot ${snapshotId} exceeds MAX_APPS ` +
+          `(${updateInventory.applications.length} > ${MAX_APPS}) \u2014 truncating`,
+        )
+        updateInventory.applications = updateInventory.applications.slice(0, MAX_APPS)
+      }
+
       const updateMap = new Map<string, Record<string, unknown>>()
       for (const app of updateInventory.applications) {
         const appKey = (app.name || app.app_name) as string

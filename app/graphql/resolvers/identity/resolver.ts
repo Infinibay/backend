@@ -152,7 +152,7 @@ export class IdentityProviderResolver {
   ): Promise<IdentityProviderType> {
     const { prisma } = context
     // buildCreateData throws validation errors that are safe to surface verbatim.
-    const data = this.service(prisma).buildCreateData(input)
+    const data = await this.service(prisma).buildCreateData(input)
     try {
       const provider = await prisma.identityProvider.create({ data })
       return toIdentityProviderType(provider)
@@ -172,7 +172,7 @@ export class IdentityProviderResolver {
   ): Promise<IdentityProviderType> {
     const { prisma } = context
     // buildUpdateData throws validation errors that are safe to surface verbatim.
-    const data = this.service(prisma).buildUpdateData(input)
+    const data = await this.service(prisma).buildUpdateData(input)
     try {
       const provider = await prisma.identityProvider.update({ where: { id }, data })
       return toIdentityProviderType(provider)
@@ -293,7 +293,7 @@ export class IdentityProviderResolver {
   ): Promise<IdentityProviderConnectionResultType> {
     const { prisma } = context
     try {
-      const data = this.service(prisma).buildCreateData(input)
+      const data = await this.service(prisma).buildCreateData(input)
       const result = await this.service(prisma).testConnection({
         host: data.host,
         port: data.port ?? (data.useTls ? 636 : 389),

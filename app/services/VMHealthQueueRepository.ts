@@ -116,6 +116,23 @@ export class VMHealthQueueRepository {
     })
   }
 
+  /**
+   * Delete terminal (COMPLETED/FAILED) health-check queue rows created before
+   * `cutoff`. The queue accrues one row per check per VM per run and is never
+   * pruned otherwise, so it grows without bound; this caps its size. Only terminal
+   * rows are removed, so an in-flight PENDING/RUNNING task is never dropped.
+   * Returns the number of rows deleted.
+   */
+  async pruneTerminalBefore(cutoff: Date): Promise<number> {
+    const { count } = await this.prisma.vMHealthCheckQueue.deleteMany({
+      where: {
+        status: { in: ['COMPLETED', 'FAILED'] },
+        createdAt: { lt: cutoff },
+      },
+    })
+    return count
+  }
+
   async findMachine(machineId: string): Promise<{ id: string; name: string; status: string; os?: string | null; setupComplete: boolean } | null> {
     const m = await this.prisma.machine.findUnique({
       where: { id: machineId },

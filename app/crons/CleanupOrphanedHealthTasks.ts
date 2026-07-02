@@ -3,6 +3,7 @@ import { CronJob } from 'cron'
 import { PrismaClient } from '@prisma/client'
 import { getVMHealthQueueManager } from '../services/VMHealthQueueManager'
 import { getEventManager } from '../services/EventManager'
+import { VMHealthQueueRepository } from '../services/VMHealthQueueRepository'
 
 const debug = logger.child({ module: 'CleanupOrphanedHealthTasksJob' })
 
@@ -62,6 +63,16 @@ export class CleanupOrphanedHealthTasksJob {
 
       // Run the cleanup
       await queueManager.cleanupOrphanedTasks()
+
+      // Prune terminal (COMPLETED/FAILED) queue rows past the retention window so
+      // the queue table doesn't grow without bound (one row per check per VM per
+      // run). Default 7 days; tune via HEALTH_QUEUE_RETENTION_DAYS.
+      const retentionDays = Number(process.env.HEALTH_QUEUE_RETENTION_DAYS) || 7
+      if (retentionDays > 0) {
+        const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000)
+        const pruned = await new VMHealthQueueRepository(this.prisma).pruneTerminalBefore(cutoff)
+        if (pruned > 0) debug.info(`🗂️ Pruned ${pruned} terminal health-check queue row(s) older than ${retentionDays}d`)
+      }
 
       debug.debug('Orphaned health tasks cleanup completed')
     } catch (error) {

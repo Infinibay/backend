@@ -43,8 +43,8 @@ describe('IdentityProviderService security primitives', () => {
   })
 
   describe('bind-secret encryption (encrypt/decrypt round-trip)', () => {
-    it('round-trips a bind password through buildCreateData + decryptSecret', () => {
-      const data = service.buildCreateData({
+    it('round-trips a bind password through buildCreateData + decryptSecret', async () => {
+      const data = await service.buildCreateData({
         name: 'Corporate AD',
         providerType: 'ACTIVE_DIRECTORY',
         host: 'ad.example.com',
@@ -60,8 +60,8 @@ describe('IdentityProviderService security primitives', () => {
       expect(decryptSecret(secret)).toBe('S3cret!pass')
     })
 
-    it('throws (auth-tag mismatch) when the stored secret is tampered with', () => {
-      const data = service.buildCreateData({
+    it('throws (auth-tag mismatch) when the stored secret is tampered with', async () => {
+      const data = await service.buildCreateData({
         name: 'Corporate AD',
         providerType: 'ACTIVE_DIRECTORY',
         host: 'ad.example.com',

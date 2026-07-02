@@ -35,7 +35,7 @@ describe('IdentityProviderService', () => {
   })
 
   it('validates saved providers with strict bind credentials', async () => {
-    const providerData = service.buildCreateData({
+    const providerData = await service.buildCreateData({
       name: 'Corporate AD',
       providerType: 'ACTIVE_DIRECTORY',
       host: 'ad.example.com',

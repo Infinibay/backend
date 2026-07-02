@@ -272,7 +272,7 @@ export class IdentityProviderService {
     }
   }
 
-  buildCreateData (input: IdentityProviderConfig): Prisma.IdentityProviderCreateInput {
+  async buildCreateData (input: IdentityProviderConfig): Promise<Prisma.IdentityProviderCreateInput> {
     const host = cleanString(input.host)
     const baseDn = cleanString(input.baseDn)
     const name = cleanString(input.name)
@@ -280,6 +280,12 @@ export class IdentityProviderService {
     if (!name) throw new Error('Connector name is required')
     if (!host) throw new Error('Host is required')
     if (!baseDn) throw new Error('Base DN is required')
+    // Persist-time SSRF guard: reject a connector pointed at an internal/loopback
+    // target at config time (fail early with a clear error) instead of only on the
+    // first authenticate/sync. Same policy as the operational paths (prod-only,
+    // IDENTITY_ALLOW_PRIVATE_TARGETS escape hatch), so it never blocks a
+    // legitimately-configured internal directory server.
+    await this.assertHostAllowed(host)
 
     const useTls = input.useTls ?? false
     const bindPassword = cleanString(input.bindPassword)
@@ -303,7 +309,7 @@ export class IdentityProviderService {
     }
   }
 
-  buildUpdateData (input: IdentityProviderPatch): Prisma.IdentityProviderUpdateInput {
+  async buildUpdateData (input: IdentityProviderPatch): Promise<Prisma.IdentityProviderUpdateInput> {
     const data: Prisma.IdentityProviderUpdateInput = {}
 
     if (input.name !== undefined) {
@@ -317,6 +323,8 @@ export class IdentityProviderService {
     if (input.host !== undefined) {
       const host = cleanString(input.host)
       if (!host) throw new Error('Host is required')
+      // Persist-time SSRF guard on the new host (see buildCreateData).
+      await this.assertHostAllowed(host)
       data.host = host
     }
     if (input.useTls !== undefined) data.useTls = input.useTls ?? false
