@@ -75,58 +75,103 @@ export class AgentStorageMigrationAdapter implements VMStorageMigrationAdapter {
     sourceNodeId: string | null
     targetNodeId: string
     diskPaths: string[]
+    deferReclaim?: boolean
   }): Promise<void> {
-    const { machineId, sourceNodeId, targetNodeId, diskPaths } = params
+    const { machineId, sourceNodeId, targetNodeId, diskPaths, deferReclaim } = params
     if (sourceNodeId === targetNodeId) return // same node — nothing to move
     if (diskPaths.length === 0) {
       logger.warn(`Migration ${machineId}: no disk paths recorded — nothing to copy (the VM may not be provisioned yet)`)
       return
     }
 
-    const localNodeId = await this.resolveLocal()
-    const sourceLocal = sourceNodeId == null || (localNodeId != null && sourceNodeId === localNodeId)
-    const targetLocal = localNodeId != null && targetNodeId === localNodeId
-
-    const sourceNode = sourceLocal ? null : await this.requireNode(sourceNodeId as string, 'source')
-    const targetNode = targetLocal ? null : await this.requireNode(targetNodeId, 'target')
-
-    // CRITICAL data-safety: no-op when BOTH legs resolve to the SAME physical disk
-    // store. diskDir is uniform cluster-wide (see file header), so a leg's physical
-    // identity is `local` for the master's own node, else `${address}:${agentPort}`.
-    // When the keys match, source and target are the SAME file at the SAME path:
-    // copying it onto itself (temp → rename back) and then unlinking the "source"
-    // would destroy the VM's only qcow2 — the sha256 self-check cannot detect this.
-    // This subsumes the master-local&&local case (a VM with nodeId=null migrated to
-    // the master's own node id, where the raw id no-op check null===masterId is false)
-    // AND two distinct Node rows (re-onboarded / cloned host) that share an
-    // address+agentPort, which would otherwise pull-then-push over the same inode and
-    // then delete it during the I2 source reclaim.
-    const srcKey = sourceLocal ? 'local' : `${sourceNode!.address}:${sourceNode!.agentPort}`
-    const tgtKey = targetLocal ? 'local' : `${targetNode!.address}:${targetNode!.agentPort}`
-    if (srcKey === tgtKey) {
-      logger.info(`Migration ${machineId}: source and target resolve to the same physical disk store (${srcKey}) — disk already in place, no copy needed`)
+    const legs = await this.resolveLegs(sourceNodeId, targetNodeId)
+    if (legs.samePhysicalStore) {
+      logger.info(`Migration ${machineId}: source and target resolve to the same physical disk store — disk already in place, no copy needed`)
       return
     }
 
-    logger.info(`Migration ${machineId}: copying ${diskPaths.length} disk(s) ${sourceLocal ? 'master(local)' : sourceNode!.name} → ${targetLocal ? 'master(local)' : targetNode!.name}`)
+    logger.info(`Migration ${machineId}: copying ${diskPaths.length} disk(s) ${legs.sourceLocal ? 'master(local)' : legs.sourceNode!.name} → ${legs.targetLocal ? 'master(local)' : legs.targetNode!.name}`)
 
     // 1+2+3: transfer every disk and prove its integrity on the target BEFORE any deletion.
     for (const p of diskPaths) {
-      const srcSha = await this.transferOne(p, { sourceLocal, sourceNode, targetLocal, targetNode })
+      const srcSha = await this.transferOne(p, legs)
       logger.info(`Migration ${machineId}: disk verified on target (sha256 ${srcSha.slice(0, 16)}…) ${p}`)
     }
 
-    // 4: only now is it safe to reclaim the source (invariant I2).
-    if (this.deleteSourceAfter) {
-      for (const p of diskPaths) {
-        try {
-          if (sourceLocal) await this.store.unlink(p)
-          else await this.deleteRemote(sourceNode!, p)
-        } catch (err) {
-          // The migration already succeeded (target verified); a stale source is a
-          // leak to clean up, not a failure to surface to the user.
-          logger.warn(`Migration ${machineId}: source disk cleanup failed for ${p} (left in place): ${String(err)}`)
-        }
+    // 4: reclaiming the source is the ONLY destructive step (invariant I2 — never
+    // before every disk is checksum-proven on the target). With deferReclaim the
+    // caller (migrateStoppedMachineToNode) runs it via reclaimSourceStorage strictly
+    // AFTER the Machine.nodeId commit is durable, so an interrupted commit can never
+    // strand the VM pointing at a node whose disk was already deleted. Legacy callers
+    // (deferReclaim unset) keep the pre-commit delete here for backward compatibility.
+    if (this.deleteSourceAfter && !deferReclaim) {
+      await this.deleteSources(machineId, diskPaths, legs)
+    }
+  }
+
+  /**
+   * Delete the migrated source disk(s), invoked ONLY after the ownership commit
+   * (deferReclaim path). Best-effort: a stale source is a leak to clean up, not a
+   * failure to surface. No-op when source and target are the same physical store
+   * (prepareMachineStorage already short-circuited the copy — deleting would destroy
+   * the VM's only disk).
+   */
+  async reclaimSourceStorage (params: {
+    machineId: string
+    sourceNodeId: string | null
+    targetNodeId: string
+    diskPaths: string[]
+  }): Promise<void> {
+    const { machineId, sourceNodeId, targetNodeId, diskPaths } = params
+    if (!this.deleteSourceAfter) return
+    if (sourceNodeId === targetNodeId || diskPaths.length === 0) return
+    const legs = await this.resolveLegs(sourceNodeId, targetNodeId)
+    if (legs.samePhysicalStore) return
+    await this.deleteSources(machineId, diskPaths, legs)
+  }
+
+  /**
+   * Resolve which side of the migration is the master's own filesystem vs a remote
+   * agent, and whether both legs resolve to the SAME physical disk store.
+   *
+   * diskDir is uniform cluster-wide (see file header), so a leg's physical identity
+   * is `local` for the master's own node, else `${address}:${agentPort}`. When the
+   * keys match, source and target are the SAME file at the SAME path: copying it onto
+   * itself and then unlinking the "source" would destroy the VM's only qcow2 (the
+   * sha256 self-check cannot detect this). Subsumes the master-local&&local case AND
+   * two distinct Node rows (re-onboarded / cloned host) sharing an address+agentPort.
+   */
+  private async resolveLegs (sourceNodeId: string | null, targetNodeId: string): Promise<{
+    sourceLocal: boolean
+    sourceNode: NodeAddr | null
+    targetLocal: boolean
+    targetNode: NodeAddr | null
+    samePhysicalStore: boolean
+  }> {
+    const localNodeId = await this.resolveLocal()
+    const sourceLocal = sourceNodeId == null || (localNodeId != null && sourceNodeId === localNodeId)
+    const targetLocal = localNodeId != null && targetNodeId === localNodeId
+    const sourceNode = sourceLocal ? null : await this.requireNode(sourceNodeId as string, 'source')
+    const targetNode = targetLocal ? null : await this.requireNode(targetNodeId, 'target')
+    const srcKey = sourceLocal ? 'local' : `${sourceNode!.address}:${sourceNode!.agentPort}`
+    const tgtKey = targetLocal ? 'local' : `${targetNode!.address}:${targetNode!.agentPort}`
+    return { sourceLocal, sourceNode, targetLocal, targetNode, samePhysicalStore: srcKey === tgtKey }
+  }
+
+  /** Best-effort delete of the source disk(s); a failure is logged, never thrown. */
+  private async deleteSources (
+    machineId: string,
+    diskPaths: string[],
+    legs: { sourceLocal: boolean, sourceNode: NodeAddr | null }
+  ): Promise<void> {
+    for (const p of diskPaths) {
+      try {
+        if (legs.sourceLocal) await this.store.unlink(p)
+        else await this.deleteRemote(legs.sourceNode!, p)
+      } catch (err) {
+        // The migration already succeeded (target verified); a stale source is a
+        // leak to clean up, not a failure to surface to the user.
+        logger.warn(`Migration ${machineId}: source disk cleanup failed for ${p} (left in place): ${String(err)}`)
       }
     }
   }

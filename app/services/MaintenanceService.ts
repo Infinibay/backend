@@ -733,5 +733,30 @@ export class MaintenanceService {
   }
 }
 
+/**
+ * Boot-time reconcile: release maintenance tasks left stuck in the RUNNING
+ * execution-lock by a hard process/host crash. executeTask's try/finally covers a
+ * failed operation, but not a process that dies mid-task — that task stays RUNNING
+ * forever and getDueTasks (IDLE-only) can never re-select it, so it never runs
+ * again. On a fresh boot no task is actually executing, so releasing every RUNNING
+ * lock back to IDLE is safe. Deliberately leaves 'LOCKED' (a deliberate admin lock)
+ * untouched. Log-but-continue so a reconcile failure never blocks startup.
+ */
+export async function reconcileOrphanedMaintenanceLocks (prisma: PrismaClient): Promise<number> {
+  try {
+    const result = await prisma.maintenanceTask.updateMany({
+      where: { executionStatus: 'RUNNING' },
+      data: { executionStatus: 'IDLE' }
+    })
+    if (result.count > 0) {
+      logger.info(`🔧 Maintenance lock reconcile: released ${result.count} task(s) left RUNNING by a crash`)
+    }
+    return result.count
+  } catch (error) {
+    logger.error('❌ Maintenance lock reconciliation failed:', error)
+    return 0
+  }
+}
+
 // Export the class for use in other parts of the application
 export default MaintenanceService

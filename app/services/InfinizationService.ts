@@ -21,6 +21,8 @@ import prisma from '../utils/database'
 import { getEventManager, EventAction } from './EventManager'
 // Read-only import of the canonical disk-op markers (constants owned elsewhere).
 import { DISK_OP_STATUSES, OFF_STATUS } from '../constants/machine-status'
+import { reconcileOrphanedMoveMarkers } from './node/VMMigrationService'
+import { reconcileOrphanedMaintenanceLocks } from './MaintenanceService'
 
 const debug = logger.child({ module: 'infinization-service' })
 
@@ -208,6 +210,25 @@ async function initializeInfinization (): Promise<Infinization> {
   // is gone with the crash, so it is safe to release the marker back to 'off'.
   // Log-but-continue so a reconcile failure never blocks startup.
   await reconcileOrphanedDiskOpMarkers()
+
+  // Reclaim VMs orphaned in the 'moving' migration status-lock by a crash mid
+  // cross-node copy: same rationale as the disk-op markers above — the claiming
+  // migration process is gone, so the marker can never clear itself and the VM is
+  // stuck un-startable. Log-but-continue so a reconcile failure never blocks boot.
+  try {
+    const reclaimed = await reconcileOrphanedMoveMarkers(prisma)
+    if (reclaimed > 0) logger.info(`♻️ Reconciled ${reclaimed} orphaned VM move marker(s)`)
+  } catch (err) {
+    logger.error('⚠️ Failed to reconcile orphaned move markers:', err)
+  }
+
+  // Release maintenance-task execution locks stranded in RUNNING by a crash (the
+  // in-request try/finally can't cover a process death) so the task can run again.
+  try {
+    await reconcileOrphanedMaintenanceLocks(prisma)
+  } catch (err) {
+    logger.error('⚠️ Failed to reconcile orphaned maintenance locks:', err)
+  }
 
   // Re-attach to running VMs (e.g., after backend restart)
   await attachToRunningVMs(infinization)
