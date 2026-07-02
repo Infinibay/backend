@@ -43,8 +43,9 @@ export class VMRecommendationResolver {
       })
     }
 
-    // Create service instance per request
-    const recommendationService = new VMRecommendationService(context.prisma)
+    // Reuse the process-wide instance: constructing one per request leaks an
+    // hourly maintenance setInterval that is never cleared (unbounded timer DoS).
+    const recommendationService = VMRecommendationService.getShared(context.prisma)
 
     // Use safe method to get recommendations with standardized error handling
     const recommendations = await recommendationService.getRecommendations(vmId, refresh ?? false, filter || undefined)

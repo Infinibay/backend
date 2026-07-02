@@ -25,8 +25,12 @@ describe('VMRecommendationResolver', () => {
       generateRecommendations: jest.fn()
     }
 
-    // Mock the service constructor to return our mock
+    // Mock the service constructor to return our mock (harmless; kept for compat)
     MockVMRecommendationService.mockImplementation(() => mockService)
+
+    // The resolver now obtains the service via the static getShared(prisma)
+    // (process-wide shared instance). Make it return our mock.
+    MockVMRecommendationService.getShared = jest.fn(() => mockService)
 
     resolver = new VMRecommendationResolver()
 
@@ -205,7 +209,7 @@ describe('VMRecommendationResolver', () => {
     })
 
     describe('Service Integration', () => {
-      it('should create VMRecommendationService with correct Prisma client', async () => {
+      it('should obtain the shared VMRecommendationService with correct Prisma client', async () => {
         const mockRecommendations = [
           createMockVMRecommendation({ machineId: vmId, type: RecommendationType.DISK_SPACE_LOW })
         ]
@@ -214,7 +218,7 @@ describe('VMRecommendationResolver', () => {
 
         await resolver.getVMRecommendations(vmId, mockContext)
 
-        expect(MockVMRecommendationService).toHaveBeenCalledWith(mockContext.prisma)
+        expect(MockVMRecommendationService.getShared).toHaveBeenCalledWith(mockContext.prisma)
       })
 
       it('should return recommendations in correct GraphQL format', async () => {
@@ -295,7 +299,7 @@ describe('VMRecommendationResolver', () => {
 
     describe('Error Handling', () => {
       it('should handle VMRecommendationService initialization failure', async () => {
-        MockVMRecommendationService.mockImplementation(() => {
+        MockVMRecommendationService.getShared.mockImplementation(() => {
           throw new Error('Service initialization failed')
         })
 
@@ -448,15 +452,17 @@ describe('VMRecommendationResolver', () => {
         expect(endTime - startTime).toBeLessThan(1000) // Should complete within 1 second
       })
 
-      it('should create new service instance per request', async () => {
+      it('should obtain the shared service instance per request', async () => {
         mockService.getRecommendations.mockResolvedValue([])
 
         // Make multiple requests
         await resolver.getVMRecommendations(vmId, mockContext)
         await resolver.getVMRecommendations(vmId, mockContext)
 
-        // Service should be instantiated for each request
-        expect(MockVMRecommendationService).toHaveBeenCalledTimes(2)
+        // getShared should be invoked once per request, returning the
+        // process-wide shared instance (no new instance is constructed).
+        expect(MockVMRecommendationService.getShared).toHaveBeenCalledTimes(2)
+        expect(MockVMRecommendationService.getShared).toHaveBeenCalledWith(mockContext.prisma)
       })
     })
 
@@ -466,7 +472,7 @@ describe('VMRecommendationResolver', () => {
 
         await resolver.getVMRecommendations(vmId, mockContext)
 
-        expect(MockVMRecommendationService).toHaveBeenCalledWith(mockContext.prisma)
+        expect(MockVMRecommendationService.getShared).toHaveBeenCalledWith(mockContext.prisma)
       })
 
       it('should use context.user for authorization', async () => {

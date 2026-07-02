@@ -474,6 +474,28 @@ export class CommandDispatcher {
         return { action: 'PackageList' }
       case 'ServiceList':
         return { action: 'ServiceList' }
+      case 'ServiceControl': {
+        // infiniservice deserializes ServiceControl as a nested
+        // `params: ServiceControlParams { service, operation }` (NOT flattened,
+        // and NOT the resolver's `service_name`/`action` field names). Without
+        // this case the request hit the `default` branch, which returns only
+        // `{ action }` and silently dropped the params — every controlVMService
+        // call no-op'd on the guest. Remap here (accepting either field-name
+        // spelling) so a validated request actually reaches the agent.
+        const p = (commandType.params ?? {}) as Record<string, unknown>
+        const service = (p.service ?? p.service_name ?? '') as string
+        const operation = (p.operation ?? p.action ?? '') as string
+        if (typeof service !== 'string' || service.trim() === '') {
+          throw new Error('ServiceControl requires a non-empty service name')
+        }
+        if (typeof operation !== 'string' || operation.trim() === '') {
+          throw new Error('ServiceControl requires an operation')
+        }
+        return {
+          action: 'ServiceControl',
+          params: { service, operation }
+        }
+      }
       case 'SystemInfo':
         return { action: 'SystemInfo' }
       case 'OsInfo':
