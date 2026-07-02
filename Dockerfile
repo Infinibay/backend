@@ -20,7 +20,7 @@
 # git, needed to compile the native addons (bcrypt, ref-napi, ssh2). The qemu /
 # nftables / swtpm tools are inert on macOS (no /dev/kvm) but let the SAME image
 # run the full VM path on a Linux KVM host.
-FROM node:20-bookworm AS base
+FROM docker.io/library/node:20-bookworm AS base
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
       qemu-system-x86 qemu-utils nftables iproute2 dnsmasq \
