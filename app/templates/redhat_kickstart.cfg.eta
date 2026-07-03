@@ -63,10 +63,21 @@ reboot --eject
 # Firewall configuration
 firewall --enabled --ssh
 
-# Package Selection
-%packages
-# Install full fedora workstation (https://github.com/kororaproject/kp-config/blob/master/kickstart.d/fedora-workstation-common.ks)
-# Exclude unwanted groups that fedora-live-base.ks pulls in
+# Package Selection.
+#
+# Design principle: get the desktop from Fedora's MAINTAINED comps environment
+# (@^workstation-product-environment below), not from a hand-curated list of leaf
+# packages. Fedora re-cuts the environment/group membership every release, so package
+# renames/merges/splits are absorbed automatically with no template changes. Only pin
+# leaf packages that the environment does NOT guarantee and that Infinibay needs (the
+# guest agents) or that our %post depends on (flatpak, curl).
+#
+# --ignoremissing: if any pinned leaf ever disappears in a future Fedora, degrade to a
+# warning instead of aborting the whole install. This is what turns "one renamed
+# package bricks every install" into "the install continues and we get a log line".
+# (A build-time pre-flight that queries the target mirror could additionally surface
+# such a missing pin as a build-time warning — not yet implemented.)
+%packages --ignoremissing
 
 # VM performance
 qemu-guest-agent
@@ -79,14 +90,19 @@ gdm
 curl
 wget
 
-# Flatpak support (RPM Fusion and third-party repos configured in %post)
+# Flatpak CLI — needed by %post to add the Flathub remote (RPM Fusion and other
+# third-party repos are configured in %post). The GNOME Software flatpak plugin is
+# bundled inside the gnome-software RPM (pulled by the Workstation environment below);
+# Fedora has never shipped a separate gnome-software-plugin-flatpak package (that is a
+# Debian/Ubuntu split), so it must NOT be listed here — doing so aborts the install.
 flatpak
-<% if (parseInt(it.fedoraVersion) < 43) { %>
-# gnome-software-plugin-flatpak only exists in Fedora < 43
-gnome-software-plugin-flatpak
-<% } %>
 
-@workstation-product-environment
+# Full Fedora Workstation desktop, via the maintained comps ENVIRONMENT.
+# The caret '^' selects an environment; a bare '@' would (wrongly) look for a group of
+# this name. This pulls gnome-desktop (gdm, gnome-software incl. its flatpak plugin),
+# base-graphical, firefox, fonts, hardware-support, printing, etc. — all tracked by
+# Fedora per release, so it stays correct across version bumps without edits here.
+@^workstation-product-environment
 @development-tools
 
 %end
