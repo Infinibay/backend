@@ -381,6 +381,8 @@ export interface SafeCommandType {
   // Maintenance commands
   'ExecutePowerShellScript' | 'RunMaintenanceTask' | 'ValidateSystemHealth' |
   'CleanTemporaryFiles' | 'UpdateSystemSoftware' | 'RestartServices' | 'CheckSystemIntegrity' |
+  // In-guest OS reboot via the agent (preferred over cold QMP/ACPI restart)
+  'RebootSystem' |
   // Golden-image seal — runs per-OS cleanup and triggers sysprep / poweroff
   'PrepareGoldenImage' |
   // Active Directory / LDAP domain join (Windows Add-Computer / Linux realm join)

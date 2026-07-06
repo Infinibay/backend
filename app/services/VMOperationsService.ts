@@ -11,6 +11,7 @@ import logger from '@main/logger'
 import { isPowerActionLocked } from '../constants/machine-status'
 import { NodeDispatcher } from './node/NodeDispatcher'
 import { type NodeExecutor } from './node/NodeExecutor'
+import { getVirtioSocketWatcherService } from './VirtioSocketWatcherService'
 
 export interface VMOperationResult {
   success: boolean
@@ -62,9 +63,39 @@ export class VMOperationsService {
   }
 
   /**
-   * Restart a virtual machine (graceful shutdown then start)
+   * Restart a virtual machine.
+   *
+   * Agent-first: if the in-guest infiniservice agent is reachable, ask it to reboot
+   * the OS from inside — the guest reboots in place (QEMU stays up and emits a QMP
+   * RESET), which is reliable and cannot orphan QEMU the way a cold ACPI restart can
+   * when the guest fails to power off. Fall back to the legacy cold stop+start when
+   * no agent is reachable (freshly installed VM, agent down, older agent that can't
+   * decode the command) or when the agent reboot fails/times out.
    */
   async restartMachine (machineId: string): Promise<VMOperationResult> {
+    try {
+      const socket = getVirtioSocketWatcherService()
+      if (socket.isVmConnected(machineId)) {
+        this.debug.debug(`Restart ${machineId}: agent connected, requesting in-guest reboot`)
+        try {
+          const resp = await socket.sendRebootSystem(machineId)
+          if (resp.success) {
+            this.debug.info(`Restart ${machineId}: in-guest reboot initiated via agent`)
+            return { success: true, message: 'Reboot initiated inside the guest via the agent' }
+          }
+          this.debug.warn(`Restart ${machineId}: agent reboot returned failure (${resp.error ?? 'no detail'}) — falling back to cold restart`)
+        } catch (agentErr: any) {
+          this.debug.warn(`Restart ${machineId}: agent reboot failed/timed out (${agentErr?.message ?? String(agentErr)}) — falling back to cold restart`)
+        }
+      } else {
+        this.debug.debug(`Restart ${machineId}: no live agent, using legacy cold restart`)
+      }
+    } catch (lookupErr: any) {
+      // Socket-watcher singleton unavailable → just use the legacy path.
+      this.debug.debug(`Restart ${machineId}: agent path unavailable (${lookupErr?.message ?? String(lookupErr)}), using legacy cold restart`)
+    }
+
+    // Legacy cold restart (graceful ACPI stop then start), routed to the owning node.
     return this.runOperation(
       machineId, 'Restarting', 'Machine restarted successfully', 'Failed to restart machine',
       (infinization) => infinization.restartVM(machineId)

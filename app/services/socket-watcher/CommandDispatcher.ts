@@ -402,6 +402,25 @@ export class CommandDispatcher {
     return this.sendSafeCommand(vmId, commandType, timeout)
   }
 
+  /**
+   * Helper method for an in-guest OS reboot via the agent. Preferred over a cold
+   * QMP/ACPI restart: the guest reboots in place (QEMU stays up, emits RESET) so
+   * it can't be orphaned. The agent acks immediately and reboots a few seconds
+   * later, so a normal success response comes back before the guest goes down.
+   */
+  async sendRebootSystem(
+    vmId: string,
+    force: boolean = false,
+    timeout: number = 30000
+  ): Promise<CommandResponse> {
+    const commandType: SafeCommandType = {
+      action: 'RebootSystem',
+      params: { force }
+    }
+
+    return this.sendSafeCommand(vmId, commandType, timeout)
+  }
+
   // ──────────────────────────────────────────────────────────────────────────
   // Retry logic
   // ──────────────────────────────────────────────────────────────────────────
@@ -564,6 +583,11 @@ export class CommandDispatcher {
       case 'CheckSystemIntegrity':
         return {
           action: 'CheckSystemIntegrity'
+        }
+      case 'RebootSystem':
+        return {
+          action: 'RebootSystem',
+          force: commandType.params?.force ?? false
         }
       case 'UserList':
         return { action: 'UserList' }

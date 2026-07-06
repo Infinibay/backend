@@ -424,6 +424,15 @@ export class VirtioSocketWatcherService extends EventEmitter {
     return this.commandDispatcher.sendCheckSystemIntegrity(vmId, timeout)
   }
 
+  /** In-guest OS reboot via the agent (preferred over a cold QMP/ACPI restart). */
+  public async sendRebootSystem(
+    vmId: string,
+    force: boolean = false,
+    timeout: number = 30000
+  ): Promise<CommandResponse> {
+    return this.commandDispatcher.sendRebootSystem(vmId, force, timeout)
+  }
+
   public async executeCommandWithRetry(
     vmId: string,
     commandBuilder: () => Promise<CommandResponse>,
