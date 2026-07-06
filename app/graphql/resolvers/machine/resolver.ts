@@ -39,6 +39,7 @@ import { InfinizationFirewallService } from '../../../services/firewall/Infiniza
 import { VMMigrationService } from '../../../services/node/VMMigrationService'
 import { AgentStorageMigrationAdapter } from '../../../services/node/AgentStorageMigrationAdapter'
 import { NodeDispatcher } from '../../../services/node/NodeDispatcher'
+import { getConfiguredStorageProvider } from '../../../services/storage'
 import { DomainJoinService } from '../../../services/DomainJoinService'
 import { Machine as PrismaMachine, MachineTemplate as PrismaMachineTemplate, Department as PrismaDepartment, MachineConfiguration, Node as PrismaNode, PrismaClient } from '@prisma/client'
 import { SafeUser } from '@utils/context'
@@ -411,7 +412,10 @@ export class MachineMutations {
     // Local (non-shared) storage: physically copy the disk to the target node over
     // the mTLS disk channel (Phase 3). Shared storage needs no copy — the disk is
     // already reachable from the target — so we skip the adapter entirely.
-    const sharedStorage = ['1', 'true', 'yes'].includes((process.env.INFINIBAY_SHARED_STORAGE || '').toLowerCase())
+    // Source shared-ness through the StorageProvider abstraction (DB config first,
+    // then env) rather than reading INFINIBAY_SHARED_STORAGE inline. The decision
+    // is passed to VMMigrationService as an explicit storageMode override below.
+    const sharedStorage = (await getConfiguredStorageProvider(prisma)).isShared()
     // The dispatcher doubles as the liveness probe (executorFor → getVMStatus on the
     // owning node) so migration refuses to move a disk out from under a live qemu.
     const livenessProbe = new NodeDispatcher(prisma)

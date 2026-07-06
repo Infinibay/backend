@@ -2,6 +2,7 @@ import { PrismaClient } from '@prisma/client'
 import logger from '@main/logger'
 import { calculateNodeCapacity } from './NodeCapacity'
 import { MOVING_STATUS, OFF_STATUS } from '../../constants/machine-status'
+import { getStorageProviderFromEnv } from '@services/storage'
 
 export interface VMStorageMigrationAdapter {
   prepareMachineStorage(params: {
@@ -60,7 +61,6 @@ export interface VMMigrationResult {
 }
 
 const MIGRATABLE_STATUSES = ['off', 'stopped', 'error']
-const SHARED_STORAGE_VALUES = new Set(['1', 'true', 'yes'])
 
 export class VMMigrationService {
   constructor (
@@ -238,7 +238,10 @@ export class VMMigrationService {
   private isSharedStorageEnabled (): boolean {
     if (this.options.storageMode === 'shared') return true
     if (this.options.storageMode === 'external') return false
-    return SHARED_STORAGE_VALUES.has((process.env.INFINIBAY_SHARED_STORAGE || '').toLowerCase())
+    // Source shared-ness through the StorageProvider abstraction (env-configured)
+    // instead of re-reading INFINIBAY_SHARED_STORAGE directly. See
+    // app/services/storage + lxd/docs/setup-system/03-storage-provider-scaffolding.md.
+    return getStorageProviderFromEnv().isShared()
   }
 
   private parseDiskPaths (value: unknown): string[] {

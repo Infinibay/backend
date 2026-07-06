@@ -207,9 +207,11 @@ export class KickstartInstaller extends UnattendedManagerBase {
    * @returns Post-install script for InfiniService installation
    */
   private generateInfiniServiceConfig (): string {
-    const backendHost = process.env.APP_HOST || 'localhost'
     const backendPort = process.env.PORT || '4000'
-    const baseUrl = `http://${backendHost}:${backendPort}`
+    // Fallback ONLY. The real backend host is resolved at runtime inside the guest as
+    // its default gateway (see the %post script below) - APP_HOST is the host's LAN IP
+    // and is NOT routable from the VM's isolated department network (it times out).
+    const fallbackHost = process.env.APP_HOST || 'localhost'
 
     // Per-VM HMAC secret (hex) for the installer's root-only EnvironmentFile.
     const agentSecret = deriveVmSecret(this.vmId)
@@ -221,8 +223,17 @@ export class KickstartInstaller extends UnattendedManagerBase {
     const postInstallScript = `%post --log=/root/infiniservice-install.log
 echo "=== Starting InfiniService Installation ==="
 echo "Timestamp: $(date)"
-echo "Backend URL: ${baseUrl}"
 echo "VM ID: ${this.vmId}"
+
+# Resolve the backend at runtime from the VM's DEFAULT GATEWAY (= the department
+# bridge IP, where the backend binds :${backendPort}); it is on the same L2 segment
+# and always reachable, unlike APP_HOST (the host LAN IP) which is NOT routable
+# from the VM's isolated department network. Fall back to the configured host only
+# when there is no default route.
+GW="\$(ip route 2>/dev/null | awk '/^default/{print \$3; exit}')"
+BACKEND_HOST="\${GW:-${fallbackHost}}"
+BASE_URL="http://\${BACKEND_HOST}:${backendPort}"
+echo "Backend URL: \$BASE_URL (gateway=\${GW:-none})"
 
 # Function to wait for network connectivity
 wait_for_network() {
@@ -238,7 +249,7 @@ wait_for_network() {
             echo "IP address assigned"
 
             # Test DNS resolution
-            if getent hosts ${backendHost} >/dev/null 2>&1 || ping -c 1 -W 2 8.8.8.8 >/dev/null 2>&1; then
+            if getent hosts \$BACKEND_HOST >/dev/null 2>&1 || ping -c 1 -W 2 8.8.8.8 >/dev/null 2>&1; then
                 echo "Network connectivity confirmed"
                 return 0
             fi
@@ -292,7 +303,7 @@ mkdir -p /tmp/infiniservice
 cd /tmp/infiniservice
 
 # Download InfiniService binary with retry
-if ! download_with_retry "${baseUrl}/infiniservice/linux/binary" "infiniservice" "InfiniService binary"; then
+if ! download_with_retry "\${BASE_URL}/infiniservice/linux/binary" "infiniservice" "InfiniService binary"; then
     echo "[FAIL] Could not download InfiniService binary"
     echo "InfiniService can be installed manually later"
     cd / && rm -rf /tmp/infiniservice
@@ -300,7 +311,7 @@ if ! download_with_retry "${baseUrl}/infiniservice/linux/binary" "infiniservice"
 fi
 
 # Download installation script with retry
-if ! download_with_retry "${baseUrl}/infiniservice/linux/script" "install-linux.sh" "InfiniService installation script"; then
+if ! download_with_retry "\${BASE_URL}/infiniservice/linux/script" "install-linux.sh" "InfiniService installation script"; then
     echo "[FAIL] Could not download installation script"
     echo "InfiniService can be installed manually later"
     cd / && rm -rf /tmp/infiniservice
@@ -340,33 +351,42 @@ echo "=== InfiniService Installation Completed ==="
    * @returns The Fedora version number (e.g., "43", "41")
    */
   private async extractFedoraVersionFromISO (): Promise<string> {
+    // The version feeds the netinstall mirrorlist (`repo=fedora-<version>`). We must
+    // NOT invent a placeholder on failure: a bogus id like `fedora-99` returns zero
+    // mirrors and anaconda aborts mid-install with "failed to set up installation
+    // source" — a cryptic runtime failure that is far harder to trace than failing
+    // the ISO build right here with an actionable message.
+    this.debug.debug(`[ISO] Extracting Fedora version from: ${this.isoPath}`)
+
+    let volIdOutput: string
     try {
-      this.debug.debug(`[ISO] Extracting Fedora version from: ${this.isoPath}`)
-      const volIdOutput = await this.executeCommand(['isoinfo', '-d', '-i', this.isoPath as string]) as string
-
-      // Match 'Volume id: ...' and extract the version number at the end
-      // Examples: "Fedora-E-dvd-x86_64-43", "Fedora-S-dvd-x86_64-41", "Fedora-WS-Live-x86_64-40"
-      const volIdMatch = volIdOutput.match(/Volume id:\s*(.*)/m)
-      if (volIdMatch && volIdMatch[1]) {
-        const volumeId = volIdMatch[1].trim()
-        this.debug.debug(`[ISO] Volume ID: ${volumeId}`)
-
-        // Extract version number (last number in the Volume ID)
-        const versionMatch = volumeId.match(/-(\d+)$/)
-        if (versionMatch && versionMatch[1]) {
-          const version = versionMatch[1]
-          this.debug.debug(`[ISO] Detected Fedora version: ${version}`)
-          return version
-        }
-      }
-
-      this.debug.debug('warning', '[ISO] Could not detect Fedora version, assuming latest (99)')
-      return '99'
+      volIdOutput = await this.executeCommand(['isoinfo', '-d', '-i', this.isoPath as string]) as string
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error)
-      this.debug.debug('warning', `[ISO] Failed to extract Fedora version: ${errorMsg}. Assuming latest (99)`)
-      return '99'
+      throw new Error(
+        `Could not read the Fedora ISO Volume ID (${errorMsg}). The netinstall ` +
+        `mirrorlist needs the Fedora version. Ensure 'isoinfo' (genisoimage/cdrkit) ` +
+        `is installed on the host that generates the unattended ISO.`
+      )
     }
+
+    // Match 'Volume id: ...' and extract the version number at the end
+    // Examples: "Fedora-E-dvd-x86_64-43", "Fedora-S-dvd-x86_64-41", "Fedora-WS-Live-x86_64-40"
+    const volumeId = volIdOutput.match(/Volume id:\s*(.*)/m)?.[1]?.trim()
+    this.debug.debug(`[ISO] Volume ID: ${volumeId ?? '(not found)'}`)
+
+    // Extract version number (last number in the Volume ID)
+    const version = volumeId?.match(/-(\d+)$/)?.[1]
+    if (!version) {
+      throw new Error(
+        `Could not parse a Fedora version from the ISO Volume ID ${JSON.stringify(volumeId ?? null)} ` +
+        `(expected a trailing number like 'Fedora-E-dvd-x86_64-43'). A pre-release/Rawhide ISO ` +
+        `has no numeric version and is not supported by the netinstall mirrorlist path.`
+      )
+    }
+
+    this.debug.debug(`[ISO] Detected Fedora version: ${version}`)
+    return version
   }
 
   /**
@@ -861,8 +881,10 @@ echo "=== InfiniService Installation Completed ==="
         }
       }
 
-      // Check for %packages section
-      const hasPackages = lines.some(line => line.trim() === '%packages')
+      // Check for %packages section. The header may carry options
+      // (e.g. `%packages --ignoremissing`), so match the directive rather than
+      // requiring a bare line — the same way the section start/end check below does.
+      const hasPackages = lines.some(line => /^%packages(\s|$)/.test(line.trim()))
       if (!hasPackages) {
         errors.push('Missing required %packages section')
       }

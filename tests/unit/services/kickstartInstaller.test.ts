@@ -157,6 +157,15 @@ describe('KickstartInstaller', () => {
       expect(validation.valid).toBe(false)
       expect(validation.errors.length).toBeGreaterThan(0)
     })
+
+    it('should accept a %packages header carrying options (--ignoremissing)', async () => {
+      // Regression: the live template emits `%packages --ignoremissing`, which an
+      // exact-match check wrongly flagged as a missing %packages section.
+      const withOptions = validKickstart.replace('%packages', '%packages --ignoremissing')
+      const validation = await (manager as any).validateConfig(withOptions)
+      expect(validation.valid).toBe(true)
+      expect(validation.errors).not.toContain('Missing required %packages section')
+    })
   })
 
   describe('generateApplicationsConfig', () => {
@@ -261,7 +270,10 @@ describe('KickstartInstaller', () => {
       expect(config).toContain('%post')
       expect(config).toContain('infiniservice')
       expect(config).toContain('install-linux.sh')
-      expect(config).toContain(`http://${process.env.APP_HOST || 'localhost'}:${process.env.PORT || '4000'}`)
+      // Host is resolved at runtime from the default gateway; APP_HOST is only the
+      // fallback. Only the port is baked into the script; the host is $BACKEND_HOST.
+      expect(config).toContain(`BASE_URL="http://\${BACKEND_HOST}:${process.env.PORT || '4000'}"`)
+      expect(config).toContain(`\${GW:-${process.env.APP_HOST || 'localhost'}}`)
       expect(config).toContain('vm-123') // vmId
     })
 
@@ -288,7 +300,10 @@ describe('KickstartInstaller', () => {
       const testManager = new KickstartInstaller('user', 'pass', [])
       const config = testManager['generateInfiniServiceConfig']()
 
-      expect(config).toContain('http://custom-server:8080')
+      // Port is baked; the host is resolved at runtime from the gateway, with
+      // APP_HOST kept only as the fallback.
+      expect(config).toContain('BASE_URL="http://${BACKEND_HOST}:8080"')
+      expect(config).toContain('${GW:-custom-server}')
 
       delete process.env.APP_HOST
       delete process.env.PORT
@@ -310,17 +325,28 @@ describe('KickstartInstaller', () => {
       mockExecCmd.mockRestore()
     })
 
-    it('should return 99 when version extraction fails', async () => {
+    it('should throw (not invent a version) when isoinfo fails', async () => {
+      // A placeholder version would build a bogus `repo=fedora-<N>` mirrorlist and
+      // make anaconda abort mid-install; failing the build here is the intended
+      // behaviour so the cause is obvious.
       const testManager = new KickstartInstaller('user', 'pass', [])
       testManager['isoPath'] = '/nonexistent.iso'
 
-      // Mock executeCommand to reject
       const mockExecCmd = jest.spyOn(testManager as any, 'executeCommand')
         .mockRejectedValue(new Error('File not found'))
 
-      const version = await testManager['extractFedoraVersionFromISO']()
+      await expect(testManager['extractFedoraVersionFromISO']()).rejects.toThrow(/Volume ID/)
+      mockExecCmd.mockRestore()
+    })
 
-      expect(version).toBe('99')
+    it('should throw when the Volume ID has no numeric version (e.g. Rawhide)', async () => {
+      const testManager = new KickstartInstaller('user', 'pass', [])
+      testManager['isoPath'] = '/path/to/rawhide.iso'
+
+      const mockExecCmd = jest.spyOn(testManager as any, 'executeCommand')
+        .mockResolvedValue('Volume id: Fedora-WS-dvd-x86_64-Rawhide\n')
+
+      await expect(testManager['extractFedoraVersionFromISO']()).rejects.toThrow(/Rawhide|parse a Fedora version/)
       mockExecCmd.mockRestore()
     })
   })

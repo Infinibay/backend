@@ -588,3 +588,67 @@ export async function ejectAllCdroms (vmId: string): Promise<void> {
   }
 }
 
+/** Resolve the temp-ISO age threshold from env (INFINIBAY_ISO_TEMP_MAX_AGE_HOURS), default 24h. */
+function resolveIsoTempMaxAgeMs (): number {
+  const hours = Number(process.env.INFINIBAY_ISO_TEMP_MAX_AGE_HOURS)
+  return (Number.isFinite(hours) && hours > 0 ? hours : 24) * 60 * 60 * 1000
+}
+
+/**
+ * Age-based reaper for orphaned unattended-install ISOs in the temp dir.
+ *
+ * The normal deleter ({@link ejectAllCdroms}) only runs when a guest's infiniservice
+ * agent handshakes (→ setupComplete). A VM whose agent never installs, or that is
+ * deleted before install completes, would otherwise leak its ~1.2GB temp ISO forever
+ * (the VM-delete path cannot target it — the path is a random UUID not persisted to
+ * the DB). A successful install ejects within minutes, so any temp ISO whose mtime is
+ * older than `maxAgeMs` (default 24h, well past the longest install timeout) is
+ * definitively orphaned and safe to remove. On Linux, unlinking an ISO still held open
+ * by a running QEMU is safe — QEMU keeps its fd and the space frees when it closes —
+ * so this can never corrupt an in-progress install.
+ *
+ * Best-effort and non-throwing: safe to call at startup and on an interval.
+ *
+ * @param maxAgeMs - Age threshold; files with mtime older than this are deleted.
+ * @returns number of ISOs reclaimed.
+ */
+export async function reapStaleTempIsos (maxAgeMs: number = resolveIsoTempMaxAgeMs()): Promise<number> {
+  const baseDir = process.env.INFINIBAY_BASE_DIR ?? '/opt/infinibay'
+  const tempIsoDir = process.env.INFINIBAY_ISO_TEMP_DIR ?? path.join(baseDir, 'iso', 'temp')
+
+  let entries: string[]
+  try {
+    entries = await fs.promises.readdir(tempIsoDir)
+  } catch (err: any) {
+    // ENOENT just means no VM has ever generated a temp ISO yet — nothing to do.
+    if (err?.code !== 'ENOENT') {
+      debug.warn(`Temp-ISO janitor: cannot read ${tempIsoDir}: ${err?.message ?? err}`)
+    }
+    return 0
+  }
+
+  const now = Date.now()
+  let reclaimed = 0
+  for (const name of entries) {
+    if (!name.endsWith('.iso')) continue
+    const isoPath = path.join(tempIsoDir, name)
+    try {
+      const st = await fs.promises.stat(isoPath)
+      if (!st.isFile()) continue
+      const ageMs = now - st.mtimeMs
+      if (ageMs < maxAgeMs) continue
+      await fs.promises.unlink(isoPath)
+      reclaimed++
+      debug.info(`Temp-ISO janitor: reclaimed orphaned ${isoPath} (age ${Math.round(ageMs / 3_600_000)}h)`)
+    } catch (err: any) {
+      if (err?.code !== 'ENOENT') {
+        debug.warn(`Temp-ISO janitor: failed on ${isoPath}: ${err?.message ?? err}`)
+      }
+    }
+  }
+  if (reclaimed > 0) {
+    debug.info(`Temp-ISO janitor: reclaimed ${reclaimed} orphaned temp ISO(s) from ${tempIsoDir}`)
+  }
+  return reclaimed
+}
+

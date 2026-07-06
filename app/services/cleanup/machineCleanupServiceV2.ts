@@ -102,6 +102,20 @@ export class MachineCleanupServiceV2 {
       return
     }
 
+    // 0. Best-effort reclaim of the ~1.2GB unattended install ISO in iso/temp.
+    // The normal deleter (ejectAllCdroms) runs ONLY when infiniservice handshakes
+    // (MetricsHandler.handleFirstInfiniserviceMessage → setupComplete); a VM whose
+    // agent never installed leaves its temp ISO on disk forever, and no step below
+    // removes it. Do it BEFORE destroyVM, which kills QEMU and makes the QMP
+    // block-device query impossible. Non-fatal; local-node/QMP-reachable only — the
+    // age-based temp-ISO janitor (startup + hourly) covers stopped/crashed/remote VMs.
+    try {
+      const { ejectAllCdroms } = await import('../InfinizationService')
+      await ejectAllCdroms(machineId)
+    } catch (isoErr: any) {
+      this.debug.warn(`Temp ISO reclaim before delete skipped for VM ${machineId}: ${isoErr?.message ?? isoErr}`)
+    }
+
     // 1. Stop and clean up VM via infinization
     this.debug.info(`[1/6] Cleaning VM resources (TAP, firewall)`)
     const vmResourcesResult = await this.cleanupVMResources(machineId, summary)

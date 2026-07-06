@@ -3,10 +3,12 @@ import { getSocketService } from '../SocketService'
 import { ISO } from '@prisma/client'
 
 export interface ISOEvent {
-  action: 'registered' | 'removed' | 'validated' | 'progress' | 'status_changed';
+  action: 'registered' | 'removed' | 'validated' | 'progress' | 'status_changed' | 'download_complete' | 'download_failed';
   iso?: ISO;
   isoId?: string;
   filename?: string;
+  os?: string;
+  error?: string;
   progress?: {
     current: number;
     total: number;
@@ -169,6 +171,53 @@ export class ISOEventManager {
       if (io) {
         io.emit('iso:download:progress', event)
       }
+    }
+  }
+
+  /**
+   * Emit a terminal "download finished successfully" event. Also fires the
+   * generic `iso:registered` broadcast so existing listeners refresh.
+   */
+  public emitDownloadComplete (iso: ISO, userId?: string): void {
+    const socketService = this.getSocket()
+    if (!socketService) return
+
+    const event: ISOEvent = {
+      action: 'download_complete',
+      iso,
+      filename: iso.filename,
+      os: iso.os
+    }
+
+    if (userId) {
+      socketService.sendToUser(userId, 'iso', 'download:complete', event)
+    } else {
+      const io = socketService.getIO()
+      if (io) io.emit('iso:download:complete', event)
+    }
+    // Keep the existing global "an ISO appeared" signal working too.
+    this.emitISORegistered(iso)
+  }
+
+  /**
+   * Emit a terminal "download failed" event with a human-readable reason.
+   */
+  public emitDownloadFailed (filename: string, os: string, message: string, userId?: string): void {
+    const socketService = this.getSocket()
+    if (!socketService) return
+
+    const event: ISOEvent = {
+      action: 'download_failed',
+      filename,
+      os,
+      error: message
+    }
+
+    if (userId) {
+      socketService.sendToUser(userId, 'iso', 'download:failed', event)
+    } else {
+      const io = socketService.getIO()
+      if (io) io.emit('iso:download:failed', event)
     }
   }
 

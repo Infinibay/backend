@@ -19,6 +19,22 @@
 export type InstallMechanism = 'cloud-init' | 'kickstart' | 'autounattend'
 export type OsFamily = 'ubuntu' | 'debian' | 'fedora' | 'rhel' | 'windows'
 
+/**
+ * Auto-download spec for Linux net/desktop images. Windows is intentionally
+ * upload-only (Microsoft CDN links expire). Updating to a newer release is a DATA
+ * change here (bump `version`), not new code — IsoDownloadService implements the
+ * `strategy` (discovers the exact filename + checksum from the published index).
+ */
+export interface AutoDownloadSpec {
+  strategy: 'ubuntu-releases' | 'fedora-releases'
+  /** Base URL for the strategy's published directory listing. The concrete
+   *  version + point-release is AUTO-DETECTED from the index (newest that has a
+   *  downloadable image), not hardcoded. */
+  baseUrl: string
+  /** Optional floor; auto-detection ignores versions below this. */
+  minVersion?: string
+}
+
 export interface OsProfile {
   /** Canonical id (matches the OsEnum value where one exists). */
   id: string
@@ -47,6 +63,10 @@ export interface OsProfile {
   kickstartEnvironment?: string
   /** Boots via OVMF UEFI by default. */
   uefi: boolean
+  /** Official download page, shown for manual-upload guidance / auto-download fallback. */
+  officialDownloadUrl?: string
+  /** Auto-download spec (Linux net/desktop only). Absent → manual upload only. */
+  autoDownload?: AutoDownloadSpec
 }
 
 const PROFILES: OsProfile[] = [
@@ -63,7 +83,10 @@ const PROFILES: OsProfile[] = [
     // ('ubuntu-server'). Full desktop is the right default for a VDI product.
     cloudInitPreferredSource: 'ubuntu-desktop',
     expectedEdition: 'desktop',
-    uefi: true
+    uefi: true,
+    officialDownloadUrl: 'https://ubuntu.com/download/desktop',
+    // Version auto-detected from the releases index (prefers the newest LTS).
+    autoDownload: { strategy: 'ubuntu-releases', baseUrl: 'https://releases.ubuntu.com' }
   },
   {
     id: 'debian', family: 'debian', mechanism: 'cloud-init', displayName: 'Debian',
@@ -73,7 +96,10 @@ const PROFILES: OsProfile[] = [
   {
     id: 'fedora', family: 'fedora', mechanism: 'kickstart', displayName: 'Fedora',
     isoPatterns: [/fedora.*\.iso$/i],
-    uefi: true
+    uefi: true,
+    officialDownloadUrl: 'https://fedoraproject.org/server/download',
+    // dl.fedoraproject.org is the master (no mirror redirect). Version auto-detected.
+    autoDownload: { strategy: 'fedora-releases', baseUrl: 'https://dl.fedoraproject.org/pub/fedora/linux/releases' }
   },
   {
     id: 'rhel', family: 'rhel', mechanism: 'kickstart', displayName: 'RHEL family',
@@ -84,12 +110,15 @@ const PROFILES: OsProfile[] = [
   {
     id: 'windows10', family: 'windows', mechanism: 'autounattend', displayName: 'Windows 10',
     isoPatterns: [/win(dows)?[-_ ]?10.*\.iso$/i, /Win10.*\.iso$/i],
-    uefi: true
+    uefi: true,
+    // Windows is upload-only: Microsoft's download links are session-scoped and expire.
+    officialDownloadUrl: 'https://www.microsoft.com/software-download/windows10'
   },
   {
     id: 'windows11', family: 'windows', mechanism: 'autounattend', displayName: 'Windows 11',
     isoPatterns: [/win(dows)?[-_ ]?11.*\.iso$/i, /Win11.*\.iso$/i],
-    uefi: true
+    uefi: true,
+    officialDownloadUrl: 'https://www.microsoft.com/software-download/windows11'
   }
 ]
 

@@ -6,6 +6,7 @@ import path from 'path'
 import { PrismaClient, UserRole } from '@prisma/client'
 import { calculateNodeCapacity } from '../app/services/node/NodeCapacity'
 import { IdentityProviderService } from '../app/services/identity/IdentityProviderService'
+import { getStorageProviderFromEnv } from '../app/services/storage'
 
 type CheckStatus = 'pass' | 'warn' | 'fail'
 
@@ -33,7 +34,6 @@ const minOnlineNodes = Number(
 
 const prisma = new PrismaClient()
 const results: CheckResult[] = []
-const SHARED_STORAGE_VALUES = new Set(['1', 'true', 'yes'])
 
 function addResult (
   status: CheckStatus,
@@ -105,14 +105,20 @@ async function checkEnvironment (): Promise<void> {
     'Per-provider tlsInsecureSkipVerify is ignored in production; certificate validation is always enforced when NODE_ENV=production'
   )
 
-  if (!SHARED_STORAGE_VALUES.has((process.env.INFINIBAY_SHARED_STORAGE || '').toLowerCase())) {
+  // Source shared-ness through the StorageProvider abstraction and, for a shared
+  // mount, actually VERIFY the mount (closes the old honor-system gap where a
+  // declared-but-missing mount passed silently). See app/services/storage.
+  const storageProvider = getStorageProviderFromEnv()
+  if (!storageProvider.isShared()) {
     addResult(
       strictStatus(),
       'Shared VM storage',
-      'INFINIBAY_SHARED_STORAGE=true is required for built-in cold migration between nodes unless a storage migration adapter is configured'
+      'INFINIBAY_SHARED_STORAGE=true (or INFINIBAY_STORAGE_BACKEND=shared-mount) is required for built-in cold migration between nodes unless a storage migration adapter is configured'
     )
   } else {
-    addResult('pass', 'Shared VM storage', 'Shared VM storage is declared for cold migration')
+    const diskDir = process.env.INFINIZATION_DISK_DIR || '/var/lib/infinization/disks'
+    const verify = await storageProvider.verify(diskDir)
+    addResult(verify.ok ? 'pass' : strictStatus(), 'Shared VM storage', verify.detail)
   }
 }
 

@@ -596,10 +596,22 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
    * @returns Array of FirstLogonCommands for InfiniService installation
    */
   private generateInfiniServiceInstallCommands (idx: number): any[] {
-    const backendHost = process.env.APP_HOST || 'localhost'
     const backendPort = process.env.PORT || '4000'
-    const baseUrl = `http://${backendHost}:${backendPort}`
+    // Fallback ONLY. The real backend host is resolved at runtime inside the guest as
+    // its default gateway (the department bridge IP, where the backend also binds
+    // :PORT) — APP_HOST is the host's LAN IP and is NOT routable from the VM's isolated
+    // department NAT subnet (the download would time out). Mirrors the Fedora/Ubuntu
+    // installers, which resolve the gateway the same way. See downloadViaGateway().
+    const fallbackHost = process.env.APP_HOST || 'localhost'
     const { PATHS, INFINISERVICE } = UnattendedWindowsManager
+
+    // PowerShell that resolves the backend from the VM's default gateway at runtime and
+    // downloads `path` to `outFile`. `$gw` is a literal PowerShell variable (not JS
+    // interpolation); only the port and fallback host are baked in from JS. Single-quoted
+    // literals + string concatenation avoid nesting double-quotes inside the outer
+    // `-Command "..."` and the `$gw:` drive-qualifier ambiguity.
+    const downloadViaGateway = (path: string, outFile: string): string =>
+      `powershell -Command "$gw=(Get-NetRoute -DestinationPrefix '0.0.0.0/0' -EA SilentlyContinue | Sort-Object RouteMetric | Select-Object -First 1 -ExpandProperty NextHop); if([string]::IsNullOrWhiteSpace($gw)){$gw='${fallbackHost}'}; Invoke-WebRequest -Uri ('http://' + $gw + ':${backendPort}/infiniservice/windows/${path}') -OutFile ${outFile}"`
 
     // Per-VM HMAC secret (hex). install-windows.ps1 reads it from the env var
     // and stores it in the service-private registry environment (ACL'd). We set
@@ -638,7 +650,7 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
         Order: idx + 3,
         Description: 'Download InfiniService binary with retry',
         RequiresUserInput: false,
-        CommandLine: `powershell -Command "Invoke-WebRequest -Uri ${baseUrl}/infiniservice/windows/binary -OutFile C:\\Temp\\InfiniService\\infiniservice.exe"`
+        CommandLine: downloadViaGateway('binary', 'C:\\Temp\\InfiniService\\infiniservice.exe')
       },
       {
         $: { 'wcm:action': 'add' },
@@ -652,7 +664,7 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
         Order: idx + 5,
         Description: 'Download InfiniService installation script with retry',
         RequiresUserInput: false,
-        CommandLine: `powershell -Command "Invoke-WebRequest -Uri ${baseUrl}/infiniservice/windows/script -OutFile C:\\Temp\\InfiniService\\install-windows.ps1"`
+        CommandLine: downloadViaGateway('script', 'C:\\Temp\\InfiniService\\install-windows.ps1')
       },
       {
         $: { 'wcm:action': 'add' },

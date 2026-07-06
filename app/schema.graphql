@@ -1025,6 +1025,14 @@ input IpRangeInput {
   start: String! = ""
 }
 
+type IsoDownloadStatus {
+  error: String
+  os: String!
+  receivedBytes: Float!
+  state: String!
+  totalBytes: Float!
+}
+
 """
 The `JSON` scalar type represents JSON values as specified by [ECMA-404](http://www.ecma-international.org/publications/files/ECMA-ST/ECMA-404.pdf).
 """
@@ -1368,6 +1376,11 @@ type Mutation {
   """Calculate ISO checksum"""
   calculateISOChecksum(isoId: String!): String!
 
+  """
+  Cancel an in-progress ISO auto-download. Returns true if one was aborted.
+  """
+  cancelOSIsoDownload(os: String!): Boolean!
+
   """Cancel a pending or running resolution. No-op on terminal resolutions."""
   cancelResolution(id: ID!): RecommendationResolutionType!
   cancelScheduledScript(executionId: ID!): ScheduleScriptResponseType!
@@ -1377,6 +1390,7 @@ type Mutation {
   captureGoldenImageFromMachine(input: CaptureGoldenImageFromMachineInput!): GoldenImageResult!
   cleanupInfinibayFirewall: CleanupResultType!
   clearUserPermissionOverride(permission: String!, userId: String!): Boolean!
+  completeSetup: SetupStatusType!
 
   """
   Check out a desktop from the pool for the current user. Returns Machine.id.
@@ -1520,6 +1534,7 @@ type Mutation {
   setNodeMaintenanceMode(enabled: Boolean!, id: ID!): NodeType!
   setRolePermission(input: SetRolePermissionInput!): RoleType!
   setUserPermissionOverride(input: SetUserPermissionOverrideInput!): UserPermissionOverrideType!
+  setupChangeAdminPassword(newPassword: String!): SetupStatusType!
   setupNode: DyummyType!
 
   """
@@ -1531,6 +1546,11 @@ type Mutation {
   Snooze a single recommendation for a duration (ISO 8601 duration format: PT1H, P1D, etc.)
   """
   snoozeRecommendation(duration: String!, id: ID!): SnoozeRecommendationResult!
+
+  """
+  Start auto-downloading the latest official ISO for an OS. Poll isoDownloadStatus (or listen to iso:download:* over Socket.IO) for progress.
+  """
+  startOSIsoDownload(os: String!): Boolean!
   suspend(id: String!): SuccessType!
   syncFirewallToLibvirt: SyncResultType!
 
@@ -1922,6 +1942,9 @@ type Query {
   application(id: String!): ApplicationType
   applications: [ApplicationType!]!
 
+  """OS ids that can be auto-downloaded (Linux net/desktop images)"""
+  autoDownloadableOSes: [String!]!
+
   """Get all available ISOs"""
   availableISOs: [ISO!]!
   backgroundHealthServiceStatus: BackgroundHealthServiceStatus!
@@ -2021,6 +2044,11 @@ type Query {
   identityProvider(id: ID!): IdentityProviderType
   identityProviders: [IdentityProviderType!]!
   identitySyncRuns(providerId: ID!): [IdentitySyncRunType!]!
+
+  """
+  Live status of an auto-download (poll this for progress; socket-independent).
+  """
+  isoDownloadStatus(os: String!): IsoDownloadStatus!
   latestVMHealthSnapshot(machineId: ID!): VMHealthSnapshotType
   listInfinibayFilters: [LibvirtFilterInfoType!]!
 
@@ -2067,6 +2095,11 @@ type Query {
 
   """Fetch a single resolution. Poll this query to track progress."""
   recommendationResolution(id: ID!): RecommendationResolutionType
+
+  """
+  Return recent resolutions (any status) for a machine, newest first. Use to show run history — what was triggered, whether it succeeded/failed, and why.
+  """
+  resolutionHistoryForMachine(limit: Int, machineId: ID!): [RecommendationResolutionType!]!
   role(id: String!): RoleType
   roles: [RoleType!]!
 
@@ -2082,6 +2115,7 @@ type Query {
 
   """Search for available packages on a virtual machine"""
   searchPackages(machineId: ID!, query: String!): [PackageInfo!]!
+  setupStatus: SetupStatusType!
 
   """Get current socket connection statistics for all VMs"""
   socketConnectionStats: SocketConnectionStats
@@ -2515,6 +2549,19 @@ input SetUserPermissionOverrideInput {
   permission: String! = ""
   scope: PermissionScope = ANY
   userId: ID! = ""
+}
+
+type SetupStatusType {
+  completed: Boolean!
+  devModeAdmin: Boolean!
+  phase: String!
+  steps: [SetupStepType!]!
+}
+
+type SetupStepType {
+  done: Boolean!
+  key: String!
+  label: String!
 }
 
 """Shell type for script execution"""

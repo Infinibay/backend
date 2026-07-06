@@ -26,6 +26,7 @@ import { configureRoutes } from './config/routes'
 import { expressMiddleware } from '@as-integrations/express5'
 import { InfinibayContext, createUserValidationHelpers, SafeUser } from './utils/context'
 import { verifyRequestAuth } from './utils/jwtAuth'
+import { isSetupOpen } from './utils/setupState'
 
 // GraphQL Subscriptions transport
 import { WebSocketServer } from 'ws'
@@ -117,7 +118,7 @@ async function bootstrap (): Promise<void> {
           return {
             prisma,
             user: authResult.user,
-            setupMode: false,
+            setupMode: await isSetupOpen(prisma),
             virtioSocketWatcher,
             auth: authResult.meta,
             userHelpers
@@ -166,7 +167,7 @@ async function bootstrap (): Promise<void> {
             req,
             res,
             user: authResult.user,
-            setupMode: false,
+            setupMode: await isSetupOpen(prisma),
             virtioSocketWatcher,
             auth: authResult.meta,
             userHelpers
@@ -249,9 +250,13 @@ async function bootstrap (): Promise<void> {
     // Initialize and start VirtioSocketWatcherService (already created earlier for context)
     virtioSocketWatcher.initialize(vmEventManager, healthQueueManager)
 
-    // Forward metrics updates to Socket.io clients
+    // Forward metrics updates to Socket.io clients. Route through the same
+    // per-user recipient model the other resource events use (owner + admins +
+    // department users); the old emitToRoom(`vm:${vmId}`) was dead because no
+    // socket ever joins that room. Fire-and-forget with error isolation.
     virtioSocketWatcher.on('metricsUpdated', ({ vmId, metrics }) => {
-      socketService.emitToRoom(`vm:${vmId}`, 'metricsUpdate', { vmId, metrics })
+      vmEventManager.handleMetricsUpdate(vmId, metrics)
+        .catch(err => logger.error(`Failed to forward metrics update for VM ${vmId}:`, err))
     })
 
     try {
@@ -285,6 +290,24 @@ async function bootstrap (): Promise<void> {
 
     // Start cron jobs
     cronHandles = await startCrons()
+
+    // Reclaim orphaned unattended-install ISOs in iso/temp. The normal deleter
+    // (ejectAllCdroms) only fires on the infiniservice handshake, so a VM whose agent
+    // never installs — or that is deleted mid-install — leaks its ~1.2GB temp ISO.
+    // Sweep once now and hourly thereafter (age-based; a successful install ejects
+    // within minutes, so anything old is definitively orphaned). unref'd so it never
+    // holds the process open on shutdown.
+    try {
+      const { reapStaleTempIsos } = await import('./services/InfinizationService')
+      const sweepTempIsos = (): void => {
+        void reapStaleTempIsos().catch((e) => logger.warn('Temp-ISO janitor sweep failed:', e))
+      }
+      sweepTempIsos()
+      setInterval(sweepTempIsos, 60 * 60 * 1000).unref()
+      logger.info('🧹 Temp-ISO janitor started (startup + hourly)')
+    } catch (error) {
+      logger.error('⚠️ Failed to start temp-ISO janitor:', error)
+    }
 
     // Initialize backup scheduler (loads enabled schedules from DB)
     try {

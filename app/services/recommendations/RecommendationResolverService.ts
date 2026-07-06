@@ -253,11 +253,20 @@ export class RecommendationResolverService {
         result: (result.data ?? undefined) as any,
         completedAt: new Date()
       })
-      // Auto-dismiss on success; keep visible when reboot still required
+      // Auto-dismiss on success; keep visible when reboot still required.
+      // Also set a suppression window (snoozedUntil) so the recommendation does
+      // not immediately re-materialize on the next ~1-min health scan before the
+      // guest's own state (e.g. installed OS updates) has caught up. Window
+      // defaults to 30 minutes, overridable via RECOMMENDATION_SUPPRESSION_MINUTES.
       if (finalStatus === ResolutionStatus.SUCCEEDED) {
+        const suppressionMinutes = Number(process.env.RECOMMENDATION_SUPPRESSION_MINUTES) || 30
         await prisma.vMRecommendation.update({
           where: { id: rec.id },
-          data: { dismissedAt: new Date(), activeResolutionId: null }
+          data: {
+            dismissedAt: new Date(),
+            snoozedUntil: new Date(Date.now() + suppressionMinutes * 60 * 1000),
+            activeResolutionId: null
+          }
         })
       }
 

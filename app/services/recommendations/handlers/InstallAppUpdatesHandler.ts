@@ -20,6 +20,10 @@ function extractUpdates (ctx: Parameters<ResolutionHandler['run']>[0]): AppUpdat
 const MAX_PACKAGES = 200
 // Same charset infiniservice's validate_package_name enforces on the guest side.
 const PACKAGE_NAME_RE = /^[A-Za-z0-9._:+-]{1,100}$/
+// Cap per-package guest output stored in the result so a 200-package run can't
+// bloat the persisted resolution row.
+const clip = (s?: string, max = 4000): string | undefined =>
+  s && s.length > max ? `${s.slice(0, max)}\n…[truncated]` : s
 
 function eligibleNames (entries: AppUpdateEntry[], securityOnly?: boolean): string[] {
   const filtered = securityOnly
@@ -49,13 +53,22 @@ function pickPackages (entries: AppUpdateEntry[], explicit?: string[], securityO
   return eligible
 }
 
+interface PackageLog {
+  package: string
+  success: boolean
+  stdout?: string
+  stderr?: string
+}
+
 async function runPackageUpdates (
   ctx: Parameters<ResolutionHandler['run']>[0],
   packages: string[]
-): Promise<{ succeeded: string[]; failed: Array<{ package: string; error: string }> }> {
+): Promise<{ succeeded: string[]; failed: Array<{ package: string; error: string }>; logs: PackageLog[] }> {
   const socket = getVirtioSocketWatcherService()
   const succeeded: string[] = []
   const failed: Array<{ package: string; error: string }> = []
+  // Per-package guest output so the UI's log view can show what actually happened.
+  const logs: PackageLog[] = []
 
   if (packages.length === 0) {
     throw new Error('No packages to update')
@@ -67,9 +80,11 @@ async function runPackageUpdates (
     await ctx.reportProgress(pct, `Updating ${pkg} (${i + 1}/${packages.length})`)
     try {
       const response = await socket.sendPackageCommand(ctx.machineId, 'PackageUpdate', pkg, 5 * 60 * 1000)
+      logs.push({ package: pkg, success: response.success, stdout: clip(response.stdout), stderr: clip(response.stderr) })
       if (response.success) succeeded.push(pkg)
       else failed.push({ package: pkg, error: response.error || 'Unknown error' })
     } catch (err: any) {
+      logs.push({ package: pkg, success: false, stderr: err?.message || String(err) })
       failed.push({ package: pkg, error: err?.message || String(err) })
     }
   }
@@ -78,7 +93,7 @@ async function runPackageUpdates (
     throw new Error(`All ${packages.length} package updates failed`)
   }
 
-  return { succeeded, failed }
+  return { succeeded, failed, logs }
 }
 
 export const installAppUpdatesHandler: ResolutionHandler = {

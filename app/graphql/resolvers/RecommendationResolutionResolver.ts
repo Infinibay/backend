@@ -1,4 +1,4 @@
-import { Arg, Ctx, ID, Mutation, Query, Resolver } from 'type-graphql'
+import { Arg, Ctx, ID, Int, Mutation, Query, Resolver } from 'type-graphql'
 import { GraphQLError } from 'graphql'
 import { Can } from '@main/permissions'
 import { InfinibayContext } from '../../utils/context'
@@ -137,6 +137,32 @@ export class RecommendationResolutionResolver {
         status: { in: ['PENDING', 'RUNNING'] }
       },
       orderBy: { createdAt: 'desc' }
+    })
+    return rows.map(toGql)
+  }
+
+  @Query(() => [RecommendationResolutionType], {
+    description: 'Return recent resolutions (any status) for a machine, newest first. Use to show run history — what was triggered, whether it succeeded/failed, and why.'
+  })
+  @Can('recommendation:view', { id: (a) => a.machineId, scopeVia: 'vm' })
+  async resolutionHistoryForMachine (
+    @Arg('machineId', () => ID) machineId: string,
+    @Ctx() context: InfinibayContext,
+    @Arg('limit', () => Int, { nullable: true }) limit?: number
+  ): Promise<RecommendationResolutionType[]> {
+    const machine = await context.prisma.machine.findUnique({
+      where: { id: machineId },
+      select: { userId: true }
+    })
+    if (!machine) {
+      throw new GraphQLError('Machine not found', { extensions: { code: 'NOT_FOUND' } })
+    }
+    // Clamp so a caller can't request an unbounded scan.
+    const take = Math.min(Math.max(limit ?? 20, 1), 100)
+    const rows = await context.prisma.recommendationResolution.findMany({
+      where: { machineId },
+      orderBy: { createdAt: 'desc' },
+      take
     })
     return rows.map(toGql)
   }

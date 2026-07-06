@@ -4,6 +4,13 @@ import { ResolutionHandler } from './index'
 
 const OS_UPDATE_TIMEOUT_MS = 30 * 60 * 1000 // 30 minutes
 
+// Cap stored guest output so a large package-manager transcript can't bloat the
+// persisted resolution row (the UI only needs a readable tail).
+function clip (s: string | undefined, max = 20000): string {
+  if (!s) return ''
+  return s.length > max ? `${s.slice(0, max)}\n…[truncated]` : s
+}
+
 export const installOSUpdatesHandler: ResolutionHandler = {
   actionKey: 'install_updates',
   types: [RecommendationType.OS_UPDATE_AVAILABLE],
@@ -27,7 +34,13 @@ export const installOSUpdatesHandler: ResolutionHandler = {
       message: requiresReboot
         ? 'Updates installed. System reboot required to complete.'
         : 'Updates installed successfully.',
-      data,
+      // Fold the guest's real stdout/stderr into the persisted result so the UI
+      // can show what the package manager actually did (the "logs" view).
+      data: {
+        ...data,
+        stdout: clip(response.stdout),
+        stderr: clip(response.stderr)
+      },
       requiresReboot
     }
   }

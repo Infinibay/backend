@@ -480,7 +480,7 @@ export class GoldenImageService {
     await this.startSourceGuarded(machineId)
 
     this.emitProgress(imageId, 35, 'waiting_for_agent')
-    await this.waitForSetupComplete(machineId, SETUP_WAIT_TIMEOUT_MS)
+    await this.waitForAgentConnection(machineId, SETUP_WAIT_TIMEOUT_MS)
 
     this.emitProgress(imageId, 55, 'sealing')
     await this.sendPrepareGoldenImage(machineId, {
@@ -539,7 +539,7 @@ export class GoldenImageService {
       await this.startSourceGuarded(machineId)
 
       this.emitProgress(imageId, 35, 'waiting_for_agent')
-      await this.waitForSetupComplete(machineId, SETUP_WAIT_TIMEOUT_MS)
+      await this.waitForAgentConnection(machineId, SETUP_WAIT_TIMEOUT_MS)
 
       this.emitProgress(imageId, 55, 'sealing')
       await this.sendPrepareGoldenImage(machineId, {
@@ -754,6 +754,33 @@ export class GoldenImageService {
       await sleep(POLL_INTERVAL_MS)
     }
     throw new Error(`Timed out waiting for setupComplete on machine ${machineId}`)
+  }
+
+  /**
+   * Wait for the in-guest agent's virtio-serial connection to come up before we
+   * send a command to the guest (e.g. PrepareGoldenImage).
+   *
+   * The SEAL paths must NOT gate on waitForSetupComplete: setupComplete is a
+   * persistent provisioning flag that is ALREADY true for an existing VM, so it
+   * returns instantly after the reboot-for-seal — and PrepareGoldenImage then
+   * fires before the rebooted guest has finished booting and reconnected its
+   * agent, so sendSafeCommand throws "No connection to VM" (observed capture
+   * failure). Gate on a live agent connection instead. A timeout here is the
+   * actionable failure to surface: the guest never brought its agent up
+   * (infiniservice not installed / not running).
+   */
+  private async waitForAgentConnection (machineId: string, timeoutMs: number): Promise<void> {
+    const deadline = Date.now() + timeoutMs
+    while (Date.now() < deadline) {
+      if (this.virtioWatcher.isVmConnected(machineId)) return
+      await sleep(POLL_INTERVAL_MS)
+    }
+    throw new Error(
+      `Timed out waiting for the in-guest agent to connect on machine ${machineId}. ` +
+      'Golden-image capture reboots the VM and seals it through the Infinibay ' +
+      'agent (infiniservice) over virtio-serial — ensure the agent is installed ' +
+      'and running in the guest, then retry.'
+    )
   }
 
   private async waitForShutdown (machineId: string, timeoutMs: number): Promise<void> {

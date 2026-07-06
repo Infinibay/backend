@@ -355,10 +355,18 @@ export class VMRecommendationService {
         return []
       }
 
-      // Build where clause from filter, including snapshot filtering
+      // Build where clause from filter, including snapshot filtering.
+      // Exclude dismissed and actively-snoozed recommendations, mirroring the
+      // global queries in VMRecommendationResolver — otherwise a resolved rec
+      // (e.g. "OS updates available") keeps re-appearing in the per-VM list.
       const where: Prisma.VMRecommendationWhereInput = {
         machineId: vmId,
-        snapshotId: latestSnapshot.id
+        snapshotId: latestSnapshot.id,
+        dismissedAt: null,
+        OR: [
+          { snoozedUntil: null },
+          { snoozedUntil: { lt: new Date() } }
+        ]
       }
 
       if (filter?.types && filter.types.length > 0) {
@@ -602,6 +610,26 @@ export class VMRecommendationService {
     results: RecommendationResult[]
   ): Promise<VMRecommendation[]> {
     if (results.length === 0) {
+      // A scan that yields zero recommendations means previously-flagged issues
+      // are resolved. Clear stale VISIBLE rows for the latest snapshot so they
+      // don't linger forever (the old early-return left them in place). Rows that
+      // are dismissed or under an active snooze are preserved — they're already
+      // hidden and must survive a transient empty scan so a just-resolved rec is
+      // not un-suppressed.
+      if (snapshotId) {
+        const now = new Date()
+        await this.prisma.vMRecommendation.deleteMany({
+          where: {
+            machineId: vmId,
+            snapshotId,
+            dismissedAt: null,
+            OR: [
+              { snoozedUntil: null },
+              { snoozedUntil: { lte: now } }
+            ]
+          }
+        })
+      }
       return []
     }
 
@@ -630,18 +658,57 @@ export class VMRecommendationService {
 
     logger.info(`📝 Recommendations changed for VM ${vmId}, saving to database`)
 
-    // Prepare bulk data for createMany
-    const bulkData = results.map(result => ({
-      machineId: vmId,
-      snapshotId,
-      type: result.type,
-      text: result.text,
-      actionText: result.actionText,
-      data: result.data ? JSON.parse(JSON.stringify(result.data)) : undefined
-    }))
-
     // Use transaction for atomic bulk create
     return await this.prisma.$transaction(async (tx) => {
+      // Preserve dismissal / snooze across the delete+recreate below. deleteMany
+      // wipes dismissedAt/snoozedUntil, so a just-resolved recommendation would
+      // re-materialize un-suppressed on the next ~1-min scan whenever its content
+      // hash changes. Carry suppression forward keyed by recommendation type for
+      // any (machineId, type) that either has an ACTIVE snooze (anywhere on this
+      // machine — this is what survives a new snapshot) or was dismissed on the
+      // current snapshot (this is what survives an in-place re-materialization).
+      const now = new Date()
+      const suppressedRows = await tx.vMRecommendation.findMany({
+        where: {
+          machineId: vmId,
+          OR: [
+            { snoozedUntil: { gt: now } },
+            ...(snapshotId ? [{ snapshotId, dismissedAt: { not: null } }] : [])
+          ]
+        },
+        select: { type: true, dismissedAt: true, snoozedUntil: true }
+      })
+
+      const laterDate = (a: Date | null, b: Date | null): Date | null => {
+        if (!a) return b
+        if (!b) return a
+        return a.getTime() >= b.getTime() ? a : b
+      }
+
+      const suppressionByType = new Map<RecommendationType, { dismissedAt: Date | null; snoozedUntil: Date | null }>()
+      for (const row of suppressedRows) {
+        const prev = suppressionByType.get(row.type)
+        suppressionByType.set(row.type, {
+          dismissedAt: row.dismissedAt ?? prev?.dismissedAt ?? null,
+          snoozedUntil: laterDate(row.snoozedUntil, prev?.snoozedUntil ?? null)
+        })
+      }
+
+      // Prepare bulk data for createMany, merging any preserved suppression by type.
+      const bulkData = results.map(result => {
+        const suppression = suppressionByType.get(result.type)
+        return {
+          machineId: vmId,
+          snapshotId,
+          type: result.type,
+          text: result.text,
+          actionText: result.actionText,
+          data: result.data ? JSON.parse(JSON.stringify(result.data)) : undefined,
+          dismissedAt: suppression?.dismissedAt ?? null,
+          snoozedUntil: suppression?.snoozedUntil ?? null
+        }
+      })
+
       // Delete existing recommendations for this VM + snapshot before inserting new ones.
       // This prevents duplicate entries when a VM is rescanned (e.g. new Edge update
       // detected alongside stale entries from a previous scan).

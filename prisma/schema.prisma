@@ -1324,6 +1324,18 @@ model AppSettings {
   accentColor   String?
   accent2Color  String?
   accent3Color  String?
+  // ── First-run setup state (see lxd/docs/setup-system) ──
+  // setupCompleted gates the /setup onboarding flow and the setupMode auth
+  // context. Fresh installs seed this to false; existing installs are backfilled
+  // to true by the migration (they are already past first-run setup).
+  setupCompleted   Boolean   @default(false)
+  setupPhase       String    @default("pending") // pending | in_progress | completed
+  devModeAdmin     Boolean   @default(false) // dev-default admin creds used → force password change in /setup
+  setupStartedAt   DateTime?
+  setupCompletedAt DateTime?
+  // Forward-looking storage backend config (NFS/Ceph reconfigure UI is future work).
+  // The StorageProvider factory prefers this over the INFINIBAY_STORAGE_BACKEND env.
+  storageConfig    Json?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 

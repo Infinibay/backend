@@ -27,8 +27,13 @@ selinux --enforcing
 # Network information
 network --bootproto=dhcp --onboot=on --activate
 
-# Root password
-rootpw --lock --iscrypted locked
+# Root password: lock the account, no password (login is via the wheel/sudo user
+# created below). Do NOT add `--iscrypted locked` — that feeds the literal string
+# "locked" to `chpasswd -e` as if it were a crypt hash; modern shadow-utils
+# (Fedora 43+) validates the hash and aborts the install with
+# "Unable to set password for new user: status=1". Bare `--lock` makes anaconda
+# write `!` to the shadow field (the CI-tested rootpw-lock-no-password path).
+rootpw --lock
 
 # System timezone
 timezone <%= it.timezone %>
@@ -137,13 +142,24 @@ rpm --import https://dl.google.com/linux/linux_signing_key.pub
 # Set up VS Code repository
 rpm --import https://packages.microsoft.com/keys/microsoft.asc
 
-# Set up Docker repository
-dnf -y install dnf-plugins-core
-dnf config-manager --add-repo https://download.docker.com/linux/fedora/docker-ce.repo
+# Set up Docker repository. Write the .repo file directly rather than via
+# `dnf config-manager --add-repo`: dnf5 (Fedora 41+) removed the `--add-repo` flag,
+# and its replacement `addrepo --from-repofile` has a known bug with this exact repo
+# (dnf5 issue #1603). A plain download is version-agnostic — works on dnf4 and dnf5.
+curl -fsSL https://download.docker.com/linux/fedora/docker-ce.repo \
+  -o /etc/yum.repos.d/docker-ce.repo
 
-# Set up Brave Browser repository
+# Set up Brave Browser repository (bare baseurl, no upstream .repo file → write it
+# directly, same dnf5 reason as Docker above).
 rpm --import https://brave-browser-rpm-release.s3.brave.com/brave-core.asc
-dnf config-manager --add-repo https://brave-browser-rpm-release.s3.brave.com/x86_64/
+cat > /etc/yum.repos.d/brave-browser.repo <<'BRAVE_REPO'
+[brave-browser]
+name=Brave Browser
+baseurl=https://brave-browser-rpm-release.s3.brave.com/x86_64/
+enabled=1
+gpgcheck=1
+gpgkey=https://brave-browser-rpm-release.s3.brave.com/brave-core.asc
+BRAVE_REPO
 
 # Set up Flathub repository
 flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo

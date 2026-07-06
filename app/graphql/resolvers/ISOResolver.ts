@@ -1,7 +1,9 @@
 import logger from '@main/logger'
-import { Resolver, Query, Mutation, Arg } from 'type-graphql'
-import { ISO, ISOStatus, SystemReadiness, ISOAvailabilityMap } from '../types/ISOType'
+import { Resolver, Query, Mutation, Arg, Ctx } from 'type-graphql'
+import { ISO, ISOStatus, SystemReadiness, ISOAvailabilityMap, IsoDownloadStatus } from '../types/ISOType'
 import ISOService from '@services/ISOService'
+import IsoDownloadService from '@services/IsoDownloadService'
+import { InfinibayContext } from '@utils/context'
 import { UserInputError } from '@utils/errors'
 import { Can } from '@main/permissions'
 
@@ -11,6 +13,42 @@ export class ISOResolver {
 
   constructor () {
     this.isoService = ISOService.getInstance()
+  }
+
+  @Query(() => [String], { description: 'OS ids that can be auto-downloaded (Linux net/desktop images)' })
+  @Can('iso:view')
+  async autoDownloadableOSes (): Promise<string[]> {
+    return IsoDownloadService.downloadableOsIds()
+  }
+
+  @Mutation(() => Boolean, { description: 'Start auto-downloading the latest official ISO for an OS. Poll isoDownloadStatus (or listen to iso:download:* over Socket.IO) for progress.' })
+  @Can('iso:create')
+  async startOSIsoDownload (
+    @Arg('os') os: string,
+    @Ctx() context: InfinibayContext
+  ): Promise<boolean> {
+    // Fire-and-forget: throws synchronously only for "cannot start" cases
+    // (unknown/undownloadable OS, already running).
+    return IsoDownloadService.getInstance().start(os, context.prisma, context.user?.id)
+  }
+
+  @Query(() => IsoDownloadStatus, { description: 'Live status of an auto-download (poll this for progress; socket-independent).' })
+  @Can('iso:view')
+  async isoDownloadStatus (
+    @Arg('os') os: string
+  ): Promise<IsoDownloadStatus> {
+    const s = IsoDownloadService.getInstance().getStatus(os)
+    return s
+      ? { os: s.os, state: s.state, receivedBytes: s.receivedBytes, totalBytes: s.totalBytes, error: s.error ?? null }
+      : { os: os.toLowerCase(), state: 'idle', receivedBytes: 0, totalBytes: 0, error: null }
+  }
+
+  @Mutation(() => Boolean, { description: 'Cancel an in-progress ISO auto-download. Returns true if one was aborted.' })
+  @Can('iso:create')
+  async cancelOSIsoDownload (
+    @Arg('os') os: string
+  ): Promise<boolean> {
+    return IsoDownloadService.getInstance().cancel(os)
   }
 
   @Query(() => [ISO], { description: 'Get all available ISOs' })

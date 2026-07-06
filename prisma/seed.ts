@@ -239,6 +239,12 @@ async function createDefaultMachineTemplate () {
 }
 
 async function createDefaultAppSettings (prisma: Prisma.TransactionClient | PrismaClient) {
+  // First-run setup starts OPEN on a fresh install. Mark devModeAdmin when the
+  // admin was seeded with the insecure dev default so /setup forces a password
+  // change. The setup fields are only written on CREATE — an existing row (an
+  // install already past setup) is left untouched so a re-seed never re-opens
+  // /setup or clobbers a completed state.
+  const devModeAdmin = process.env.INFINIBAY_DEV_MODE_ADMIN === '1' || DEFAULT_ADMIN_PASSWORD === 'password'
   try {
     await prisma.appSettings.upsert({
       where: {
@@ -255,10 +261,14 @@ async function createDefaultAppSettings (prisma: Prisma.TransactionClient | Pris
         theme: 'system',
         wallpaper: 'wallpaper1.jpg',
         logoUrl: null,
-        interfaceSize: 'xl'
+        interfaceSize: 'xl',
+        setupCompleted: false,
+        setupPhase: 'pending',
+        devModeAdmin,
+        setupStartedAt: new Date()
       }
     })
-    console.log('Default app settings created/updated successfully')
+    console.log(`Default app settings created/updated successfully (devModeAdmin=${devModeAdmin})`)
   } catch (error) {
     console.error('Error creating default app settings:', error)
   }

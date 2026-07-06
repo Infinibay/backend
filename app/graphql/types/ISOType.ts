@@ -1,4 +1,4 @@
-import { ObjectType, Field, ID } from 'type-graphql'
+import { ObjectType, Field, ID, Float } from 'type-graphql'
 
 @ObjectType()
 export class ISO {
@@ -73,4 +73,24 @@ export class ISOAvailabilityMap {
 
   @Field()
     available!: boolean
+}
+
+@ObjectType()
+export class IsoDownloadStatus {
+  @Field()
+    os!: string
+
+  /** idle | resolving | downloading | verifying | registering | done | failed | cancelled */
+  @Field()
+    state!: string
+
+  // Float (not Int): a multi-GB ISO exceeds the 32-bit Int range.
+  @Field(() => Float)
+    receivedBytes!: number
+
+  @Field(() => Float)
+    totalBytes!: number
+
+  @Field(() => String, { nullable: true })
+    error?: string | null
 }

@@ -665,7 +665,7 @@ describe('UnattendedWindowsManager', () => {
   })
 
   describe('environment variables', () => {
-    it('should use APP_HOST environment variable', async () => {
+    it('resolves the backend from the guest default gateway, with APP_HOST as fallback', async () => {
       const originalHost = process.env.APP_HOST
       process.env.APP_HOST = 'custom-host.example.com'
 
@@ -678,7 +678,13 @@ describe('UnattendedWindowsManager', () => {
       )
 
       const commands = (manager as any).getFirstLogonCommands()
-      expect(JSON.stringify(commands)).toContain('custom-host.example.com')
+      const json = JSON.stringify(commands)
+      // The host is resolved at runtime from the VM's default gateway (routable from the
+      // isolated department NAT subnet); APP_HOST is only the fallback when there's no route.
+      expect(json).toContain('Get-NetRoute')
+      expect(json).toContain("$gw='custom-host.example.com'")
+      // It must NOT bake APP_HOST as the literal URL host — that LAN IP is unroutable from the guest.
+      expect(json).not.toContain('http://custom-host.example.com')
 
       if (originalHost) process.env.APP_HOST = originalHost
       else delete process.env.APP_HOST

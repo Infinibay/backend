@@ -423,6 +423,46 @@ export class VmEventManager extends BaseEventManager {
     }
   }
 
+  /**
+   * Route a live VM metrics update to the same per-user recipients (owner +
+   * admins + department users) the other resource events use. Emits the wire
+   * event `${namespace}:metrics:update` with `{ status, data: { vmId, metrics }, timestamp }`.
+   * The `metrics` object is passed through verbatim — do NOT reshape it here;
+   * its field names are the contract the frontend maps against.
+   */
+  async handleMetricsUpdate (
+    vmId: string,
+    metrics: any,
+    triggeredBy?: string
+  ): Promise<void> {
+    try {
+      const vm = await this.prisma.machine.findUnique({
+        where: { id: vmId },
+        include: {
+          user: { select: { id: true } },
+          department: { select: { id: true } }
+        }
+      })
+
+      if (!vm) {
+        logger.warn(`⚠️ VM not found for metrics update: ${vmId}`)
+        return
+      }
+
+      const targetUsers = await this.getTargetUsers(vm, 'update')
+
+      for (const userId of targetUsers) {
+        this.socketService.sendToUser(userId, 'metrics', 'update', {
+          status: 'success',
+          data: { vmId, metrics }
+        })
+      }
+    } catch (error) {
+      logger.error(`❌ Error handling metrics update for VM ${vmId}:`, error)
+      throw error
+    }
+  }
+
   async handleRemediationEvent (
     vmId: string,
     actionType: string,

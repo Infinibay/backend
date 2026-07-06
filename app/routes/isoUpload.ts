@@ -75,7 +75,7 @@ async function validateMetadata (
  * @param isoPath - Path to the uploaded ISO file
  * @returns Object with valid boolean and optional error message
  */
-async function validateFedoraNetinstallISO (isoPath: string): Promise<{ valid: boolean; error?: string }> {
+export async function validateFedoraNetinstallISO (isoPath: string): Promise<{ valid: boolean; error?: string }> {
   try {
     // Use isoinfo to get the Volume ID. execFile (no shell) + grep the output in
     // JS instead of piping through the shell, so the path can't be abused.
@@ -113,7 +113,7 @@ async function validateFedoraNetinstallISO (isoPath: string): Promise<{ valid: b
  * @param isoPath - Path to the uploaded ISO file
  * @returns Object with valid boolean and optional error message
  */
-async function validateUbuntuDesktopISO (isoPath: string): Promise<{ valid: boolean; error?: string }> {
+export async function validateUbuntuDesktopISO (isoPath: string): Promise<{ valid: boolean; error?: string }> {
   const tempDir = path.join(os.tmpdir(), `iso-validate-${Date.now()}`)
 
   try {
