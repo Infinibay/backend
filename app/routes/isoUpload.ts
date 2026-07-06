@@ -127,7 +127,7 @@ export async function validateUbuntuDesktopISO (isoPath: string): Promise<{ vali
       await execFileAsync('7z', ['e', isoPath, 'casper/install-sources.yaml', `-o${tempDir}`, '-y'], {
         timeout: 30000 // 30 second timeout
       })
-    } catch (extractError) {
+    } catch {
       // If casper/install-sources.yaml doesn't exist, it's likely not a valid Ubuntu ISO
       // or it's an older format - we'll allow it but log a warning
       logger.warn('Could not extract install-sources.yaml from ISO - may be an older Ubuntu format')

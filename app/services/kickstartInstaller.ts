@@ -1,4 +1,3 @@
-import { Logger } from 'winston'
 import { Application } from '@prisma/client'
 import * as fs from 'fs'
 import * as path from 'path'

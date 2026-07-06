@@ -1,14 +1,11 @@
 import logger from '@main/logger'
-import { MachineApplication, Application } from '@prisma/client'
 import { Builder, parseString } from 'xml2js'
-import { spawn, exec } from 'child_process'
+import { exec } from 'child_process'
 import { promisify } from 'util'
 
 const execAsync = promisify(exec)
 import * as fs from 'fs'
-import * as os from 'os'
 import * as path from 'path'
-import { promises as fsPromises } from 'fs'
 
 import { UnattendedManagerBase } from './unattendedManagerBase'
 import { escapeForCmd, escapeForPowerShellArg } from './shellEscape'
@@ -603,7 +600,6 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
     // department NAT subnet (the download would time out). Mirrors the Fedora/Ubuntu
     // installers, which resolve the gateway the same way. See downloadViaGateway().
     const fallbackHost = process.env.APP_HOST || 'localhost'
-    const { PATHS, INFINISERVICE } = UnattendedWindowsManager
 
     // PowerShell that resolves the backend from the VM's default gateway at runtime and
     // downloads `path` to `outFile`. `$gw` is a literal PowerShell variable (not JS
@@ -729,8 +725,6 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
         }
 
         const parsedCommand = this.parseInstallCommand(installCommand, app.parameters)
-        const appNameSafe = app.name.replace(/\s+/g, '_').replace(/['"]/g, '')
-        const logFile = `${appNameSafe}_install.log`
 
         // Simplified - just run the command directly
         const commandLine = `cmd /c ${parsedCommand}`
@@ -1182,8 +1176,6 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
       throw new Error('Extraction directory does not exist.')
     }
 
-    // save the config to
-    const imageName = 'windows' + this.version.toString() + '.iso'
     // Define the command and arguments for creating a new ISO image
     /*
     mkisofs -b boot/etfsboot.com -no-emul-boot -c BOOT.CAT -iso-level 4 -J -l -D -N -joliet-long -relaxed-filenames -v -V "Custom" -udf -boot-info-table -eltorito-alt-boot -eltorito-boot efi/microsoft/boot/efisys_noprompt.bin -no-emul-boot -o install.iso -allow-limited-size /tmp/extracted_iso_1705986374004/

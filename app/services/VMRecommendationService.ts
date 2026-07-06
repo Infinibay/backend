@@ -1,15 +1,12 @@
 import logger from '@main/logger'
-import { PrismaClient, Machine, VMHealthSnapshot, SystemMetrics, ProcessSnapshot, PortUsage, VMRecommendation, RecommendationType, Prisma } from '@prisma/client'
+import { PrismaClient, VMRecommendation, RecommendationType, Prisma } from '@prisma/client'
 import { createHash } from 'crypto'
 import { RecommendationFilterInput } from '../graphql/types/RecommendationTypes'
-import { AppError, ErrorCode, ErrorContext } from '../utils/errors/ErrorHandler'
+import { AppError, ErrorCode } from '../utils/errors/ErrorHandler'
 import {
   RecommendationChecker,
-  RecommendationData,
   RecommendationResult,
   RecommendationContext,
-  AppUpdateInfo,
-  ThreatTimelineInfo,
   DiskSpaceChecker,
   ResourceOptimizationChecker,
   DiskIOBottleneckChecker,
@@ -22,7 +19,6 @@ import {
   DefenderThreatChecker
 } from './recommendations'
 import { getPackageManager, PackageManager } from './packages/PackageManager'
-import { PackageCheckerResult } from './packages/types'
 import {
   RecommendationOperationResult,
   ServiceConfiguration

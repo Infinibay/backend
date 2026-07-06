@@ -14,7 +14,6 @@ import http from 'node:http'
 import 'dotenv/config'
 import 'reflect-metadata'
 import cors from 'cors'
-import jwt from 'jsonwebtoken'
 
 // Prisma Client (with callbacks extension applied automatically)
 import prisma from './utils/database'
@@ -24,7 +23,7 @@ import { configureServer, buildCorsOptions } from './config/server'
 import { createApolloServer } from './config/apollo'
 import { configureRoutes } from './config/routes'
 import { expressMiddleware } from '@as-integrations/express5'
-import { InfinibayContext, createUserValidationHelpers, SafeUser } from './utils/context'
+import { InfinibayContext, createUserValidationHelpers } from './utils/context'
 import { verifyRequestAuth } from './utils/jwtAuth'
 import { isSetupOpen } from './utils/setupState'
 

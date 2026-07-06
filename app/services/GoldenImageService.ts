@@ -161,9 +161,6 @@ export class GoldenImageService {
       throw new Error(`Template ${templateId} not found during build orchestration`)
     }
 
-    const os = (template.osType ?? '').toLowerCase()
-    const isWindows = os.includes('windows')
-
     // Pick a department — any department with a bridge will do for the
     // temporary build VM. The VM is destroyed after sealing.
     const department = await this.prisma.department.findFirst({

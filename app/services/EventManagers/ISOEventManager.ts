@@ -38,7 +38,7 @@ export class ISOEventManager {
   private getSocket () {
     try {
       return getSocketService()
-    } catch (error) {
+    } catch {
       logger.warn('Socket service not initialized yet')
       return null
     }

@@ -36,7 +36,7 @@ export class RecommendationResolverService {
    * returns it instead of starting a second one.
    */
   async resolve (opts: ResolveOptions): Promise<RecommendationResolution> {
-    const { recommendationId, actionKey, userId, userRole, params } = opts
+    const { recommendationId, actionKey, userId, params } = opts
 
     const rec = await this.prisma.vMRecommendation.findUnique({
       where: { id: recommendationId },

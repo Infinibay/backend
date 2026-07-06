@@ -1,6 +1,5 @@
 import { Application } from '@prisma/client'
 import * as fs from 'fs'
-import * as path from 'path'
 
 import { UnattendedWindowsManager } from '@services/unattendedWindowsManager'
 
@@ -93,7 +92,7 @@ describe('UnattendedWindowsManager', () => {
     })
 
     it('should use default product key if none provided', () => {
-      const m = new UnattendedWindowsManager(
+      new UnattendedWindowsManager(
         10,
         mockUsername,
         mockPassword,
@@ -702,7 +701,7 @@ describe('UnattendedWindowsManager', () => {
         []
       )
 
-      const config = await manager.generateConfig()
+      await manager.generateConfig()
 
       if (originalPort) process.env.PORT = originalPort
       else delete process.env.PORT

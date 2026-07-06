@@ -1,13 +1,9 @@
 import { Application } from '@prisma/client'
 import * as fs from 'fs'
-import * as os from 'os'
-import * as path from 'path'
 import { promises as fsPromises } from 'fs'
-import * as execModule from 'child_process'
 import { KickstartInstaller } from '@services/kickstartInstaller'
 
 // Mock the logger
-const mockDebugLog = jest.fn()
 jest.mock('@main/logger', () => {
   const mockChildLogger = {
     debug: jest.fn(),
@@ -352,12 +348,10 @@ describe('KickstartInstaller', () => {
   })
 
   describe('modifyGrubConfigForKickstart', () => {
-    let testDir: string
     const mockReadFile = jest.spyOn(fsPromises, 'readFile')
     const mockWriteFile = jest.spyOn(fsPromises, 'writeFile')
 
     beforeEach(() => {
-      testDir = os.tmpdir()
       mockReadFile.mockClear()
       mockWriteFile.mockClear()
     })
@@ -541,7 +535,7 @@ fedoraVersion: ${data.fedoraVersion}
     })
 
     it('should generate complete kickstart configuration', async () => {
-      const mockLog = jest.spyOn(manager['debug'], 'warn').mockImplementation(() => ({} as any))
+      jest.spyOn(manager['debug'], 'warn').mockImplementation(() => ({} as any))
       jest.spyOn(manager as any, 'extractFedoraVersionFromISO').mockResolvedValue('43')
 
       const result = await manager.generateConfig()
