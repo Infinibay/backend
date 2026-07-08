@@ -38,6 +38,9 @@ import type { PrismaClient, Backup as PrismaBackup } from '@prisma/client'
 import logger from '@main/logger'
 import { getEventManager } from '@services/EventManager'
 import { VMOperationsService } from '@services/VMOperationsService'
+import { getConfiguredStorageProvider } from '@services/storage'
+import { resolveLocalNodeId } from '@services/InfinizationService'
+import { RemoteDiskStaging, type StagingNode } from '@services/node/RemoteDiskStaging'
 import { assertVmStopped } from '@utils/assertVmStopped'
 import { ForbiddenError, NotFoundError, UserInputError } from '@utils/errors'
 import {
@@ -290,6 +293,62 @@ export class BackupService {
   }
 
   /**
+   * Decide whether a backup/restore for `vmId` must stage the disk to/from a remote
+   * node. Backups run centrally on the master, but with LOCAL (non-shared) storage a
+   * VM that lives on a compute node has its qcow2 only on that node. Returns the node
+   * to stage against, or null when no staging is needed:
+   *   - shared storage (NFS/Ceph/shared-mount) → disk already reachable at the path;
+   *   - the VM has no node or runs on the master's own node → already local.
+   * Throws when the VM is on a node with no reachable address (can't stage).
+   */
+  private async resolveRemoteStaging (vmId: string): Promise<StagingNode | null> {
+    // Shared storage: the disk is byte-reachable from the master at the same path.
+    if ((await getConfiguredStorageProvider(this.prisma)).isShared()) return null
+
+    const machine = await this.prisma.machine.findUnique({
+      where: { id: vmId },
+      select: { nodeId: true }
+    })
+    const nodeId = machine?.nodeId
+    if (!nodeId) return null // unassigned → treated as master-local
+
+    // Fail CLOSED (audit): if we cannot resolve THIS master's own node identity we cannot
+    // prove the VM is genuinely remote. Treat it as local (no staging) — a truly-remote VM
+    // then fails its backup loudly rather than risk staging against the wrong host. The old
+    // `localNodeId && …` form failed OPEN: a falsy localNodeId slipped straight through to
+    // "remote", which combined with cleanup could delete a master-local VM's only disk.
+    const localNodeId = await resolveLocalNodeId().catch(() => undefined)
+    if (!localNodeId) return null
+    if (nodeId === localNodeId) return null // runs on the master's own node
+
+    const node = await this.prisma.node.findUnique({
+      where: { id: nodeId },
+      select: { name: true, address: true, agentPort: true }
+    })
+    if (!node || !node.address) {
+      throw new Error(`VM ${vmId} is on node ${nodeId}, which has no reachable address — cannot stage its disk for backup/restore`)
+    }
+
+    // samePhysicalStore guard (mirrors AgentStorageMigrationAdapter.resolveLegs): a second
+    // Node row for the master's own host (re-onboard / clone / rename) has a DIFFERENT id
+    // but the SAME address:agentPort. Staging against it would pull the disk onto the master
+    // where it already physically lives — treat address+port identity with the master's own
+    // node as local (no staging).
+    const localNode = await this.prisma.node.findUnique({
+      where: { id: localNodeId },
+      select: { address: true, agentPort: true }
+    })
+    if (localNode && localNode.address === node.address && localNode.agentPort === node.agentPort) return null
+
+    return { name: node.name, address: node.address, agentPort: node.agentPort }
+  }
+
+  /** Master disk dir the staging helper materializes remote disks into (same path as the node's). */
+  private get diskBaseDir (): string {
+    return path.resolve(process.env.INFINIZATION_DISK_DIR ?? '/var/lib/infinization/disks')
+  }
+
+  /**
    * Creates a backup and persists it to the database. The record is inserted
    * with `IN_PROGRESS` up-front so the UI can show the in-flight operation.
    */
@@ -337,6 +396,28 @@ export class BackupService {
       // just before the claim (its qemu may still be alive). FAIL CLOSED — a null
       // probe is treated as "running", never "stopped".
       await assertVmStopped(this.prisma, params.vmId, vm.name)
+
+      // Resolve remote-node staging while HOLDING the claim (audit, TOCTOU): backups run
+      // centrally on the master, so a VM on a remote node with LOCAL storage must have its
+      // disk pulled in before qemu-img and dropped after (null = local/shared → no staging).
+      // Reading nodeId under the BACKING_UP lock closes the race where a concurrent migration
+      // commits a nodeId change between resolve and claim. An unreachable node throws here and
+      // the catch below releases the marker synchronously.
+      const stagingNode = await this.resolveRemoteStaging(params.vmId)
+
+      // A SNAPSHOT backup writes an INTERNAL qcow2 snapshot into the source disk in place — it
+      // produces no external artifact. Staging a remote disk to a throwaway master scratch copy
+      // and snapshotting THAT would put the snapshot in a file we then delete (cleanupLocal),
+      // yielding a silent-success but empty, unrestorable backup while the node's real disk is
+      // never snapshotted (audit). A snapshot can only be taken on the node's live disk, so
+      // refuse it here rather than produce phantom data protection.
+      if (stagingNode && params.type === BackupType.SNAPSHOT) {
+        throw new UserInputError(
+          `SNAPSHOT backups are not supported for VM ${vm.name}: it runs on remote node ${stagingNode.name} ` +
+          'with local storage, and an internal snapshot can only be created on the node\'s live disk. ' +
+          'Use a FULL or INCREMENTAL backup instead.'
+        )
+      }
 
       // Validate user-supplied paths before they reach qemu-img / mkdir: keep the
       // destination within the backup root and the source disks within the disk dir
@@ -395,7 +476,8 @@ export class BackupService {
         description: params.description,
         parentBackupId: params.parentBackupId,
         tags: params.tags,
-        triggeredBy: params.triggeredBy
+        triggeredBy: params.triggeredBy,
+        stagingNode
       })
 
       return pending
@@ -405,6 +487,19 @@ export class BackupService {
       // left stuck in BACKING_UP.
       await this.releaseVm(params.vmId, BACKING_UP_STATUS)
       throw err
+    }
+  }
+
+  /** Persist a backup row as FAILED and dispatch the 'failed' event. Never throws. */
+  private async persistBackupFailure (pendingId: string, message: string, triggeredBy?: string): Promise<void> {
+    try {
+      const updated = await this.prisma.backup.update({
+        where: { id: pendingId },
+        data: { status: BackupStatus.FAILED, errorMessage: message, completedAt: new Date() }
+      })
+      this.dispatch('failed', updated, triggeredBy).catch((err: unknown) => logger.error(`Failed to dispatch 'failed' event for backup ${pendingId}: ${err instanceof Error ? err.message : String(err)}`))
+    } catch (dbErr) {
+      logger.error(`failed to mark backup ${pendingId} as FAILED: ${dbErr instanceof Error ? dbErr.message : String(dbErr)}`)
     }
   }
 
@@ -423,17 +518,37 @@ export class BackupService {
     parentBackupId?: string
     tags?: string[]
     triggeredBy?: string
+    stagingNode?: StagingNode | null
   }): Promise<void> {
     const {
       pendingId, vmId, diskPaths, destinationDir, type, compression,
-      description, parentBackupId, tags, triggeredBy
+      description, parentBackupId, tags, triggeredBy, stagingNode
     } = args
 
     // This worker OWNS the BACKING_UP marker that createBackup claimed. Release
     // it in `finally` so the VM returns to OFF whether the convert succeeds,
     // fails, or this method takes the early `return` in the catch below (audit
     // H1: the marker must ALWAYS be cleared on this async path).
+    // ONE staging instance owns the scratch it creates and is the ONLY thing that may
+    // delete it (cleanupLocal removes only paths it staged — never a real disk).
+    const staging = stagingNode ? new RemoteDiskStaging(this.diskBaseDir, vmId) : null
+    // The disks qemu-img actually reads: the VM's real paths, or master-local SCRATCH
+    // paths when the disk was staged in from a remote node.
+    let sourcePaths = diskPaths
     try {
+    // Remote VM + local storage: pull its disk(s) into master-local scratch before
+    // qemu-img touches them, and drop the scratch in `finally`. A pull failure marks
+    // the backup FAILED (same as a convert failure) and returns.
+    if (staging && stagingNode) {
+      try {
+        sourcePaths = await staging.stageIn(stagingNode, diskPaths)
+      } catch (err) {
+        const message = `disk staging from node ${stagingNode.name} failed: ${err instanceof Error ? err.message : String(err)}`
+        logger.error(`backup ${pendingId}: ${message}`)
+        await this.persistBackupFailure(pendingId, message, triggeredBy)
+        return
+      }
+    }
     // --- Live progress wiring -------------------------------------------------
     let lastPersisted = -1
     const persistIfChanged = (pct: number): void => {
@@ -453,7 +568,7 @@ export class BackupService {
     this.infinization.on('progress', onProgress)
 
     let totalSourceBytes = 0
-    for (const src of diskPaths) {
+    for (const src of sourcePaths) {
       try {
         const st = await fs.stat(src)
         totalSourceBytes += st.size
@@ -500,7 +615,7 @@ export class BackupService {
     try {
       result = await this.infinization.createBackup({
         vmId,
-        diskPaths,
+        diskPaths: sourcePaths,
         destinationDir,
         type,
         compression,
@@ -513,19 +628,7 @@ export class BackupService {
       this.infinization.off('progress', onProgress)
       const message = err instanceof Error ? err.message : String(err)
       logger.error(`backup ${pendingId} failed: ${message}`)
-      try {
-        const updated = await this.prisma.backup.update({
-          where: { id: pendingId },
-          data: {
-            status: BackupStatus.FAILED,
-            errorMessage: message,
-            completedAt: new Date()
-          }
-        })
-        this.dispatch('failed', updated, triggeredBy).catch((err: unknown) => logger.error(`Failed to dispatch 'failed' event for backup ${pendingId}: ${err instanceof Error ? err.message : String(err)}`))
-      } catch (dbErr) {
-        logger.error(`failed to mark backup ${pendingId} as FAILED: ${dbErr instanceof Error ? dbErr.message : String(dbErr)}`)
-      }
+      await this.persistBackupFailure(pendingId, message, triggeredBy)
       return
     }
     clearInterval(poller)
@@ -554,6 +657,12 @@ export class BackupService {
       logger.error(`failed to finalize backup ${pendingId}: ${dbErr instanceof Error ? dbErr.message : String(dbErr)}`)
     }
     } finally {
+      // Drop the master-local scratch copies (remote VM + local storage) — the backup
+      // artifact already lives in the backup dir; the staged raw disk is scratch. Only
+      // ever deletes paths `staging` actually created, never a real disk.
+      if (staging) {
+        await staging.cleanupLocal()
+      }
       // Release the disk-op claim. Safe on every exit (normal completion, the
       // early `return` in the infinization-error catch, or an unexpected throw).
       await this.releaseVm(vmId, BACKING_UP_STATUS)
@@ -627,6 +736,9 @@ export class BackupService {
       )
     }
 
+    // Resolved under the RESTORING lock (audit, TOCTOU) — see the finally for cleanup.
+    let stagingNode: StagingNode | null = null
+    let staging: RemoteDiskStaging | null = null
     try {
       // Restoring over a live qcow2 corrupts it (qemu-img convert vs the VM's write
       // lock). Re-probe the live process — fail closed — AFTER the claim and BEFORE
@@ -635,6 +747,34 @@ export class BackupService {
       // disk N leaves disks 0..N-1 already overwritten); making it temp+atomic-rename
       // is a tracked follow-up. The stopped-guard removes the dominant corruption path.
       await assertVmStopped(this.prisma, params.vmId)
+
+      // Resolve remote-node staging while HOLDING the RESTORING claim (closes the race
+      // where a migration commits a nodeId change between resolve and claim).
+      stagingNode = await this.resolveRemoteStaging(params.vmId)
+      staging = stagingNode ? new RemoteDiskStaging(this.diskBaseDir, vm.id) : null
+
+      // Remote VM + local storage: restore materializes the disk into master-local SCRATCH
+      // (never the real flat path), which we push out to the node afterwards. beginMaterialize
+      // clears any stale scratch and registers the targets for cleanup. Local/shared VMs
+      // restore straight into their real disk paths.
+      const restoreTargets = (staging && stagingNode)
+        ? await staging.beginMaterialize(diskPaths)
+        : diskPaths
+
+      // Honor overwriteExisting=false on the REMOTE path too (audit): staging redirects the
+      // restore write to freshly-cleared scratch, so infinization's own TARGET_EXISTS guard
+      // checks an empty file and never fires — and the node push overwrites unconditionally.
+      // Mirror the local behavior by checking the node's REAL disk before doing any work.
+      if (staging && stagingNode && !(params.overwriteExisting ?? false)) {
+        for (const p of diskPaths) {
+          if (await staging.remoteExists(stagingNode, p)) {
+            throw new UserInputError(
+              `Disk already exists on node ${stagingNode.name} and overwriteExisting is false: ${p}. ` +
+              'Set overwriteExisting to replace it.'
+            )
+          }
+        }
+      }
 
       // Announce the restore so the UI (and other sessions) can show activity
       // while the — potentially multi-minute — copy runs. The mutation itself
@@ -651,13 +791,23 @@ export class BackupService {
       const result = await this.infinization.restoreBackup({
         vmId: vm.id,
         backupId: resolvedBackupId,
-        diskPaths,
+        diskPaths: restoreTargets,
         overwriteExisting: params.overwriteExisting ?? false,
         // Default false: a normal restore of a SNAPSHOT-type backup never clobbers
         // the live source disk in place — the library materializes to a distinct
         // target or refuses. Only an explicit operator opt-in flips this to true.
         allowInPlaceSnapshotRevert: params.allowInPlaceSnapshotRevert ?? false
       })
+
+      // Remote VM: the disk was just materialized into master-local scratch — push it out
+      // to the owning node (each disk atomic + sha256-verified on the node) so the restore
+      // lands where the VM actually runs. A push failure surfaces as the restore error. The
+      // node writes a temp then renames, so the disk that FAILED to push is untouched; on a
+      // multi-disk VM, disks pushed before the failure are already committed (non-atomic —
+      // see pushBack) but no data is lost: the backup artifact survives, so a retry restores.
+      if (staging && stagingNode && result.success) {
+        await staging.pushBack(stagingNode, diskPaths)
+      }
 
       // Restore is an event on its own — the UI wants to know the VM changed.
       const payload = {
@@ -674,6 +824,9 @@ export class BackupService {
 
       return result
     } finally {
+      // Drop the master-local scratch copy (remote restore). Best-effort; only ever
+      // removes scratch `staging` created, never a real disk.
+      if (staging) await staging.cleanupLocal()
       // Always release the RESTORING claim — success, qemu-img failure, or throw.
       await this.releaseVm(params.vmId, RESTORING_STATUS)
     }
