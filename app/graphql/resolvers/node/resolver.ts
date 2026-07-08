@@ -244,4 +244,57 @@ export class NodeResolver {
     await enrollment.reject(id)
     return true
   }
+
+  /**
+   * Permanently remove a node from the inventory (delete the row), for
+   * decommissioned hosts you no longer want listed. Refuses the master
+   * (control-plane) node, and refuses a node that still has VMs assigned —
+   * deleting it would detach them (Machine.nodeId → null via onDelete: SetNull)
+   * and strand them, since a re-registering agent is minted a fresh node id and
+   * the nulled machines never re-link. The node's own Disk rows are removed with
+   * it (Disk.nodeId is a required relation, so they must go first).
+   *
+   * NOTE: MigrationJob.sourceNodeId/targetNodeId are plain columns (no FK), so
+   * historical migration rows are left pointing at the deleted id. And a node
+   * whose agent is still running will re-register on its next heartbeat — for a
+   * durable removal, `rejectNode` it (revokes its cert) and/or stop the agent first.
+   */
+  @Mutation(() => Boolean)
+  @Can('node:edit', { id: (a) => a.id })
+  async deleteNode (
+    @Arg('id', () => ID) id: string,
+      @Ctx() context: InfinibayContext
+  ): Promise<boolean> {
+    const { prisma } = context
+    const target = await prisma.node.findUnique({
+      where: { id },
+      select: { id: true, role: true }
+    })
+    if (!target) {
+      throw new GraphQLError('Node not found', { extensions: { code: 'NOT_FOUND' } })
+    }
+    if (target.role === 'master') {
+      throw new UserInputError('The master node cannot be deleted')
+    }
+    const machineCount = await prisma.machine.count({ where: { nodeId: id } })
+    if (machineCount > 0) {
+      throw new UserInputError(
+        `This node still has ${machineCount} VM(s) assigned. Migrate or remove them before deleting the node.`
+      )
+    }
+    try {
+      await prisma.$transaction([
+        prisma.disk.deleteMany({ where: { nodeId: id } }),
+        prisma.node.delete({ where: { id } })
+      ])
+    } catch (err: any) {
+      // Lost a race with a concurrent delete (row already gone) → surface a clean
+      // NOT_FOUND like the pre-check, not a masked "Internal server error".
+      if (err?.code === 'P2025') {
+        throw new GraphQLError('Node not found', { extensions: { code: 'NOT_FOUND' } })
+      }
+      throw err
+    }
+    return true
+  }
 }

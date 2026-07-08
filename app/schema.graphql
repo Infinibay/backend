@@ -1435,6 +1435,7 @@ type Mutation {
   deleteIdentityProvider(id: ID!): Boolean!
   deleteMaintenanceTask(id: ID!): MaintenanceTaskResponse!
   deleteNetwork(input: DeleteNetworkInput!): Boolean!
+  deleteNode(id: ID!): Boolean!
   deletePool(id: ID!): Boolean!
   deleteRole(id: String!): Boolean!
   deleteScript(force: Boolean = false, id: ID!): ScriptResponseType!
