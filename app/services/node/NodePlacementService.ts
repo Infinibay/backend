@@ -31,11 +31,18 @@ const SCHEDULABLE_NODE_STATUSES = ['online', 'approved']
 export class NodePlacementService {
   constructor (private readonly prisma: Prisma.TransactionClient) {}
 
-  async chooseNodeForMachine (request: MachinePlacementRequest): Promise<string | null> {
+  async chooseNodeForMachine (request: MachinePlacementRequest, excludeNodeId?: string): Promise<string | null> {
     const nodes = await this.prisma.node.findMany({
       // Only schedulable lifecycle states — never place onto a pending/rejected/
-      // decommissioned/offline node (it has no live agent to run the VM).
-      where: { status: { in: SCHEDULABLE_NODE_STATUSES }, maintenanceMode: false },
+      // decommissioned/offline node (it has no live agent to run the VM). When
+      // draining a node, exclude it explicitly (id) so a VM is never "migrated"
+      // back onto the very host being evacuated (belt-and-suspenders on top of the
+      // maintenanceMode flip the drain performs).
+      where: {
+        status: { in: SCHEDULABLE_NODE_STATUSES },
+        maintenanceMode: false,
+        ...(excludeNodeId ? { id: { not: excludeNodeId } } : {})
+      },
       select: {
         id: true,
         name: true,

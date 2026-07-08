@@ -1,6 +1,6 @@
 import { Arg, Ctx, ID, Mutation, Query, Resolver } from 'type-graphql'
 import { GraphQLError } from 'graphql'
-import { Disk, Node } from '@prisma/client'
+import { Disk, Node, PrismaClient } from '@prisma/client'
 
 import { InfinibayContext } from '@utils/context'
 import { UserInputError } from '@utils/errors'
@@ -9,6 +9,7 @@ import { Can } from '@main/permissions'
 import { calculateNodeCapacity, nodeHealth } from '../../../services/node/NodeCapacity'
 import { ClusterCA } from '../../../services/node/ClusterCA'
 import { NodeEnrollmentService } from '../../../services/node/NodeEnrollmentService'
+import { NodeDrainService, type NodeDrainResult } from '../../../services/node/NodeDrainService'
 
 type NodeWithDisks = Node & { disks: Disk[] }
 
@@ -216,10 +217,38 @@ export class NodeResolver {
   }
 
   /** Reject a pending node's join request. */
+  /**
+   * Evacuate every VM off a node before it is removed (dar de baja / eliminar).
+   * Removing a node with VMs still assigned would orphan them (Machine.nodeId is
+   * onDelete:SetNull; the disk lives on a host that is gone) — "porque sino, se
+   * pierden". So both rejectNode and deleteNode drain first via NodeDrainService,
+   * which cold-migrates each VM to another node (master preferred). Throws a clear
+   * UserInputError when live VMs need an explicit power-off confirmation
+   * (stopRunningVms) or when some VM could not be migrated (node left intact + in
+   * maintenance, NOT removed). Returns quietly only when the node is fully drained.
+   */
+  private async drainNodeOrThrow (prisma: PrismaClient, nodeId: string, stopRunningVms: boolean): Promise<void> {
+    const result: NodeDrainResult = await new NodeDrainService(prisma).drainNode(nodeId, { stopRunning: stopRunningVms })
+    if (result.needsConfirmation) {
+      throw new UserInputError(
+        `This node has ${result.runningCount} running VM(s). Removing it will POWER THEM OFF and migrate all ${result.total} VM(s) to another node. ` +
+        'Confirm to proceed (stopRunningVms=true).'
+      )
+    }
+    if (!result.drained) {
+      const detail = result.failed.map(f => `${f.name} (${f.reason})`).join('; ')
+      throw new UserInputError(
+        `Could not migrate all VMs off the node — it was left in maintenance and NOT removed ` +
+        `(migrated ${result.migrated.length}/${result.total}). Failed: ${detail}`
+      )
+    }
+  }
+
   @Mutation(() => Boolean)
   @Can('node:edit', { id: (a) => a.id })
   async rejectNode (
     @Arg('id', () => ID) id: string,
+    @Arg('stopRunningVms', () => Boolean, { nullable: true }) stopRunningVms: boolean | null,
       @Ctx() context: InfinibayContext
   ): Promise<boolean> {
     const { prisma } = context
@@ -240,6 +269,8 @@ export class NodeResolver {
     if (target.role === 'master') {
       throw new UserInputError('The master node cannot be rejected')
     }
+    // Evacuate its VMs first so decommissioning never strands them.
+    await this.drainNodeOrThrow(prisma, id, stopRunningVms === true)
     const enrollment = new NodeEnrollmentService(context.prisma, new ClusterCA())
     await enrollment.reject(id)
     return true
@@ -248,11 +279,10 @@ export class NodeResolver {
   /**
    * Permanently remove a node from the inventory (delete the row), for
    * decommissioned hosts you no longer want listed. Refuses the master
-   * (control-plane) node, and refuses a node that still has VMs assigned —
-   * deleting it would detach them (Machine.nodeId → null via onDelete: SetNull)
-   * and strand them, since a re-registering agent is minted a fresh node id and
-   * the nulled machines never re-link. The node's own Disk rows are removed with
-   * it (Disk.nodeId is a required relation, so they must go first).
+   * (control-plane) node. First DRAINS the node (migrates every VM off it — see
+   * drainNodeOrThrow) so deletion never orphans a VM; the delete only proceeds once
+   * the node is empty. The node's own Disk rows are removed with it (Disk.nodeId is
+   * a required relation, so they must go first).
    *
    * NOTE: MigrationJob.sourceNodeId/targetNodeId are plain columns (no FK), so
    * historical migration rows are left pointing at the deleted id. And a node
@@ -263,6 +293,7 @@ export class NodeResolver {
   @Can('node:edit', { id: (a) => a.id })
   async deleteNode (
     @Arg('id', () => ID) id: string,
+    @Arg('stopRunningVms', () => Boolean, { nullable: true }) stopRunningVms: boolean | null,
       @Ctx() context: InfinibayContext
   ): Promise<boolean> {
     const { prisma } = context
@@ -276,12 +307,8 @@ export class NodeResolver {
     if (target.role === 'master') {
       throw new UserInputError('The master node cannot be deleted')
     }
-    const machineCount = await prisma.machine.count({ where: { nodeId: id } })
-    if (machineCount > 0) {
-      throw new UserInputError(
-        `This node still has ${machineCount} VM(s) assigned. Migrate or remove them before deleting the node.`
-      )
-    }
+    // Evacuate its VMs first; only a fully-drained node is removed.
+    await this.drainNodeOrThrow(prisma, id, stopRunningVms === true)
     try {
       await prisma.$transaction([
         prisma.disk.deleteMany({ where: { nodeId: id } }),

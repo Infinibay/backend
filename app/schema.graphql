@@ -1435,7 +1435,7 @@ type Mutation {
   deleteIdentityProvider(id: ID!): Boolean!
   deleteMaintenanceTask(id: ID!): MaintenanceTaskResponse!
   deleteNetwork(input: DeleteNetworkInput!): Boolean!
-  deleteNode(id: ID!): Boolean!
+  deleteNode(id: ID!, stopRunningVms: Boolean): Boolean!
   deletePool(id: ID!): Boolean!
   deleteRole(id: String!): Boolean!
   deleteScript(force: Boolean = false, id: ID!): ScriptResponseType!
@@ -1494,7 +1494,7 @@ type Mutation {
 
   """Register uploaded ISO"""
   registerISO(filename: String!, os: String!, path: String!, size: Float!): ISO!
-  rejectNode(id: ID!): Boolean!
+  rejectNode(id: ID!, stopRunningVms: Boolean): Boolean!
   removeDepartmentMember(departmentId: String!, userId: String!): Boolean!
 
   """Remove ISO file"""
