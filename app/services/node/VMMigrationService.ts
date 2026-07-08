@@ -178,11 +178,25 @@ export class VMMigrationService {
         deferReclaim
       })
 
-      // ── Commit the new owner + release the lock in one write ──────────────────
-      await this.prisma.machine.update({
-        where: { id: machineId },
+      // ── Commit the new owner + release the lock in one GUARDED write ──────────
+      // Guard the commit on OUR claim still holding (status='moving' AND nodeId
+      // unchanged). If a concurrent stop/power/delete path cleared or stole the
+      // 'moving' marker while we were copying (audit C2/C3/C4 — stop() resets it to
+      // 'off', destroy flips it to 'deleting'), count!=1 and we ABORT here — BEFORE
+      // the destructive source reclaim below. That leaves the source disk intact and
+      // the DB owner unchanged; the verified target copy becomes a sweepable leak,
+      // never a split-brain/double-owner or a disk deleted out from under a VM whose
+      // lock we no longer hold. A plain unconditional update() could not detect this.
+      const committed = await this.prisma.machine.updateMany({
+        where: { id: machineId, status: MOVING_STATUS, nodeId: sourceNodeId },
         data: { nodeId: targetNodeId, status: priorStatus }
       })
+      if (committed.count !== 1) {
+        throw new Error(
+          'Migration aborted: the VM lock was released by a concurrent power/delete operation during the disk copy. ' +
+          'The source disk is intact and ownership is unchanged (retry the migration); the target copy will be reclaimed by the storage sweeper.'
+        )
+      }
 
       // ── I2 source reclaim ─────────────────────────────────────────────────────
       // Delete the source disk(s) ONLY now that ownership is durably committed to
@@ -197,7 +211,7 @@ export class VMMigrationService {
           sourceNodeId,
           targetNodeId,
           diskPaths
-        }).catch((e) => logger.warn(`Migration ${machineId}: source storage reclaim failed (left in place): ${String(e)}`))
+        }).catch((e) => logger.error(`Migration ${machineId}: source storage reclaim FAILED (disk leaked on source — reclaim manually, audit C5): ${String(e)}`))
       }
 
       return {
@@ -208,12 +222,35 @@ export class VMMigrationService {
       }
     } catch (err) {
       // Release the claim so a failed migration never strands the VM in 'moving'.
-      await this.prisma.machine.updateMany({
-        where: { id: machineId, status: MOVING_STATUS },
-        data: { status: priorStatus }
-      }).catch((e) => logger.error(`Migration ${machineId}: failed to roll back 'moving' status: ${String(e)}`))
+      // Retry the release: the original failure may be a transient DB blip that would
+      // also fail a single rollback write (audit C1), which would strand the VM in
+      // 'moving' — un-startable until a backend restart. The periodic reconcile
+      // (reconcileOrphanedMoveMarkers on a timer) is the ultimate backstop.
+      await this.releaseMovingClaim(machineId, priorStatus)
       throw err
     }
+  }
+
+  /**
+   * Best-effort release of the 'moving' status-as-lock back to priorStatus, retried
+   * a few times so a single transient DB error on the rollback write does not strand
+   * the VM in 'moving' (audit C1). Guarded on status=MOVING so it never clobbers a
+   * status another operation legitimately set after our claim was already released.
+   */
+  private async releaseMovingClaim (machineId: string, priorStatus: string): Promise<void> {
+    for (let attempt = 1; attempt <= 4; attempt++) {
+      try {
+        await this.prisma.machine.updateMany({
+          where: { id: machineId, status: MOVING_STATUS },
+          data: { status: priorStatus }
+        })
+        return
+      } catch (e) {
+        logger.error(`Migration ${machineId}: rollback of 'moving' status failed (attempt ${attempt}/4): ${String(e)}`)
+        if (attempt < 4) await new Promise((r) => setTimeout(r, 250 * attempt))
+      }
+    }
+    logger.error(`Migration ${machineId}: could NOT release 'moving' lock after retries — the periodic reconcile will reset it`)
   }
 
   private async prepareStorageForMigration (params: {

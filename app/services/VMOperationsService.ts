@@ -73,6 +73,8 @@ export class VMOperationsService {
    * decode the command) or when the agent reboot fails/times out.
    */
   async restartMachine (machineId: string): Promise<VMOperationResult> {
+    const locked = await this.assertPowerActionAllowed(machineId, 'restart')
+    if (locked) return locked
     try {
       const socket = getVirtioSocketWatcherService()
       if (socket.isVmConnected(machineId)) {
@@ -106,6 +108,8 @@ export class VMOperationsService {
    * Force power off a virtual machine (immediate destroy)
    */
   async forcePowerOff (machineId: string): Promise<VMOperationResult> {
+    const locked = await this.assertPowerActionAllowed(machineId, 'force power off')
+    if (locked) return locked
     return this.runOperation(
       machineId, 'Force powering off', 'Machine forcefully powered off', 'Failed to force power off machine',
       (infinization) => infinization.stopVM(machineId, { graceful: false, force: true })
@@ -116,6 +120,8 @@ export class VMOperationsService {
    * Graceful power off a virtual machine
    */
   async gracefulPowerOff (machineId: string): Promise<VMOperationResult> {
+    const locked = await this.assertPowerActionAllowed(machineId, 'power off')
+    if (locked) return locked
     return this.runOperation(
       machineId, 'Gracefully powering off', 'Machine powered off', 'Failed to power off machine',
       (infinization) => infinization.stopVM(machineId, { graceful: true, timeout: 120000, force: true })
@@ -126,6 +132,8 @@ export class VMOperationsService {
    * Reset a virtual machine (hardware reset)
    */
   async resetMachine (machineId: string): Promise<VMOperationResult> {
+    const locked = await this.assertPowerActionAllowed(machineId, 'reset')
+    if (locked) return locked
     return this.runOperation(
       machineId, 'Resetting', 'Machine reset successfully', 'Failed to reset machine',
       (infinization) => infinization.resetVM(machineId)
@@ -133,26 +141,43 @@ export class VMOperationsService {
   }
 
   /**
-   * Start a virtual machine.
-   *
-   * REFUSES to start while the VM row is claimed by an in-progress disk
-   * operation (backing_up / restoring / snapshotting). Starting qemu while
-   * qemu-img holds the qcow2 open corrupts the image — this DB-status check is
-   * the authoritative cross-service gate that backs up the claim in
-   * BackupService / SnapshotServiceV2 (audit H1). Fail closed.
+   * Shared power-action lock gate (audit C2/C3). Refuses ANY power state change
+   * (start/stop/restart/reset/suspend) while the VM row is claimed by a transient
+   * disk operation (backing_up / restoring / snapshotting) OR a cross-node migration
+   * ('moving'). Power-cycling a VM whose qcow2 is held by qemu-img — or whose disk is
+   * mid-copy to another node — corrupts the image / races the migration and can
+   * silently release the 'moving' lock (via VMLifecycle.stop). The DB status is the
+   * authoritative cross-service lock; fail closed (a null probe blocks nothing here,
+   * but every write path re-checks). Returns an error result to short-circuit the
+   * caller, or null when the action may proceed.
    */
-  async startMachine (machineId: string): Promise<VMOperationResult> {
+  private async assertPowerActionAllowed (machineId: string, verb: string): Promise<VMOperationResult | null> {
     const machine = await this.prisma.machine.findUnique({
       where: { id: machineId },
       select: { status: true }
     })
     if (machine && isPowerActionLocked(machine.status)) {
-      this.debug.warn(`Refusing to start machine ${machineId}: row is locked by a transient operation (status=${machine.status})`)
+      this.debug.warn(`Refusing to ${verb} machine ${machineId}: row is locked by a transient operation (status=${machine.status})`)
       return {
         success: false,
-        error: `VM is busy (${machine.status}). Wait for the backup/restore/snapshot/migration to finish before powering on.`
+        error: `VM is busy (${machine.status}). Wait for the backup/restore/snapshot/migration to finish before you ${verb} it.`
       }
     }
+    return null
+  }
+
+  /**
+   * Start a virtual machine.
+   *
+   * REFUSES to start while the VM row is claimed by an in-progress disk
+   * operation (backing_up / restoring / snapshotting) or a cross-node migration
+   * ('moving'). Starting qemu while qemu-img holds the qcow2 open — or while the
+   * disk is being copied to another node — corrupts the image; this DB-status check
+   * is the authoritative cross-service gate. Fail closed.
+   */
+  async startMachine (machineId: string): Promise<VMOperationResult> {
+    const locked = await this.assertPowerActionAllowed(machineId, 'start')
+    if (locked) return locked
 
     // Thread the operator's seccomp-sandbox opt-out (read from the master's env)
     // into start too, so a VM created with the sandbox disabled does not re-enable
@@ -171,6 +196,8 @@ export class VMOperationsService {
    * Suspend a virtual machine
    */
   async suspendMachine (machineId: string): Promise<VMOperationResult> {
+    const locked = await this.assertPowerActionAllowed(machineId, 'suspend')
+    if (locked) return locked
     return this.runOperation(
       machineId, 'Suspending', 'Machine suspended successfully', 'Failed to suspend machine',
       (infinization) => infinization.suspendVM(machineId)
@@ -181,6 +208,8 @@ export class VMOperationsService {
    * Resume a suspended virtual machine
    */
   async resumeMachine (machineId: string): Promise<VMOperationResult> {
+    const locked = await this.assertPowerActionAllowed(machineId, 'resume')
+    if (locked) return locked
     return this.runOperation(
       machineId, 'Resuming', 'Machine resumed successfully', 'Failed to resume machine',
       (infinization) => infinization.resumeVM(machineId)

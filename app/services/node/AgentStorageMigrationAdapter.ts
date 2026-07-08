@@ -169,9 +169,12 @@ export class AgentStorageMigrationAdapter implements VMStorageMigrationAdapter {
         if (legs.sourceLocal) await this.store.unlink(p)
         else await this.deleteRemote(legs.sourceNode!, p)
       } catch (err) {
-        // The migration already succeeded (target verified); a stale source is a
-        // leak to clean up, not a failure to surface to the user.
-        logger.warn(`Migration ${machineId}: source disk cleanup failed for ${p} (left in place): ${String(err)}`)
+        // The migration already succeeded (target verified + committed); a stale
+        // source is a storage LEAK, not a reason to fail the committed migration.
+        // Log at ERROR with the full path so an operator can reclaim it manually —
+        // there is no automatic reclaim sweeper yet (audit C5), so a swallowed
+        // warn would let these accumulate invisibly toward ENOSPC.
+        logger.error(`Migration ${machineId}: LEAKED source disk (reclaim failed, delete manually): ${p} — ${String(err)}`)
       }
     }
   }

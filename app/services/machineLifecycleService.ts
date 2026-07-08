@@ -11,7 +11,7 @@ import { getEventManager } from '../services/EventManager'
 import { CreateMachineServiceV2 } from './CreateMachineServiceV2'
 import { NodePlacementService } from './node/NodePlacementService'
 import { CreateMachineInputType, UpdateMachineHardwareInput, UpdateMachineNameInput, UpdateMachineUserInput, SuccessType, FirstBootScriptInputType } from '../graphql/resolvers/machine/type'
-import { DELETING_STATUS, REBUILDING_STATUS } from '../constants/machine-status'
+import { DELETING_STATUS, REBUILDING_STATUS, MOVING_STATUS } from '../constants/machine-status'
 
 /**
  * Normalize PCI address to standard format.
@@ -372,12 +372,15 @@ export class MachineLifecycleService {
     // 1); the second sees status already 'deleting' (or 'rebuilding') and
     // matches nothing (count 0), so it bails before running cleanupVM a second
     // time. We also refuse to delete a VM a pool reset is mid-rebuild on
-    // (REBUILDING owns the disk). The authz scope is re-applied so the claim
+    // (REBUILDING owns the disk) or that a cross-node migration owns (MOVING —
+    // audit C4: without this, a delete interleaves with an in-flight migration and
+    // tears down the source disk mid-copy, or the migration's commit resurrects a
+    // half-deleted VM on the target). The authz scope is re-applied so the claim
     // cannot widen past what findFirst already authorized.
     const claim = await this.prisma.machine.updateMany({
       where: {
         ...whereClause,
-        status: { notIn: [DELETING_STATUS, REBUILDING_STATUS] }
+        status: { notIn: [DELETING_STATUS, REBUILDING_STATUS, MOVING_STATUS] }
       },
       data: { status: DELETING_STATUS }
     })

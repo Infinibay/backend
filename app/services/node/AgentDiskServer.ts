@@ -104,13 +104,25 @@ export class LocalDiskStore {
         hash.update(chunk); cb(null, chunk)
       }
     })
+    // DURABILITY (audit P1/P2): in the cross-node migration path the master deletes
+    // the SOURCE disk on the strength of this push returning ok — so the target bytes
+    // must be on STABLE storage first, not merely in the OS page cache. A target-host
+    // crash inside the writeback window would otherwise lose the only surviving copy.
+    // fsync the file data (own the fd so autoClose can't close it before the fsync),
+    // then fsync the parent directory so the rename entry itself survives a crash.
+    const fd = fs.openSync(tmp, 'w')
     try {
-      await pipeline(src, meter, fs.createWriteStream(tmp))
+      await pipeline(src, meter, fs.createWriteStream(tmp, { fd, autoClose: false }))
+      fs.fsyncSync(fd)
     } catch (err) {
+      try { fs.closeSync(fd) } catch { /* already closed */ }
       fs.rmSync(tmp, { force: true })
       throw err
     }
+    try { fs.closeSync(fd) } catch { /* already closed */ }
     fs.renameSync(tmp, abs)
+    const dirFd = fs.openSync(path.dirname(abs), 'r')
+    try { fs.fsyncSync(dirFd) } finally { fs.closeSync(dirFd) }
     return { size, sha256: hash.digest('hex') }
   }
 
