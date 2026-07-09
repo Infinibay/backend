@@ -49,7 +49,7 @@ export interface AgentStorageMigrationAdapterDeps {
   jsonPost?: typeof httpsJsonPost
 }
 
-interface DiskStat { exists: boolean, size?: number, sha256?: string }
+interface DiskStat { exists: boolean, size?: number, sha256?: string, allocated?: number }
 
 export class AgentStorageMigrationAdapter implements VMStorageMigrationAdapter {
   private readonly store: LocalDiskStore
@@ -92,10 +92,22 @@ export class AgentStorageMigrationAdapter implements VMStorageMigrationAdapter {
 
     logger.info(`Migration ${machineId}: copying ${diskPaths.length} disk(s) ${legs.sourceLocal ? 'master(local)' : legs.sourceNode!.name} → ${legs.targetLocal ? 'master(local)' : legs.targetNode!.name}`)
 
+    // Prefer the SPARSE wire (transfer only allocated bytes) when every remote peer
+    // involved advertises it. A qcow2's apparent size is its VIRTUAL size (tens of GiB
+    // of holes); the raw wire streams all of it and trips the node's request timeout
+    // (408) mid-body on a large disk. Sparse moves only the real bytes. A not-yet-
+    // upgraded node fails the capability probe and we transparently fall back to raw.
+    const useSparse = await this.negotiateSparse(legs)
+    logger.info(`Migration ${machineId}: disk transfer mode = ${useSparse ? 'sparse (allocated-only)' : 'raw (full image)'}`)
+
     // 1+2+3: transfer every disk and prove its integrity on the target BEFORE any deletion.
     for (const p of diskPaths) {
-      const srcSha = await this.transferOne(p, legs)
-      logger.info(`Migration ${machineId}: disk verified on target (sha256 ${srcSha.slice(0, 16)}…) ${p}`)
+      if (useSparse) {
+        await this.transferOneSparse(machineId, p, legs)
+      } else {
+        const srcSha = await this.transferOne(p, legs)
+        logger.info(`Migration ${machineId}: disk verified on target (sha256 ${srcSha.slice(0, 16)}…) ${p}`)
+      }
     }
 
     // 4: reclaiming the source is the ONLY destructive step (invariant I2 — never
@@ -234,6 +246,98 @@ export class AgentStorageMigrationAdapter implements VMStorageMigrationAdapter {
     return srcSha
   }
 
+  /**
+   * Sparse can be used only if EVERY remote peer on this migration advertises it (the
+   * master's own local legs always can). Probes /agent/disk/capabilities; a pre-sparse
+   * node 404s → we return false and the caller uses the raw wire. Never throws.
+   */
+  private async negotiateSparse (legs: {
+    sourceLocal: boolean, sourceNode: NodeAddr | null, targetLocal: boolean, targetNode: NodeAddr | null
+  }): Promise<boolean> {
+    const peers: NodeAddr[] = []
+    if (!legs.sourceLocal && legs.sourceNode) peers.push(legs.sourceNode)
+    if (!legs.targetLocal && legs.targetNode) peers.push(legs.targetNode)
+    for (const peer of peers) {
+      if (!(await this.remoteSupportsSparse(peer))) {
+        logger.info(`Migration: node ${peer.name} does not advertise sparse disk transfer — falling back to raw`)
+        return false
+      }
+    }
+    return true
+  }
+
+  private async remoteSupportsSparse (n: NodeAddr): Promise<boolean> {
+    try {
+      const r = await this.jsonPost(`https://${n.address}:${n.agentPort}/agent/disk/capabilities`, {}, this.identity(), { expectedCn: n.name })
+      const body = this.parseJson(r.text)
+      return r.status === 200 && body?.sparse === true
+    } catch {
+      return false
+    }
+  }
+
+  /**
+   * Move one disk source→target over the SPARSE wire: only non-zero regions cross the
+   * network, framed with an integrity trailer the RECEIVER verifies (so no side hashes
+   * the holes). Handles all three network shapes — local→node (push), node→local
+   * (pull+reconstruct), node→node (pull→push relay). Throws on any failure with the
+   * source stream released (no leaked fd / half-open pull connection).
+   */
+  private async transferOneSparse (
+    machineId: string,
+    p: string,
+    ctx: { sourceLocal: boolean, sourceNode: NodeAddr | null, targetLocal: boolean, targetNode: NodeAddr | null }
+  ): Promise<void> {
+    // Source: a framed sparse stream + the logical (apparent) and allocated (real) sizes.
+    let srcStream: Readable
+    let logicalSize: number
+    let dataSize: number
+    if (ctx.sourceLocal) {
+      if (!this.store.exists(p)) throw new Error(`source disk missing on master: ${p}`)
+      logicalSize = this.store.size(p)
+      dataSize = this.store.allocatedBytes(p)
+      srcStream = await this.store.createSparseReadStream(p)
+    } else {
+      const stat = await this.statRemote(ctx.sourceNode!, p)
+      if (!stat.exists || stat.size == null) throw new Error(`source disk missing on node ${ctx.sourceNode!.name}: ${p}`)
+      logicalSize = stat.size
+      dataSize = stat.allocated ?? stat.size
+      srcStream = await this.streamGet(this.sparsePullUrl(ctx.sourceNode!, p), this.identity(), ctx.sourceNode!.name)
+    }
+
+    try {
+      if (ctx.targetLocal) {
+        // Master is the target: guard free space, reconstruct locally (trailer verified inside).
+        if (dataSize > 0 && this.store.freeBytes() < Math.ceil(dataSize * 1.05)) {
+          throw new Error(`insufficient disk space on master for ${p}: need ~${dataSize} bytes, ${this.store.freeBytes()} free`)
+        }
+        // Cap by the logical span (not the du-derived dataSize) — see the parity note in
+        // AgentDiskServer's sparse push. A real over-fill fails safely at write time.
+        const written = await this.store.writeFromSparse(p, srcStream, { logicalSize, dataByteCap: logicalSize })
+        logger.info(`Migration ${machineId}: disk reconstructed on master (${written.dataBytes} real / ${logicalSize} logical bytes) ${p}`)
+      } else {
+        // Relay the framed stream to the target node's sparse push (master never interprets it).
+        const r = await this.streamPost(this.sparsePushUrl(ctx.targetNode!, p, logicalSize, dataSize), srcStream, this.identity(), ctx.targetNode!.name)
+        const body = this.parseJson(r.text)
+        if (r.status !== 200 || body?.ok !== true) {
+          throw new Error(`sparse disk push to node ${ctx.targetNode!.name} failed (${r.status}): ${r.text.slice(0, 300)}`)
+        }
+        logger.info(`Migration ${machineId}: disk verified on node ${ctx.targetNode!.name} (${body.dataBytes ?? '?'} real bytes) ${p}`)
+      }
+    } catch (err) {
+      srcStream.destroy() // release the source (local fd or remote pull connection) on any failure
+      throw err
+    }
+  }
+
+  private sparsePullUrl (n: NodeAddr, p: string): string {
+    return `https://${n.address}:${n.agentPort}/agent/disk/pull?path=${encodeURIComponent(p)}&sparse=1`
+  }
+
+  private sparsePushUrl (n: NodeAddr, p: string, logicalSize: number, dataSize: number): string {
+    return `https://${n.address}:${n.agentPort}/agent/disk/push?path=${encodeURIComponent(p)}&sparse=1&size=${logicalSize}&dataSize=${dataSize}`
+  }
+
   private async requireNode (nodeId: string, which: 'source' | 'target'): Promise<NodeAddr> {
     const node = await this.prisma.node.findUnique({
       where: { id: nodeId },
@@ -258,7 +362,7 @@ export class AgentStorageMigrationAdapter implements VMStorageMigrationAdapter {
     const r = await this.jsonPost(`https://${n.address}:${n.agentPort}/agent/disk/stat`, { path: p }, this.identity(), { expectedCn: n.name })
     const body = this.parseJson(r.text)
     if (r.status !== 200 || body?.ok !== true) throw new Error(`disk stat on node ${n.name} failed (${r.status}): ${r.text.slice(0, 300)}`)
-    return { exists: body.exists === true, size: body.size, sha256: body.sha256 }
+    return { exists: body.exists === true, size: body.size, sha256: body.sha256, allocated: body.allocated }
   }
 
   private async deleteRemote (n: NodeAddr, p: string): Promise<void> {

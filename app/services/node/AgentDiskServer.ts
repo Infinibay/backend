@@ -1,10 +1,12 @@
 import fs from 'fs'
+import fsp from 'fs/promises'
 import path from 'path'
 import crypto from 'crypto'
 import { pipeline } from 'node:stream/promises'
-import { Transform } from 'node:stream'
+import { Transform, type Readable } from 'node:stream'
 import express, { type Request, type RequestHandler, type Response } from 'express'
 import { requireClientCert } from './clusterMtls'
+import { createSparseStream, receiveSparse } from './sparseDisk'
 
 /**
  * Multi-node Phase 3 (cold migration): the node-agent side of the disk wire.
@@ -58,6 +60,15 @@ export class LocalDiskStore {
   }
 
   /**
+   * Bytes actually allocated on disk for `p` (st_blocks × 512) — the REAL payload a
+   * sparse transfer must move, vs `size()` which is the apparent/virtual span (holes
+   * included). Drives the target free-space guard + the receiver's data-byte cap.
+   */
+  allocatedBytes (p: string): number {
+    return fs.statSync(this.resolveWithin(p)).blocks * 512
+  }
+
+  /**
    * Bytes currently free on the filesystem backing the disk store. The disk dir
    * may not exist yet on a node that has never run a VM, so statfs the nearest
    * EXISTING ancestor (free space is a property of the filesystem, not the dir).
@@ -82,6 +93,55 @@ export class LocalDiskStore {
 
   createReadStream (p: string): fs.ReadStream {
     return fs.createReadStream(this.resolveWithin(p))
+  }
+
+  /**
+   * Open `p` as a SPARSE wire stream (only non-zero regions, framed + hashed — see
+   * sparseDisk.ts). The returned stream owns the fd and closes it on end/destroy.
+   */
+  async createSparseReadStream (p: string): Promise<Readable> {
+    const abs = this.resolveWithin(p)
+    const fd = await fsp.open(abs, 'r')
+    const { size } = await fd.stat()
+    return createSparseStream(fd, size)
+  }
+
+  /**
+   * Reconstruct a SPARSE wire stream (`src`) into `p` atomically (temp file →
+   * ftruncate to `logicalSize` so trailing holes exist → write extents → fsync →
+   * rename → fsync dir), returning the real bytes written. `dataByteCap` bounds the
+   * cumulative extent payload so a peer can't smuggle an unbounded body past the
+   * free-space guard. The trailer sha256 is verified inside receiveSparse.
+   */
+  async writeFromSparse (
+    p: string,
+    src: NodeJS.ReadableStream,
+    opts: { logicalSize: number, dataByteCap: number }
+  ): Promise<{ size: number, dataBytes: number }> {
+    const abs = this.resolveWithin(p)
+    fs.mkdirSync(path.dirname(abs), { recursive: true })
+    const tmp = `${abs}.part-${process.pid}-${Date.now()}`
+    const fh = await fsp.open(tmp, 'w')
+    let dataBytes = 0
+    try {
+      await fh.truncate(opts.logicalSize)
+      const result = await receiveSparse(src as AsyncIterable<Buffer>, {
+        fd: fh,
+        logicalSize: opts.logicalSize,
+        dataByteCap: opts.dataByteCap
+      })
+      dataBytes = result.dataBytes
+      await fh.sync() // durability P1/P2: the master reclaims the source on our ok
+    } catch (err) {
+      try { await fh.close() } catch { /* already closed */ }
+      fs.rmSync(tmp, { force: true })
+      throw err
+    }
+    await fh.close()
+    fs.renameSync(tmp, abs)
+    const dirFd = fs.openSync(path.dirname(abs), 'r')
+    try { fs.fsyncSync(dirFd) } finally { fs.closeSync(dirFd) }
+    return { size: opts.logicalSize, dataBytes }
   }
 
   /**
@@ -153,23 +213,50 @@ export function createAgentDiskRouter (opts: AgentDiskServerOptions): express.Ro
     res.status(400).json({ ok: false, error: err instanceof Error ? err.message : String(err) })
   }
 
+  const truthyParam = (v: unknown): boolean => v === '1' || v === 'true'
+
+  // Parse a query param that must be a SINGLE positive integer (rejects arrays,
+  // missing, non-finite, ≤0). Used for the sparse push's size/dataSize.
+  const singlePositiveInt = (v: unknown): number | null => {
+    if (Array.isArray(v) || v == null) return null
+    const n = Number(v)
+    return Number.isFinite(n) && n > 0 ? Math.floor(n) : null
+  }
+
+  // Capability probe: the master checks this BEFORE choosing the sparse wire so a
+  // not-yet-upgraded node cleanly falls back to raw (old agents 404 here). Kept
+  // trivial + unauthenticated-safe (still behind mTLS/token `auth`) — it leaks nothing.
+  router.post('/disk/capabilities', express.json({ limit: '4kb' }), auth, (_req: Request, res: Response) => {
+    res.json({ ok: true, sparse: true })
+  })
+
   router.post('/disk/stat', express.json({ limit: '64kb' }), auth, async (req: Request, res: Response) => {
     try {
       const p = (req.body ?? {}).path as string
       const abs = store.resolveWithin(p)
       if (!fs.existsSync(abs)) { res.json({ ok: true, exists: false }); return }
-      res.json({ ok: true, exists: true, size: store.size(p), sha256: await store.sha256(p) })
+      // `allocated` (real bytes) lets the master size a sparse pull's free-space guard
+      // and data cap; `size` stays the apparent/logical span used to ftruncate.
+      res.json({ ok: true, exists: true, size: store.size(p), allocated: store.allocatedBytes(p), sha256: await store.sha256(p) })
     } catch (err) { badPath(res, err) }
   })
 
-  router.get('/disk/pull', auth, (req: Request, res: Response) => {
+  router.get('/disk/pull', auth, async (req: Request, res: Response) => {
     try {
       const p = String(req.query.path ?? '')
       const abs = store.resolveWithin(p)
       if (!fs.existsSync(abs)) { res.status(404).json({ ok: false, error: 'disk not found' }); return }
       res.setHeader('content-type', 'application/octet-stream')
-      res.setHeader('content-length', String(store.size(p)))
-      const rs = store.createReadStream(p)
+      // Sparse pull: stream only the non-zero regions (framed + hashed). The length is
+      // not known up front, so it goes out chunked (no content-length). The master
+      // reconstructs via writeFromSparse and verifies the trailer hash.
+      let rs: Readable
+      if (truthyParam(req.query.sparse)) {
+        rs = await store.createSparseReadStream(p)
+      } else {
+        res.setHeader('content-length', String(store.size(p)))
+        rs = store.createReadStream(p)
+      }
       // Use pipeline() (not raw rs.pipe): pipe() does NOT destroy the source when the
       // response errors or the client aborts mid-transfer, leaking the open file fd on
       // the long-lived agent. pipeline() tears down rs on any res error / premature
@@ -183,6 +270,37 @@ export function createAgentDiskRouter (opts: AgentDiskServerOptions): express.Ro
     try {
       const p = String(req.query.path ?? '')
       store.resolveWithin(p) // validate before consuming the body
+
+      // ── Sparse push (negotiated via /disk/capabilities) ─────────────────────────
+      // Only the non-zero regions arrive, framed + integrity-trailer'd (sparseDisk.ts).
+      // `size` is the logical/apparent span (ftruncate target so trailing holes exist);
+      // `dataSize` is the real allocated bytes, which drives BOTH the free-space guard
+      // and the receiver's cumulative data cap. No sha256 param — integrity is the
+      // stream's own trailer hash, verified inside receiveSparse.
+      if (truthyParam(req.query.sparse)) {
+        const logicalSize = singlePositiveInt(req.query.size)
+        const dataSize = singlePositiveInt(req.query.dataSize)
+        if (logicalSize == null) { res.status(400).json({ ok: false, error: 'size query param is required and must be a positive number' }); return }
+        if (dataSize == null) { res.status(400).json({ ok: false, error: 'dataSize query param is required and must be a positive number' }); return }
+        const needBytes = Math.ceil(dataSize * 1.05)
+        const free = store.freeBytes()
+        if (free < needBytes) {
+          res.status(507).json({ ok: false, error: `insufficient disk space on target: need ~${dataSize} bytes, ${free} free` })
+          return
+        }
+        // Bound the cumulative payload by the LOGICAL span — you can't have more non-zero
+        // blocks than the whole image. `dataSize` (allocated) only sizes the free-space
+        // guard above: the codec's 64 KiB block granularity can push real bytes modestly
+        // above the FS's finer-grained st_blocks, so a dataSize-derived cap would risk
+        // falsely rejecting a legit transfer. A genuine disk-fill still fails safely at
+        // write time (ENOSPC) with the temp file reclaimed. This mirrors the raw path,
+        // which likewise bounds by the declared apparent size.
+        const written = await store.writeFromSparse(p, req, { logicalSize, dataByteCap: logicalSize })
+        res.json({ ok: true, sparse: true, ...written })
+        return
+      }
+
+      // ── Raw push (legacy / pre-sparse peers) ────────────────────────────────────
       // The honest master always declares BOTH the exact byte size and the sha256 of the
       // image it pushes (see AgentStorageMigrationAdapter.pushUrl). Require and strictly
       // validate both BEFORE reading a single body byte: an omitted/understated size or a
@@ -222,8 +340,12 @@ export function createAgentDiskRouter (opts: AgentDiskServerOptions): express.Ro
       res.json({ ok: true, ...written })
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
-      // A body that overran its declared size is a caller fault (413), not a server 500.
-      const status = /exceeds declared size/.test(msg) ? 413 : 500
+      // Caller faults get a 4xx: an over-cap raw body (413), or a malformed/overlapping/
+      // tampered sparse stream (422). Everything else is a server-side 500.
+      let status = 500
+      if (/exceeds declared size/.test(msg)) status = 413
+      else if (/exceed declared allocation cap/.test(msg)) status = 413
+      else if (/^sparse disk stream:/.test(msg)) status = 422
       res.status(status).json({ ok: false, error: msg })
     }
   })
