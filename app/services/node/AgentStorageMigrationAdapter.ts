@@ -1,4 +1,4 @@
-import { type Readable } from 'node:stream'
+import { Transform, type Readable } from 'node:stream'
 import { PrismaClient } from '@prisma/client'
 import logger from '@main/logger'
 import { type VMStorageMigrationAdapter } from './VMMigrationService'
@@ -76,8 +76,9 @@ export class AgentStorageMigrationAdapter implements VMStorageMigrationAdapter {
     targetNodeId: string
     diskPaths: string[]
     deferReclaim?: boolean
+    onBytes?: (transferred: number, total: number) => void
   }): Promise<void> {
-    const { machineId, sourceNodeId, targetNodeId, diskPaths, deferReclaim } = params
+    const { machineId, sourceNodeId, targetNodeId, diskPaths, deferReclaim, onBytes } = params
     if (sourceNodeId === targetNodeId) return // same node — nothing to move
     if (diskPaths.length === 0) {
       logger.warn(`Migration ${machineId}: no disk paths recorded — nothing to copy (the VM may not be provisioned yet)`)
@@ -103,9 +104,9 @@ export class AgentStorageMigrationAdapter implements VMStorageMigrationAdapter {
     // 1+2+3: transfer every disk and prove its integrity on the target BEFORE any deletion.
     for (const p of diskPaths) {
       if (useSparse) {
-        await this.transferOneSparse(machineId, p, legs)
+        await this.transferOneSparse(machineId, p, legs, onBytes)
       } else {
-        const srcSha = await this.transferOne(p, legs)
+        const srcSha = await this.transferOne(p, legs, onBytes)
         logger.info(`Migration ${machineId}: disk verified on target (sha256 ${srcSha.slice(0, 16)}…) ${p}`)
       }
     }
@@ -194,7 +195,8 @@ export class AgentStorageMigrationAdapter implements VMStorageMigrationAdapter {
   /** Move one disk source→target and return the verified sha256. Throws on any mismatch (source untouched). */
   private async transferOne (
     p: string,
-    ctx: { sourceLocal: boolean, sourceNode: NodeAddr | null, targetLocal: boolean, targetNode: NodeAddr | null }
+    ctx: { sourceLocal: boolean, sourceNode: NodeAddr | null, targetLocal: boolean, targetNode: NodeAddr | null },
+    onBytes?: (transferred: number, total: number) => void
   ): Promise<string> {
     // Source integrity reference + size + byte stream.
     let srcSha: string
@@ -212,6 +214,9 @@ export class AgentStorageMigrationAdapter implements VMStorageMigrationAdapter {
       srcSize = stat.size ?? 0
       srcStream = await this.streamGet(this.pullUrl(ctx.sourceNode!, p), this.identity(), ctx.sourceNode!.name)
     }
+
+    // Meter the raw wire (full image size) so the caller can stream a progress bar.
+    srcStream = this.meter(srcStream, srcSize, onBytes)
 
     // Target write + its own sha256 of what landed. Any failure here MUST release the
     // source byte stream: once streamGet resolved, the pull connection's deadline timer
@@ -277,6 +282,36 @@ export class AgentStorageMigrationAdapter implements VMStorageMigrationAdapter {
   }
 
   /**
+   * Wrap a source byte stream in a pass-through that reports cumulative bytes moved to
+   * `onBytes` (throttled to ~every total/200 bytes, min 4 MiB, so a 10 GiB copy emits
+   * ~200 smooth updates), driving a live migration progress bar. Returns the ORIGINAL
+   * stream untouched when there is no sink or no known total. The returned meter owns
+   * teardown of the underlying source: destroying it (the transfer failure paths
+   * already call srcStream.destroy()) tears down the source too, so no fd / half-open
+   * pull connection leaks. Reported `transferred` is clamped to `total` (the framing
+   * overhead would otherwise nudge it just past 100%).
+   */
+  private meter (src: Readable, total: number, onBytes?: (transferred: number, total: number) => void): Readable {
+    if (!onBytes || !(total > 0)) return src
+    let seen = 0
+    let lastEmit = 0
+    const step = Math.max(4 * 1024 * 1024, Math.floor(total / 200))
+    const emit = (): void => { try { onBytes(Math.min(seen, total), total) } catch { /* best-effort, never breaks the copy */ } }
+    const meter = new Transform({
+      transform (chunk: Buffer, _enc, cb) {
+        seen += chunk.length
+        if (seen - lastEmit >= step) { lastEmit = seen; emit() }
+        cb(null, chunk)
+      },
+      flush (cb) { emit(); cb() }
+    })
+    // Cascade teardown both ways so a failure on either side never leaks the other.
+    meter.on('close', () => { if (!src.destroyed) src.destroy() })
+    src.on('error', (e) => { if (!meter.destroyed) meter.destroy(e) })
+    return src.pipe(meter)
+  }
+
+  /**
    * Move one disk source→target over the SPARSE wire: only non-zero regions cross the
    * network, framed with an integrity trailer the RECEIVER verifies (so no side hashes
    * the holes). Handles all three network shapes — local→node (push), node→local
@@ -286,7 +321,8 @@ export class AgentStorageMigrationAdapter implements VMStorageMigrationAdapter {
   private async transferOneSparse (
     machineId: string,
     p: string,
-    ctx: { sourceLocal: boolean, sourceNode: NodeAddr | null, targetLocal: boolean, targetNode: NodeAddr | null }
+    ctx: { sourceLocal: boolean, sourceNode: NodeAddr | null, targetLocal: boolean, targetNode: NodeAddr | null },
+    onBytes?: (transferred: number, total: number) => void
   ): Promise<void> {
     // Source: a framed sparse stream + the logical (apparent) and allocated (real) sizes.
     let srcStream: Readable
@@ -304,6 +340,11 @@ export class AgentStorageMigrationAdapter implements VMStorageMigrationAdapter {
       dataSize = stat.allocated ?? stat.size
       srcStream = await this.streamGet(this.sparsePullUrl(ctx.sourceNode!, p), this.identity(), ctx.sourceNode!.name)
     }
+
+    // Meter the framed wire against the allocated (real) size so the UI can show a
+    // truthful "X / Y" bar — only the allocated bytes (plus a little framing) cross,
+    // never the multi-GiB holes. The framing overhead is clamped out (min(seen,total)).
+    srcStream = this.meter(srcStream, dataSize, onBytes)
 
     try {
       if (ctx.targetLocal) {

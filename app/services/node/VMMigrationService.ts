@@ -18,6 +18,14 @@ export interface VMStorageMigrationAdapter {
     // was already deleted. Adapters predating this flag ignore it (legacy: they
     // still delete inside prepareMachineStorage and omit reclaimSourceStorage).
     deferReclaim?: boolean
+    /**
+     * Best-effort byte-progress sink, fired periodically as bytes cross the wire
+     * during the disk copy: `transferred` = allocated bytes moved so far, `total` =
+     * allocated bytes to move. Lets the caller stream a real progress bar over
+     * Socket.IO instead of only the coarse phase. Must never throw; adapters that
+     * predate it simply ignore it.
+     */
+    onBytes?: (transferred: number, total: number) => void
   }): Promise<void>
   /**
    * Best-effort reclaim (delete) of the now-migrated source disk(s), invoked by
@@ -224,8 +232,14 @@ export class VMMigrationService {
     priorStatus: string
     diskPaths: string[]
     onPhase?: (phase: MigrationPhase) => void
+    /**
+     * Best-effort byte-progress sink for the 'copying' phase (throttled), so the
+     * caller can surface a real "X / Y bytes" progress bar over Socket.IO. Never
+     * throws; only fired while the disk copy is in flight.
+     */
+    onProgress?: (info: { transferred: number, total: number }) => void
   }): Promise<VMMigrationResult> {
-    const { machineId, sourceNodeId, targetNodeId, priorStatus, diskPaths, onPhase } = params
+    const { machineId, sourceNodeId, targetNodeId, priorStatus, diskPaths, onPhase, onProgress } = params
     try {
       // ── Liveness ────────────────────────────────────────────────────────────
       // The DB status can lag reality (e.g. an 'error' row left by a failed create
@@ -255,7 +269,8 @@ export class VMMigrationService {
         sourceNodeId,
         targetNodeId,
         diskPaths,
-        deferReclaim
+        deferReclaim,
+        onBytes: onProgress ? (transferred, total) => onProgress({ transferred, total }) : undefined
       })
 
       // ── Commit the new owner + release the lock in one GUARDED write ──────────
@@ -341,6 +356,7 @@ export class VMMigrationService {
     targetNodeId: string
     diskPaths: string[]
     deferReclaim?: boolean
+    onBytes?: (transferred: number, total: number) => void
   }): Promise<void> {
     if (this.options.storageAdapter) {
       await this.options.storageAdapter.prepareMachineStorage(params)

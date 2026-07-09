@@ -460,6 +460,9 @@ export class MachineMutations {
       id, vmId: id, sourceNodeId: begin.sourceNodeId, targetNodeId
     }, triggeredBy).catch((e) => logger.warn(`migrations:started dispatch failed: ${String(e)}`))
 
+    // Coarse operator-visible progress log (every ~10%), so a migration's real byte
+    // movement is legible in the backend logs — not just the coarse phase transitions.
+    let lastLoggedDecile = -1
     void (async () => {
       try {
         await migrationService.completeStartedMigration({
@@ -472,6 +475,20 @@ export class MachineMutations {
             getEventManager().dispatchEvent('migrations', 'progress', {
               id, vmId: id, phase, sourceNodeId: begin.sourceNodeId, targetNodeId
             }, triggeredBy).catch(() => {})
+          },
+          onProgress: ({ transferred, total }) => {
+            // Byte-level 'copying' progress (throttled by the adapter) — carries the
+            // real X/Y so the UI shows an actual filling bar, not a frozen phase label.
+            getEventManager().dispatchEvent('migrations', 'progress', {
+              id, vmId: id, phase: 'copying', transferred, total, sourceNodeId: begin.sourceNodeId, targetNodeId
+            }, triggeredBy).catch(() => {})
+            if (total > 0) {
+              const decile = Math.floor((transferred / total) * 10)
+              if (decile > lastLoggedDecile) {
+                lastLoggedDecile = decile
+                logger.info(`Migration ${id}: copy ${Math.round((transferred / total) * 100)}% (${transferred}/${total} bytes)`)
+              }
+            }
           }
         })
         getEventManager().dispatchEvent('migrations', 'completed', {
