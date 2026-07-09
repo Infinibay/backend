@@ -10,6 +10,7 @@ import { calculateNodeCapacity, nodeHealth } from '../../../services/node/NodeCa
 import { ClusterCA } from '../../../services/node/ClusterCA'
 import { NodeEnrollmentService } from '../../../services/node/NodeEnrollmentService'
 import { NodeDrainService, type NodeDrainResult } from '../../../services/node/NodeDrainService'
+import { emitNodesChanged } from '../../../services/NodesEventManager'
 
 type NodeWithDisks = Node & { disks: Disk[] }
 
@@ -170,6 +171,10 @@ export class NodeResolver {
       }
     })
 
+    // Push the inventory change to admins so the Infrastructure page updates
+    // live instead of polling.
+    emitNodesChanged('update', { id })
+
     return toGraphql(node)
   }
 
@@ -322,6 +327,8 @@ export class NodeResolver {
       }
       throw err
     }
+    // Node removed — tell admins to drop it from the live inventory.
+    emitNodesChanged('delete', { id })
     return true
   }
 }

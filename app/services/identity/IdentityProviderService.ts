@@ -5,6 +5,7 @@ import dns from 'dns'
 import bcrypt from 'bcrypt'
 import { Client, Entry } from 'ldapts'
 import { IdentityGroupRoleMapping, IdentityProvider, Prisma, PrismaClient, UserRole } from '@prisma/client'
+import { emitAdminResourceEvent } from '../AdminBroadcastEventManager'
 
 export interface IdentityProviderConfig {
   name: string
@@ -492,6 +493,10 @@ export class IdentityProviderService {
         message: 'Directory sync started'
       }
     })
+    // Push sync lifecycle to admins so the identity detail page refreshes its
+    // run history live instead of polling. (The run row is written once at start
+    // and once at finish — there is no intermediate progress to poll for.)
+    emitAdminResourceEvent('identity', 'started', { providerId, syncRunId: syncRun.id })
 
     await this.prisma.identityProvider.update({
       where: { id: providerId },
@@ -716,6 +721,7 @@ export class IdentityProviderService {
           lastError: null
         }
       })
+      emitAdminResourceEvent('identity', 'completed', { providerId, syncRunId: syncRun.id })
 
       return {
         success: true,
@@ -743,6 +749,7 @@ export class IdentityProviderService {
           lastError: message
         }
       })
+      emitAdminResourceEvent('identity', 'failed', { providerId, syncRunId: syncRun.id })
       return {
         success: false,
         message,

@@ -1,4 +1,5 @@
 import { PrismaClient, Prisma } from '@prisma/client'
+import { emitNodesChanged } from '../NodesEventManager'
 
 /**
  * Hardware summary an agent reports with each heartbeat. Mirrors the shape
@@ -82,6 +83,9 @@ export class NodeHeartbeatService {
           lastHeartbeat: now
         }
       })
+      // A live heartbeat refreshes status/capacity/liveness — push it so the
+      // admin inventory recomputes online/stale without client polling.
+      emitNodesChanged('update', { id: existing.id })
       return { nodeId: existing.id, created: false }
     }
 
@@ -100,6 +104,8 @@ export class NodeHeartbeatService {
         lastHeartbeat: now
       }
     })
+    // A brand-new compute node just registered — surface it in the admin inventory.
+    emitNodesChanged('update', { id: node.id })
     return { nodeId: node.id, created: true }
   }
 }

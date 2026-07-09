@@ -10,6 +10,7 @@ import type {
 import { KeepAliveManager } from './KeepAliveManager'
 import type { MetricsHandler } from './MetricsHandler'
 import { HealthMonitor, updateConnectionStabilityScore } from './HealthMonitor'
+import { emitAdminResourceEvent } from '../AdminBroadcastEventManager'
 
 import * as net from 'net'
 import * as fs from 'fs'
@@ -470,6 +471,10 @@ export class ConnectionManager {
       // Process any queued health checks for this VM
       this.processHealthCheckQueue(connection)
 
+      // Push agent connectivity to admins so the Sessions page / agent-connection
+      // hooks refetch socketConnectionStats live instead of polling.
+      emitAdminResourceEvent('agent_connections', 'update', { vmId, isConnected: true })
+
       // TODO: Implement handshake authentication here
     })
 
@@ -801,6 +806,9 @@ export class ConnectionManager {
     if (!connection) {
       return
     }
+
+    // The agent for this VM is going away — refresh admin connectivity views.
+    emitAdminResourceEvent('agent_connections', 'update', { vmId, isConnected: false })
 
     const disconnectTime = new Date()
     const connectionDuration = disconnectTime.getTime() - connection.connectionStartTime.getTime()

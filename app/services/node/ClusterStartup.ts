@@ -1,6 +1,7 @@
 import { PrismaClient } from '@prisma/client'
 import logger from '@main/logger'
 import { LocalNodeRegistrationService } from './LocalNodeRegistrationService'
+import { emitNodesChanged } from '../NodesEventManager'
 
 let heartbeatTimer: NodeJS.Timeout | null = null
 
@@ -38,6 +39,11 @@ export async function startClusterHeartbeat (prisma: PrismaClient): Promise<void
         where: { id: node.id },
         data: { lastHeartbeat: new Date(), status: 'online' }
       })
+      // This master tick is also the cluster liveness heartbeat: pushing it lets
+      // the admin inventory recompute every node's online/stale state on an
+      // interval (websocket-driven) rather than each client polling — and it is
+      // the only signal that flips the LAST compute node to stale once it dies.
+      emitNodesChanged('update', { id: node.id })
     } catch (error) {
       logger.warn(`Local node heartbeat refresh failed: ${String(error)}`)
     }

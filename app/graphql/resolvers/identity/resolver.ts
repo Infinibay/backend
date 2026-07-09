@@ -18,6 +18,7 @@ import { UserRole } from '../user/type'
 import { IdentityProviderService } from '../../../services/identity/IdentityProviderService'
 import { Can } from '@main/permissions'
 import { BackgroundTaskService } from '@services/BackgroundTaskService'
+import { emitAdminResourceEvent } from '../../../services/AdminBroadcastEventManager'
 import logger from '@main/logger'
 
 function toIdentityProviderType (provider: PrismaIdentityProvider): IdentityProviderType {
@@ -155,6 +156,7 @@ export class IdentityProviderResolver {
     const data = await this.service(prisma).buildCreateData(input)
     try {
       const provider = await prisma.identityProvider.create({ data })
+      emitAdminResourceEvent('identity', 'create', { id: provider.id })
       return toIdentityProviderType(provider)
     } catch (error) {
       // Don't echo raw directory/database errors to the client; log them instead.
@@ -175,6 +177,7 @@ export class IdentityProviderResolver {
     const data = await this.service(prisma).buildUpdateData(input)
     try {
       const provider = await prisma.identityProvider.update({ where: { id }, data })
+      emitAdminResourceEvent('identity', 'update', { id })
       return toIdentityProviderType(provider)
     } catch (error) {
       // Don't echo raw directory/database errors to the client; log them instead.
@@ -191,6 +194,7 @@ export class IdentityProviderResolver {
   ): Promise<boolean> {
     const { prisma } = context
     await prisma.identityProvider.delete({ where: { id } })
+    emitAdminResourceEvent('identity', 'delete', { id })
     return true
   }
 
@@ -233,6 +237,7 @@ export class IdentityProviderResolver {
       }
     })
 
+    emitAdminResourceEvent('identity', 'update', { id: input.providerId })
     return toIdentityGroupRoleMappingType(mapping)
   }
 
@@ -243,7 +248,8 @@ export class IdentityProviderResolver {
     @Ctx() context: InfinibayContext
   ): Promise<boolean> {
     const { prisma } = context
-    await prisma.identityGroupRoleMapping.delete({ where: { id } })
+    const mapping = await prisma.identityGroupRoleMapping.delete({ where: { id } })
+    emitAdminResourceEvent('identity', 'update', { id: mapping.providerId })
     return true
   }
 
@@ -266,6 +272,8 @@ export class IdentityProviderResolver {
         lastError: result.success ? null : result.message
       }
     })
+    // Connection test flipped the provider's status/lastTestAt — refresh admins live.
+    emitAdminResourceEvent('identity', 'update', { id })
 
     if (!result.success) {
       // Keep the detailed directory/bind error in provider.lastError and logs only;

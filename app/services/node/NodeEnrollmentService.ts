@@ -5,6 +5,7 @@ import logger from '@main/logger'
 import { UserInputError, AuthenticationError } from '@utils/errors'
 import { ClusterCA } from './ClusterCA'
 import { computeSas } from './clusterCrypto'
+import { emitNodesChanged } from '../NodesEventManager'
 
 /**
  * Multi-node Phase 2 (onboarding): SAS-verified node enrollment.
@@ -135,6 +136,8 @@ export class NodeEnrollmentService {
     }
 
     logger.info(`🔗 Node '${req.name}' requested enrollment (pending approval, SAS computed)`)
+    // A new pending node appeared — refresh the admin PendingNodesSection live.
+    emitNodesChanged('update', { id: nodeId })
     return { status: 'pending', nodeId, sasCode, joinNonce, caCertPem: this.ca.getCaCertPem() }
   }
 
@@ -169,6 +172,8 @@ export class NodeEnrollmentService {
     }
     await this.prisma.node.update({ where: { id: nodeId }, data: { status: 'approved' } })
     logger.info(`✅ Node '${node.name}' approved for the cluster`)
+    // Left the pending set (approved) — refresh admin inventory + pending list.
+    emitNodesChanged('update', { id: nodeId })
   }
 
   /**
@@ -182,6 +187,8 @@ export class NodeEnrollmentService {
       where: { id: nodeId },
       data: { status: 'rejected', joinNonce: null, joinCodeHash: null, certPem: null }
     })
+    // Left the pending set (rejected) — refresh admin inventory + pending list.
+    emitNodesChanged('update', { id: nodeId })
   }
 
   /**
@@ -257,6 +264,8 @@ export class NodeEnrollmentService {
       }
     })
     logger.info(`📜 Issued client certificate to node '${node.name}' (fingerprint ${issued.fingerprint.slice(0, 16)}…)`)
+    // Certificate issued — the node is now an active cluster member; refresh inventory.
+    emitNodesChanged('update', { id: node.id })
     return { status: 'issued', certPem: issued.certPem, caCertPem: this.ca.getCaCertPem(), fingerprint: issued.fingerprint }
   }
 

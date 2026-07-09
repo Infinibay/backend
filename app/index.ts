@@ -219,6 +219,13 @@ async function bootstrap (): Promise<void> {
     const { MigrationEventManager } = await import('./services/MigrationEventManager')
     const migrationsEventManager = new MigrationEventManager(socketService, prisma)
 
+    const { NodesEventManager } = await import('./services/NodesEventManager')
+    const nodesEventManager = new NodesEventManager(socketService, prisma)
+
+    const { AdminBroadcastEventManager } = await import('./services/AdminBroadcastEventManager')
+    const identityEventManager = new AdminBroadcastEventManager(socketService, prisma, 'identity')
+    const agentConnectionsEventManager = new AdminBroadcastEventManager(socketService, prisma, 'agent_connections')
+
     eventManager.registerResourceManager('applications', applicationEventManager)
     eventManager.registerResourceManager('departments', departmentEventManager)
     eventManager.registerResourceManager('firewall', firewallEventManager)
@@ -231,6 +238,9 @@ async function bootstrap (): Promise<void> {
     eventManager.registerResourceManager('golden_images', goldenImageEventManager)
     eventManager.registerResourceManager('policy', policyEventManager)
     eventManager.registerResourceManager('migrations', migrationsEventManager)
+    eventManager.registerResourceManager('nodes', nodesEventManager)
+    eventManager.registerResourceManager('identity', identityEventManager)
+    eventManager.registerResourceManager('agent_connections', agentConnectionsEventManager)
 
     logger.info('🎯 Real-time event system initialized with all resource managers')
 
