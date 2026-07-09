@@ -33,6 +33,7 @@ import { ConnectionManager } from './socket-watcher/ConnectionManager'
 import { HealthMonitor } from './socket-watcher/HealthMonitor'
 import { signForVm } from './socket-watcher/AgentMessageSigner'
 import { emitAdminResourceEvent } from './AdminBroadcastEventManager'
+import { deliverAgentCommandToNode } from './node/NodeDispatcher'
 
 // Import all types, constants, and helpers from the canonical source
 import {
@@ -124,6 +125,17 @@ interface RemoteVmConnection {
   /** Date.now() of the last telemetry POST that referenced this VM — drives staleness. */
   lastReportAt: number
   droppedFrames: number
+  /**
+   * Phase 2: commands awaiting a `response` forwarded from the node. Correlation
+   * stays on the master (single source of truth); the node just relays the signed
+   * envelope out and the guest's `response` back. Preserved across connState
+   * updates and rejected when the connection is pruned/expired.
+   */
+  pendingCommands: Map<string, {
+    resolve: (value: CommandResponse) => void
+    reject: (error: Error) => void
+    timeout: NodeJS.Timeout
+  }>
 }
 
 export class VirtioSocketWatcherService extends EventEmitter {
@@ -210,7 +222,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
       handleCircuitBreakerStateChange: (conn, msg) => this.connectionManager.handleCircuitBreakerStateChange(conn, msg),
       handleFirewallEvent: (vmId, msg) => this.handleFirewallEvent(vmId, msg),
       handleScriptCompletion: (vmId, msg) => this.handleScriptCompletion(vmId, msg),
-      handleRequestPendingScripts: (vmId, msg, conn) => this.handleRequestPendingScripts(vmId, msg, conn),
+      handleRequestPendingScripts: (vmId, msg, conn) => this.handleRequestPendingScripts(vmId, msg, (m) => this.sendMessage(conn, m)),
       handleAgentEvent: (vmId, msg) => this.handleAgentEvent(vmId, msg),
     })
 
@@ -243,6 +255,14 @@ export class VirtioSocketWatcherService extends EventEmitter {
       connections: this.connections,
       reconnectFn: (vmId: string, socketPath: string) => this.connectionManager.connectToVm(vmId, socketPath),
       sendMessage: (conn, msg) => this.sendMessage(conn, msg),
+      // Phase 2: route commands for node-hosted VMs to the owning node (the master
+      // signs; the node relays). Correlation lives on the remote connection's own
+      // pendingCommands map, resolved when its `response` frame is ingested.
+      getRemoteTarget: (vmId: string) => {
+        const rc = this.remoteConnections.get(vmId)
+        return rc ? { isConnected: rc.isConnected, pendingCommands: rc.pendingCommands } : undefined
+      },
+      sendToNode: (vmId: string, message: OutboundMessage) => this.sendSignedToNode(vmId, message),
     })
 
     // Log timeout configuration for debugging
@@ -352,6 +372,22 @@ export class VirtioSocketWatcherService extends EventEmitter {
         case 'firewall_event':
           await this.handleFirewallEvent(vmId, message as FirewallEventMessage)
           break
+        case 'response':
+          // Phase 2: a command result relayed back — resolve the pending command.
+          await this.ingestRemoteResponse(vmId, message as ResponseMessage)
+          break
+        case 'request_pending_scripts':
+          // Phase 2: the guest is asking for first-boot/scheduled scripts — answer
+          // by relaying a signed pending_scripts_response back through the node.
+          await this.handleRequestPendingScripts(
+            vmId,
+            message as RequestPendingScriptsMessage,
+            (m) => {
+              this.sendSignedToNode(vmId, m).catch(e =>
+                this.debug.error(`Failed to relay pending_scripts_response to node-hosted VM ${vmId}: ${(e as Error).message}`))
+            }
+          )
+          break
         default:
           this.debug.debug(`Ignoring forwarded message type '${message.type}' for remote VM ${vmId}`)
       }
@@ -382,7 +418,10 @@ export class VirtioSocketWatcherService extends EventEmitter {
         reconnectAttempts: typeof s.reconnectAttempts === 'number' ? s.reconnectAttempts : (prev?.reconnectAttempts ?? 0),
         lastMessageTime,
         lastReportAt: now,
-        droppedFrames: typeof s.droppedFrames === 'number' ? s.droppedFrames : (prev?.droppedFrames ?? 0)
+        droppedFrames: typeof s.droppedFrames === 'number' ? s.droppedFrames : (prev?.droppedFrames ?? 0),
+        // Preserve in-flight command correlation across state updates (a NEW Map
+        // here would orphan pending commands and hang their callers until timeout).
+        pendingCommands: prev?.pendingCommands ?? new Map()
       })
       if (!prev || prev.isConnected !== isConnected) {
         emitAdminResourceEvent('agent_connections', 'update', { vmId: s.vmId, isConnected })
@@ -395,6 +434,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
       for (const [vmId, rc] of this.remoteConnections) {
         if (rc.nodeId === nodeId && !seen.has(vmId)) {
           this.remoteConnections.delete(vmId)
+          this.rejectRemotePending(rc, 'VM is gone')
           if (rc.isConnected) emitAdminResourceEvent('agent_connections', 'update', { vmId, isConnected: false })
         }
       }
@@ -410,6 +450,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
       const age = now - rc.lastReportAt
       if (age > removeMs) {
         this.remoteConnections.delete(vmId)
+        this.rejectRemotePending(rc, 'node telemetry expired')
         if (rc.isConnected) emitAdminResourceEvent('agent_connections', 'update', { vmId, isConnected: false })
         continue
       }
@@ -419,6 +460,78 @@ export class VirtioSocketWatcherService extends EventEmitter {
         emitAdminResourceEvent('agent_connections', 'update', { vmId, isConnected: false })
       }
     }
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // Remote command relay (Phase 2) — master signs, node writes the opaque bytes
+  // ──────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Sign a message for a node-hosted VM and relay it to the owning node, which
+   * writes the opaque bytes to that VM's local guest socket. The HMAC secret never
+   * leaves the master. Throws if unsignable / node unreachable / undeliverable —
+   * the CommandDispatcher turns that into a rejected command promise.
+   */
+  private async sendSignedToNode(vmId: string, message: OutboundMessage): Promise<void> {
+    const envelope = signForVm(vmId, message)
+    if (!envelope) {
+      throw new Error('INFINISERVICE_HMAC_MASTER_SECRET is not set — cannot sign agent commands for node-hosted VMs')
+    }
+    const rc = this.remoteConnections.get(vmId)
+    if (!rc) throw new Error(`No remote connection for VM ${vmId}`)
+    const node = await this.prisma.node.findUnique({
+      where: { id: rc.nodeId },
+      select: { name: true, address: true, agentPort: true }
+    })
+    if (!node || !node.address) {
+      throw new Error(`Node ${rc.nodeId} hosting VM ${vmId} has no reachable address`)
+    }
+    await deliverAgentCommandToNode({ name: node.name, address: node.address, agentPort: node.agentPort }, vmId, envelope)
+  }
+
+  /** Resolve a forwarded command `response` against the remote VM's pending map. */
+  private async ingestRemoteResponse(vmId: string, response: ResponseMessage): Promise<void> {
+    const rc = this.remoteConnections.get(vmId)
+    const pending = rc?.pendingCommands.get(response.id)
+
+    // Mirror MessageRouter: for process commands the payload may arrive as stdout JSON.
+    let data = response.data
+    if (!data && response.stdout && response.command_type &&
+        ['ProcessList', 'ProcessTop', 'ProcessKill'].includes(response.command_type)) {
+      try { data = JSON.parse(response.stdout) } catch { /* leave data undefined */ }
+    }
+
+    const commandResponse: CommandResponse = {
+      id: response.id,
+      success: response.success,
+      exit_code: response.exit_code,
+      stdout: response.stdout || '',
+      stderr: response.stderr || '',
+      execution_time_ms: response.execution_time_ms,
+      command_type: response.command_type,
+      data: data || response.data,
+      error: response.error
+    }
+
+    if (pending && rc) {
+      clearTimeout(pending.timeout)
+      pending.resolve(commandResponse)
+      rc.pendingCommands.delete(response.id)
+    } else {
+      this.debug.warn(`Received response for unknown/expired remote command ${response.id} from VM ${vmId}`)
+    }
+
+    // Auto-check emissions work the same for node-hosted VMs (DB-keyed by vmId).
+    await this.metricsHandler.handleAutoCheckResponse(vmId, response, data || null)
+  }
+
+  /** Reject and clear all pending commands for a remote VM that went away. */
+  private rejectRemotePending(rc: RemoteVmConnection, reason: string): void {
+    for (const [id, pending] of rc.pendingCommands) {
+      clearTimeout(pending.timeout)
+      pending.reject(new Error(`Command ${id} aborted: ${reason}`))
+    }
+    rc.pendingCommands.clear()
   }
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -979,7 +1092,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
    */
   private async dispatchPendingScripts(
     vmId: string,
-    connection: VmConnection,
+    send: (message: OutboundMessage) => void,
     now: Date,
     scheduledForBound: Date
   ): Promise<number> {
@@ -1116,14 +1229,14 @@ export class VirtioSocketWatcherService extends EventEmitter {
       scripts: result.pendingScripts
     }
 
-    this.sendMessage(connection, response)
+    send(response)
     return result.pendingScripts.length
   }
 
   /**
    * Handle request for pending script executions from InfiniService
    */
-  private async handleRequestPendingScripts(vmId: string, msg: RequestPendingScriptsMessage, connection: VmConnection): Promise<void> {
+  private async handleRequestPendingScripts(vmId: string, msg: RequestPendingScriptsMessage, send: (message: OutboundMessage) => void): Promise<void> {
     try {
       this.debug.info(`📜 Pending scripts request received from VM ${vmId}`)
 
@@ -1139,7 +1252,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
       }
       const comparisonTime = timeDiff > maxSkewMs ? now : requestTimestamp
 
-      const count = await this.dispatchPendingScripts(vmId, connection, now, comparisonTime)
+      const count = await this.dispatchPendingScripts(vmId, send, now, comparisonTime)
       this.debug.info(`Sent ${count} pending scripts to VM ${vmId}`)
     } catch (error) {
       this.debug.error(`Failed to handle pending scripts request: ${error}`)
@@ -1151,13 +1264,21 @@ export class VirtioSocketWatcherService extends EventEmitter {
    */
   public async pushPendingScriptsToVM(vmId: string): Promise<{ success: boolean; scriptCount: number; error?: string }> {
     try {
-      // 1. Connection Validation
+      // 1. Resolve a send channel — a local socket, else a node-hosted VM's relay.
+      let send: ((message: OutboundMessage) => void) | null = null
       const connection = this.connections.get(vmId)
-      if (!connection) {
-        return { success: false, scriptCount: 0, error: 'VM not connected' }
+      if (connection && connection.isConnected) {
+        send = (m) => this.sendMessage(connection, m)
+      } else {
+        const rc = this.remoteConnections.get(vmId)
+        if (rc && rc.isConnected) {
+          send = (m) => {
+            this.sendSignedToNode(vmId, m).catch(e =>
+              this.debug.error(`Failed to relay pending_scripts_response to node-hosted VM ${vmId}: ${(e as Error).message}`))
+          }
+        }
       }
-
-      if (!connection.isConnected) {
+      if (!send) {
         return { success: false, scriptCount: 0, error: 'VM not connected' }
       }
 
@@ -1166,7 +1287,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
       // 2. Dispatch. The push path has no request_timestamp / clock-skew
       //    handling, so it uses `now` as the scheduledFor bound.
       const now = new Date()
-      const count = await this.dispatchPendingScripts(vmId, connection, now, now)
+      const count = await this.dispatchPendingScripts(vmId, send, now, now)
       this.debug.info(`Pushed ${count} pending scripts to VM ${vmId}`)
 
       // 3. Return Result

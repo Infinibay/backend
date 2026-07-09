@@ -9,7 +9,7 @@ import {
 } from './NodeExecutor'
 import { LocalNodeExecutor } from './LocalNodeExecutor'
 import { ClusterCA } from './ClusterCA'
-import { type ClusterIdentity } from './clusterMtls'
+import { httpsJsonPost, type ClusterIdentity } from './clusterMtls'
 
 /**
  * Multi-node Phase 1 (VM-op routing): resolves WHICH host executes a VM verb.
@@ -158,4 +158,61 @@ function defaultRemoteExecutor (node: RemoteNodeInfo): NodeExecutor {
     token
   })
   return new RemoteNodeExecutor(transport)
+}
+
+/**
+ * Phase 2 (node-hosted VM commands): relay a MASTER-SIGNED message envelope to the
+ * node that hosts a VM, to be written to that VM's local guest socket. The master
+ * signs (holds the HMAC secret); the node is a dumb pipe. Auth mirrors
+ * defaultRemoteExecutor: mTLS with the master's client cert + node-CN pin, else the
+ * pre-mTLS shared token. Throws unless the node reports `delivered: true`.
+ */
+export async function deliverAgentCommandToNode (
+  node: { name: string, address: string, agentPort: number },
+  vmId: string,
+  envelope: unknown
+): Promise<void> {
+  const body = { vmId, envelope }
+  let status: number
+  let text: string
+  if (process.env.INFINIBAY_CLUSTER_MTLS === '1') {
+    const r = await httpsJsonPost(
+      `https://${node.address}:${node.agentPort}/agent/agent-command`,
+      body,
+      masterIdentity(),
+      { expectedCn: node.name }
+    )
+    status = r.status
+    text = r.text
+  } else {
+    const token = process.env.INFINIBAY_CLUSTER_TOKEN
+    if (!token) throw new Error('INFINIBAY_CLUSTER_TOKEN is not set — cannot reach remote node agents')
+    const ctrl = new AbortController()
+    const deadline = setTimeout(() => ctrl.abort(), 15000)
+    if (typeof deadline.unref === 'function') deadline.unref()
+    try {
+      const res = await fetch(`http://${node.address}:${node.agentPort}/agent/agent-command`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+        body: JSON.stringify(body),
+        signal: ctrl.signal
+      })
+      status = res.status
+      text = await res.text().catch(() => '')
+    } finally {
+      clearTimeout(deadline)
+    }
+  }
+  if (status < 200 || status >= 300) {
+    throw new Error(`agent-command delivery to node ${node.name} failed (${status}): ${text.slice(0, 200)}`)
+  }
+  let parsed: { delivered?: boolean, error?: string }
+  try {
+    parsed = JSON.parse(text) as typeof parsed
+  } catch {
+    throw new Error(`agent-command delivery to node ${node.name} returned a non-JSON response`)
+  }
+  if (parsed.delivered !== true) {
+    throw new Error(`agent-command not delivered to VM ${vmId} on node ${node.name}: ${parsed.error ?? 'unknown'}`)
+  }
 }

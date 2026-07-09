@@ -43,11 +43,19 @@ const MAX_MESSAGE_BYTES = Number(process.env.VIRTIO_MAX_MESSAGE_BYTES) || 4 * 10
 // this window. infiniservice sends metrics every ~30s, so 90s = 3 missed cycles.
 const STALE_AFTER_MS = Number(process.env.NODE_TELEMETRY_STALE_MS) || 90_000
 
-// Only these guest message types have a vmId-keyed handler on the master and are
-// useful for the READ path. Everything else (keep_alive, circuit_breaker_state,
-// error_report, response, request_pending_scripts, connection_state_change) is
-// node-local connection health or needs a reply we can't sign in Phase 1 — drop it.
-const FORWARDED_TYPES = new Set(['metrics', 'agent_event', 'script_completion', 'firewall_event'])
+// Guest message types forwarded to the master. Phase 1 read-path telemetry
+// (metrics / agent_event / script_completion / firewall_event) PLUS Phase 2
+// request/reply traffic: `response` (command results the master correlates to a
+// pending command) and `request_pending_scripts` (the guest asking for first-boot
+// / scheduled scripts, which the master answers by relaying a signed reply back
+// through /agent/agent-command). Everything else (keep_alive, circuit_breaker_state,
+// error_report) is node-local connection health — dropped.
+const FORWARDED_TYPES = new Set(['metrics', 'agent_event', 'script_completion', 'firewall_event', 'response', 'request_pending_scripts'])
+
+// These are latency-sensitive (a user is awaiting a command result, or the guest
+// is blocking on its script request with a bounded retry): flush them to the
+// master immediately instead of waiting for the batch tick.
+const LATENCY_SENSITIVE = new Set(['response', 'request_pending_scripts'])
 
 interface RelayFrame {
   vmId: string
@@ -301,6 +309,31 @@ export class NodeTelemetryRelay {
     const type = typeof message.type === 'string' ? message.type : undefined
     if (!type || !FORWARDED_TYPES.has(type)) return
     this.enqueue(vm, message)
+    // Command results / script requests must not wait for the 2s batch tick.
+    if (LATENCY_SENSITIVE.has(type)) void this.flush(false)
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // Phase 2: deliver a master-signed envelope to a local VM socket
+  // ──────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Write a master-signed message envelope to a VM's local guest socket. The
+   * master signs (it holds the HMAC secret); this node is a dumb pipe that writes
+   * the opaque bytes. Returns false if the VM has no live socket here (the master
+   * treats that as an undeliverable command). Called by the verb server's
+   * POST /agent/agent-command handler.
+   */
+  deliverToVm (vmId: string, envelope: unknown): boolean {
+    const vm = this.vms.get(vmId)
+    if (!vm || !vm.socket || !vm.isConnected) return false
+    try {
+      vm.socket.write(JSON.stringify(envelope) + '\n')
+      return true
+    } catch (err) {
+      this.log('warn', `deliverToVm write failed for VM ${vmId}: ${String(err)}`)
+      return false
+    }
   }
 
   // ──────────────────────────────────────────────────────────────────────────

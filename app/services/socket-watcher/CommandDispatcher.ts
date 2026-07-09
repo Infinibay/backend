@@ -35,6 +35,20 @@ export type ReconnectFn = (vmId: string, socketPath: string) => Promise<void>
 /** Callback to send a message over a VM socket */
 export type SendMessageFn = (connection: VmConnection, message: OutboundMessage) => void
 
+/**
+ * Phase 2: a node-hosted VM has no local socket. Command correlation still lives on
+ * the master via a per-remote-VM pendingCommands map; delivery is a master→node
+ * relay (the master signs, the node writes). The orchestrator injects these.
+ */
+export interface RemoteCommandTarget {
+  isConnected: boolean
+  pendingCommands: Map<string, {
+    resolve: (value: CommandResponse) => void
+    reject: (error: Error) => void
+    timeout: NodeJS.Timeout
+  }>
+}
+
 export interface CommandDispatcherDeps {
   debug: Logger
   /** The orchestrator's connections Map — shared reference */
@@ -43,6 +57,10 @@ export interface CommandDispatcherDeps {
   reconnectFn: ReconnectFn
   /** Function to write messages to a VM socket (owned by orchestrator) */
   sendMessage: SendMessageFn
+  /** Resolve a node-hosted VM's command target (Phase 2). Absent VM → local-only. */
+  getRemoteTarget?: (vmId: string) => RemoteCommandTarget | undefined
+  /** Sign + relay a message to the node hosting a VM (Phase 2). Throws on undeliverable. */
+  sendToNode?: (vmId: string, message: OutboundMessage) => Promise<void>
 }
 
 // ────────────────────────────────────────────────────────────────────────────────
@@ -54,12 +72,55 @@ export class CommandDispatcher {
   private readonly connections: Map<string, VmConnection>
   private readonly reconnectFn: ReconnectFn
   private readonly sendMessage: SendMessageFn
+  private readonly getRemoteTarget?: (vmId: string) => RemoteCommandTarget | undefined
+  private readonly sendToNode?: (vmId: string, message: OutboundMessage) => Promise<void>
 
   constructor(deps: CommandDispatcherDeps) {
     this.debug = deps.debug
     this.connections = deps.connections
     this.reconnectFn = deps.reconnectFn
     this.sendMessage = deps.sendMessage
+    this.getRemoteTarget = deps.getRemoteTarget
+    this.sendToNode = deps.sendToNode
+  }
+
+  /**
+   * Route a built command message to a node-hosted VM: register the pending
+   * command on the remote target's own map (so the forwarded `response` resolves
+   * it), then relay the signed envelope to the node. Rejects promptly if the node
+   * is unreachable rather than hanging the caller until timeout. Returns null when
+   * the VM is not node-hosted, so the caller falls through to the local path.
+   */
+  private tryRemoteCommand (
+    vmId: string,
+    commandId: string,
+    message: OutboundMessage,
+    timeout: number
+  ): Promise<CommandResponse> | null {
+    if (this.connections.get(vmId)) return null // a local VM takes the local path
+    const remote = this.getRemoteTarget?.(vmId)
+    if (!remote) return null
+    if (!remote.isConnected) {
+      return Promise.reject(new Error(`VM ${vmId} (node-hosted) is not connected`))
+    }
+    const sendToNode = this.sendToNode
+    if (!sendToNode) {
+      return Promise.reject(new Error(`No node transport configured for VM ${vmId}`))
+    }
+    return new Promise<CommandResponse>((resolve, reject) => {
+      const timeoutHandle = setTimeout(() => {
+        remote.pendingCommands.delete(commandId)
+        reject(new Error(`Command timeout after ${timeout}ms`))
+      }, timeout)
+      remote.pendingCommands.set(commandId, { resolve, reject, timeout: timeoutHandle })
+      this.debug.debug(`Relaying command ${commandId} to node-hosted VM ${vmId}: ${JSON.stringify(redactSensitive(message))}`)
+      sendToNode(vmId, message).catch((err: unknown) => {
+        // Delivery to the node failed — release the pending slot immediately.
+        clearTimeout(timeoutHandle)
+        remote.pendingCommands.delete(commandId)
+        reject(err instanceof Error ? err : new Error(String(err)))
+      })
+    })
   }
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -79,6 +140,24 @@ export class CommandDispatcher {
     commandType: SafeCommandType,
     timeout: number = 30000
   ): Promise<CommandResponse> {
+    const commandId = uuidv4()
+    // Build the command message once (serde-tagged for infiniservice). Built up
+    // front so the same message + id serve both the remote relay and local paths.
+    // formatCommandType may throw (validation) — as an async method that surfaces
+    // as a rejected promise, exactly as before when it ran inside the executor.
+    const message = {
+      type: 'SafeCommand',
+      id: commandId,
+      command_type: this.formatCommandType(commandType),
+      params: null, // Not used, params are in command_type
+      timeout: Math.floor(timeout / 1000) // Convert to seconds for InfiniService
+    }
+
+    // Node-hosted VM → relay the command to its owning node (Phase 2). Returns
+    // null when the VM isn't node-hosted, so we fall through to the local path.
+    const relayed = this.tryRemoteCommand(vmId, commandId, message, timeout)
+    if (relayed) return relayed
+
     let connection = this.connections.get(vmId)
     if (!connection) {
       throw new Error(`No connection to VM ${vmId}`)
@@ -110,8 +189,6 @@ export class CommandDispatcher {
       }
     }
 
-    const commandId = uuidv4()
-
     return new Promise<CommandResponse>((resolve, reject) => {
       // Set up timeout
       const timeoutHandle = setTimeout(() => {
@@ -125,21 +202,6 @@ export class CommandDispatcher {
         reject,
         timeout: timeoutHandle
       })
-
-      // Build the command_type object with proper serde tag format
-      // InfiniService expects SafeCommandType with #[serde(tag = "action")]
-      const commandTypeFormatted = this.formatCommandType(commandType)
-
-      // Build the complete message with IncomingMessage structure
-      // IncomingMessage has #[serde(tag = "type")] internally-tagged enum
-      // With internally-tagged enums, the variant's fields are flattened into the same object
-      const message = {
-        type: 'SafeCommand',
-        id: commandId,
-        command_type: commandTypeFormatted,
-        params: null, // Not used, params are in command_type
-        timeout: Math.floor(timeout / 1000) // Convert to seconds for InfiniService
-      }
 
       // Redact before logging: JoinDomain (and future commands) carry secrets
       // like the domain bind password, which must never hit the log.
@@ -158,6 +220,23 @@ export class CommandDispatcher {
     options: Partial<UnsafeCommandRequest> = {},
     timeout: number = 30000
   ): Promise<CommandResponse> {
+    const commandId = uuidv4()
+    // Serde-tagged UnsafeCommand; built once for both the remote-relay and local paths.
+    const message = {
+      type: 'UnsafeCommand',
+      id: commandId,
+      raw_command: rawCommand,
+      shell: options.shell,
+      timeout: Math.floor(timeout / 1000),
+      working_dir: options.workingDir,
+      env_vars: options.envVars,
+      run_as: options.runAs
+    }
+
+    // Node-hosted VM → relay to its owning node (Phase 2); else fall through local.
+    const relayed = this.tryRemoteCommand(vmId, commandId, message, timeout)
+    if (relayed) return relayed
+
     let connection = this.connections.get(vmId)
     if (!connection) {
       throw new Error(`No connection to VM ${vmId}`)
@@ -189,8 +268,6 @@ export class CommandDispatcher {
       }
     }
 
-    const commandId = uuidv4()
-
     return new Promise<CommandResponse>((resolve, reject) => {
       // Set up timeout
       const timeoutHandle = setTimeout(() => {
@@ -204,19 +281,6 @@ export class CommandDispatcher {
         reject,
         timeout: timeoutHandle
       })
-
-      // Send command with proper serde-tagged format
-      // With internally-tagged enums, the variant's fields are flattened into the same object
-      const message = {
-        type: 'UnsafeCommand',
-        id: commandId,
-        raw_command: rawCommand,
-        shell: options.shell,
-        timeout: Math.floor(timeout / 1000),
-        working_dir: options.workingDir,
-        env_vars: options.envVars,
-        run_as: options.runAs
-      }
 
       this.debug.debug(`Sending unsafe command ${commandId} to VM ${vmId}: ${rawCommand}`)
       this.sendMessage(connection, message)

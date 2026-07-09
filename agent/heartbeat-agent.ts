@@ -194,6 +194,11 @@ let verbHttpsServer: https.Server | null = null
 
 function startVerbServer (): void {
   const app = express()
+  // Phase 2: let the master relay signed command envelopes to node-hosted VMs.
+  // Bound to the relay's deliverToVm (null-safe if telemetry is disabled).
+  const deliverAgentCommand = telemetryRelay
+    ? (vmId: string, envelope: unknown): boolean => telemetryRelay!.deliverToVm(vmId, envelope)
+    : undefined
   app.get('/agent/health', (_req: express.Request, res: express.Response) => {
     res.json({ ok: true, node: NAME, role: ROLE, mtls: MTLS, infinizationReady: target !== null })
   })
@@ -206,7 +211,7 @@ function startVerbServer (): void {
   }
   if (MTLS) {
     // Only the master's CN may call verbs (mandatory pin — guaranteed set by main()).
-    app.use('/agent', createAgentVerbRouter({ getTarget, auth: 'mtls', masterCn: MASTER_CN }))
+    app.use('/agent', createAgentVerbRouter({ getTarget, auth: 'mtls', masterCn: MASTER_CN, deliverAgentCommand }))
     // Cold-migration disk transfer (pull/push/stat/delete), confined to DISK_DIR and
     // restricted to the master's verified client cert (Phase 3).
     app.use('/agent', createAgentDiskRouter({ store: new LocalDiskStore(DISK_DIR), auth: 'mtls', masterCn: MASTER_CN }))
@@ -225,7 +230,7 @@ function startVerbServer (): void {
     })
     verbHttpsServer = server
   } else {
-    app.use('/agent', createAgentVerbRouter({ getTarget }))
+    app.use('/agent', createAgentVerbRouter({ getTarget, deliverAgentCommand }))
     const server = app.listen(AGENT_PORT, () => {
       console.log(`[agent] verb server listening on :${AGENT_PORT} (POST /agent/vm)`)
     })
@@ -331,8 +336,10 @@ function main (): void {
     process.exit(1)
   }
   console.log(`[agent] starting: name=${NAME} role=${ROLE} master=${MASTER_URL} port=${AGENT_PORT} interval=${INTERVAL_MS}ms mtls=${MTLS}`)
-  startVerbServer()
+  // Relay BEFORE the verb server so the verb server can wire POST /agent-command
+  // to the relay's deliverToVm (Phase 2 command relay for node-hosted VMs).
   startTelemetryRelay()
+  startVerbServer()
   void sendHeartbeat()
   const timer = setInterval(() => { void sendHeartbeat() }, INTERVAL_MS)
 

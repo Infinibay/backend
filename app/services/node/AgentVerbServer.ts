@@ -35,6 +35,13 @@ export interface AgentVerbServerOptions {
   auth?: 'token' | 'mtls'
   /** Under mTLS, the only CN allowed to call verbs (the master's node name). */
   masterCn?: string
+  /**
+   * Phase 2 (node-hosted VM commands): deliver a MASTER-SIGNED message envelope to
+   * a local VM's guest socket. The master signs (it holds the HMAC secret); this
+   * node just writes the opaque bytes. When provided, registers
+   * POST /agent-command. Returns false when the VM has no live socket on this node.
+   */
+  deliverAgentCommand?: (vmId: string, envelope: unknown) => boolean
 }
 
 /**
@@ -63,6 +70,29 @@ export function createAgentVerbRouter (opts: AgentVerbServerOptions): express.Ro
       res.status(500).json({ ok: false, error: message })
     }
   })
+
+  // Phase 2: the master relays a signed command envelope for a node-hosted VM here;
+  // we write the opaque bytes to that VM's local guest socket (the master already
+  // authorized the vmId against this node). Same auth as /vm (mTLS master cert /
+  // token). No response body is echoed — the guest's reply returns via telemetry.
+  if (opts.deliverAgentCommand) {
+    const deliver = opts.deliverAgentCommand
+    // 8mb: command envelopes are tiny, but a relayed pending_scripts_response
+    // carries full (interpolated) script content, which can be sizeable.
+    router.post('/agent-command', express.json({ limit: '8mb' }), auth, (req: Request, res: Response) => {
+      const { vmId, envelope } = (req.body ?? {}) as { vmId?: unknown, envelope?: unknown }
+      if (typeof vmId !== 'string' || vmId.length === 0 || envelope == null || typeof envelope !== 'object') {
+        res.status(400).json({ delivered: false, error: 'vmId (string) and envelope (object) are required' })
+        return
+      }
+      const delivered = deliver(vmId, envelope)
+      if (!delivered) {
+        res.status(409).json({ delivered: false, error: `VM ${vmId} has no live guest socket on this node` })
+        return
+      }
+      res.json({ delivered: true })
+    })
+  }
 
   return router
 }
