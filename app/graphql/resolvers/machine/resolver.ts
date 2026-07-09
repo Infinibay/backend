@@ -415,6 +415,7 @@ export class MachineMutations {
     // Source shared-ness through the StorageProvider abstraction (DB config first,
     // then env) rather than reading INFINIBAY_SHARED_STORAGE inline. The decision
     // is passed to VMMigrationService as an explicit storageMode override below.
+    const triggeredBy = user?.id
     const sharedStorage = (await getConfiguredStorageProvider(prisma)).isShared()
     // The dispatcher doubles as the liveness probe (executorFor → getVMStatus on the
     // owning node) so migration refuses to move a disk out from under a live qemu.
@@ -422,21 +423,75 @@ export class MachineMutations {
     const migrationService = sharedStorage
       ? new VMMigrationService(prisma, { storageMode: 'shared', livenessProbe })
       : new VMMigrationService(prisma, { storageAdapter: new AgentStorageMigrationAdapter(prisma), livenessProbe })
-    const result = await migrationService.migrateStoppedMachineToNode(id, targetNodeId)
 
-    try {
-      const updatedMachine = await prisma.machine.findUnique({
-        where: { id },
-        include: { configuration: true, department: true, template: true, user: true }
-      })
-      if (updatedMachine) {
-        await getEventManager().dispatchEvent('vms', 'update', updatedMachine, user?.id)
+    // ── Synchronous begin: validate + atomically claim the VM as 'moving' ─────────
+    // Validation failures (VM not stopped, node in maintenance, insufficient capacity,
+    // busy) throw here and surface as a GraphQL error, exactly as before — fast
+    // pre-flight, no work done. But a multi-GB disk copy blows past any HTTP/client
+    // timeout, so the ACTUAL relocation runs on a detached worker and the outcome is
+    // delivered over Socket.IO ('migrations' resource: started → progress → completed|failed).
+    const begin = await migrationService.beginStoppedMachineMigration(id, targetNodeId)
+
+    const emitVmUpdate = async (): Promise<void> => {
+      try {
+        const updatedMachine = await prisma.machine.findUnique({
+          where: { id },
+          include: { configuration: true, department: true, template: true, user: true }
+        })
+        if (updatedMachine) {
+          await getEventManager().dispatchEvent('vms', 'update', updatedMachine, triggeredBy)
+        }
+      } catch (eventError) {
+        logger.error('Failed to trigger vms:update after migration:', eventError)
       }
-    } catch (eventError) {
-      logger.error('Failed to trigger migration event:', eventError)
     }
 
-    return result
+    if (begin.alreadyOnTarget) {
+      // Nothing to move — the VM already lives on the requested node.
+      return { accepted: true, success: true, machineId: id, sourceNodeId: begin.sourceNodeId, targetNodeId }
+    }
+
+    // The row is now claimed as 'moving'. Announce the start and run the long copy on a
+    // detached worker. completeStartedMigration commits+releases the claim on success or
+    // releases it and throws on failure — either way we emit a terminal event and refresh
+    // the VM row. The startup reconcile (reconcileOrphanedMoveMarkers) is the backstop if
+    // this process dies mid-copy, resetting the stranded 'moving' row back to its status.
+    getEventManager().dispatchEvent('migrations', 'started', {
+      id, vmId: id, sourceNodeId: begin.sourceNodeId, targetNodeId
+    }, triggeredBy).catch((e) => logger.warn(`migrations:started dispatch failed: ${String(e)}`))
+
+    void (async () => {
+      try {
+        await migrationService.completeStartedMigration({
+          machineId: id,
+          sourceNodeId: begin.sourceNodeId,
+          targetNodeId,
+          priorStatus: begin.priorStatus,
+          diskPaths: begin.diskPaths,
+          onPhase: (phase) => {
+            getEventManager().dispatchEvent('migrations', 'progress', {
+              id, vmId: id, phase, sourceNodeId: begin.sourceNodeId, targetNodeId
+            }, triggeredBy).catch(() => {})
+          }
+        })
+        getEventManager().dispatchEvent('migrations', 'completed', {
+          id, vmId: id, success: true, sourceNodeId: begin.sourceNodeId, targetNodeId
+        }, triggeredBy).catch(() => {})
+        logger.info(`Migration ${id}: completed → node ${targetNodeId}`)
+        await emitVmUpdate()
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        logger.error(`Migration ${id} failed (background): ${message}`)
+        getEventManager().dispatchEvent('migrations', 'failed', {
+          id, vmId: id, success: false, sourceNodeId: begin.sourceNodeId, targetNodeId, error: message
+        }, triggeredBy).catch(() => {})
+        // completeStartedMigration already released the 'moving' claim; refresh the row so
+        // the UI sees the VM back at its prior status on the source node.
+        await emitVmUpdate()
+      }
+    })()
+
+    return { accepted: true, success: true, machineId: id, sourceNodeId: begin.sourceNodeId, targetNodeId }
   }
 
   @Mutation(() => SuccessType)

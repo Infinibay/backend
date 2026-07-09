@@ -1141,6 +1141,7 @@ input MachineApplicationInputType {
 }
 
 type MachineMigrationResultType {
+  accepted: Boolean!
   error: String
   machineId: String!
   sourceNodeId: String

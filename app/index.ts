@@ -216,6 +216,9 @@ async function bootstrap (): Promise<void> {
     const { PolicyEventManager } = await import('./services/PolicyEventManager')
     const policyEventManager = new PolicyEventManager(socketService, prisma)
 
+    const { MigrationEventManager } = await import('./services/MigrationEventManager')
+    const migrationsEventManager = new MigrationEventManager(socketService, prisma)
+
     eventManager.registerResourceManager('applications', applicationEventManager)
     eventManager.registerResourceManager('departments', departmentEventManager)
     eventManager.registerResourceManager('firewall', firewallEventManager)
@@ -227,6 +230,7 @@ async function bootstrap (): Promise<void> {
     eventManager.registerResourceManager('recommendations', recommendationsEventManager)
     eventManager.registerResourceManager('golden_images', goldenImageEventManager)
     eventManager.registerResourceManager('policy', policyEventManager)
+    eventManager.registerResourceManager('migrations', migrationsEventManager)
 
     logger.info('🎯 Real-time event system initialized with all resource managers')
 

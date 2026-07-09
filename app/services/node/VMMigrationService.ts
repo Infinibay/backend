@@ -60,6 +60,25 @@ export interface VMMigrationResult {
   error?: string
 }
 
+/** Coarse phase of the async migration, surfaced to the UI over Socket.IO. */
+export type MigrationPhase = 'copying' | 'committing' | 'reclaiming'
+
+/**
+ * Result of the SYNCHRONOUS begin step (validation + the 'moving' claim). When
+ * `started` is true the row is now claimed as 'moving' and the caller MUST run
+ * `completeStartedMigration` (which releases/commits the claim) — inline (drain) or
+ * on a background worker (the async resolver). `alreadyOnTarget` is the no-op case.
+ */
+export interface MigrationBeginResult {
+  started: boolean
+  alreadyOnTarget: boolean
+  machineId: string
+  sourceNodeId: string | null
+  targetNodeId: string
+  priorStatus: string
+  diskPaths: string[]
+}
+
 const MIGRATABLE_STATUSES = ['off', 'stopped', 'error']
 
 export class VMMigrationService {
@@ -68,7 +87,36 @@ export class VMMigrationService {
     private readonly options: VMMigrationServiceOptions = {}
   ) {}
 
+  /**
+   * Cold-migrate a stopped VM's disk(s) to another node, fully synchronously (validate
+   * → claim → copy → commit → reclaim). Kept as the composed begin+complete so callers
+   * that need to AWAIT the whole migration (e.g. NodeDrainService) work unchanged. The
+   * interactive resolver instead calls `beginStoppedMachineMigration` and runs
+   * `completeStartedMigration` on a background worker so the mutation returns immediately.
+   */
   async migrateStoppedMachineToNode (machineId: string, targetNodeId: string): Promise<VMMigrationResult> {
+    const begin = await this.beginStoppedMachineMigration(machineId, targetNodeId)
+    if (begin.alreadyOnTarget) {
+      return { success: true, machineId, sourceNodeId: begin.sourceNodeId, targetNodeId }
+    }
+    return this.completeStartedMigration({
+      machineId,
+      sourceNodeId: begin.sourceNodeId,
+      targetNodeId,
+      priorStatus: begin.priorStatus,
+      diskPaths: begin.diskPaths
+    })
+  }
+
+  /**
+   * SYNCHRONOUS begin: validate the VM is migratable, validate the target node, and
+   * atomically claim the row as 'moving'. Fast (DB reads + one guarded write) — safe to
+   * await in a GraphQL mutation before returning. Throws on any validation failure
+   * (VM not found / not stopped / node missing / maintenance / insufficient capacity /
+   * lost claim race), exactly as the old combined method did. On success returns
+   * `started: true` with the context `completeStartedMigration` needs.
+   */
+  async beginStoppedMachineMigration (machineId: string, targetNodeId: string): Promise<MigrationBeginResult> {
     const machine = await this.prisma.machine.findUnique({
       where: { id: machineId },
       include: {
@@ -90,10 +138,13 @@ export class VMMigrationService {
 
     if (machine.nodeId === targetNodeId) {
       return {
-        success: true,
+        started: false,
+        alreadyOnTarget: true,
         machineId,
         sourceNodeId: machine.nodeId,
-        targetNodeId
+        targetNodeId,
+        priorStatus: machine.status,
+        diskPaths: []
       }
     }
 
@@ -147,6 +198,34 @@ export class VMMigrationService {
       throw new Error('VM is busy or no longer in a migratable state (another migration or power operation is in progress)')
     }
 
+    return {
+      started: true,
+      alreadyOnTarget: false,
+      machineId,
+      sourceNodeId,
+      targetNodeId,
+      priorStatus,
+      diskPaths
+    }
+  }
+
+  /**
+   * The LONG part of a migration, run only after `beginStoppedMachineMigration` has
+   * claimed the row as 'moving'. Copies+verifies the disk to the target, commits the
+   * nodeId, reclaims the source. On ANY failure it releases the 'moving' claim and
+   * rethrows (the source disk is never destroyed before the commit — invariant I2).
+   * `onPhase` is fired at each coarse step so a caller can surface progress over
+   * Socket.IO; it must never throw (it is called synchronously, best-effort).
+   */
+  async completeStartedMigration (params: {
+    machineId: string
+    sourceNodeId: string | null
+    targetNodeId: string
+    priorStatus: string
+    diskPaths: string[]
+    onPhase?: (phase: MigrationPhase) => void
+  }): Promise<VMMigrationResult> {
+    const { machineId, sourceNodeId, targetNodeId, priorStatus, diskPaths, onPhase } = params
     try {
       // ── Liveness ────────────────────────────────────────────────────────────
       // The DB status can lag reality (e.g. an 'error' row left by a failed create
@@ -170,6 +249,7 @@ export class VMMigrationService {
       // node (VM un-startable, real copy orphaned). A commit failure at this
       // point is safely retryable because no disk has been destroyed yet.
       const deferReclaim = typeof this.options.storageAdapter?.reclaimSourceStorage === 'function'
+      onPhase?.('copying')
       await this.prepareStorageForMigration({
         machineId,
         sourceNodeId,
@@ -187,6 +267,7 @@ export class VMMigrationService {
       // the DB owner unchanged; the verified target copy becomes a sweepable leak,
       // never a split-brain/double-owner or a disk deleted out from under a VM whose
       // lock we no longer hold. A plain unconditional update() could not detect this.
+      onPhase?.('committing')
       const committed = await this.prisma.machine.updateMany({
         where: { id: machineId, status: MOVING_STATUS, nodeId: sourceNodeId },
         data: { nodeId: targetNodeId, status: priorStatus }
@@ -206,6 +287,7 @@ export class VMMigrationService {
       // already deleted inside prepareMachineStorage above — deferReclaim is false
       // and this is skipped, preserving their behaviour exactly.
       if (deferReclaim) {
+        onPhase?.('reclaiming')
         await this.options.storageAdapter!.reclaimSourceStorage!({
           machineId,
           sourceNodeId,

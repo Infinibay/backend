@@ -174,6 +174,15 @@ export class JoinDomainInput {
 
 @ObjectType()
 export class MachineMigrationResultType {
+    /**
+     * Whether the migration was accepted and is now running in the background (or was a
+     * no-op because the VM is already on the target). The terminal outcome arrives over
+     * Socket.IO on the 'migrations' resource (started → progress → completed | failed).
+     */
+    @Field(() => Boolean)
+      accepted: boolean = false
+
+    /** Deprecated alias of `accepted`, kept for backward compatibility. */
     @Field(() => Boolean)
       success: boolean = false
 
@@ -186,6 +195,7 @@ export class MachineMigrationResultType {
     @Field(() => String)
       targetNodeId: string = ''
 
+    /** Set only on a synchronous rejection (e.g. validation). Runtime failures come via Socket.IO. */
     @Field(() => String, { nullable: true })
       error?: string
 }
