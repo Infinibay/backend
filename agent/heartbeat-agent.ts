@@ -210,6 +210,14 @@ function startVerbServer (): void {
     // restricted to the master's verified client cert (Phase 3).
     app.use('/agent', createAgentDiskRouter({ store: new LocalDiskStore(DISK_DIR), auth: 'mtls', masterCn: MASTER_CN }))
     const server = https.createServer(clusterServerOptions(currentIdentity(), { rejectUnauthorized: true }), app)
+    // Disk push/pull streams multi-GB qcow2 bodies whose receipt legitimately takes far
+    // longer than Node's default 5-min `requestTimeout` (a 90 GiB disk over a LAN is ~15 min),
+    // which otherwise aborts the upload mid-body with a 408 and fails the migration/backup.
+    // Disable the whole-request timeout on this server: the endpoint is mTLS-only (just the
+    // master), the body is bounded by the receiver's free-space + maxBytes guards, and the
+    // client (streamPostOverMtls) carries its own 1 h deadline + tears the socket down, so a
+    // stuck transfer is still reclaimed. headersTimeout (60 s default) still guards the handshake.
+    server.requestTimeout = 0
     server.on('error', onListenError)
     server.listen(AGENT_PORT, () => {
       console.log(`[agent] verb server listening on :${AGENT_PORT} (HTTPS mTLS, master CN '${MASTER_CN}', POST /agent/vm)`)
