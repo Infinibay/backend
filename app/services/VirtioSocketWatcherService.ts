@@ -32,6 +32,7 @@ import { MessageRouter } from './socket-watcher/MessageRouter'
 import { ConnectionManager } from './socket-watcher/ConnectionManager'
 import { HealthMonitor } from './socket-watcher/HealthMonitor'
 import { signForVm } from './socket-watcher/AgentMessageSigner'
+import { emitAdminResourceEvent } from './AdminBroadcastEventManager'
 
 // Import all types, constants, and helpers from the canonical source
 import {
@@ -110,6 +111,21 @@ export type {
 }
 
 
+/**
+ * A node-hosted VM's connection as seen from the master: there is NO local
+ * socket (the real socket lives on the node); the node relays state + freshness.
+ */
+interface RemoteVmConnection {
+  vmId: string
+  nodeId: string
+  isConnected: boolean
+  reconnectAttempts: number
+  lastMessageTime: Date
+  /** Date.now() of the last telemetry POST that referenced this VM — drives staleness. */
+  lastReportAt: number
+  droppedFrames: number
+}
+
 export class VirtioSocketWatcherService extends EventEmitter {
   private prisma: typeof prisma
   private vmEventManager?: VmEventManager
@@ -128,6 +144,20 @@ export class VirtioSocketWatcherService extends EventEmitter {
 
   // One-time guard so a missing master secret warns once, not per message.
   private warnedNoAgentSecret = false
+
+  // ── Multi-node Phase 1: node-hosted VM telemetry ──────────────────────────
+  // A compute node runs its VMs' QEMU (and their infiniservice sockets) on ITS
+  // OWN filesystem, which this master's chokidar watcher never sees. The node's
+  // NodeTelemetryRelay forwards those guests' metrics + connection state to the
+  // master via POST /cluster/telemetry, which lands here. We keep a parallel Map
+  // of REMOTE connections (no local socket) that merges into getConnectionStats()
+  // and drives `agent_connections`/`metrics:update` for node-hosted VMs exactly
+  // like local ones. See services/node + routes/cluster.ts (telemetry route).
+  private remoteConnections: Map<string, RemoteVmConnection> = new Map()
+  // Per-node dedup cursor: drop frames already ingested when a node re-sends a
+  // batch after a lost ack. Reset when the node's relay epoch changes (restart).
+  private remoteSeqCursor: Map<string, { epoch: string, maxSeq: number }> = new Map()
+  private remoteSweepTimer: NodeJS.Timeout | null = null
 
   constructor(prismaClient: typeof prisma) {
     super()
@@ -230,11 +260,165 @@ export class VirtioSocketWatcherService extends EventEmitter {
   // ──────────────────────────────────────────────────────────────────────────
 
   async start(): Promise<void> {
+    // Expire node-hosted VM connections whose node stopped reporting (node crash /
+    // network partition). The node can't announce its own death, so this timer is
+    // the only thing that flips its VMs to disconnected in the fleet views.
+    if (!this.remoteSweepTimer) {
+      this.remoteSweepTimer = setInterval(() => this.expireStaleRemote(), 15000)
+      if (typeof this.remoteSweepTimer.unref === 'function') this.remoteSweepTimer.unref()
+    }
     return this.connectionManager.start()
   }
 
   async stop(): Promise<void> {
+    if (this.remoteSweepTimer) {
+      clearInterval(this.remoteSweepTimer)
+      this.remoteSweepTimer = null
+    }
     return this.connectionManager.stop()
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // Remote (node-hosted VM) telemetry ingestion — multi-node Phase 1
+  // ──────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Ingest one telemetry batch forwarded by a compute node's NodeTelemetryRelay.
+   * `nodeId` is the AUTHENTICATED calling node (resolved from its mTLS cert CN /
+   * token in routes/cluster.ts) and every vmId has ALREADY been ownership-gated
+   * to that node by the route (G0) — so we trust the vmIds here.
+   *
+   * Guest messages are fed into the SAME vmId-keyed handlers used for local VMs
+   * (metrics → DB + `metrics:update`; agent_event / script_completion /
+   * firewall_event), so a node-hosted VM behaves identically to a master-hosted
+   * one from the frontend's perspective.
+   */
+  public async ingestRemoteTelemetry(
+    nodeId: string,
+    payload: {
+      epoch?: string
+      snapshot?: boolean
+      frames?: Array<{ vmId?: unknown, seq?: unknown, message?: unknown }>
+      connections?: Array<{ vmId?: unknown, isConnected?: unknown, reconnectAttempts?: unknown, lastMessageTime?: unknown, droppedFrames?: unknown }>
+    }
+  ): Promise<{ accepted: number, ackSeq: number }> {
+    const now = Date.now()
+
+    // Apply connection state first so a VM referenced by a frame is already
+    // registered/fresh (and so `agent_connections` fires before its metrics).
+    if (Array.isArray(payload.connections)) {
+      this.applyRemoteConnState(nodeId, payload.connections, payload.snapshot === true, now)
+    }
+
+    const frames = Array.isArray(payload.frames) ? payload.frames : []
+    const epoch = typeof payload.epoch === 'string' ? payload.epoch : ''
+    const cursor = this.remoteSeqCursor.get(nodeId)
+    // A changed epoch means the node's relay restarted (seq reset to 0) — start over.
+    let maxSeq = (cursor && cursor.epoch === epoch) ? cursor.maxSeq : 0
+
+    let accepted = 0
+    for (const frame of frames) {
+      if (!frame || typeof frame.vmId !== 'string' || frame.message == null || typeof frame.message !== 'object') continue
+      const seq = typeof frame.seq === 'number' ? frame.seq : undefined
+      if (seq !== undefined && seq <= maxSeq) continue // duplicate — already ingested
+      await this.ingestRemoteMessage(frame.vmId, frame.message as BaseMessage, now)
+      if (seq !== undefined && seq > maxSeq) maxSeq = seq
+      accepted++
+    }
+
+    this.remoteSeqCursor.set(nodeId, { epoch, maxSeq })
+    return { accepted, ackSeq: maxSeq }
+  }
+
+  /** Route one forwarded guest message to the existing vmId-keyed handlers. */
+  private async ingestRemoteMessage(vmId: string, message: BaseMessage, now: number): Promise<void> {
+    const rc = this.remoteConnections.get(vmId)
+    if (rc) {
+      rc.lastMessageTime = new Date()
+      rc.lastReportAt = now
+    }
+    try {
+      switch (message.type) {
+        case 'metrics':
+          await this.metricsHandler.handleFirstInfiniserviceMessage(vmId)
+          await this.metricsHandler.storeMetrics(vmId, message as MetricsMessage)
+          break
+        case 'agent_event':
+          await this.handleAgentEvent(vmId, message as AgentEventMessage)
+          break
+        case 'script_completion':
+          await this.handleScriptCompletion(vmId, message as ScriptCompletionMessage)
+          break
+        case 'firewall_event':
+          await this.handleFirewallEvent(vmId, message as FirewallEventMessage)
+          break
+        default:
+          this.debug.debug(`Ignoring forwarded message type '${message.type}' for remote VM ${vmId}`)
+      }
+    } catch (error) {
+      this.debug.error(`Failed to ingest remote ${message.type} for VM ${vmId}: ${(error as Error).message}`)
+    }
+  }
+
+  /** Upsert node-hosted VM connection state; emit `agent_connections` on change. */
+  private applyRemoteConnState(
+    nodeId: string,
+    states: Array<{ vmId?: unknown, isConnected?: unknown, reconnectAttempts?: unknown, lastMessageTime?: unknown, droppedFrames?: unknown }>,
+    snapshot: boolean,
+    now: number
+  ): void {
+    const seen = new Set<string>()
+    for (const s of states) {
+      if (!s || typeof s.vmId !== 'string') continue
+      seen.add(s.vmId)
+      const prev = this.remoteConnections.get(s.vmId)
+      const isConnected = s.isConnected === true
+      const parsed = typeof s.lastMessageTime === 'string' ? new Date(s.lastMessageTime) : undefined
+      const lastMessageTime = parsed && !isNaN(parsed.getTime()) ? parsed : (prev?.lastMessageTime ?? new Date())
+      this.remoteConnections.set(s.vmId, {
+        vmId: s.vmId,
+        nodeId,
+        isConnected,
+        reconnectAttempts: typeof s.reconnectAttempts === 'number' ? s.reconnectAttempts : (prev?.reconnectAttempts ?? 0),
+        lastMessageTime,
+        lastReportAt: now,
+        droppedFrames: typeof s.droppedFrames === 'number' ? s.droppedFrames : (prev?.droppedFrames ?? 0)
+      })
+      if (!prev || prev.isConnected !== isConnected) {
+        emitAdminResourceEvent('agent_connections', 'update', { vmId: s.vmId, isConnected })
+      }
+    }
+
+    // On a FULL snapshot, a VM this node previously reported but omits now was
+    // destroyed/migrated away — drop it (and announce the disconnect if needed).
+    if (snapshot) {
+      for (const [vmId, rc] of this.remoteConnections) {
+        if (rc.nodeId === nodeId && !seen.has(vmId)) {
+          this.remoteConnections.delete(vmId)
+          if (rc.isConnected) emitAdminResourceEvent('agent_connections', 'update', { vmId, isConnected: false })
+        }
+      }
+    }
+  }
+
+  /** Periodic sweep: a node that stopped POSTing telemetry is treated as gone. */
+  private expireStaleRemote(): void {
+    const now = Date.now()
+    const staleMs = Number(process.env.REMOTE_TELEMETRY_STALE_MS) || 45000
+    const removeMs = Number(process.env.REMOTE_TELEMETRY_REMOVE_MS) || 300000
+    for (const [vmId, rc] of this.remoteConnections) {
+      const age = now - rc.lastReportAt
+      if (age > removeMs) {
+        this.remoteConnections.delete(vmId)
+        if (rc.isConnected) emitAdminResourceEvent('agent_connections', 'update', { vmId, isConnected: false })
+        continue
+      }
+      if (rc.isConnected && age > staleMs) {
+        rc.isConnected = false
+        this.debug.warn(`Remote VM ${vmId} (node ${rc.nodeId}) telemetry stale for ${Math.round(age / 1000)}s — marking disconnected`)
+        emitAdminResourceEvent('agent_connections', 'update', { vmId, isConnected: false })
+      }
+    }
   }
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -447,7 +631,40 @@ export class VirtioSocketWatcherService extends EventEmitter {
   // ──────────────────────────────────────────────────────────────────────────
 
   public getConnectionStats() {
-    return this.connectionManager.getConnectionStats()
+    const local = this.connectionManager.getConnectionStats()
+    if (this.remoteConnections.size === 0) return local
+
+    // Shape node-hosted VMs like local connection entries so the same
+    // mapToVmConnectionInfo() in the resolver renders them. The node is a passive
+    // reader, so keep-alive RTT is unavailable (null/N/A) — an honest degradation.
+    const remote: any[] = Array.from(this.remoteConnections.values()).map(rc => ({
+      vmId: rc.vmId,
+      isConnected: rc.isConnected,
+      reconnectAttempts: rc.reconnectAttempts,
+      lastMessageTime: rc.lastMessageTime,
+      errorCount: 0,
+      connectionQuality: rc.isConnected ? 'good' : 'critical',
+      remote: true,
+      nodeId: rc.nodeId,
+      keepAlive: {
+        sentCount: 0,
+        receivedCount: 0,
+        failureCount: 0,
+        consecutiveFailures: 0,
+        averageRtt: 0,
+        lastSent: undefined,
+        lastReceived: undefined,
+        lastFailure: undefined,
+        successRate: 'N/A'
+      }
+    }))
+
+    return {
+      ...local,
+      totalConnections: local.totalConnections + remote.length,
+      activeConnections: local.activeConnections + remote.filter(r => r.isConnected).length,
+      connections: [...local.connections, ...remote] as any[]
+    }
   }
 
   public getKeepAliveMetrics(vmId: string) {

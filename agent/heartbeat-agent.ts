@@ -42,6 +42,7 @@ import { createAgentDiskRouter, LocalDiskStore } from '../app/services/node/Agen
 import { type NodeExecutor } from '../app/services/node/NodeExecutor'
 import { loadClusterIdentity, httpsJsonPost, clusterServerOptions, type ClusterIdentity } from '../app/services/node/clusterMtls'
 import { generateNodeKeyAndCsr, certFingerprint, certExpiresWithinDays } from '../app/services/node/clusterCrypto'
+import { NodeTelemetryRelay } from './NodeTelemetryRelay'
 
 const MASTER_URL = (process.env.MASTER_URL || 'http://localhost:4000').replace(/\/+$/, '')
 const NAME = process.env.INFINIBAY_NODE_NAME || os.hostname()
@@ -274,6 +275,40 @@ async function maybeRenewCert (): Promise<void> {
   console.log(`[agent] certificate renewed (fingerprint ${certFingerprint(body.certPem).slice(0, 16)}…)`)
 }
 
+// ---------------------------------------------------------------------------
+// Telemetry relay (multi-node Phase 1) — forward node-hosted VMs' guest
+// telemetry (metrics / agent events) to the master over the SAME authenticated
+// cluster channel used by the heartbeat. Passive reader: never writes to a guest
+// socket, so it needs no HMAC secret. Opt out with INFINIBAY_NODE_TELEMETRY=0.
+// ---------------------------------------------------------------------------
+let telemetryRelay: NodeTelemetryRelay | null = null
+
+async function postTelemetry (body: unknown): Promise<{ status: number, text: string }> {
+  if (MTLS) {
+    return httpsJsonPost(`${MASTER_CLUSTER_URL}/cluster/telemetry`, body, currentIdentity(), { expectedCn: MASTER_CN!, timeoutMs: 20000 })
+  }
+  const res = await fetch(`${MASTER_URL}/cluster/telemetry`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${TOKEN}` },
+    body: JSON.stringify(body)
+  })
+  return { status: res.status, text: await res.text().catch(() => '') }
+}
+
+function startTelemetryRelay (): void {
+  if (process.env.INFINIBAY_NODE_TELEMETRY === '0') {
+    console.log('[agent] telemetry relay disabled (INFINIBAY_NODE_TELEMETRY=0)')
+    return
+  }
+  telemetryRelay = new NodeTelemetryRelay({
+    socketDir: SOCKET_DIR,
+    nodeName: NAME,
+    post: postTelemetry,
+    log: (level, msg) => { console[level === 'info' ? 'log' : level](`[agent] ${msg}`) }
+  })
+  telemetryRelay.start()
+}
+
 function main (): void {
   // Fail closed when mTLS is MANDATED but the materials to do it securely are absent —
   // never silently downgrade to the cleartext token channel against operator intent.
@@ -297,6 +332,7 @@ function main (): void {
   }
   console.log(`[agent] starting: name=${NAME} role=${ROLE} master=${MASTER_URL} port=${AGENT_PORT} interval=${INTERVAL_MS}ms mtls=${MTLS}`)
   startVerbServer()
+  startTelemetryRelay()
   void sendHeartbeat()
   const timer = setInterval(() => { void sendHeartbeat() }, INTERVAL_MS)
 
@@ -312,6 +348,7 @@ function main (): void {
   const shutdown = (): void => {
     clearInterval(timer)
     if (renewTimer) clearInterval(renewTimer)
+    telemetryRelay?.stop()
     process.exit(0)
   }
   process.on('SIGINT', shutdown)

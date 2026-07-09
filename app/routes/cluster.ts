@@ -12,6 +12,7 @@ import type { TLSSocket } from 'node:tls'
 import { NodeEnrollmentService } from '../services/node/NodeEnrollmentService'
 import { PrismaClient } from '@prisma/client'
 import { isValidMachineStatus } from '../constants/machine-status'
+import { getVirtioSocketWatcherService } from '../services/VirtioSocketWatcherService'
 
 const service = new NodeHeartbeatService(prisma as unknown as PrismaClient)
 
@@ -305,6 +306,74 @@ export function createClusterRouter (opts: { mode?: ClusterRouterMode } = {}): e
       }
       logger.error('cluster db rpc failed', error)
       res.status(500).json({ ok: false, error: { message: error instanceof Error ? error.message : String(error) } })
+    }
+  })
+
+  /**
+   * POST /cluster/telemetry — a compute node's NodeTelemetryRelay forwards its
+   * node-hosted VMs' guest telemetry (metrics / agent events) + connection state
+   * (multi-node Phase 1). The master feeds each frame into the SAME vmId-keyed
+   * handlers used for master-hosted VMs, so a node-hosted VM's metrics/agent
+   * connectivity reach the frontend identically.
+   *
+   * SECURITY: node identity is the verified cert CN under mTLS (body nodeName is
+   * ignored), else the self-asserted nodeName pre-mTLS — mirroring /db. Every
+   * referenced vmId is ownership-gated (G0) to the calling node in ONE query;
+   * anything it does not own is dropped (a just-migrated VM must not 403 the whole
+   * batch), so a compromised node can only report telemetry for ITS OWN VMs.
+   */
+  router.post('/telemetry', express.json({ limit: '8mb' }), opsAuth, async (req: Request, res: Response) => {
+    try {
+      const body = (req.body ?? {}) as {
+        nodeName?: unknown, epoch?: unknown, snapshot?: unknown, frames?: unknown, connections?: unknown
+      }
+      const nodeName = verifiedCn(req) ?? body.nodeName
+      if (typeof nodeName !== 'string' || nodeName.length === 0) {
+        res.status(400).json({ error: 'nodeName (string) is required' })
+        return
+      }
+      const node = await prisma.node.findFirst({ where: { name: nodeName }, select: { id: true } })
+      if (!node) {
+        res.status(404).json({ error: `node not registered: ${nodeName}` })
+        return
+      }
+
+      const rawFrames = Array.isArray(body.frames) ? body.frames as Array<Record<string, unknown>> : []
+      const rawConns = Array.isArray(body.connections) ? body.connections as Array<Record<string, unknown>> : []
+
+      // Ownership gate (G0): resolve the owned subset of every referenced vmId in
+      // one query, then drop frames/conn entries for VMs this node does not own.
+      const referenced = new Set<string>()
+      for (const f of rawFrames) if (typeof f?.vmId === 'string') referenced.add(f.vmId)
+      for (const c of rawConns) if (typeof c?.vmId === 'string') referenced.add(c.vmId)
+      let owned = new Set<string>()
+      if (referenced.size > 0) {
+        const rows = await prisma.machine.findMany({
+          where: { nodeId: node.id, id: { in: Array.from(referenced) } },
+          select: { id: true }
+        })
+        owned = new Set(rows.map(r => r.id))
+      }
+      const frames = rawFrames.filter(f => typeof f?.vmId === 'string' && owned.has(f.vmId as string))
+      const connections = rawConns.filter(c => typeof c?.vmId === 'string' && owned.has(c.vmId as string))
+      const dropped = (rawFrames.length - frames.length) + (rawConns.length - connections.length)
+      if (dropped > 0) {
+        logger.warn(`cluster telemetry from ${nodeName}: dropped ${dropped} entries for VMs it does not own`)
+      }
+
+      const result = await getVirtioSocketWatcherService().ingestRemoteTelemetry(node.id, {
+        epoch: typeof body.epoch === 'string' ? body.epoch : undefined,
+        // A snapshot's prune step keys off the connections list; only honor it when
+        // no ownership entries were dropped, so we never prune a VM whose state was
+        // filtered out by a transient ownership race.
+        snapshot: body.snapshot === true && dropped === 0,
+        frames: frames as Array<{ vmId?: unknown, seq?: unknown, message?: unknown }>,
+        connections: connections as Array<{ vmId?: unknown, isConnected?: unknown }>
+      })
+      res.json({ ok: true, accepted: result.accepted, ackSeq: result.ackSeq })
+    } catch (error) {
+      logger.error('cluster telemetry ingest failed', error)
+      res.status(500).json({ error: 'telemetry ingest failed' })
     }
   })
 
