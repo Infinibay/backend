@@ -15,7 +15,7 @@ import { createSparseStream, receiveSparse } from './sparseDisk'
  * nodes by PULLING it from the source agent and PUSHING it to the target agent.
  * This router exposes those operations on the agent's existing mTLS verb server:
  *
- *   POST /agent/disk/stat   {path}            → { exists, size, sha256 }
+ *   POST /agent/disk/stat   {path, sha256?}   → { exists, size, allocated, sha256? }  (sha256 defaults on; opt out for a cheap metadata-only stat)
  *   GET  /agent/disk/pull?path=…              → 200 octet-stream of the file
  *   POST /agent/disk/push?path=…&sha256=…     → write (atomic) + verify, { size, sha256 }
  *   POST /agent/disk/delete {path}            → unlink (source cleanup after verify)
@@ -232,12 +232,26 @@ export function createAgentDiskRouter (opts: AgentDiskServerOptions): express.Ro
 
   router.post('/disk/stat', express.json({ limit: '64kb' }), auth, async (req: Request, res: Response) => {
     try {
-      const p = (req.body ?? {}).path as string
+      const body = req.body ?? {}
+      const p = body.path as string
       const abs = store.resolveWithin(p)
       if (!fs.existsSync(abs)) { res.json({ ok: true, exists: false }); return }
       // `allocated` (real bytes) lets the master size a sparse pull's free-space guard
-      // and data cap; `size` stays the apparent/logical span used to ftruncate.
-      res.json({ ok: true, exists: true, size: store.size(p), allocated: store.allocatedBytes(p), sha256: await store.sha256(p) })
+      // and data cap; `size` stays the apparent/logical span used to ftruncate. Both are
+      // O(1) fs.statSync reads.
+      //
+      // sha256 is a WHOLE-FILE read (seconds→minutes for a multi-GiB qcow2) and would
+      // otherwise trip the master's 15s mTLS request deadline ("cluster mTLS request
+      // deadline exceeded") on a node→master transfer. Compute it ONLY when the caller
+      // asks: the sparse wire proves integrity with the stream's own trailer and passes
+      // `sha256: false`, so it never pays; the raw transfer + backup staging still verify
+      // against it and get it by default. Default true keeps pre-flag callers working.
+      const wantSha = body.sha256 !== false
+      const meta: { ok: true, exists: true, size: number, allocated: number, sha256?: string } = {
+        ok: true, exists: true, size: store.size(p), allocated: store.allocatedBytes(p)
+      }
+      if (wantSha) meta.sha256 = await store.sha256(p)
+      res.json(meta)
     } catch (err) { badPath(res, err) }
   })
 

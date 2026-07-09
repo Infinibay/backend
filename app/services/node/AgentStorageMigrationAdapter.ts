@@ -51,6 +51,16 @@ export interface AgentStorageMigrationAdapterDeps {
 
 interface DiskStat { exists: boolean, size?: number, sha256?: string, allocated?: number }
 
+/**
+ * mTLS request deadline for a stat that asks the node to HASH the whole disk (raw
+ * transfer path). A sha256 is a full-file read — seconds→minutes for a multi-GiB
+ * qcow2 — so the default 15s deadline is far too tight and fired mid-hash as
+ * "cluster mTLS request deadline exceeded". Match the streaming transport's ceiling
+ * (the hash reads the disk once, same order as the copy). The sparse path skips the
+ * hash entirely and keeps the default deadline.
+ */
+const REMOTE_STAT_HASH_TIMEOUT_MS = 60 * 60 * 1000
+
 export class AgentStorageMigrationAdapter implements VMStorageMigrationAdapter {
   private readonly store: LocalDiskStore
   private readonly resolveLocal: () => Promise<string | undefined>
@@ -208,7 +218,10 @@ export class AgentStorageMigrationAdapter implements VMStorageMigrationAdapter {
       srcSize = this.store.size(p)
       srcStream = this.store.createReadStream(p)
     } else {
-      const stat = await this.statRemote(ctx.sourceNode!, p)
+      // Raw path genuinely needs the source's sha256 (the target verifies against it),
+      // so let the node hash the whole disk — but give the request room (a multi-GiB
+      // hash overruns the default 15s mTLS deadline).
+      const stat = await this.statRemote(ctx.sourceNode!, p, { sha256: true, timeoutMs: REMOTE_STAT_HASH_TIMEOUT_MS })
       if (!stat.exists || !stat.sha256) throw new Error(`source disk missing on node ${ctx.sourceNode!.name}: ${p}`)
       srcSha = stat.sha256
       srcSize = stat.size ?? 0
@@ -334,7 +347,11 @@ export class AgentStorageMigrationAdapter implements VMStorageMigrationAdapter {
       dataSize = this.store.allocatedBytes(p)
       srcStream = await this.store.createSparseReadStream(p)
     } else {
-      const stat = await this.statRemote(ctx.sourceNode!, p)
+      // Sparse path proves integrity with the stream's own trailer, so it does NOT need
+      // the source sha256 — skip it (`sha256: false`). A whole-disk hash here is pure
+      // waste AND overruns the default 15s mTLS deadline on a large qcow2, which is what
+      // failed a node→master migration with "cluster mTLS request deadline exceeded".
+      const stat = await this.statRemote(ctx.sourceNode!, p, { sha256: false })
       if (!stat.exists || stat.size == null) throw new Error(`source disk missing on node ${ctx.sourceNode!.name}: ${p}`)
       logicalSize = stat.size
       dataSize = stat.allocated ?? stat.size
@@ -399,8 +416,17 @@ export class AgentStorageMigrationAdapter implements VMStorageMigrationAdapter {
     return `https://${n.address}:${n.agentPort}/agent/disk/push?path=${encodeURIComponent(p)}&sha256=${sha256}${sizeParam}`
   }
 
-  private async statRemote (n: NodeAddr, p: string): Promise<DiskStat> {
-    const r = await this.jsonPost(`https://${n.address}:${n.agentPort}/agent/disk/stat`, { path: p }, this.identity(), { expectedCn: n.name })
+  private async statRemote (n: NodeAddr, p: string, opts: { sha256?: boolean, timeoutMs?: number } = {}): Promise<DiskStat> {
+    // sha256 defaults to true (old node agents always hash), but the caller can opt out
+    // when it doesn't need the hash — the sparse wire does its own trailer verification.
+    // timeoutMs left undefined keeps httpsJsonPost's 15s default; hashing callers pass a
+    // larger deadline so a multi-GiB whole-file hash doesn't trip it.
+    const r = await this.jsonPost(
+      `https://${n.address}:${n.agentPort}/agent/disk/stat`,
+      { path: p, sha256: opts.sha256 ?? true },
+      this.identity(),
+      { expectedCn: n.name, timeoutMs: opts.timeoutMs }
+    )
     const body = this.parseJson(r.text)
     if (r.status !== 200 || body?.ok !== true) throw new Error(`disk stat on node ${n.name} failed (${r.status}): ${r.text.slice(0, 300)}`)
     return { exists: body.exists === true, size: body.size, sha256: body.sha256, allocated: body.allocated }

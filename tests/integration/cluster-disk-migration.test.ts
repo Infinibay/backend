@@ -200,6 +200,31 @@ describe('Phase 3 cold disk migration — real mTLS transfer', () => {
     }
   })
 
+  it('stat hashes only on demand — sha256:false skips the whole-file read, default includes it', async () => {
+    const ca = new ClusterCA(caDir)
+    const source = await startAgent(makeNodeIdentity(ca, 'source-node', ca.getCaCertPem()), 'master-1')
+    try {
+      const fileName = 'vm-stat.qcow2'
+      const payload = crypto.randomBytes(64 * 1024)
+      fs.writeFileSync(path.join(source.diskDir, fileName), payload)
+      const expectedSha = crypto.createHash('sha256').update(payload).digest('hex')
+      const url = `https://127.0.0.1:${source.port}/agent/disk/stat`
+
+      // Opt out of hashing (the sparse transfer path): size + allocated come back, sha256 does NOT.
+      const lean = await httpsJsonPost(url, { path: fileName, sha256: false }, masterIdentity, { expectedCn: 'source-node' })
+      const leanBody = JSON.parse(lean.text)
+      expect(leanBody).toMatchObject({ ok: true, exists: true, size: payload.length })
+      expect(typeof leanBody.allocated).toBe('number')
+      expect(leanBody.sha256).toBeUndefined()
+
+      // Default (raw transfer + backup staging) still returns the hash.
+      const full = await httpsJsonPost(url, { path: fileName }, masterIdentity, { expectedCn: 'source-node' })
+      expect(JSON.parse(full.text)).toMatchObject({ ok: true, exists: true, size: payload.length, sha256: expectedSha })
+    } finally {
+      await source.close()
+    }
+  })
+
   it('confines disk paths to the store — a traversal path is rejected 400', async () => {
     const ca = new ClusterCA(caDir)
     const source = await startAgent(makeNodeIdentity(ca, 'source-node', ca.getCaCertPem()), 'master-1')

@@ -34,6 +34,14 @@ export interface StagingNode {
 /** Dedicated subdir under the master disk dir for staged scratch. Never holds real VM disks. */
 const STAGING_SUBDIR = '.backup-staging'
 
+/**
+ * mTLS deadline for a stat that hashes the whole remote disk (stageIn verifies the
+ * pulled bytes against it). A sha256 is a full-file read — seconds→minutes for a
+ * multi-GiB qcow2 — so the default 15s deadline is far too tight. Mirrors
+ * AgentStorageMigrationAdapter's raw-path stat timeout.
+ */
+const REMOTE_STAT_HASH_TIMEOUT_MS = 60 * 60 * 1000
+
 export class RemoteDiskStaging {
   private readonly store: LocalDiskStore
   private readonly identity: () => ClusterIdentity
@@ -190,11 +198,25 @@ export class RemoteDiskStaging {
 
   /** Whether the node currently holds a real disk at `realPath` (used to honor overwriteExisting=false). */
   async remoteExists (node: StagingNode, realPath: string): Promise<boolean> {
-    return (await this.statRemote(node, realPath)).exists
+    // Existence only — never make the node hash the whole disk (and never block on it)
+    // just to answer a yes/no.
+    return (await this.statRemote(node, realPath, { sha256: false })).exists
   }
 
-  private async statRemote (n: StagingNode, p: string): Promise<{ exists: boolean, size?: number, sha256?: string }> {
-    const r = await httpsJsonPost(this.statUrl(n), { path: p }, this.identity(), { expectedCn: n.name })
+  private async statRemote (
+    n: StagingNode,
+    p: string,
+    opts: { sha256?: boolean, timeoutMs?: number } = {}
+  ): Promise<{ exists: boolean, size?: number, sha256?: string }> {
+    // stageIn needs the sha256 (it verifies the pulled bytes against it) → default true +
+    // a generous deadline so a multi-GiB whole-file hash doesn't trip the 15s default.
+    const wantSha = opts.sha256 ?? true
+    const r = await httpsJsonPost(
+      this.statUrl(n),
+      { path: p, sha256: wantSha },
+      this.identity(),
+      { expectedCn: n.name, timeoutMs: opts.timeoutMs ?? (wantSha ? REMOTE_STAT_HASH_TIMEOUT_MS : undefined) }
+    )
     const body = this.parseJson(r.text)
     if (r.status !== 200 || body?.ok !== true) throw new Error(`disk stat on node ${n.name} failed (${r.status}): ${r.text.slice(0, 200)}`)
     return { exists: body.exists === true, size: body.size, sha256: body.sha256 }
