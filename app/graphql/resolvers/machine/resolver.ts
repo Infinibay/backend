@@ -29,7 +29,7 @@ import { GraphicPortService } from '@utils/VirtManager/graphicPortService'
 import { MachineLifecycleService } from '../../../services/machineLifecycleService'
 import { getEventManager } from '../../../services/EventManager'
 import { VMOperationsService } from '../../../services/VMOperationsService'
-import { isDiskOperationInProgress, GOLDEN_IMAGE_BUILD_BUSY_MESSAGE } from '../../../constants/machine-status'
+import { isDiskOperationInProgress, GOLDEN_IMAGE_BUILD_BUSY_MESSAGE, MOVING_STATUS } from '../../../constants/machine-status'
 import { getSocketService } from '../../../services/SocketService'
 import { VMMoveService } from '../../../services/VMMoveService'
 import { FirewallOrchestrationService } from '../../../services/firewall/FirewallOrchestrationService'
@@ -217,6 +217,28 @@ export class MachineQueries {
       include: { configuration: true, department: true, template: true, user: true, node: true }
     })
 
+    const requestHost = hostFromHeader(ctx.req?.headers['x-forwarded-host'] ?? ctx.req?.headers.host)
+    return Promise.all(prismaMachines.map(m => transformMachine(m, prisma, requestHost)))
+  }
+
+  // Machines currently mid cross-node migration (status-as-lock 'moving'). The migration
+  // itself runs on a detached worker and streams progress ONLY over Socket.IO
+  // (MigrationEventManager) — nothing durable is written per-event, so a client that
+  // reloads mid-move has no live task to show. This query lets the frontend re-seed the
+  // header's background-tasks dropdown on load (an indeterminate "Moving…" entry that the
+  // next live 'migrations' event refines with the real phase/percent). Scoped to what the
+  // caller may view, same as `machines`.
+  @Query(() => [Machine])
+  @Can('vm:view')
+  async activeMigrations (
+    @Ctx() ctx: InfinibayContext
+  ): Promise<Machine[]> {
+    const { prisma } = ctx
+    const scopedWhere = await ctx.scopedWhere!('vm:view')
+    const prismaMachines = await prisma.machine.findMany({
+      where: { AND: [scopedWhere, { status: MOVING_STATUS }] },
+      include: { configuration: true, department: true, template: true, user: true, node: true }
+    })
     const requestHost = hostFromHeader(ctx.req?.headers['x-forwarded-host'] ?? ctx.req?.headers.host)
     return Promise.all(prismaMachines.map(m => transformMachine(m, prisma, requestHost)))
   }
