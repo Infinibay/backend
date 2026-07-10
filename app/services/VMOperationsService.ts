@@ -12,6 +12,7 @@ import { isPowerActionLocked, GOLDEN_IMAGE_BUILD_BUSY_MESSAGE } from '../constan
 import { NodeDispatcher } from './node/NodeDispatcher'
 import { type NodeExecutor } from './node/NodeExecutor'
 import { getVirtioSocketWatcherService } from './VirtioSocketWatcherService'
+import { OverlayCoordinatorService } from './network/OverlayCoordinatorService'
 
 export interface VMOperationResult {
   success: boolean
@@ -23,14 +24,16 @@ export class VMOperationsService {
   private prisma: PrismaClient
   private debug: Logger
   private dispatcher: NodeDispatcher
+  private overlay: OverlayCoordinatorService
 
-  constructor (prisma: PrismaClient, dispatcher?: NodeDispatcher) {
+  constructor (prisma: PrismaClient, dispatcher?: NodeDispatcher, overlay?: OverlayCoordinatorService) {
     this.prisma = prisma
     this.debug = logger.child({ module: 'vm-operations' })
     // Multi-node routing seam: every verb is executed against the node that owns
     // the VM. On a single-node cluster this resolves to a LocalNodeExecutor, so
     // behaviour is identical to the previous direct getInfinization() path.
     this.dispatcher = dispatcher ?? new NodeDispatcher(prisma)
+    this.overlay = overlay ?? new OverlayCoordinatorService(prisma, this.dispatcher)
   }
 
   /**
@@ -192,6 +195,24 @@ export class VMOperationsService {
   async startMachine (machineId: string, opts?: { allowGoldenImageBuild?: boolean }): Promise<VMOperationResult> {
     const locked = await this.assertPowerActionAllowed(machineId, 'start', opts)
     if (locked) return locked
+
+    // Department L2 overlay (07-networking.md §1): if this VM is assigned to a node,
+    // realize its department's segment on that node (bridge + VXLAN + WireGuard mesh)
+    // BEFORE powering on. This is what makes a VM moved to a compute node boot instead
+    // of failing at TAP-attach with "master infinibr-… does not exist". Fail-closed —
+    // a VM whose L2 cannot be built must not power on silently partitioned.
+    const placement = await this.prisma.machine.findUnique({
+      where: { id: machineId },
+      select: { nodeId: true, departmentId: true }
+    })
+    if (placement?.nodeId && placement.departmentId) {
+      try {
+        await this.overlay.ensurePlacement(placement.departmentId, placement.nodeId)
+      } catch (error: any) {
+        this.debug.error(`Overlay realize failed for machine ${machineId}: ${error?.message}`)
+        return { success: false, error: `network overlay could not be prepared: ${error?.message ?? String(error)}` }
+      }
+    }
 
     // Thread the operator's seccomp-sandbox opt-out (read from the master's env)
     // into start too, so a VM created with the sandbox disabled does not re-enable

@@ -37,6 +37,13 @@ export interface NodeExecutor {
   getVMStatus: Inf['getVMStatus']
   attachToRunningVM: Inf['attachToRunningVM']
   guestExec: Inf['guestExec']
+  // Department L2 overlay (07-networking.md §1). Per-node/per-department, not
+  // per-VM: the master pushes the segment + peer set and the agent realizes it
+  // locally. Structurally derived like the VM verbs, so a signature change in the
+  // library fails to compile here until the executors match.
+  ensureSegment: Inf['ensureSegment']
+  setPeers: Inf['setPeers']
+  destroySegment: Inf['destroySegment']
 }
 
 type E = NodeExecutor
@@ -58,6 +65,24 @@ export const VM_VERB_METHODS: ReadonlyArray<keyof NodeExecutor> = [
   'getVMStatus',
   'attachToRunningVM',
   'guestExec'
+]
+
+/**
+ * Department-overlay verbs a node agent may execute (07-networking.md §1). Kept a
+ * distinct group from the VM verbs because they are per-node/per-department rather
+ * than per-VM, but they ride the SAME `/agent/vm` mTLS endpoint (the verb router is
+ * verb-agnostic). Master → node only; the master pushes all per-segment data.
+ */
+export const OVERLAY_VERB_METHODS: ReadonlyArray<keyof NodeExecutor> = [
+  'ensureSegment',
+  'setPeers',
+  'destroySegment'
+]
+
+/** Every verb invokable on a node agent over the wire (VM lifecycle + overlay). */
+export const NODE_VERB_METHODS: ReadonlyArray<keyof NodeExecutor> = [
+  ...VM_VERB_METHODS,
+  ...OVERLAY_VERB_METHODS
 ]
 
 /** Pluggable transport: turns a (verb, args) pair into the agent's result. */
@@ -120,6 +145,18 @@ export class RemoteNodeExecutor implements NodeExecutor {
 
   guestExec (...a: Parameters<E['guestExec']>): ReturnType<E['guestExec']> {
     return this.invoke('guestExec', a) as ReturnType<E['guestExec']>
+  }
+
+  ensureSegment (...a: Parameters<E['ensureSegment']>): ReturnType<E['ensureSegment']> {
+    return this.invoke('ensureSegment', a) as ReturnType<E['ensureSegment']>
+  }
+
+  setPeers (...a: Parameters<E['setPeers']>): ReturnType<E['setPeers']> {
+    return this.invoke('setPeers', a) as ReturnType<E['setPeers']>
+  }
+
+  destroySegment (...a: Parameters<E['destroySegment']>): ReturnType<E['destroySegment']> {
+    return this.invoke('destroySegment', a) as ReturnType<E['destroySegment']>
   }
 }
 

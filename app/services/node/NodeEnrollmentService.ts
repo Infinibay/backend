@@ -33,6 +33,63 @@ import { emitNodesChanged } from '../NodesEventManager'
 export interface EnrollmentRequest {
   name: string
   csrPem: string
+  /** Department-overlay identity (07-networking.md §1). Optional: an old agent, or a
+   *  host that is not overlay-capable, omits it. Persisted to NodeUnderlay when the
+   *  three required fields (vtepIp/wgPubKey/wgEndpoint) are all present. */
+  underlay?: NodeUnderlayReport
+}
+
+/** Per-node overlay endpoint an agent reports (enroll + heartbeat). The WireGuard
+ *  PRIVATE key never appears here — only the public key. */
+export interface NodeUnderlayReport {
+  vtepIp: string
+  mgmtIp?: string | null
+  wgPubKey: string
+  wgEndpoint: string
+}
+
+/**
+ * Persist a node's overlay endpoint (idempotent). Shared by enrollment and
+ * heartbeat so a NodeUnderlay row appears as soon as an overlay-capable agent
+ * reports one and is refreshed if its data NIC changes. No-op when the report is
+ * absent or missing a required field. Master-local write (not via the Pick).
+ */
+const IPV4_RE = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/
+function isIPv4 (s: string): boolean {
+  const m = IPV4_RE.exec(s)
+  return m !== null && m.slice(1, 5).every(o => Number(o) >= 0 && Number(o) <= 255)
+}
+/** "host:port" with an IPv4 host and a 1..65535 port (WireGuard endpoint). */
+function isWgEndpoint (s: string): boolean {
+  const m = /^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}):(\d{1,5})$/.exec(s)
+  return m !== null && isIPv4(m[1]) && Number(m[2]) >= 1 && Number(m[2]) <= 65535
+}
+
+/** True when a report is complete AND FORMAT-valid (IPv4 vtep/mgmt + host:port
+ *  endpoint). A malformed underlay must never be persisted: it would later be pushed
+ *  as an OverlayPeer and make the node's assertValidIPv4 throw, fail-closing every
+ *  co-hosted VM start (M5). */
+export function isValidUnderlayReport (u?: NodeUnderlayReport): u is NodeUnderlayReport {
+  return !!u && isIPv4(u.vtepIp) && !!u.wgPubKey && !/\s/.test(u.wgPubKey) &&
+    isWgEndpoint(u.wgEndpoint) && (u.mgmtIp == null || isIPv4(u.mgmtIp))
+}
+
+export async function upsertNodeUnderlay (
+  prisma: PrismaClient,
+  nodeId: string,
+  u?: NodeUnderlayReport
+): Promise<void> {
+  if (u && !isValidUnderlayReport(u)) {
+    logger.warn(`Rejecting malformed overlay underlay report for node ${nodeId} (bad vtepIp/wgEndpoint) — not persisting`)
+    return
+  }
+  if (!isValidUnderlayReport(u)) return
+  const data = { vtepIp: u.vtepIp, mgmtIp: u.mgmtIp ?? null, wgPubKey: u.wgPubKey, wgEndpoint: u.wgEndpoint }
+  await prisma.nodeUnderlay.upsert({
+    where: { nodeId },
+    update: data,
+    create: { nodeId, ...data }
+  })
 }
 
 export type EnrollmentResult =
@@ -134,6 +191,11 @@ export class NodeEnrollmentService {
       })
       nodeId = created.id
     }
+
+    // Capture the node's overlay endpoint (07-networking.md §1) as soon as it
+    // enrolls; refreshed on each heartbeat if the data NIC changes. Only consumed by
+    // the master's overlay coordinator once the node is an actual dept member.
+    await upsertNodeUnderlay(this.prisma, nodeId, req.underlay)
 
     logger.info(`🔗 Node '${req.name}' requested enrollment (pending approval, SAS computed)`)
     // A new pending node appeared — refresh the admin PendingNodesSection live.

@@ -404,6 +404,19 @@ export class MachineLifecycleService {
     try {
       const cleanup = new MachineCleanupServiceV2(this.prisma)
       await cleanup.cleanupVM(machine.id)
+      // Overlay lifecycle (07-networking.md §1): if this was the last VM of its
+      // department on that node, tear down the node's VXLAN segment and drop it from
+      // the surviving members' mesh (re-electing the gateway owner if it left).
+      // Best-effort and non-fatal — the VM is already deleted; the periodic reconcile
+      // is the backstop. Dynamic import avoids a static import cycle.
+      if (machine.nodeId && machine.departmentId) {
+        try {
+          const { OverlayCoordinatorService } = await import('./network/OverlayCoordinatorService')
+          await new OverlayCoordinatorService(this.prisma).teardownIfEmpty(machine.departmentId, machine.nodeId)
+        } catch (e) {
+          this.debug.debug(`Overlay teardown after delete of ${machine.id} failed (harmless, will reconcile): ${String(e)}`)
+        }
+      }
       return { success: true, message: 'Machine destroyed' }
     } catch (error: unknown) {
       // cleanupVM owns failure-state marking (DELETE_FAILED on physical-teardown

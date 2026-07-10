@@ -311,6 +311,22 @@ export class VMMigrationService {
         }).catch((e) => logger.error(`Migration ${machineId}: source storage reclaim FAILED (disk leaked on source — reclaim manually, audit C5): ${String(e)}`))
       }
 
+      // ── Overlay teardown on the emptied source (07-networking.md §1/§4) ─────────
+      // If the source node now hosts 0 VMs of this department, remove its VXLAN
+      // device and drop it from the surviving members' mesh. Best-effort: a leftover
+      // segment is harmless and self-heals on the next placement; this must never
+      // fail an already-committed migration. Dynamic import avoids a static import
+      // cycle (VMMigrationService ↔ InfinizationService via the coordinator).
+      try {
+        const dept = await this.prisma.machine.findUnique({ where: { id: machineId }, select: { departmentId: true } })
+        if (dept?.departmentId && sourceNodeId) {
+          const { OverlayCoordinatorService } = await import('../network/OverlayCoordinatorService')
+          await new OverlayCoordinatorService(this.prisma).teardownIfEmpty(dept.departmentId, sourceNodeId)
+        }
+      } catch (e) {
+        logger.warn(`Migration ${machineId}: overlay teardown on source node ${sourceNodeId} failed (harmless, will reconcile): ${String(e)}`)
+      }
+
       return {
         success: true,
         machineId,

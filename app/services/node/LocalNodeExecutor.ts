@@ -56,4 +56,18 @@ export class LocalNodeExecutor implements NodeExecutor {
   async guestExec (...a: Parameters<E['guestExec']>): Promise<Awaited<ReturnType<E['guestExec']>>> {
     return (await getInfinization()).guestExec(...a)
   }
+
+  // Department L2 overlay verbs (07-networking.md §1) — realized in-process when the
+  // master itself hosts the VM / is a member node.
+  async ensureSegment (...a: Parameters<E['ensureSegment']>): Promise<Awaited<ReturnType<E['ensureSegment']>>> {
+    return (await getInfinization()).ensureSegment(...a)
+  }
+
+  async setPeers (...a: Parameters<E['setPeers']>): Promise<Awaited<ReturnType<E['setPeers']>>> {
+    return (await getInfinization()).setPeers(...a)
+  }
+
+  async destroySegment (...a: Parameters<E['destroySegment']>): Promise<Awaited<ReturnType<E['destroySegment']>>> {
+    return (await getInfinization()).destroySegment(...a)
+  }
 }

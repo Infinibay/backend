@@ -22,6 +22,7 @@ import { getEventManager, EventAction } from './EventManager'
 // Read-only import of the canonical disk-op markers (constants owned elsewhere).
 import { DISK_OP_STATUSES, OFF_STATUS } from '../constants/machine-status'
 import { reconcileOrphanedMoveMarkers } from './node/VMMigrationService'
+import { loadOverlaySelfIdentity } from './node/overlayIdentity'
 import { reconcileOrphanedMaintenanceLocks } from './MaintenanceService'
 
 const debug = logger.child({ module: 'infinization-service' })
@@ -169,7 +170,11 @@ async function initializeInfinization (): Promise<Infinization> {
     qmpSocketDir: INFINIZATION_CONFIG.qmpSocketDir,
     pidfileDir: INFINIZATION_CONFIG.pidfileDir,
     healthMonitorInterval: INFINIZATION_CONFIG.healthMonitorInterval,
-    autoStartHealthMonitor: INFINIZATION_CONFIG.autoStartHealthMonitor
+    autoStartHealthMonitor: INFINIZATION_CONFIG.autoStartHealthMonitor,
+    // Department L2 overlay (07-networking.md §1): the master realizes segments
+    // in-process for the departments it hosts (it is a VXLAN peer in the single-
+    // gateway model). Undefined if this host has no WireGuard key yet.
+    overlay: loadOverlaySelfIdentity()
   })
 
   await infinization.initialize()
@@ -182,6 +187,35 @@ async function initializeInfinization (): Promise<Infinization> {
 
   // Subscribe to QMP events for real-time status updates
   subscribeToVMEvents(infinization)
+
+  // Department L2 overlay periodic reconcile (07-networking.md §5). The master is
+  // the overlay control plane; re-drive every cross-node department's segments +
+  // gateway election on a timer so drift self-heals — after a node/master reboot the
+  // VXLAN/WireGuard devices are gone, and any swallowed best-effort push during
+  // placement/teardown is otherwise never retried. Master-only (this path runs only
+  // in the control-plane backend). Best-effort; dynamic import avoids a static cycle.
+  if (process.env.INFINIBAY_DISABLE_OVERLAY_RECONCILE !== '1') {
+    const OVERLAY_RECONCILE_MS = Number(process.env.INFINIBAY_OVERLAY_RECONCILE_MS) || 90_000
+    // In-flight guard: a slow pass (a node blocking on the mTLS timeout across many
+    // departments) can exceed the interval; skip a tick rather than stack concurrent
+    // passes that multiply outbound connection pressure.
+    let reconcileInFlight = false
+    const runReconcile = async (): Promise<void> => {
+      if (reconcileInFlight) return
+      reconcileInFlight = true
+      try {
+        const { OverlayCoordinatorService } = await import('./network/OverlayCoordinatorService')
+        await new OverlayCoordinatorService(prisma as unknown as import('@prisma/client').PrismaClient).reconcileAll()
+      } catch (err) {
+        logger.warn(`Overlay reconcile pass failed: ${String(err)}`)
+      } finally {
+        reconcileInFlight = false
+      }
+    }
+    const overlayTimer = setInterval(() => { void runReconcile() }, OVERLAY_RECONCILE_MS)
+    if (typeof overlayTimer.unref === 'function') overlayTimer.unref()
+    void runReconcile() // once at startup so a reboot re-realizes segments promptly
+  }
 
   // Reconcile VMs stuck in transient states ('starting'/'powering_off_update'/
   // 'rebuilding') after a previous backend/QEMU crash. ORDER IS LOAD-BEARING:

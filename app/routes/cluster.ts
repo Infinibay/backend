@@ -9,7 +9,7 @@ import { requireClientCert, peerCertFingerprint, type ClusterAuthedRequest } fro
 import { certFingerprint } from '../services/node/clusterCrypto'
 import { ClusterCA } from '../services/node/ClusterCA'
 import type { TLSSocket } from 'node:tls'
-import { NodeEnrollmentService } from '../services/node/NodeEnrollmentService'
+import { NodeEnrollmentService, isValidUnderlayReport, type NodeUnderlayReport } from '../services/node/NodeEnrollmentService'
 import { PrismaClient } from '@prisma/client'
 import { isValidMachineStatus } from '../constants/machine-status'
 import { getVirtioSocketWatcherService } from '../services/VirtioSocketWatcherService'
@@ -23,6 +23,29 @@ const service = new NodeHeartbeatService(prisma as unknown as PrismaClient)
 // (X.509 CN is capped at 64 chars; a DNS label at 63.)
 function isValidNodeLabel (name: string): boolean {
   return /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,62}$/.test(name)
+}
+
+/**
+ * Validate an untrusted department-overlay endpoint report (07-networking.md §1)
+ * from a node's enroll/heartbeat body. Returns the vetted shape or null on any
+ * malformation. vtepIp/wgPubKey/wgEndpoint are required non-empty strings; mgmtIp
+ * is optional. Bounded lengths keep a hostile body from bloating the row.
+ */
+function parseUnderlayReport (u: unknown): NodeUnderlayReport | null {
+  if (typeof u !== 'object' || u === null) return null
+  const r = u as Record<string, unknown>
+  const str = (v: unknown, max: number): v is string => typeof v === 'string' && v.length > 0 && v.length <= max
+  if (!str(r.vtepIp, 64) || !str(r.wgPubKey, 128) || !str(r.wgEndpoint, 128)) return null
+  if (r.mgmtIp != null && !str(r.mgmtIp, 64)) return null
+  const candidate: NodeUnderlayReport = {
+    vtepIp: r.vtepIp,
+    wgPubKey: r.wgPubKey,
+    wgEndpoint: r.wgEndpoint,
+    mgmtIp: (r.mgmtIp as string | undefined) ?? null
+  }
+  // Reject bad FORMAT (non-IPv4 vtep/mgmt, non host:port endpoint) up front so the
+  // node gets a clear 400 rather than silently failing to become an overlay peer.
+  return isValidUnderlayReport(candidate) ? candidate : null
 }
 
 /**
@@ -191,12 +214,23 @@ export function createClusterRouter (opts: { mode?: ClusterRouterMode } = {}): e
         res.status(400).json({ error: 'agentVersion must be a string' })
         return
       }
+      // Optional department-overlay endpoint (07-networking.md §1). Vet it like the
+      // rest of the body; a malformed underlay must not 500 or reach the DB.
+      let underlay
+      if (body.underlay != null) {
+        underlay = parseUnderlayReport(body.underlay)
+        if (!underlay) {
+          res.status(400).json({ error: 'underlay must have string vtepIp/wgPubKey/wgEndpoint (mgmtIp optional)' })
+          return
+        }
+      }
       const result = await service.recordHeartbeat({
         name,
         role,
         address: body.address ?? null,
         agentVersion: body.agentVersion ?? null,
-        hardware: { ram: hw.ram, cores: hw.cores, currentRaid: hw.currentRaid, cpuFlags: hw.cpuFlags ?? {} }
+        hardware: { ram: hw.ram, cores: hw.cores, currentRaid: hw.currentRaid, cpuFlags: hw.cpuFlags ?? {} },
+        underlay
       })
       res.json({ ok: true, nodeId: result.nodeId, created: result.created })
     } catch (error) {
@@ -426,7 +460,12 @@ export function createClusterRouter (opts: { mode?: ClusterRouterMode } = {}): e
         res.status(400).json({ error: 'invalid node name: must be a 1-63 char DNS-style label' })
         return
       }
-      const result = await enrollment().requestEnrollment({ name, csrPem })
+      const underlay = req.body?.underlay != null ? parseUnderlayReport(req.body.underlay) : undefined
+      if (req.body?.underlay != null && !underlay) {
+        res.status(400).json({ error: 'underlay must have string vtepIp/wgPubKey/wgEndpoint (mgmtIp optional)' })
+        return
+      }
+      const result = await enrollment().requestEnrollment({ name, csrPem, underlay: underlay ?? undefined })
       res.json({ status: result.status, joinNonce: result.joinNonce, caCertPem: result.caCertPem })
     } catch (error) {
       // A bad CSR (unparseable / failed self-signature) is a client error.

@@ -183,51 +183,78 @@ model UserPermissionOverride {
 }
 
 model Node {
-  id              String    @id @default(uuid())
-  name            String
-  currentRaid     String
-  nextRaid        String?
-  cpuFlags        Json
-  ram             Int
-  cores           Int
-  maintenanceMode Boolean   @default(false)
+  id                    String        @id @default(uuid())
+  name                  String
+  currentRaid           String
+  nextRaid              String?
+  cpuFlags              Json
+  ram                   Int
+  cores                 Int
+  maintenanceMode       Boolean       @default(false)
   // --- multi-node (Phase 0) ---
   /// "master" (the control-plane host: runs Postgres + backend + CA) | "compute".
   /// The local node is registered as "master" by LocalNodeRegistrationService.
-  role            String    @default("compute")
+  role                  String        @default("compute")
   /// Lifecycle of the node in the cluster:
   /// "pending" (join requested, awaiting SAS approval) | "approved" (cert issued, no HB yet)
   /// | "online" (recent heartbeat) | "offline" (heartbeat stale) | "rejected" | "decommissioned".
   /// Derived health (online/stale) is computed from `lastHeartbeat` (see NodeCapacity);
   /// this column records the administrative/lifecycle state set by onboarding.
-  status          String    @default("pending")
+  status                String        @default("pending")
   /// Reachable management address of the node agent (LAN IP / host). Null until onboarded.
-  address         String?
+  address               String?
   /// Port the node agent's mTLS RPC listens on.
-  agentPort       Int       @default(9443)
+  agentPort             Int           @default(9443)
   /// SHA-256 fingerprint of the agent's mTLS client certificate (TOFU pin). Unique
   /// across the cluster; null until the join is approved and a cert is issued.
-  fingerprint     String?   @unique
+  fingerprint           String?       @unique
   /// PEM of the agent client certificate signed by the master CA (issued on approval).
-  certPem         String?
+  certPem               String?
   /// Hash of the short pairing (SAS) code shown during onboarding; cleared after approval.
-  joinCodeHash    String?
+  joinCodeHash          String?
   /// Random nonce mixed into the SAS derivation for this join attempt.
-  joinNonce       String?
+  joinNonce             String?
   /// Last heartbeat/lease-renewal received from the agent. Drives staleness
   /// (NodeCapacity.nodeHealth) — replaces the previous reliance on `updatedAt`,
   /// which nothing refreshed after registration.
-  lastHeartbeat   DateTime?
+  lastHeartbeat         DateTime?
   /// Reported agent build/version, for skew checks during rolling upgrades.
-  agentVersion    String?
+  agentVersion          String?
   /// Free-form scheduling labels (e.g. {"gpu": true, "zone": "rack-a"}).
-  labels          Json?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-  disks           Disk[]
-  machines        Machine[]
+  labels                Json?
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+  disks                 Disk[]
+  machines              Machine[]
+  /// Per-node VXLAN/WireGuard endpoint identity (populated at onboarding). 1:1.
+  underlay              NodeUnderlay?
+  /// Departments for which THIS node is the sole gateway owner (ADR-N2).
+  gatewayForDepartments Department[]
 
   @@index([status])
+}
+
+/// Per-node overlay endpoint + WireGuard identity for the department L2 overlay
+/// (07-networking.md §1, ADR-N4). Populated at onboarding (the JoinRequest carries
+/// vtepIp/wgPubKey/wgEndpoint; the master persists this row at approve time) and
+/// refreshed on each lease-renewal heartbeat if the data NIC changes. The WireGuard
+/// PRIVATE key never leaves the node — only wgPubKey is stored here. Single-NIC
+/// nodes report vtepIp == mgmtIp. The master reads this table to compute each
+/// department's peer set and PUSHES it to member agents via OverlayRPC.setPeers;
+/// nodes never read it (that would need a new InfinizationDatabase Pick method).
+model NodeUnderlay {
+  nodeId     String   @id
+  /// VXLAN VTEP / overlay data-plane IP the peer mesh dials (WireGuard-tunnelled).
+  vtepIp     String
+  /// Management-plane IP (agent mTLS RPC / console / heartbeat). Optional; on a
+  /// single-NIC node this equals vtepIp.
+  mgmtIp     String?
+  /// WireGuard PUBLIC key (base64, X25519). The private half stays on the node.
+  wgPubKey   String
+  /// host:port the peer dials to establish the WireGuard tunnel to this node.
+  wgEndpoint String
+  updatedAt  DateTime @updatedAt
+  node       Node     @relation(fields: [nodeId], references: [id], onDelete: Cascade)
 }
 
 /// Audit/observability record of a VM move between nodes (cold or live). The
@@ -804,6 +831,25 @@ model Department {
   ntpServers     String[] @default(["216.239.35.0", "162.159.200.1"]) // NTP servers for DHCP clients (Google: 216.239.35.0, Cloudflare: 162.159.200.1)
   mtu            Int?     @default(1500) // MTU for DHCP clients (default: 1500 for standard Ethernet)
 
+  // --- multi-node L2 overlay (07-networking.md §1, ADR-N1/N2) ---
+  /// VXLAN Network Identifier for this department's node-spanning L2 segment.
+  /// Null while the department is single-host (overlayMode 'local'); allocated by
+  /// the master (OverlayCoordinatorService) on the first cross-node need. Range
+  /// 4096..16M; @unique so two departments can never share an L2 domain.
+  vni           Int?    @unique
+  /// "local" (single Linux bridge on one host — the legacy model) | "vxlan"
+  /// (the same infinibr-{shortId} bridge realized on every member node and joined
+  /// by an infivx-{shortId} VXLAN netdev carried in the infiwg WireGuard mesh).
+  overlayMode   String  @default("local")
+  /// The single node that owns gatewayIP + runs dnsmasq + masquerades for this
+  /// department (ADR-N2 singularity: exactly one, "anycast-of-1"). Every other
+  /// member realizes bridge+overlay only. SetNull on node delete → re-election.
+  /// dnsmasqPid above becomes owner-node-scoped semantically once overlayMode='vxlan'.
+  gatewayNodeId String?
+  gatewayNode   Node?   @relation(fields: [gatewayNodeId], references: [id], onDelete: SetNull)
+  /// Bridge/VXLAN MTU under the overlay: 1500 - 50 (VXLAN) - 80 (WireGuard) headroom.
+  overlayMtu    Int     @default(1370)
+
   // Firewall policy configuration
   firewallPolicy        FirewallPolicy @default(BLOCK_ALL)
   firewallDefaultConfig String?        @default("allow_outbound")
@@ -1322,16 +1368,16 @@ model RecommendationResolution {
 }
 
 model AppSettings {
-  id            String   @id @default(uuid())
-  theme         String   @default("system")
-  wallpaper     String   @default("wallpaper1.jpg")
-  logoUrl       String?
-  interfaceSize String   @default("xl")
-  brandName     String?
-  themePreset   String?
-  accentColor   String?
-  accent2Color  String?
-  accent3Color  String?
+  id               String    @id @default(uuid())
+  theme            String    @default("system")
+  wallpaper        String    @default("wallpaper1.jpg")
+  logoUrl          String?
+  interfaceSize    String    @default("xl")
+  brandName        String?
+  themePreset      String?
+  accentColor      String?
+  accent2Color     String?
+  accent3Color     String?
   // ── First-run setup state (see lxd/docs/setup-system) ──
   // setupCompleted gates the /setup onboarding flow and the setupMode auth
   // context. Fresh installs seed this to false; existing installs are backfilled
@@ -1344,8 +1390,8 @@ model AppSettings {
   // Forward-looking storage backend config (NFS/Ceph reconfigure UI is future work).
   // The StorageProvider factory prefers this over the INFINIBAY_STORAGE_BACKEND env.
   storageConfig    Json?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   @@index([id])
 }

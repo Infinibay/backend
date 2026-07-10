@@ -26,6 +26,7 @@ import {
   csrPublicKeyFingerprint,
   certFingerprint
 } from '../app/services/node/clusterCrypto'
+import { buildUnderlayReport, type UnderlayReport } from '../app/services/node/overlayIdentity'
 
 const MASTER_URL = (process.env.MASTER_URL || 'http://localhost:4000').replace(/\/+$/, '')
 const NAME = process.env.INFINIBAY_NODE_NAME || os.hostname()
@@ -60,11 +61,11 @@ function printSas (csrPem: string, st: JoinState): void {
 }
 
 /** node → master: request enrollment, persist the join state, show the SAS. */
-async function requestEnrollment (csrPem: string): Promise<JoinState> {
+async function requestEnrollment (csrPem: string, underlay?: UnderlayReport): Promise<JoinState> {
   const res = await fetch(`${MASTER_URL}/cluster/enroll`, {
     method: 'POST',
     headers: authHeaders(),
-    body: JSON.stringify({ name: NAME, csrPem })
+    body: JSON.stringify({ name: NAME, csrPem, underlay })
   })
   if (!res.ok) {
     const text = await res.text().catch(() => '')
@@ -192,7 +193,17 @@ async function main (): Promise<void> {
   csrPem = freshCsr
   fs.writeFileSync(KEY_PATH, privateKeyPem, { mode: 0o600 })
 
-  state = await requestEnrollment(csrPem)
+  // Generate this node's WireGuard/VTEP identity and report it with enrollment so
+  // the master can add it to its department overlay meshes (07-networking.md §1).
+  // The private key stays on disk (0600); only the public key + endpoint are sent.
+  const underlay = buildUnderlayReport() ?? undefined
+  if (underlay) {
+    console.log(`[join] overlay identity: vtep=${underlay.vtepIp} wgEndpoint=${underlay.wgEndpoint}`)
+  } else {
+    console.log('[join] no usable NIC for overlay VTEP — joining without overlay identity')
+  }
+
+  state = await requestEnrollment(csrPem, underlay)
   printSas(csrPem, state)
   pollUntilIssued(csrPem)
 }

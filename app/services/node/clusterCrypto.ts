@@ -1,4 +1,4 @@
-import { createHash } from 'crypto'
+import { createHash, generateKeyPairSync } from 'crypto'
 import forge from 'node-forge'
 
 /**
@@ -73,5 +73,28 @@ export function generateNodeKeyAndCsr (commonName: string): { privateKeyPem: str
   return {
     privateKeyPem: forge.pki.privateKeyToPem(keys.privateKey),
     csrPem: forge.pki.certificationRequestToPem(csr)
+  }
+}
+
+/**
+ * Generate a WireGuard (Curve25519 / X25519) keypair for the department overlay
+ * mesh (07-networking.md §1, ADR-N4). Returns the raw 32-byte keys base64-encoded,
+ * exactly as WireGuard's `wg` tool expects — WITHOUT shelling out to `wg`, so a
+ * node can mint its identity at enrollment before wireguard-tools is even present
+ * (the `wg` binary is still needed at realize-time on an overlay-hosting node).
+ *
+ * The raw scalar/point are the last 32 bytes of the PKCS8 / SPKI DER encodings
+ * (X25519 DER is fixed-length: 48-byte private, 44-byte public). WireGuard clamps
+ * the scalar on load; the public point Node derived already corresponds to the
+ * clamped scalar, so the pair round-trips through `wg` unchanged. The PRIVATE key
+ * is the caller's secret to persist 0600 and never transmit.
+ */
+export function generateWireguardKeypair (): { privateKeyBase64: string, publicKeyBase64: string } {
+  const { publicKey, privateKey } = generateKeyPairSync('x25519')
+  const spki = publicKey.export({ format: 'der', type: 'spki' })
+  const pkcs8 = privateKey.export({ format: 'der', type: 'pkcs8' })
+  return {
+    privateKeyBase64: pkcs8.subarray(pkcs8.length - 32).toString('base64'),
+    publicKeyBase64: spki.subarray(spki.length - 32).toString('base64')
   }
 }

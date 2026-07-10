@@ -1,6 +1,8 @@
 import os from 'node:os'
 import si from 'systeminformation'
 import { Node, PrismaClient } from '@prisma/client'
+import { upsertNodeUnderlay } from './NodeEnrollmentService'
+import { buildUnderlayReport } from './overlayIdentity'
 
 interface DetectedDisk {
   path: string
@@ -138,6 +140,13 @@ export class LocalNodeRegistrationService {
           lastHeartbeat: now
         }
       })
+
+    // Register the master's own department-overlay endpoint (07-networking.md §1):
+    // in the single-gateway model the master is itself a VXLAN peer for the
+    // departments it hosts, so it needs a NodeUnderlay row + WireGuard identity like
+    // any member. buildUnderlayReport() mints/loads the WG key on first run; no-op if
+    // no usable NIC is detected.
+    await upsertNodeUnderlay(this.prisma, node.id, buildUnderlayReport() ?? undefined)
 
     await this.prisma.disk.deleteMany({
       where: { nodeId: node.id }

@@ -115,6 +115,40 @@ export class NodeDispatcher {
       agentPort: node.agentPort
     })
   }
+
+  /**
+   * Resolve the executor for a specific NODE (not a VM). Used by the department
+   * overlay coordinator to push per-node/per-department segment + peer verbs
+   * (ensureSegment/setPeers/destroySegment) to a member node. Local when the target
+   * is this host (in-process infinization); otherwise a `RemoteNodeExecutor`
+   * pointed at that node agent's verb server. Fail-closed on an unreachable node.
+   */
+  async executorForNode (nodeId: string): Promise<NodeExecutor> {
+    const localNodeId = await this.resolveLocalNodeId()
+    if (localNodeId && nodeId === localNodeId) {
+      return this.createLocalExecutor()
+    }
+
+    const node = await this.prisma.node.findUnique({
+      where: { id: nodeId },
+      select: { id: true, name: true, address: true, agentPort: true, status: true }
+    })
+    if (!node || !node.address) {
+      throw new Error(
+        `Cannot reach node ${nodeId} for an overlay op: it has no reachable address ` +
+        `(status=${node?.status ?? 'unknown'}).`
+      )
+    }
+    if (node.status === 'offline' || node.status === 'maintenance') {
+      logger.warn(`Dispatching overlay op to node ${node.name} which is ${node.status} — agent may be unreachable`)
+    }
+    return this.createRemoteExecutor({
+      id: node.id,
+      name: node.name,
+      address: node.address,
+      agentPort: node.agentPort
+    })
+  }
 }
 
 // The master's mTLS identity is the same for every remote call; cache it, but

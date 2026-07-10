@@ -43,6 +43,7 @@ import { type NodeExecutor } from '../app/services/node/NodeExecutor'
 import { loadClusterIdentity, httpsJsonPost, clusterServerOptions, type ClusterIdentity } from '../app/services/node/clusterMtls'
 import { generateNodeKeyAndCsr, certFingerprint, certExpiresWithinDays } from '../app/services/node/clusterCrypto'
 import { NodeTelemetryRelay } from './NodeTelemetryRelay'
+import { buildUnderlayReport, loadOverlaySelfIdentity } from '../app/services/node/overlayIdentity'
 
 const MASTER_URL = (process.env.MASTER_URL || 'http://localhost:4000').replace(/\/+$/, '')
 const NAME = process.env.INFINIBAY_NODE_NAME || os.hostname()
@@ -107,7 +108,12 @@ async function buildTarget (): Promise<NodeExecutor> {
     databaseAdapter,
     diskDir: DISK_DIR,
     qmpSocketDir: SOCKET_DIR,
-    pidfileDir: PID_DIR
+    pidfileDir: PID_DIR,
+    // Department L2 overlay (07-networking.md §1): hand infinization this node's
+    // VTEP + WireGuard-key path so it can realize segments locally when the master
+    // pushes ensureSegment. Undefined on a host with no WireGuard key (not
+    // overlay-capable) — the overlay verbs then throw rather than half-realize.
+    overlay: loadOverlaySelfIdentity()
   })
   await inf.initialize()
   console.log('[agent] infinization ready — serving VM verbs')
@@ -156,7 +162,10 @@ async function sendHeartbeat (): Promise<void> {
     role: ROLE,
     address: ADDRESS,
     agentVersion: VERSION,
-    hardware: collectHardware()
+    hardware: collectHardware(),
+    // Re-report the overlay endpoint each lease renewal so the master re-fans the
+    // peer set if the data NIC / WireGuard endpoint changed (07-networking.md §6).
+    underlay: buildUnderlayReport() ?? undefined
   }
   try {
     let status: number

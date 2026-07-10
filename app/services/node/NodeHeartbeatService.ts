@@ -1,5 +1,6 @@
 import { PrismaClient, Prisma } from '@prisma/client'
 import { emitNodesChanged } from '../NodesEventManager'
+import { upsertNodeUnderlay, type NodeUnderlayReport } from './NodeEnrollmentService'
 
 /**
  * Hardware summary an agent reports with each heartbeat. Mirrors the shape
@@ -24,6 +25,9 @@ export interface NodeHeartbeatPayload {
   address?: string | null
   agentVersion?: string | null
   hardware: NodeHeartbeatHardware
+  /** Department-overlay endpoint (07-networking.md §1). Re-reported each lease
+   *  renewal so the master picks up a data-NIC change and re-fans the peer set. */
+  underlay?: NodeUnderlayReport
 }
 
 /**
@@ -83,6 +87,7 @@ export class NodeHeartbeatService {
           lastHeartbeat: now
         }
       })
+      await upsertNodeUnderlay(this.prisma, existing.id, payload.underlay)
       // A live heartbeat refreshes status/capacity/liveness — push it so the
       // admin inventory recomputes online/stale without client polling.
       emitNodesChanged('update', { id: existing.id })
@@ -104,6 +109,7 @@ export class NodeHeartbeatService {
         lastHeartbeat: now
       }
     })
+    await upsertNodeUnderlay(this.prisma, node.id, payload.underlay)
     // A brand-new compute node just registered — surface it in the admin inventory.
     emitNodesChanged('update', { id: node.id })
     return { nodeId: node.id, created: true }

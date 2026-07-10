@@ -1,7 +1,7 @@
 import express, { Request, RequestHandler, Response } from 'express'
 import { requireClusterToken } from './clusterAuth'
 import { requireClientCert } from './clusterMtls'
-import { VM_VERB_METHODS, type NodeExecutor } from './NodeExecutor'
+import { NODE_VERB_METHODS, OVERLAY_VERB_METHODS, type NodeExecutor } from './NodeExecutor'
 
 /**
  * Multi-node Phase 1 (VM-op routing): the node-agent side of the VM verb wire.
@@ -11,16 +11,21 @@ import { VM_VERB_METHODS, type NodeExecutor } from './NodeExecutor'
  * via an injected RpcDatabaseAdapter) and returns the result. This is the verb
  * counterpart of the master's POST /cluster/db.
  *
- * SECURITY: the verb MUST be on the allowlist (exactly VM_VERB_METHODS — no
- * arbitrary method access), and the request MUST carry the shared cluster token
- * (pre-mTLS; Phase 2 swaps in the per-node client certificate). Fail-closed.
+ * SECURITY: the verb MUST be on the allowlist (exactly NODE_VERB_METHODS — the VM
+ * lifecycle verbs plus the department-overlay verbs, no arbitrary method access),
+ * and the request MUST carry the shared cluster token (pre-mTLS; Phase 2 swaps in
+ * the per-node client certificate). Fail-closed.
  *
  * The target is resolved lazily via `getTarget()` so a heartbeat-only node never
  * has to construct (root/KVM-requiring) infinization until a verb actually
  * arrives.
  */
 
-const VERB_ALLOWLIST = new Set<string>(VM_VERB_METHODS as readonly string[])
+const VERB_ALLOWLIST = new Set<string>(NODE_VERB_METHODS as readonly string[])
+/** Overlay verbs push WireGuard peer keys (a MITM lever) and can destroy a segment
+ *  (partition). They must ride mTLS with the master-CN pin — NEVER the pre-mTLS
+ *  shared bootstrap token, which any install-time-secret holder could replay. */
+const MTLS_ONLY_VERBS = new Set<string>(OVERLAY_VERB_METHODS as readonly string[])
 
 export interface AgentVerbServerOptions {
   /** Resolve (and lazily construct) this node's infinization-backed executor. */
@@ -57,6 +62,12 @@ export function createAgentVerbRouter (opts: AgentVerbServerOptions): express.Ro
       const { verb, args } = (req.body ?? {}) as { verb?: unknown, args?: unknown }
       if (typeof verb !== 'string' || !VERB_ALLOWLIST.has(verb)) {
         res.status(400).json({ ok: false, error: `verb not allowed: ${String(verb)}` })
+        return
+      }
+      // Overlay verbs are mTLS-only (they carry WireGuard peer keys / can partition a
+      // segment); refuse them on the pre-mTLS shared-token channel. Fail-closed.
+      if (opts.auth !== 'mtls' && MTLS_ONLY_VERBS.has(verb)) {
+        res.status(403).json({ ok: false, error: `verb '${verb}' requires mTLS` })
         return
       }
       const callArgs = Array.isArray(args) ? args : []
