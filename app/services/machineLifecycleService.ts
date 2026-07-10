@@ -11,7 +11,7 @@ import { getEventManager } from '../services/EventManager'
 import { CreateMachineServiceV2 } from './CreateMachineServiceV2'
 import { NodePlacementService } from './node/NodePlacementService'
 import { CreateMachineInputType, UpdateMachineHardwareInput, UpdateMachineNameInput, UpdateMachineUserInput, SuccessType, FirstBootScriptInputType } from '../graphql/resolvers/machine/type'
-import { DELETING_STATUS, REBUILDING_STATUS, MOVING_STATUS } from '../constants/machine-status'
+import { DELETING_STATUS, REBUILDING_STATUS, MOVING_STATUS, GOLDEN_IMAGE_BUILD_BUSY_MESSAGE } from '../constants/machine-status'
 
 /**
  * Normalize PCI address to standard format.
@@ -365,6 +365,15 @@ export class MachineLifecycleService {
       return { success: false, message: 'Machine not found' }
     }
 
+    // Refuse to delete a desktop that is frozen for an in-progress golden-image build:
+    // its disk is (or is about to be) mid `qemu-img convert`, and tearing it down under
+    // the capture would corrupt the image. The `goldenImageBuildId: null` guard added to
+    // the atomic claim below closes the TOCTOU window; this early return is for a clear
+    // message.
+    if (machine.goldenImageBuildId != null) {
+      return { success: false, message: GOLDEN_IMAGE_BUILD_BUSY_MESSAGE }
+    }
+
     // ── Atomic claim ────────────────────────────────────────────────
     // Flip the row to DELETING in a single conditional updateMany. This is the
     // lock that closes the double-delete race: two concurrent destroy requests
@@ -380,7 +389,10 @@ export class MachineLifecycleService {
     const claim = await this.prisma.machine.updateMany({
       where: {
         ...whereClause,
-        status: { notIn: [DELETING_STATUS, REBUILDING_STATUS, MOVING_STATUS] }
+        status: { notIn: [DELETING_STATUS, REBUILDING_STATUS, MOVING_STATUS] },
+        // Never delete a VM mid golden-image capture (closes the TOCTOU race with the
+        // early check above): the disk is held by an exclusive qemu-img convert.
+        goldenImageBuildId: null
       },
       data: { status: DELETING_STATUS }
     })
@@ -413,6 +425,13 @@ export class MachineLifecycleService {
 
     if (!machine) {
       throw new ApolloError(`Machine with ID ${id} not found`)
+    }
+
+    // Refuse hardware changes while the desktop is frozen for a golden-image build:
+    // backgroundUpdateHardware can power-cycle the VM, which would race the capture's
+    // seal-boot / qemu-img convert on the same disk.
+    if (machine.goldenImageBuildId != null) {
+      throw new ApolloError(GOLDEN_IMAGE_BUILD_BUSY_MESSAGE)
     }
 
     // Upper bounds so a value can never poison a node's reserved-capacity sum

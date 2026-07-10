@@ -75,6 +75,15 @@ export class Machine {
     @Field(() => ID, { nullable: true, description: 'Pool this desktop belongs to, if any (VDI pool membership).' })
       poolId: string | null = null
 
+    /**
+     * Non-null (the in-progress GoldenImage id) while a golden image is being built
+     * from this desktop. The capture power-cycles the VM to seal it, so `status` can
+     * read 'running' meanwhile — this marker is the signal the UI uses to FREEZE the
+     * desktop (no console/connect, no power/capture/delete actions) until it clears.
+     */
+    @Field(() => ID, { nullable: true, description: 'Non-null while a golden image is being built from this desktop; the desktop is frozen (no console/power/actions) until it clears.' })
+      goldenImageBuildId: string | null = null
+
     @Field(() => Date, { nullable: true })
       createdAt: Date | null = null
 

@@ -211,6 +211,13 @@ async function initializeInfinization (): Promise<Infinization> {
   // Log-but-continue so a reconcile failure never blocks startup.
   await reconcileOrphanedDiskOpMarkers()
 
+  // Clear golden-image capture freeze markers (Machine.goldenImageBuildId) orphaned by a
+  // crash. GoldenImageService stamps this on the source VM for the whole capture and
+  // clears it in a finally; a crash mid-capture strands it, freezing the desktop
+  // (no console/power/etc.) forever with no live capture to clear it. Same fresh-boot
+  // rationale as the disk-op markers above — safe to release. Log-but-continue.
+  await reconcileOrphanedGoldenImageBuilds()
+
   // Reclaim VMs orphaned in the 'moving' migration status-lock by a crash mid
   // cross-node copy: same rationale as the disk-op markers above — the claiming
   // migration process is gone, so the marker can never clear itself and the VM is
@@ -440,6 +447,59 @@ export async function reconcileOrphanedDiskOpMarkers (): Promise<number> {
     return result.count
   } catch (error) {
     logger.error('❌ Disk-op marker reconciliation failed:', error)
+    return 0
+  }
+}
+
+/**
+ * Clear golden-image build freeze markers (Machine.goldenImageBuildId) orphaned by a
+ * hard crash. GoldenImageService stamps the in-progress GoldenImage id on the source VM
+ * for the WHOLE capture and clears it in a finally; if the backend (or host) dies
+ * mid-capture, the fire-and-forget orchestration is gone and the marker would freeze the
+ * desktop forever (every guard refuses console/power/delete/move/hardware). On a fresh
+ * boot no capture can still be in flight, so any surviving marker is orphaned: clear it,
+ * and fail its GoldenImage row if still 'building' (its disk was never sealed). Errors
+ * are logged and swallowed so startup proceeds.
+ *
+ * @returns the count of markers cleared (for logging/tests)
+ */
+export async function reconcileOrphanedGoldenImageBuilds (): Promise<number> {
+  try {
+    const stuck = await prisma.machine.findMany({
+      where: { goldenImageBuildId: { not: null } },
+      select: { id: true, name: true, goldenImageBuildId: true }
+    })
+
+    if (stuck.length === 0) {
+      return 0
+    }
+
+    for (const vm of stuck) {
+      logger.warn(
+        `🔧 VM ${vm.name} (${vm.id}) left frozen for golden-image build ` +
+        `${vm.goldenImageBuildId} by a crash — clearing the marker (build never finished)`
+      )
+      // Fail the orphaned build so it doesn't sit 'building' forever.
+      if (vm.goldenImageBuildId) {
+        await prisma.goldenImage.updateMany({
+          where: { id: vm.goldenImageBuildId, status: 'building' },
+          data: {
+            status: 'failed',
+            notes: '[build failed] backend restarted while the capture was in progress'
+          }
+        })
+      }
+    }
+
+    const result = await prisma.machine.updateMany({
+      where: { goldenImageBuildId: { not: null } },
+      data: { goldenImageBuildId: null }
+    })
+
+    logger.info(`🔧 Golden-image build reconcile: cleared ${result.count} orphaned freeze marker(s)`)
+    return result.count
+  } catch (error) {
+    logger.error('❌ Golden-image build marker reconciliation failed:', error)
     return 0
   }
 }

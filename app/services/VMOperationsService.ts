@@ -8,7 +8,7 @@
 import { PrismaClient } from '@prisma/client'
 import { Logger } from 'winston'
 import logger from '@main/logger'
-import { isPowerActionLocked } from '../constants/machine-status'
+import { isPowerActionLocked, GOLDEN_IMAGE_BUILD_BUSY_MESSAGE } from '../constants/machine-status'
 import { NodeDispatcher } from './node/NodeDispatcher'
 import { type NodeExecutor } from './node/NodeExecutor'
 import { getVirtioSocketWatcherService } from './VirtioSocketWatcherService'
@@ -151,10 +151,14 @@ export class VMOperationsService {
    * but every write path re-checks). Returns an error result to short-circuit the
    * caller, or null when the action may proceed.
    */
-  private async assertPowerActionAllowed (machineId: string, verb: string): Promise<VMOperationResult | null> {
+  private async assertPowerActionAllowed (
+    machineId: string,
+    verb: string,
+    opts?: { allowGoldenImageBuild?: boolean }
+  ): Promise<VMOperationResult | null> {
     const machine = await this.prisma.machine.findUnique({
       where: { id: machineId },
-      select: { status: true }
+      select: { status: true, goldenImageBuildId: true }
     })
     if (machine && isPowerActionLocked(machine.status)) {
       this.debug.warn(`Refusing to ${verb} machine ${machineId}: row is locked by a transient operation (status=${machine.status})`)
@@ -162,6 +166,16 @@ export class VMOperationsService {
         success: false,
         error: `VM is busy (${machine.status}). Wait for the backup/restore/snapshot/migration to finish before you ${verb} it.`
       }
+    }
+    // Freeze the source VM for the WHOLE golden-image capture, not just the qemu-img
+    // windows the 'capturing' status covers: the capture power-cycles the VM to seal
+    // it, so mid-capture the status is legitimately 'running' (or 'off') with no disk-op
+    // marker — this orthogonal check keeps every user power action refused throughout.
+    // The capture flow's OWN internal seal-boot passes allowGoldenImageBuild so it can
+    // still start the VM it is sealing.
+    if (machine && machine.goldenImageBuildId != null && !opts?.allowGoldenImageBuild) {
+      this.debug.warn(`Refusing to ${verb} machine ${machineId}: frozen for a golden-image build (goldenImageBuildId=${machine.goldenImageBuildId})`)
+      return { success: false, error: GOLDEN_IMAGE_BUILD_BUSY_MESSAGE }
     }
     return null
   }
@@ -175,8 +189,8 @@ export class VMOperationsService {
    * disk is being copied to another node — corrupts the image; this DB-status check
    * is the authoritative cross-service gate. Fail closed.
    */
-  async startMachine (machineId: string): Promise<VMOperationResult> {
-    const locked = await this.assertPowerActionAllowed(machineId, 'start')
+  async startMachine (machineId: string, opts?: { allowGoldenImageBuild?: boolean }): Promise<VMOperationResult> {
+    const locked = await this.assertPowerActionAllowed(machineId, 'start', opts)
     if (locked) return locked
 
     // Thread the operator's seccomp-sandbox opt-out (read from the master's env)

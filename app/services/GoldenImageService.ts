@@ -381,6 +381,30 @@ export class GoldenImageService {
     machine: Machine & { configuration: { diskPaths: Prisma.JsonValue | null } | null },
     input: CaptureFromMachineInput
   ): Promise<void> {
+    // Freeze the source desktop for the WHOLE capture — not just the qemu-img windows
+    // the 'capturing' status covers. The capture power-cycles the VM to seal it, so
+    // during the seal-boot window its status is legitimately 'running' with no disk-op
+    // marker; goldenImageBuildId is the orthogonal signal every user-facing guard checks
+    // (console/power/delete/move/hardware) and the UI uses to show the desktop frozen.
+    // The finally clears it on success OR failure and guarantees the VM is not left
+    // running by a failed capture.
+    try {
+      await this.setBuildMarker(machine.id, imageId)
+      await this.runCaptureFromMachineInner(imageId, machine, input)
+    } finally {
+      // Backstop: the preserve-source path force-stops in its own finally before the
+      // disk restore; this covers the destroy-source failure path (a seal error before
+      // shutdown would otherwise strand the VM 'running'). No-op when already off/archived.
+      await this.forceStopForCapture(machine.id)
+      await this.clearBuildMarker(machine.id)
+    }
+  }
+
+  private async runCaptureFromMachineInner (
+    imageId: string,
+    machine: Machine & { configuration: { diskPaths: Prisma.JsonValue | null } | null },
+    input: CaptureFromMachineInput
+  ): Promise<void> {
     this.emitProgress(imageId, 5, 'preparing')
 
     const diskPaths = (machine.configuration?.diskPaths as string[] | null) ?? []
@@ -572,18 +596,34 @@ export class GoldenImageService {
       //    (re-claimed at step 3, or never released if the boot itself threw),
       //    which is exactly what we want: an exclusive lock for this overwrite of
       //    the source disk. The parent runCaptureFromMachine finally releases it.
+      //
+      //    The source MUST be fully stopped before we overwrite its disk. On the happy
+      //    path waitForShutdown already stopped it; on a failure BEFORE the seal-shutdown
+      //    (e.g. a PrepareGoldenImage timeout) the VM is still running, and qemu-img would
+      //    fail to get the write lock (observed) — worse, racing a live QEMU on the disk
+      //    risks corruption. Force-stop first so the restore is safe and a failed capture
+      //    never leaves the desktop running.
+      await this.forceStopForCapture(machineId)
       this.emitProgress(imageId, 92, 'restoring_source')
+      let restored = false
       try {
         await this.convertDisk(stagingPath, sourceDisk)
+        restored = true
       } catch (restoreErr) {
         this.debug.error(
           `Failed to restore source disk for machine=${machineId}: ` +
-          `${(restoreErr as Error).message}. The VM disk may be in a sealed state.`
+          `${(restoreErr as Error).message}. The VM disk may be in a sealed state; ` +
+          `the pre-seal clone is kept at ${stagingPath} for manual recovery.`
         )
       }
 
-      // 6. Clean up the staging file.
-      await fs.unlink(stagingPath).catch(() => {})
+      // 6. Clean up the staging file — but ONLY once the source disk is safely
+      //    restored. Deleting it after a FAILED restore (as the original code did
+      //    unconditionally) throws away the only pre-seal backup and leaves the VM
+      //    on a half-sealed disk with no way back.
+      if (restored) {
+        await fs.unlink(stagingPath).catch(() => {})
+      }
     }
   }
 
@@ -851,7 +891,12 @@ export class GoldenImageService {
    * and its finally re-releases / restores the source.
    */
   private async startSourceGuarded (machineId: string): Promise<void> {
-    const result = await new VMOperationsService(this.prisma).startMachine(machineId)
+    // allowGoldenImageBuild bypasses the freeze guard for THIS capture's own seal-boot
+    // only. The goldenImageBuildId marker is set for the whole capture (freezing every
+    // user power action); without this bypass the capture could not boot the very VM it
+    // is sealing. The disk-op status guard (isPowerActionLocked) still applies — the
+    // caller releases CAPTURING before this, so status is OFF at boot time.
+    const result = await new VMOperationsService(this.prisma).startMachine(machineId, { allowGoldenImageBuild: true })
     if (!result.success) {
       throw new Error(
         `Failed to start source VM ${machineId} for sealing: ${result.error ?? 'unknown error'}`
@@ -887,6 +932,64 @@ export class GoldenImageService {
   private emitUpdate (image: GoldenImage): void {
     const eventManager = getEventManager()
     void eventManager.dispatchEvent?.('golden_images', 'update', image)
+  }
+
+  /**
+   * Freeze the source desktop for a golden-image capture by stamping the in-progress
+   * GoldenImage id on Machine.goldenImageBuildId. This is orthogonal to `status`: it
+   * survives the seal-boot window where the VM is legitimately 'running', and every
+   * user-facing guard (VMOperationsService power gate, graphicConnection console,
+   * destroy/move/hardware) refuses actions while it is set. The vms:update event flips
+   * the desktop to its "frozen" rendering in the UI live.
+   */
+  private async setBuildMarker (machineId: string, imageId: string): Promise<void> {
+    const updated = await this.prisma.machine.update({
+      where: { id: machineId },
+      data: { goldenImageBuildId: imageId }
+    })
+    void getEventManager().dispatchEvent?.('vms', 'update', updated)
+  }
+
+  /**
+   * Clear the freeze marker at the end of a capture (success OR failure). Runs in a
+   * finally, so it must never throw. The startup reconciler is the backstop if a hard
+   * crash skips this. Emits vms:update so the UI unfreezes the desktop live.
+   */
+  private async clearBuildMarker (machineId: string): Promise<void> {
+    try {
+      const updated = await this.prisma.machine.update({
+        where: { id: machineId },
+        data: { goldenImageBuildId: null }
+      })
+      void getEventManager().dispatchEvent?.('vms', 'update', updated)
+    } catch (err) {
+      this.debug.error(
+        `Failed to clear golden-image build marker on VM ${machineId}: ` +
+        `${err instanceof Error ? err.message : String(err)}`
+      )
+    }
+  }
+
+  /**
+   * Ensure the source VM is not left running by a capture step. Uses infinization
+   * directly (bypassing the freeze power gate — this IS the capture's own cleanup) and
+   * only stops when a live QEMU is present, so it is a no-op when the VM already shut
+   * down (happy path / archived destroy-source). Never throws: it runs in finally paths
+   * that must not mask the real error.
+   */
+  private async forceStopForCapture (machineId: string): Promise<void> {
+    try {
+      const infinization = await getInfinization()
+      const status = await infinization.getVMStatus(machineId)
+      if (status.processAlive) {
+        this.debug.warn(
+          `Force-stopping VM ${machineId}: still running after a golden-image capture step`
+        )
+        await infinization.stopVM(machineId, { graceful: false, force: true })
+      }
+    } catch (err) {
+      this.debug.warn(`forceStopForCapture(${machineId}): ${(err as Error).message}`)
+    }
   }
 
   // -------------------------------------------------------------------

@@ -29,7 +29,7 @@ import { GraphicPortService } from '@utils/VirtManager/graphicPortService'
 import { MachineLifecycleService } from '../../../services/machineLifecycleService'
 import { getEventManager } from '../../../services/EventManager'
 import { VMOperationsService } from '../../../services/VMOperationsService'
-import { isDiskOperationInProgress } from '../../../constants/machine-status'
+import { isDiskOperationInProgress, GOLDEN_IMAGE_BUILD_BUSY_MESSAGE } from '../../../constants/machine-status'
 import { getSocketService } from '../../../services/SocketService'
 import { VMMoveService } from '../../../services/VMMoveService'
 import { FirewallOrchestrationService } from '../../../services/firewall/FirewallOrchestrationService'
@@ -233,6 +233,14 @@ export class MachineQueries {
     })
 
     if (!machine || !machine.configuration) return null
+
+    // Refuse to hand out a console link while the desktop is frozen for a golden-image
+    // build. The capture power-cycles the VM to seal it, so mid-capture its status is
+    // legitimately 'running' and the console would otherwise be reachable — letting a
+    // user log in and interfere with (or be sanitized away by) the in-guest sealing.
+    if (machine.goldenImageBuildId != null) {
+      throw new UserInputError(GOLDEN_IMAGE_BUILD_BUSY_MESSAGE)
+    }
 
     const port = await new GraphicPortService(prisma).getGraphicPort(machine.internalName, machine.configuration.graphicProtocol || 'vnc')
 
@@ -558,6 +566,16 @@ export class MachineMutations {
       await context.assertCan!('identityProvider:use')
     }
 
+    // Refuse while the desktop is frozen for a golden-image build: a domain join can
+    // restart the guest, which would interrupt the capture's seal-boot on the same disk.
+    const target = await context.prisma.machine.findUnique({
+      where: { id: input.machineId },
+      select: { goldenImageBuildId: true }
+    })
+    if (target?.goldenImageBuildId != null) {
+      throw new UserInputError(GOLDEN_IMAGE_BUILD_BUSY_MESSAGE)
+    }
+
     const service = new DomainJoinService(context.prisma)
     const result = await service.joinMachineToDomain({
       machineId: input.machineId,
@@ -627,6 +645,11 @@ export class MachineMutations {
       const machine = await prisma.machine.findFirst({ where: { id } })
       if (!machine) {
         return { success: false, message: 'Machine not found' }
+      }
+      // Frozen for a golden-image build: the in-guest agent is being driven by the
+      // capture (sealing/sysprep). A concurrent user command would race it.
+      if (machine.goldenImageBuildId != null) {
+        return { success: false, message: GOLDEN_IMAGE_BUILD_BUSY_MESSAGE }
       }
 
       // Execute the command inside the VM via QEMU Guest Agent

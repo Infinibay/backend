@@ -306,6 +306,14 @@ model Machine {
   /// The master is the sole writer of status/nodeId while this is non-null. Plain
   /// id reference in Phase 0 (no enforced relation yet).
   migrationJobId     String?
+  /// Non-null (references the in-progress GoldenImage.id) while a golden image is
+  /// being captured FROM this VM. Orthogonal to `status`: the capture power-cycles the
+  /// source VM to seal it, so during the seal-boot window `status` is legitimately
+  /// 'running' — this marker is what keeps the desktop FROZEN (no console/power/delete/
+  /// move/hardware) for the WHOLE capture, then clears (back to null) when the build
+  /// ends (success or failure). Mirrors migrationJobId: plain id reference, no enforced
+  /// relation. Startup reconciliation clears it if a crash strands it.
+  goldenImageBuildId String?
   localIP            String?
   publicIP           String?
   firewallRuleSetId  String?               @unique

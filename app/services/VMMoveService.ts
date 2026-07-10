@@ -128,12 +128,16 @@ export class VMMoveService {
       const claim = await this.prisma.machine.updateMany({
         where: {
           id: vmId,
-          status: { notIn: [MOVING_STATUS, DELETING_STATUS, ARCHIVED_STATUS, REBUILDING_STATUS] }
+          status: { notIn: [MOVING_STATUS, DELETING_STATUS, ARCHIVED_STATUS, REBUILDING_STATUS] },
+          // Never move a VM mid golden-image capture: the capture power-cycles it and
+          // holds its disk with an exclusive qemu-img convert; a concurrent move would
+          // also clobber the capture's status bookkeeping (moving overwrites the row).
+          goldenImageBuildId: null
         },
         data: { status: MOVING_STATUS }
       })
       if (claim.count !== 1) {
-        throw new Error('VM is busy (a move, delete, or rebuild is already in progress)')
+        throw new Error('VM is busy (a move, delete, rebuild, or golden-image build is already in progress)')
       }
       state.statusClaimed = true
 

@@ -104,6 +104,17 @@ export const DISK_OP_STATUSES: MachineStatusValue[] = [
   CAPTURING_STATUS
 ]
 
+/**
+ * User-facing refusal message shown when an operation is blocked because the VM is
+ * frozen for an in-progress golden-image capture (Machine.goldenImageBuildId set).
+ * Unlike the disk-op status markers this is orthogonal to `status`, so it survives
+ * the seal-boot window where the source VM legitimately reads 'running'. Kept here
+ * so every guard (power / console / delete / move / hardware) speaks with one voice.
+ */
+export const GOLDEN_IMAGE_BUILD_BUSY_MESSAGE =
+  'This desktop is frozen while a golden image is being built from it. ' +
+  'Wait for the golden-image build to finish (or fail) before using it again.'
+
 export function isValidMachineStatus (status: string): status is MachineStatusValue {
   return (ALL_STATUSES as string[]).includes(status)
 }
