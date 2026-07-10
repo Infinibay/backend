@@ -15,7 +15,8 @@ import { unlink } from 'fs/promises'
 import path from 'path'
 
 import logger from '@main/logger'
-import { NodeDispatcher } from '@services/node/NodeDispatcher'
+import { NodeDispatcher, masterIdentity } from '@services/node/NodeDispatcher'
+import { httpsJsonPost } from '@services/node/clusterMtls'
 import { getVirtioSocketWatcherService } from '../VirtioSocketWatcherService'
 import { DELETE_FAILED_STATUS } from '../../constants/machine-status'
 
@@ -155,7 +156,7 @@ export class MachineCleanupServiceV2 {
     const storedDiskPaths = Array.isArray(machine.configuration?.diskPaths)
       ? (machine.configuration?.diskPaths as unknown[]).filter((p): p is string => typeof p === 'string' && p.length > 0)
       : []
-    const diskResult = await this.cleanupDiskFiles(machine.internalName, storedDiskPaths, summary)
+    const diskResult = await this.cleanupDiskFiles(machine.internalName, storedDiskPaths, summary, machine.nodeId)
     summary.operations.push(diskResult)
     if (diskResult.error) summary.errors.push(diskResult.error)
 
@@ -308,8 +309,18 @@ export class MachineCleanupServiceV2 {
 
   /**
    * Cleans up disk files for the VM.
+   *
+   * Multi-node: a VM owned by a REMOTE node has its qcow2 on that node's local
+   * filesystem (the migration adapter pushed it there), NOT on the master. A plain
+   * local `unlink` here would only ever ENOENT and silently leak the disk on the
+   * node. So when `ownerNodeId` names a node that is not this host, we ALSO dispatch
+   * `/agent/disk/delete` to that node's agent (the same mTLS verb the migration
+   * reclaim uses) for each candidate path. The local unlink is still attempted (it
+   * covers single-host and shared-storage layouts where the disk IS reachable here);
+   * both are best-effort and non-fatal — a surviving disk is a storage leak to sweep,
+   * never a reason to fail the VM delete (only the physical VM teardown aborts it).
    */
-  private async cleanupDiskFiles (internalName: string, storedDiskPaths: string[], summary: CleanupSummary): Promise<ResourceCleanupResult> {
+  private async cleanupDiskFiles (internalName: string, storedDiskPaths: string[], summary: CleanupSummary, ownerNodeId?: string | null): Promise<ResourceCleanupResult> {
     const startTime = Date.now()
     const result: ResourceCleanupResult = {
       resource: 'Disk Files',
@@ -353,6 +364,27 @@ export class MachineCleanupServiceV2 {
       }
     }
 
+    // Remote-node disk: when the VM is owned by another node, its qcow2 lives on
+    // THAT node's local filesystem — the local unlinks above only ENOENT'd. Dispatch
+    // the delete to the owning node's agent so the disk is actually reclaimed.
+    if (ownerNodeId) {
+      let localNodeId: string | undefined
+      try {
+        const { resolveLocalNodeId } = await import('../InfinizationService')
+        localNodeId = await resolveLocalNodeId()
+      } catch {
+        // Local node identity unresolved → treat as single-host and skip the remote
+        // step (mis-routing a delete to the wrong host would be worse than a leak).
+      }
+      if (localNodeId && ownerNodeId !== localNodeId) {
+        const remote = await this.deleteDisksOnNode(ownerNodeId, diskPatterns)
+        for (const p of remote.removed) {
+          if (!removedFiles.includes(p)) { removedFiles.push(p); summary.resourcesCleaned.diskFiles.push(p) }
+        }
+        for (const e of remote.errors) errors.push(e)
+      }
+    }
+
     result.duration = Date.now() - startTime
     result.details = removedFiles.length > 0
       ? removedFiles.join(', ')
@@ -368,6 +400,62 @@ export class MachineCleanupServiceV2 {
     this.debug.info(`Disk cleanup completed in ${result.duration}ms: ${removedFiles.length}/${diskPatterns.length} files removed`)
 
     return result
+  }
+
+  /**
+   * Delete a VM's disk file(s) on a REMOTE node via its agent's mTLS
+   * `POST /agent/disk/delete` verb (the same path the migration source-reclaim uses).
+   * Best-effort: returns which paths were actually removed plus human-readable errors
+   * (unreachable node, non-2xx, path outside the node's disk store). Never throws.
+   *
+   * Requires cluster mTLS — the disk verbs are mTLS-only on the agent (a filesystem-
+   * mutating surface must never ride the pre-mTLS shared token). With mTLS off we can't
+   * safely reach the node, so the disk is reported as leaked rather than mis-deleted.
+   */
+  private async deleteDisksOnNode (nodeId: string, diskPaths: string[]): Promise<{ removed: string[], errors: string[] }> {
+    const removed: string[] = []
+    const errors: string[] = []
+    if (diskPaths.length === 0) return { removed, errors }
+
+    if (process.env.INFINIBAY_CLUSTER_MTLS !== '1') {
+      errors.push(`remote disk delete needs cluster mTLS (INFINIBAY_CLUSTER_MTLS=1); disk(s) left on node ${nodeId}`)
+      return { removed, errors }
+    }
+
+    const node = await this.prisma.node.findUnique({
+      where: { id: nodeId },
+      select: { name: true, address: true, agentPort: true, status: true }
+    })
+    if (!node || !node.address) {
+      errors.push(`cannot reach node ${nodeId} to delete disk(s) (no address; status=${node?.status ?? 'unknown'})`)
+      return { removed, errors }
+    }
+
+    for (const p of diskPaths) {
+      try {
+        const r = await httpsJsonPost(
+          `https://${node.address}:${node.agentPort}/agent/disk/delete`,
+          { path: p },
+          masterIdentity(),
+          { expectedCn: node.name }
+        )
+        if (r.status < 200 || r.status >= 300) {
+          errors.push(`${p} on ${node.name}: HTTP ${r.status} ${r.text.slice(0, 160)}`)
+          continue
+        }
+        let body: { ok?: boolean, deleted?: boolean }
+        try { body = JSON.parse(r.text) as typeof body } catch { errors.push(`${p} on ${node.name}: non-JSON response`); continue }
+        if (body.ok !== true) { errors.push(`${p} on ${node.name}: agent reported failure`); continue }
+        // deleted:false means the file was already gone — a clean no-op, not an error.
+        if (body.deleted === true) {
+          removed.push(p)
+          this.debug.info(`✓ Removed remote disk on ${node.name}: ${p}`)
+        }
+      } catch (e: any) {
+        errors.push(`${p} on ${node.name}: ${e?.message ?? String(e)}`)
+      }
+    }
+    return { removed, errors }
   }
 
   /**
@@ -669,7 +757,7 @@ export class MachineCleanupServiceV2 {
       const storedDiskPaths = Array.isArray(machine.configuration?.diskPaths)
         ? (machine.configuration?.diskPaths as unknown[]).filter((p): p is string => typeof p === 'string' && p.length > 0)
         : []
-      const diskResult = await this.cleanupDiskFiles(machine.internalName, storedDiskPaths, summary)
+      const diskResult = await this.cleanupDiskFiles(machine.internalName, storedDiskPaths, summary, machine.nodeId)
       summary.operations.push(diskResult)
     }
 
