@@ -23,7 +23,7 @@
 FROM docker.io/library/node:20-bookworm AS base
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      qemu-system-x86 qemu-utils nftables iproute2 dnsmasq \
+      qemu-system-x86 qemu-utils nftables iproute2 wireguard-tools dnsmasq \
       swtpm swtpm-tools ethtool numactl genisoimage xorriso procps \
       p7zip-full \
       postgresql-client curl ca-certificates bash \
