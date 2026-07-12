@@ -771,13 +771,30 @@ export class GoldenImageService {
       sanitize_user_data: opts.sanitizeUserData,
       shutdown_after: opts.shutdownAfter
     }
-    const response = await this.virtioWatcher.sendSafeCommand(
-      machineId,
-      command,
-      SEAL_COMMAND_TIMEOUT_MS
-    )
-    if (!response.success) {
-      throw new Error(`PrepareGoldenImage failed: ${response.error ?? 'unknown'}`)
+    // The seal carries shutdown_after: the guest powers itself off as it finishes,
+    // so its in-band response routinely races the shutdown and is lost — the
+    // pending command is rejected with "connection closed (socket file removed)"
+    // or times out. That is NOT a failure: the authoritative success signal is the
+    // guest actually shutting down, which the caller confirms next via
+    // waitForShutdown. Only an explicit success:false from the agent (it ran and
+    // reported failure) is a real error worth surfacing here.
+    try {
+      const response = await this.virtioWatcher.sendSafeCommand(
+        machineId,
+        command,
+        SEAL_COMMAND_TIMEOUT_MS
+      )
+      if (!response.success) {
+        throw new Error(`PrepareGoldenImage failed: ${response.error ?? 'unknown'}`)
+      }
+    } catch (err) {
+      const msg = (err as Error).message ?? ''
+      if (msg.startsWith('PrepareGoldenImage failed:')) throw err
+      this.debug.warn(
+        `Seal command response not received for ${machineId} (${msg}); ` +
+        'the guest is expected to power off as part of the seal — relying on ' +
+        'shutdown detection (waitForShutdown) as the success signal.'
+      )
     }
   }
 
@@ -809,7 +826,18 @@ export class GoldenImageService {
   private async waitForAgentConnection (machineId: string, timeoutMs: number): Promise<void> {
     const deadline = Date.now() + timeoutMs
     while (Date.now() < deadline) {
-      if (this.virtioWatcher.isVmConnected(machineId)) return
+      // Require BOTH a live connection AND a learned guest-clock offset. A
+      // just-booted guest routinely has a badly-skewed clock (its RTC/timezone),
+      // and the seal command that follows is HMAC-signed with a freshness window
+      // — it must be stamped in the guest's clock frame, which needs the offset
+      // the backend learns from the guest's first timestamped message (handshake).
+      // isVmConnected flips true ~10s BEFORE that message arrives; sending the
+      // seal in that gap stamps it with host time, and a skewed guest drops it as
+      // stale → the seal times out (600s). Waiting for the offset closes the race.
+      if (this.virtioWatcher.isVmConnected(machineId) &&
+          this.virtioWatcher.getVmClockOffset(machineId) !== undefined) {
+        return
+      }
       await sleep(POLL_INTERVAL_MS)
     }
     throw new Error(

@@ -552,7 +552,7 @@ export class VirtioSocketWatcherService extends EventEmitter {
     // point all outbound traffic funnels through. Without a master secret we
     // cannot authenticate; sending an unsigned message would only be dropped by
     // the agent, so refuse and warn once.
-    const envelope = signForVm(connection.vmId, message)
+    const envelope = signForVm(connection.vmId, message, connection.clockOffsetMs ?? 0)
     if (!envelope) {
       if (!this.warnedNoAgentSecret) {
         this.warnedNoAgentSecret = true
@@ -828,6 +828,16 @@ export class VirtioSocketWatcherService extends EventEmitter {
 
   public isVmConnected(vmId: string): boolean {
     return this.connectionManager.isVmConnected(vmId)
+  }
+
+  /**
+   * The VM's learned guest-clock offset (ms), or undefined until the backend has
+   * seen a timestamped message from the guest. Command signing uses it to stamp
+   * envelopes in the guest's clock frame; callers sealing a fresh guest should
+   * wait for it to be defined before sending time-sensitive commands.
+   */
+  public getVmClockOffset(vmId: string): number | undefined {
+    return this.connectionManager.getClockOffset(vmId)
   }
 
   public getServiceStatus(): boolean {

@@ -206,6 +206,29 @@ export class MessageRouter {
 
       const msgType = 'type' in message && typeof message.type === 'string' ? message.type : undefined
 
+      // Learn the guest's clock offset from the timestamp it stamps on every
+      // inbound message, so outbound signed command envelopes can be stamped in
+      // the guest's clock frame (see AgentMessageSigner.signForVm / sendMessage).
+      // Without this, a guest whose clock is skewed past the agent's 5-min HMAC
+      // freshness window rejects every command as stale and SILENTLY DROPS it —
+      // commands time out (10 min) while metrics still flow, masking the dead
+      // channel. Latest plausible reading wins; RTT/processing lag (seconds) is
+      // negligible against the freshness window.
+      if ('timestamp' in message && typeof (message as BaseMessage).timestamp === 'string') {
+        const guestMs = Date.parse((message as BaseMessage).timestamp)
+        // Guard against a garbage / epoch-0 timestamp yanking the offset to ~-now.
+        if (!Number.isNaN(guestMs) && guestMs > 1_600_000_000_000) {
+          const offset = guestMs - Date.now()
+          const prev = connection.clockOffsetMs
+          connection.clockOffsetMs = offset
+          // Surface a large skew once, when it first crosses the agent's freshness
+          // window, so a clock-skewed guest is diagnosable instead of an opaque timeout.
+          if (Math.abs(offset) > 300_000 && (prev === undefined || Math.abs(prev) <= 300_000)) {
+            this.debug.warn(`VM ${connection.vmId} clock is skewed ${Math.round(offset / 1000)}s vs host (beyond the agent's 5-min HMAC freshness window); correcting command-signing timestamps for this VM.`)
+          }
+        }
+      }
+
       // Track message type frequency (bounded to avoid memory growth)
       const typeKey: string = msgType || 'unknown'
       connection.messageTypeCounts[typeKey] = (connection.messageTypeCounts[typeKey] || 0) + 1

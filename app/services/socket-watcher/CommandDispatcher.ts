@@ -655,6 +655,19 @@ export class CommandDispatcher {
         }
       case 'UserList':
         return { action: 'UserList' }
+      case 'PrepareGoldenImage':
+        // Flattened fields matching infiniservice's serde(tag="action")
+        // PrepareGoldenImage variant (src/commands/mod.rs). Without this case the
+        // request hit the `default` branch and shipped `{action}` only — dropping
+        // all three params on the wire. The agent's fields are #[serde(default)]
+        // so shutdown_after still defaulted true (the seal ran), but the operator's
+        // `sanitize_user_data` choice was silently ignored (always defaulted ON).
+        return {
+          action: 'PrepareGoldenImage',
+          cleanup_level: commandType.cleanup_level ?? 'standard',
+          sanitize_user_data: commandType.sanitize_user_data ?? true,
+          shutdown_after: commandType.shutdown_after ?? true
+        }
       case 'JoinDomain':
         // Flattened fields matching infiniservice's serde(tag="action").
         // Required fields are validated by the caller (DomainJoinService).

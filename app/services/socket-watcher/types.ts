@@ -547,6 +547,12 @@ export interface VmConnection {
   keepAliveAverageRtt: number // Average RTT in milliseconds
   keepAliveLastFailureTime?: Date // Timestamp of last keep-alive failure
   keepAliveConsecutiveFailures: number // Consecutive failures (different from total)
+  // Guest clock offset (guestClock − hostClock, in ms), learned from the
+  // timestamps the guest stamps on every inbound message. Used to sign outbound
+  // command envelopes in the guest's clock frame so they pass the agent's HMAC
+  // freshness window even when the guest's clock is badly skewed. undefined
+  // until the first timestamped message is seen.
+  clockOffsetMs?: number
   // Graceful Degradation fields
   isDegraded: boolean // Whether connection is in degraded mode
   degradationReason?: string // Why connection was degraded

@@ -64,13 +64,23 @@ export function deriveVmSecret(vmId: string): string | null {
  * Returns null when signing is not possible (no master secret) — callers must
  * treat that as fail-closed and NOT send an unsigned message (the agent would
  * reject it anyway).
+ *
+ * `offsetMs` is the VM's clock offset (guestClock − hostClock, in ms), learned
+ * from the timestamps the guest stamps on every inbound message. The agent
+ * rejects a signed envelope whose `ts` is outside its HMAC freshness window
+ * (±5 min in src/auth.rs) — so a guest whose clock is skewed past that window
+ * would drop EVERY command as stale (fail-closed) while metrics still flow,
+ * surfacing only as an opaque command timeout. Stamping `ts` in the guest's
+ * clock frame keeps the envelope fresh from the guest's point of view at any
+ * skew, with no guest-side change and no weakening of replay protection (the
+ * window is still enforced, just relative to the guest's own clock).
  */
-export function signForVm(vmId: string, message: unknown): SignedEnvelope | null {
+export function signForVm(vmId: string, message: unknown, offsetMs = 0): SignedEnvelope | null {
   const secret = deriveVmSecret(vmId)
   if (!secret) return null
 
   const v = ENVELOPE_VERSION
-  const ts = Date.now()
+  const ts = Date.now() + Math.round(offsetMs)
   const nonce = randomUUID()
   const payload = JSON.stringify(message)
   const sig = createHmac('sha256', secret)

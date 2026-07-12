@@ -996,6 +996,18 @@ export class ConnectionManager {
     return connection?.isConnected || false
   }
 
+  /**
+   * The VM's learned clock offset (guestClock − hostClock, ms), or undefined if
+   * no timestamped message has been seen yet. Callers that sign time-sensitive
+   * commands (e.g. the golden-image seal) must wait for this to be defined so the
+   * envelope is stamped in the guest's clock frame — otherwise a freshly-booted,
+   * clock-skewed guest rejects the command on HMAC freshness and silently drops
+   * it. See the offset capture in MessageRouter.processMessage.
+   */
+  getClockOffset(vmId: string): number | undefined {
+    return this.connections.get(vmId)?.clockOffsetMs
+  }
+
   /** Get connection details for a VM */
   getConnectionDetails(vmId: string): ConnectionDetails | null {
     const connection = this.connections.get(vmId)
