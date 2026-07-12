@@ -35,8 +35,12 @@ network --bootproto=dhcp --onboot=on --activate
 # write `!` to the shadow field (the CI-tested rootpw-lock-no-password path).
 rootpw --lock
 
-# System timezone
-timezone <%= it.timezone %>
+# System timezone. --utc tells anaconda the hardware clock is UTC (QEMU presents
+# a UTC RTC). WITHOUT it, the guest treats the RTC as local time and, for a
+# non-UTC timezone, boots hours off in UTC terms — which silently breaks the
+# HMAC-signed agent command channel (fail-closed on the 5-min freshness window)
+# until chrony steps the clock, e.g. the golden-image seal timing out.
+timezone <%= it.timezone %> --utc
 
 # System bootloader configuration
 bootloader --timeout=1

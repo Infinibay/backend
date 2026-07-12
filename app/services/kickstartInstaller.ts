@@ -70,7 +70,7 @@ export class KickstartInstaller extends UnattendedManagerBase {
     this.locale = locale || 'en_US.UTF-8'
 
     this.keyboard = keyboard || 'us'
-    this.timezone = timezone || 'America/New_York'
+    this.timezone = timezone || 'UTC'
     this.configFileName = 'ks.cfg'
     this.debug.debug(`KickstartInstaller initialized with locale=${this.locale}, keyboard=${this.keyboard}, timezone=${this.timezone}`)
   }
@@ -114,8 +114,8 @@ export class KickstartInstaller extends UnattendedManagerBase {
     // unescaped) and also subsumes the previous non-empty check. Falls back to the default,
     // matching the locale/keyboard handling above.
     if (!/^[A-Za-z][A-Za-z0-9_+-]*(\/[A-Za-z0-9_+-]+)*$/.test(this.timezone)) {
-      this.debug.warn(`Invalid timezone: ${this.timezone}, using default: America/New_York`)
-      this.timezone = 'America/New_York'
+      this.debug.warn(`Invalid timezone: ${this.timezone}, using default: UTC`)
+      this.timezone = 'UTC'
     }
 
     this.debug.debug(`Validated configuration: locale=${this.locale}, keyboard=${this.keyboard}, timezone=${this.timezone}`)

@@ -1052,6 +1052,32 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
           },
           ComputerName: 'ComputerName',
           ProductKey: UnattendedWindowsManager.PRODUCT_KEY
+        },
+        {
+          $: {
+            name: 'Microsoft-Windows-Deployment',
+            processorArchitecture: 'amd64',
+            publicKeyToken: '31bf3856ad364e35',
+            language: 'neutral',
+            versionScope: 'nonSxS'
+          },
+          // Tell Windows the hardware clock is UTC (QEMU presents a UTC RTC, and
+          // infinization sets -rtc base=utc). Windows otherwise assumes the RTC is
+          // LOCAL time and boots hours off in UTC terms, which silently breaks the
+          // HMAC-signed agent command channel (the agent is fail-closed on a 5-min
+          // freshness window) and skews sysprep/event logs/AD/cert validity. Set in
+          // specialize so it takes effect before first boot completes.
+          RunSynchronous: {
+            RunSynchronousCommand: [
+              {
+                $: {
+                  'wcm:action': 'add'
+                },
+                Order: 1,
+                Path: 'reg add "HKLM\\SYSTEM\\CurrentControlSet\\Control\\TimeZoneInformation" /v RealTimeIsUniversal /t REG_DWORD /d 1 /f'
+              }
+            ]
+          }
         }
       ]
     }
@@ -1127,7 +1153,12 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
           FirstLogonCommands: {
             SynchronousCommand: this.getFirstLogonCommands()
           },
-          TimeZone: 'Eastern Standard Time'
+          // Default display timezone. UTC keeps Windows consistent with the Linux
+          // installers (which default to UTC) now that RealTimeIsUniversal=1 makes
+          // the underlying clock correct regardless of the display zone. (Ideally
+          // this maps from the caller's IANA `timezone` via an IANA→Windows table
+          // — a follow-up; the field isn't plumbed into this manager yet.)
+          TimeZone: 'UTC'
         }
       ]
     }
