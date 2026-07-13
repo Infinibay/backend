@@ -132,6 +132,11 @@ export class GoldenImageService {
       }
     })
 
+    // Announce the build immediately (status 'building') so the images page shows the
+    // new row and the header background-tasks tracker opens a task with the image name
+    // right away — before the first 'progress' event, which carries no name.
+    this.emitUpdate(image)
+
     // Fire-and-forget orchestration. Errors are surfaced by flipping the
     // GoldenImage status to 'failed' (via a notes field) — we don't want
     // to crash the GraphQL mutation on a 30-minute workflow.
@@ -297,7 +302,7 @@ export class GoldenImageService {
       // 8. Update the GoldenImage row
       // ------------------------------------------------------------------
       const stat = await fs.stat(finalPath)
-      await this.prisma.goldenImage.update({
+      const updated = await this.prisma.goldenImage.update({
         where: { id: imageId },
         data: {
           baseDiskPath: finalPath,
@@ -308,6 +313,9 @@ export class GoldenImageService {
         }
       })
       this.emitProgress(imageId, 100, 'draft')
+      // Terminal 'update' (status now 'draft') so the images page flips the row out of
+      // "building" and the header background-tasks tracker marks the build complete.
+      this.emitUpdate(updated)
     } catch (buildErr) {
       const reason = (buildErr as Error).message
       this.debug.error(`Build failed for image=${imageId}: ${reason}`)
@@ -367,6 +375,11 @@ export class GoldenImageService {
         createdById: input.createdById
       }
     })
+
+    // Announce the capture immediately (status 'building') so the images page shows the
+    // new row and the header background-tasks tracker opens a task with the image name
+    // right away — before the first 'progress' event, which carries no name.
+    this.emitUpdate(image)
 
     void this.runCaptureFromMachine(image.id, machine, input).catch((err) => {
       this.debug.error(`captureFromMachine failed for image=${image.id}: ${err?.message}`)
@@ -470,7 +483,7 @@ export class GoldenImageService {
     }
 
     const stat = await fs.stat(finalPath)
-    await this.prisma.goldenImage.update({
+    const updated = await this.prisma.goldenImage.update({
       where: { id: imageId },
       data: {
         baseDiskPath: finalPath,
@@ -480,6 +493,9 @@ export class GoldenImageService {
       }
     })
     this.emitProgress(imageId, 100, 'draft')
+    // Terminal 'update' (status now 'draft') so the images page flips the row out of
+    // "building" and the header background-tasks tracker marks the capture complete.
+    this.emitUpdate(updated)
   }
 
   /**
@@ -1061,13 +1077,17 @@ export class GoldenImageService {
 
   private async markFailed (imageId: string, reason: string): Promise<void> {
     try {
-      await this.prisma.goldenImage.update({
+      const updated = await this.prisma.goldenImage.update({
         where: { id: imageId },
         data: {
           status: 'failed',
           notes: `[build failed] ${reason}`
         }
       })
+      // Surface the failure live: the images page flips the row to "failed" and the
+      // header background-tasks tracker finalizes the build task with the reason.
+      // (markFailed is the only path to a failed build, so this is the terminal signal.)
+      this.emitUpdate(updated)
     } catch (err) {
       this.debug.error(`markFailed could not update image=${imageId}: ${(err as Error).message}`)
     }
