@@ -10,6 +10,7 @@ import * as path from 'path'
 import { UnattendedManagerBase } from './unattendedManagerBase'
 import { escapeForCmd, escapeForPowerShellArg } from './shellEscape'
 import { deriveVmSecret } from './socket-watcher/AgentMessageSigner'
+import { ianaToWindowsTimeZone } from '@utils/ianaToWindowsTimeZone'
 
 export interface ComponentConfig {
   name: string;
@@ -173,6 +174,7 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
   private applications: any[] = []
   private scripts: any[] = []
   private vmId: string = ''
+  private timezone: string = 'UTC' // IANA zone from the create flow; mapped to a Windows zone id for <TimeZone>
   private languageConfig: LanguageConfig
   private enableCommandLogging: boolean = true
 
@@ -184,7 +186,8 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
     applications: any[],
     vmId?: string,
     scripts: any[] = [],
-    enableCommandLogging: boolean = true
+    enableCommandLogging: boolean = true,
+    timezone: string = 'UTC'
   ) {
     super()
     this.configFileName = 'autounattend.xml'
@@ -199,6 +202,7 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
     if (vmId !== undefined) this.vmId = vmId
     if (scripts.length > 0) this.scripts = scripts
     this.enableCommandLogging = enableCommandLogging
+    this.timezone = timezone
   }
 
   /**
@@ -1153,12 +1157,10 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
           FirstLogonCommands: {
             SynchronousCommand: this.getFirstLogonCommands()
           },
-          // Default display timezone. UTC keeps Windows consistent with the Linux
-          // installers (which default to UTC) now that RealTimeIsUniversal=1 makes
-          // the underlying clock correct regardless of the display zone. (Ideally
-          // this maps from the caller's IANA `timezone` via an IANA→Windows table
-          // — a follow-up; the field isn't plumbed into this manager yet.)
-          TimeZone: 'UTC'
+          // Display timezone, mapped from the caller's IANA zone to a Windows zone
+          // id (unknown/empty → UTC). The underlying clock is correct regardless
+          // via RealTimeIsUniversal=1 (set in the specialize pass above).
+          TimeZone: ianaToWindowsTimeZone(this.timezone)
         }
       ]
     }

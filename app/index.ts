@@ -304,6 +304,23 @@ async function bootstrap (): Promise<void> {
     // Start cron jobs
     cronHandles = await startCrons()
 
+    // Clear crash-orphaned VM freeze/lock markers EAGERLY at boot. A hard crash
+    // mid golden-image-capture / disk-op leaves Machine.goldenImageBuildId (freeze)
+    // or a disk-op status lock set, and every power/console/delete guard refuses
+    // the affected desktop. The reconcilers that clear them otherwise run only
+    // inside the LAZY initializeInfinization() — i.e. on the first VM op, which the
+    // freeze itself blocks (chicken-and-egg). Run them up front so a frozen desktop
+    // recovers on restart. On a fresh boot no capture/op can still be in flight, so
+    // any surviving marker is orphaned. Idempotent with the in-init backstop.
+    try {
+      const { reconcileOrphanedGoldenImageBuilds, reconcileOrphanedDiskOpMarkers } =
+        await import('./services/InfinizationService')
+      await reconcileOrphanedGoldenImageBuilds()
+      await reconcileOrphanedDiskOpMarkers()
+    } catch (error) {
+      logger.error('⚠️ Failed to reconcile orphaned VM markers at startup:', error)
+    }
+
     // Reclaim orphaned unattended-install ISOs in iso/temp. The normal deleter
     // (ejectAllCdroms) only fires on the infiniservice handshake, so a VM whose agent
     // never installs — or that is deleted mid-install — leaks its ~1.2GB temp ISO.

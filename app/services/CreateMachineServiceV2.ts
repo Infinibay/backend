@@ -576,7 +576,7 @@ export class CreateMachineServiceV2 {
     switch (profile.mechanism) {
       case 'autounattend': {
         const version = profile.id === 'windows11' ? 11 : 10
-        const manager = new UnattendedWindowsManager(version, safeUsername, password, productKey, applications, machine.id, scripts)
+        const manager = new UnattendedWindowsManager(version, safeUsername, password, productKey, applications, machine.id, scripts, true, timezone)
         await manager.init() // async language detection (Windows only)
         return manager
       }
