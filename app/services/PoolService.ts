@@ -7,10 +7,12 @@
  * connections), and deletion (archive every member then drop the row).
  *
  * Provisioning reuses the existing MachineLifecycleService pipeline —
- * pool machines are normal Machine rows with `poolId` set. Because the
- * blueprint carries a goldenImageId, CreateMachineServiceV2 takes the
- * fast-path linked-clone route (5.A): no unattended ISO, thin qcow2
- * clone of the sealed base, boot-time <30s.
+ * pool machines are normal Machine rows with `poolId` set. provisionOne
+ * passes the pool's effective golden image (its own goldenImageId, else the
+ * blueprint's) EXPLICITLY into createMachine, so CreateMachineServiceV2 takes
+ * the fast-path linked-clone route (5.A) even when the golden image was chosen
+ * on the pool rather than baked into the blueprint: no unattended ISO, thin
+ * qcow2 clone of the sealed base, boot-time <30s.
  *
  * Refill is exposed as `runRefillTick()` — invoke it from a cron/queue
  * at your desired cadence (typ. every minute). We deliberately don't
@@ -463,11 +465,16 @@ export class PoolService {
     const lifecycleService = new MachineLifecycleService(this.prisma, this.user)
 
     // Linked-clone fast path: the golden image has the OS + apps baked.
-    // username/password are unused by CreateMachineServiceV2 when
-    // `template.goldenImageId` is set (see 5.A). We pass placeholders.
+    // We pass the pool's effective golden image EXPLICITLY (pool's own wins,
+    // else the blueprint's) — CreateMachineServiceV2 keys the clone-vs-install
+    // decision off this, so a pool whose golden image was chosen on the pool
+    // (not baked into the blueprint) still gets a thin clone instead of a full
+    // ISO install. username/password are unused on the linked-clone path; we
+    // pass placeholders.
     const machine = await lifecycleService.createMachine({
       name,
       templateId: pool.templateId,
+      goldenImageId: pool.goldenImageId ?? template.goldenImageId ?? undefined,
       departmentId: pool.departmentId,
       os: inferOsEnumFromTemplate(template) ?? OsEnum.UBUNTU,
       username: 'infinibay',

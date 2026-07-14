@@ -355,6 +355,13 @@ export class CreateMachineInputType {
 
     @Field(() => String, { nullable: true })
       timezone?: string
+
+    // Internal-only — deliberately NOT a GraphQL @Field, so it never
+    // appears on the public schema. Lets pool provisioning inject the
+    // pool's golden image so the desktop is a linked clone of that sealed
+    // base even when the blueprint template carries no golden image of its
+    // own. Set by PoolService.provisionOne; unset on normal VM creates.
+    goldenImageId?: string
 }
 
 @InputType()

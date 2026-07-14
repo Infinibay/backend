@@ -103,7 +103,8 @@ export class CreateMachineServiceV2 {
     pciBus: string | null,
     locale: string,
     keyboard: string,
-    timezone: string
+    timezone: string,
+    goldenImageId: string | null = null
   ): Promise<boolean> {
     this.debug.debug(`Creating machine ${machine.name} using infinization`)
 
@@ -121,6 +122,11 @@ export class CreateMachineServiceV2 {
 
       // Fetch related data
       const template = await this.fetchMachineTemplate(machine)
+      // Resolve the golden image this VM clones from. An explicit override
+      // (pool provisioning passes the pool's golden image) wins over the
+      // blueprint's own; otherwise fall back to the template's. This is the
+      // single source of truth for the linked-clone-vs-ISO-install decision.
+      const goldenImage = await this.resolveGoldenImage(template, goldenImageId)
       const configuration = await this.fetchMachineConfiguration(machine)
       const applications = await this.fetchMachineApplications(machine)
       const scripts = await this.fetchMachineScripts(machine)
@@ -132,6 +138,7 @@ export class CreateMachineServiceV2 {
       const vmConfig = await this.buildVMConfig(
         machine,
         template,
+        goldenImage,
         configuration,
         username,
         password,
@@ -279,6 +286,33 @@ export class CreateMachineServiceV2 {
     return template
   }
 
+  /**
+   * Resolve the golden image a new VM should be a linked clone of.
+   *
+   * Precedence: an explicit `overrideId` (pool provisioning passes the pool's
+   * goldenImageId) wins over the blueprint template's own goldenImageId. This
+   * is what lets a pool whose golden image was chosen on the pool — not baked
+   * into the blueprint — still take the linked-clone fast path instead of
+   * running a full unattended install per desktop. Returns null when neither
+   * source names a golden image (→ normal ISO-install VM).
+   */
+  private async resolveGoldenImage (
+    template: TemplateWithGoldenImage | null,
+    overrideId: string | null
+  ): Promise<GoldenImage | null> {
+    const effectiveId = overrideId ?? template?.goldenImageId ?? null
+    if (!effectiveId) return null
+    // Reuse the relation already loaded with the template when it matches.
+    if (template?.goldenImage && template.goldenImage.id === effectiveId) {
+      return template.goldenImage
+    }
+    const image = await this.prisma.goldenImage.findUnique({ where: { id: effectiveId } })
+    if (!image) {
+      throw new Error(`Golden image ${effectiveId} not found`)
+    }
+    return image
+  }
+
   private async fetchMachineConfiguration (machine: Machine): Promise<MachineConfiguration> {
     const configuration = await this.prisma.machineConfiguration.findUnique({
       where: { machineId: machine.id }
@@ -325,6 +359,7 @@ export class CreateMachineServiceV2 {
   private async buildVMConfig (
     machine: Machine,
     template: TemplateWithGoldenImage | null,
+    goldenImage: GoldenImage | null,
     configuration: MachineConfiguration,
     username: string,
     password: string,
@@ -345,12 +380,21 @@ export class CreateMachineServiceV2 {
     // without osType fall through to the per-VM value.
     const effectiveOs = template?.osType ?? machine.os
 
-    // Linked-clone fast path: when the template references a sealed golden
-    // image, new VMs are thin clones backed by that image. Skip the
-    // unattended-install ISO pipeline entirely — the OS is already inside
-    // the base disk.
-    const goldenImage = template?.goldenImage ?? null
+    // Linked-clone fast path: when an effective golden image is resolved
+    // (from the pool or the template — see resolveGoldenImage), new VMs are
+    // thin clones backed by that image. Skip the unattended-install ISO
+    // pipeline entirely — the OS is already inside the base disk.
     const useLinkedClone = Boolean(goldenImage)
+
+    // A golden image with no sealed disk on record can't back a clone. Fail
+    // loud here instead of silently producing an empty backing chain (which
+    // qemu would reject late, or worse boot a blank disk).
+    if (useLinkedClone && !goldenImage!.baseDiskPath) {
+      throw new Error(
+        `Golden image ${goldenImage!.id} has no baseDiskPath — cannot create a linked clone. ` +
+        'The image may still be building or failed to seal.'
+      )
+    }
 
     // Get network bridge from the department. Each department has its own
     // isolated bridge with DHCP and NAT. ensureDepartmentBridgeReady() does NOT

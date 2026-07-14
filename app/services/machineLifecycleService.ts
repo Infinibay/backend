@@ -84,6 +84,13 @@ export class MachineLifecycleService {
       diskSizeGB = template.storage
     }
 
+    // Effective golden image: an explicit override wins over the blueprint's
+    // own. Pool provisioning passes the pool's goldenImageId here so a pooled
+    // desktop becomes a linked clone of that sealed base even when the chosen
+    // blueprint carries no golden image — without this the VM falls through to
+    // a full unattended ISO install and the golden image gives no speedup.
+    const effectiveGoldenImageId = input.goldenImageId ?? template?.goldenImageId ?? null
+
     // Detect locale settings from host or input
     const localeSettings = this.detectLocaleFromHost(input)
 
@@ -158,7 +165,7 @@ export class MachineLifecycleService {
       // Scripts, however, ARE allowed on golden-image VMs — they run via
       // infiniservice AFTER the VM boots, not during installation, so
       // they can customize any VM regardless of how it was provisioned.
-      const isGoldenImage = Boolean(template?.goldenImageId)
+      const isGoldenImage = Boolean(effectiveGoldenImageId)
 
       if (isGoldenImage) {
         // Reject user-supplied applications when the template is backed
@@ -342,7 +349,8 @@ export class MachineLifecycleService {
         input.pciBus,
         localeSettings.locale,
         localeSettings.keyboard,
-        localeSettings.timezone
+        localeSettings.timezone,
+        effectiveGoldenImageId
       ).catch(err => {
         logger.error(`[backgroundCode] Unhandled error for machine ${machine.id}:`, err)
       })
@@ -619,7 +627,8 @@ export class MachineLifecycleService {
     pciBus: string | null,
     locale: string,
     keyboard: string,
-    timezone: string
+    timezone: string,
+    goldenImageId: string | null = null
   ) {
     logger.info(`[backgroundCode] Starting VM creation for ${id}`)
     try {
@@ -644,7 +653,8 @@ export class MachineLifecycleService {
         normalizePciAddress(pciBus),
         locale,
         keyboard,
-        timezone
+        timezone,
+        goldenImageId
       )
 
       logger.info(`[backgroundCode] CreateMachineServiceV2.create() completed for ${machine.name}`)
