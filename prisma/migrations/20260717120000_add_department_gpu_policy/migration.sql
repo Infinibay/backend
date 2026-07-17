@@ -1,0 +1,8 @@
+-- AlterTable: infinigpu virtual-GPU policy (ADR-0007 §Infinibay mapping, docs/INTEGRATION.md §3)
+ALTER TABLE "Department" ADD COLUMN     "gpuEnabled" BOOLEAN NOT NULL DEFAULT false,
+ADD COLUMN     "vramReserveMB" INTEGER NOT NULL DEFAULT 1024,
+ADD COLUMN     "vramCapMB" INTEGER NOT NULL DEFAULT 4096,
+ADD COLUMN     "priorityTier" INTEGER NOT NULL DEFAULT 2,
+ADD COLUMN     "maxConcurrentGpuVMs" INTEGER NOT NULL DEFAULT 8,
+ADD COLUMN     "gpuTimeWeight" INTEGER NOT NULL DEFAULT 1,
+ADD COLUMN     "submissionRateTokens" INTEGER NOT NULL DEFAULT 50000;

@@ -488,6 +488,17 @@ input DeleteSnapshotInput {
   snapshotName: String!
 }
 
+type DepartmentGpuPolicyType {
+  departmentId: ID!
+  gpuEnabled: Boolean!
+  gpuTimeWeight: Int!
+  maxConcurrentGpuVMs: Int!
+  priorityTier: Int!
+  submissionRateTokens: Int!
+  vramCapMB: Int!
+  vramReserveMB: Int!
+}
+
 type DepartmentMemberType {
   departmentId: String!
   id: ID!
@@ -834,6 +845,29 @@ enum GoldenImageStatus {
   DRAFT
   FAILED
   PUBLISHED
+}
+
+type GpuAttachResultType {
+  admitted: Boolean!
+  priorityTier: Int!
+  vmId: String!
+  vramCapMB: Int!
+  vramReservedMB: Int!
+  weight: Int!
+}
+
+type GpuDepartmentUsageType {
+  admittedVms: Int!
+  departmentId: ID!
+}
+
+type GpuFleetViewType {
+  admittedVms: Int!
+  byDepartment: [GpuDepartmentUsageType!]!
+  hostReserveMB: Int!
+  totalVramMB: Int!
+  vramAvailableMB: Int!
+  vramReservedMB: Int!
 }
 
 """Allow or deny effect for a per-user permission override"""
@@ -1396,6 +1430,7 @@ type Mutation {
   approveNode(id: ID!, pairingCode: String): Boolean!
   assignScriptToDepartment(departmentId: ID!, scriptId: ID!): Boolean!
   assignUserRole(input: AssignUserRoleInput!): Boolean!
+  attachGpu(machineId: ID!): GpuAttachResultType!
 
   """Calculate ISO checksum"""
   calculateISOChecksum(isoId: String!): String!
@@ -1472,6 +1507,7 @@ type Mutation {
   destroyMachineTemplate(id: String!): Boolean!
   destroyMachineTemplateCategory(id: String!): Boolean!
   destroyUser(id: String!): Boolean!
+  detachGpu(machineId: ID!): Boolean!
 
   """Disable a plugin package"""
   disablePackage(name: String!): PackageType
@@ -1604,6 +1640,7 @@ type Mutation {
   """Update a backup schedule"""
   updateBackupSchedule(id: ID!, input: UpdateScheduleInput!): BackupSchedule!
   updateDepartmentFirewallPolicy(departmentId: String!, input: UpdateDepartmentFirewallPolicyInput!): DepartmentType!
+  updateDepartmentGpuPolicy(input: UpdateDepartmentGpuPolicyInput!): DepartmentGpuPolicyType!
   updateDepartmentName(input: UpdateDepartmentNameInput!): DepartmentType!
   updateDepartmentNetwork(input: UpdateDepartmentNetworkInput!): DepartmentType!
   updateFirewallRule(input: UpdateFirewallRuleInput!, ruleId: ID!): FirewallRuleType!
@@ -2025,6 +2062,7 @@ type Query {
   currentSnapshot(machineId: String!): Snapshot
   currentUser: UserType
   department(id: String!): DepartmentType
+  departmentGpuPolicy(departmentId: ID!): DepartmentGpuPolicyType
   departmentMembers(departmentId: String!): [DepartmentMemberType!]!
   departmentNetworkDiagnostics(departmentId: String!): DepartmentNetworkDiagnosticsType!
   departmentScripts(departmentId: ID!): [ScriptType!]!
@@ -2074,6 +2112,7 @@ type Query {
   globalPendingRecommendations(limit: Int = 50): [GlobalRecommendationType!]!
   goldenImage(id: ID!): GoldenImage
   goldenImages: [GoldenImage!]!
+  gpuFleetView: GpuFleetViewType!
   graphicConnection(id: String!): GraphicConfigurationType
   healthCheckQueueStats: QueueStatsType!
   healthQueueStatistics: QueueStatistics!
@@ -2742,6 +2781,17 @@ input UpdateDepartmentFirewallPolicyInput {
   firewallCustomRules: JSON
   firewallDefaultConfig: String! = "allow_outbound"
   firewallPolicy: FirewallPolicy! = BLOCK_ALL
+}
+
+input UpdateDepartmentGpuPolicyInput {
+  departmentId: ID! = ""
+  gpuEnabled: Boolean
+  gpuTimeWeight: Int
+  maxConcurrentGpuVMs: Int
+  priorityTier: Int
+  submissionRateTokens: Int
+  vramCapMB: Int
+  vramReserveMB: Int
 }
 
 input UpdateDepartmentNameInput {

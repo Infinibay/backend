@@ -34,6 +34,7 @@ import { PoolResolver } from './pool/resolver'
 import { NodeResolver } from './node/resolver'
 import { IdentityProviderResolver } from './identity/resolver'
 import { PolicyResolver } from './policy/resolver'
+import { GpuResolver } from './gpu/resolver'
 
 const resolvers: NonEmptyArray<ClassType> = [
   UserResolver,
@@ -69,7 +70,8 @@ const resolvers: NonEmptyArray<ClassType> = [
   PoolResolver,
   NodeResolver,
   IdentityProviderResolver,
-  PolicyResolver
+  PolicyResolver,
+  GpuResolver
 ]
 
 export default resolvers

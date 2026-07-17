@@ -855,6 +855,25 @@ model Department {
   firewallDefaultConfig String?        @default("allow_outbound")
   firewallCustomRules   Json?
 
+  // --- infinigpu virtual-GPU policy (ADR-0007 §Infinibay mapping, docs/INTEGRATION.md §3) ---
+  // Opt-in per department: a VM only gets a virtual GPU when its department has
+  // gpuEnabled. The remaining six map 1:1 onto infinigpu-sched's VmConfig/BrokerConfig
+  // (the host GpuBroker "brain") and gate VM start fail-closed via GpuBrokerService.
+  /// Master switch: no virtual GPU is attached unless this is true.
+  gpuEnabled           Boolean @default(false)
+  /// BrokerConfig.vram_reserve_mb — VRAM held back for driver/host, never admitted.
+  vramReserveMB        Int     @default(1024)
+  /// VmConfig.vram_cap_mb — hard per-VM VRAM ceiling.
+  vramCapMB            Int     @default(4096)
+  /// VmConfig.priority tier (0=RealTime, 1=Interactive, 2=Normal, 3=Batch).
+  priorityTier         Int     @default(2)
+  /// BrokerConfig.max_concurrent_gpu_vms — hard cap on admitted GPU VMs in this dept.
+  maxConcurrentGpuVMs  Int     @default(8)
+  /// VmConfig.weight (≥1) — GPU-time share is proportional to this.
+  gpuTimeWeight        Int     @default(1)
+  /// Token-bucket burst hint (µs of GPU-time bankable while idle); feeds bucket_burst_us.
+  submissionRateTokens Int     @default(50000)
+
   @@index([bridgeName])
 }
 
