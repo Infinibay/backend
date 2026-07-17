@@ -95,6 +95,20 @@ export class GpuDepartmentUsageType {
     admittedVms: number = 0
 }
 
+/**
+ * How to reach a GPU VM's infiniPixel remote-display stream. `url` is a
+ * client-reachable WebSocket on the master relay; point the native infinigpu
+ * viewer (or the browser WebCodecs client) at it.
+ */
+@ObjectType()
+export class GpuConsoleStreamType {
+  @Field()
+    url: string = ''
+
+  @Field(() => Int)
+    pixelPort: number = 0
+}
+
 /** Host-wide GPU capacity snapshot (ADR-0007 "FleetView"). */
 @ObjectType()
 export class GpuFleetViewType {

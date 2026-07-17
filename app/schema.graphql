@@ -856,6 +856,11 @@ type GpuAttachResultType {
   weight: Int!
 }
 
+type GpuConsoleStreamType {
+  pixelPort: Int!
+  url: String!
+}
+
 type GpuDepartmentUsageType {
   admittedVms: Int!
   departmentId: ID!
@@ -2112,6 +2117,7 @@ type Query {
   globalPendingRecommendations(limit: Int = 50): [GlobalRecommendationType!]!
   goldenImage(id: ID!): GoldenImage
   goldenImages: [GoldenImage!]!
+  gpuConsoleStream(machineId: ID!): GpuConsoleStreamType
   gpuFleetView: GpuFleetViewType!
   graphicConnection(id: String!): GraphicConfigurationType
   healthCheckQueueStats: QueueStatsType!

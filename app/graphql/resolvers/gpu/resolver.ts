@@ -5,10 +5,13 @@ import { InfinibayContext } from '../../../utils/context'
 import { UserInputError } from '../../../utils/errors'
 import { getEventManager } from '../../../services/EventManager'
 import { getGpuBrokerService, extractGpuPolicy, GpuAdmissionError } from '../../../services/GpuBrokerService'
+import { getEncodedConsoleStreamService } from '../../../services/console/EncodedConsoleStreamService'
+import { resolveConnectHost, hostFromHeader } from '@utils/resolveConnectHost'
 import {
   DepartmentGpuPolicyType,
   UpdateDepartmentGpuPolicyInput,
   GpuAttachResultType,
+  GpuConsoleStreamType,
   GpuFleetViewType
 } from './type'
 
@@ -144,6 +147,30 @@ export class GpuResolver {
   @Can('vmHealth:view', { minScope: 'ANY' })
   async gpuFleetView (): Promise<GpuFleetViewType> {
     return getGpuBrokerService().fleetView()
+  }
+
+  /**
+   * How to reach a GPU VM's infiniPixel remote-display stream. Returns null when
+   * the VM has no live GPU session (not admitted / not running with a GPU). The
+   * `url` is a client-reachable WebSocket on the master relay — point the native
+   * infinigpu viewer (or the browser WebCodecs client) at it.
+   */
+  @Query(() => GpuConsoleStreamType, { nullable: true })
+  @Can('vm:console', { id: (a) => a.machineId })
+  async gpuConsoleStream (
+    @Arg('machineId', () => ID) machineId: string,
+    @Ctx() { req }: InfinibayContext
+  ): Promise<GpuConsoleStreamType | null> {
+    const cfg = getGpuBrokerService().getConfig(machineId)
+    if (!cfg) return null
+    // Client always dials the master relay; the device server's WS is loopback-only
+    // inside the backend host and is resolved server-side (never from client input).
+    const ingressHost = resolveConnectHost({
+      envHost: process.env.GRAPHIC_HOST,
+      requestHost: hostFromHeader(req?.headers['x-forwarded-host'] ?? req?.headers.host)
+    })
+    const session = await getEncodedConsoleStreamService().ensureSession(machineId, '127.0.0.1', cfg.pixelPort)
+    return { url: `ws://${ingressHost}:${session.listenPort}`, pixelPort: cfg.pixelPort }
   }
 }
 
