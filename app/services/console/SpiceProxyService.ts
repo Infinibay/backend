@@ -48,6 +48,21 @@ export interface ProxySession {
   expiresAt: number
 }
 
+/**
+ * Client-safe view of a live relay session for the Sessions UI. Deliberately
+ * omits upstreamHost/upstreamPort — those are internal node addresses and must
+ * never leak to a tenant. `channels` is the count of live client TCP sockets on
+ * the listener (a single SPICE viewer opens several channels), so `connected`
+ * (channels > 0) is the honest "someone has this console open right now" signal.
+ */
+export interface ConsoleSessionView {
+  vmId: string
+  listenPort: number
+  channels: number
+  connected: boolean
+  expiresAt: number
+}
+
 interface InternalSession extends ProxySession {
   server: net.Server
   sockets: Set<net.Socket>
@@ -287,6 +302,25 @@ export class SpiceProxyService {
 
   get sessionCount (): number {
     return this.sessions.size
+  }
+
+  /** Client-safe snapshot of every live relay session (for the Sessions UI). */
+  listSessions (): ConsoleSessionView[] {
+    const out: ConsoleSessionView[] = []
+    for (const s of this.sessions.values()) {
+      // `sockets` holds TWO entries per live channel (client + upstream — see the
+      // fan-out guard in tryListen, `2 * maxConnsPerSession`), so halve it to get
+      // the real client-channel count.
+      const channels = Math.floor(s.sockets.size / 2)
+      out.push({
+        vmId: s.vmId,
+        listenPort: s.listenPort,
+        channels,
+        connected: channels > 0,
+        expiresAt: s.expiresAt
+      })
+    }
+    return out
   }
 
   private publicView (s: InternalSession): ProxySession {

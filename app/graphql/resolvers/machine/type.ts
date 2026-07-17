@@ -130,6 +130,24 @@ export class SuccessType {
       message: string = ''
 }
 
+@ObjectType({ description: 'A live SPICE/VNC console relay session on the master relay.' })
+export class ConsoleSession {
+    @Field(() => String, { description: 'The VM whose console this relay forwards to.' })
+      vmId!: string
+
+    @Field(() => Int, { description: 'Client-facing port the master relay listens on.' })
+      listenPort!: number
+
+    @Field(() => Int, { description: 'Live client channel sockets (one viewer opens several).' })
+      channels!: number
+
+    @Field(() => Boolean, { description: 'True when at least one client channel is connected (console in use).' })
+      connected!: boolean
+
+    @Field(() => String, { description: 'ISO timestamp when the relay hard-expires regardless of activity.' })
+      expiresAt!: string
+}
+
 @ObjectType()
 export class CommandExecutionResponseType {
     @Field(() => Boolean)

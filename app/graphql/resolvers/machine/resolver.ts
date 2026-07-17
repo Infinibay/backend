@@ -9,6 +9,7 @@ import {
   MachineOrderBy,
   CreateMachineInputType,
   GraphicConfigurationType,
+  ConsoleSession,
   SuccessType,
   MachineStatus,
   CommandExecutionResponseType,
@@ -332,11 +333,42 @@ export class MachineQueries {
       protocol
     }
   }
+
+  @Query(() => [ConsoleSession], {
+    description: 'Live SPICE/VNC console relay sessions across the fleet (the master relay). A session exists while a console is being viewed through Infinibay.'
+  })
+  // Fleet-wide: enumerates every relay on the master regardless of owner, so —
+  // like socketConnectionStats — require an ANY-scope grant to avoid leaking the
+  // existence of other tenants' desktops.
+  @Can('vmHealth:view', { minScope: 'ANY' })
+  async consoleSessions (): Promise<ConsoleSession[]> {
+    return getSpiceProxyService().listSessions().map(s => ({
+      vmId: s.vmId,
+      listenPort: s.listenPort,
+      channels: s.channels,
+      connected: s.connected,
+      expiresAt: new Date(s.expiresAt).toISOString()
+    }))
+  }
 }
 
 @Resolver()
 export class MachineMutations {
   private debug = logger.child({ module: 'machine-mutations' })
+
+  @Mutation(() => SuccessType, {
+    description: "Force-close a VM's console relay session, disconnecting any live SPICE/VNC clients. Idempotent — succeeds even if no session is open."
+  })
+  // Ending a console is a console-control op on that specific VM, so gate it the
+  // same way as opening one (graphicConnection): per-VM, scope-checked.
+  @Can('vm:console', { id: (a) => a.vmId })
+  async endConsoleSession (
+    @Arg('vmId') vmId: string
+  ): Promise<SuccessType> {
+    getSpiceProxyService().close(vmId)
+    this.debug.info(`console relay session ended for VM ${vmId}`)
+    return { success: true, message: 'Console session ended' }
+  }
 
   @Mutation(() => Machine)
   @Can('vm:create')
