@@ -439,6 +439,19 @@ export class CreateMachineServiceV2 {
       // Get base ISO path for OS installation
       const baseIsoPath = await this.getOSIsoPath(effectiveOs)
 
+      // Whether this VM gets an infinigpu virtual GPU. Read the department policy
+      // up-front so the unattended config can auto-install the guest driver; the
+      // full broker admission (config.gpu + pixel port) still happens later.
+      let gpuEnabledForInstall = false
+      if (machine.departmentId) {
+        try {
+          const dept = await this.prisma.department.findUnique({ where: { id: machine.departmentId } })
+          gpuEnabledForInstall = !!(dept && extractGpuPolicy(dept as unknown as DepartmentGpuPolicy)?.gpuEnabled)
+        } catch (gpuReadErr: any) {
+          this.debug.warn(`infinigpu: department GPU-policy read failed for install (migration not applied?): ${gpuReadErr?.message}`)
+        }
+      }
+
       // Generate unattended installation ISO using legacy managers
       isoPath = baseIsoPath
       const unattendedManager = await this.createUnattendedManager(
@@ -451,7 +464,8 @@ export class CreateMachineServiceV2 {
         locale,
         keyboard,
         timezone,
-        effectiveOs
+        effectiveOs,
+        gpuEnabledForInstall
       )
 
       // Close the silent media-less-VM path: if we built an unattended installer
@@ -628,7 +642,8 @@ export class CreateMachineServiceV2 {
     locale: string,
     keyboard: string,
     timezone: string,
-    effectiveOs: string
+    effectiveOs: string,
+    gpuEnabled: boolean = false
   ): Promise<UnattendedManagerBase | null> {
     // Validate the username once, here, before constructing any manager. It
     // becomes a guest OS account AND is interpolated into install command lines,
@@ -650,13 +665,20 @@ export class CreateMachineServiceV2 {
       case 'autounattend': {
         const version = profile.id === 'windows11' ? 11 : 10
         const manager = new UnattendedWindowsManager(version, safeUsername, password, productKey, applications, machine.id, scripts, true, timezone)
+        manager.gpuEnabled = gpuEnabled
         await manager.init() // async language detection (Windows only)
         return manager
       }
-      case 'cloud-init':
-        return new CloudInitInstaller(safeUsername, password, applications, machine.id, scripts, { osProfile: profile, locale, keyboard, timezone })
-      case 'kickstart':
-        return new KickstartInstaller(safeUsername, password, applications, machine.id, locale, keyboard, timezone, { osProfile: profile })
+      case 'cloud-init': {
+        const manager = new CloudInitInstaller(safeUsername, password, applications, machine.id, scripts, { osProfile: profile, locale, keyboard, timezone })
+        manager.gpuEnabled = gpuEnabled
+        return manager
+      }
+      case 'kickstart': {
+        const manager = new KickstartInstaller(safeUsername, password, applications, machine.id, locale, keyboard, timezone, { osProfile: profile })
+        manager.gpuEnabled = gpuEnabled
+        return manager
+      }
       default:
         this.debug.warn(`Unsupported install mechanism for OS: ${effectiveOs}`)
         return null

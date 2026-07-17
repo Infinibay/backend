@@ -122,6 +122,7 @@ export class KickstartInstaller extends UnattendedManagerBase {
 
     const applicationsPostCommands = await this.generateApplicationsConfig()
     const infiniServicePostCommands = this.generateInfiniServiceConfig()
+    const gpuDriverPostCommands = this.gpuEnabled ? this.generateGpuDriverConfig() : ''
     const fedoraVersion = await this.extractFedoraVersionFromISO()
     this.debug.debug(`Applications and InfiniService post commands generated (Fedora ${fedoraVersion})`)
 
@@ -146,7 +147,8 @@ export class KickstartInstaller extends UnattendedManagerBase {
         timezone: this.timezone,
         fedoraVersion,
         applicationsPostCommands,
-        infiniServicePostCommands
+        infiniServicePostCommands,
+        gpuDriverPostCommands
       })
 
       this.debug.debug('RedHat kickstart configuration generated successfully')
@@ -341,6 +343,66 @@ echo "=== InfiniService Installation Completed ==="
 `
 
     return postInstallScript
+  }
+
+  /**
+   * infinigpu guest DRM driver auto-install (%post). Sets up a first-boot systemd
+   * oneshot that fetches the driver tarball and runs its install.sh — the driver
+   * builds via DKMS against the INSTALLED kernel, which is only running post-reboot
+   * (the %post chroot runs the installer's kernel). Non-fatal to the OS install.
+   */
+  private generateGpuDriverConfig (): string {
+    const backendPort = process.env.PORT || '4000'
+    const fallbackHost = process.env.APP_HOST || 'localhost'
+    return `
+%post --log=/root/infinigpu-driver-install.log
+#!/bin/bash
+# --- infinigpu guest GPU driver: first-boot installer ---
+cat > /usr/local/sbin/install_infinigpu_driver.sh << 'IGPUEOF'
+#!/bin/bash
+set -o pipefail
+LOG_FILE="/var/log/infinigpu_driver_install.log"
+log_message() { echo "\$(date '+%Y-%m-%d %H:%M:%S') - \$1" | tee -a "\$LOG_FILE"; }
+GW="\$(ip route 2>/dev/null | awk '/^default/{print \$3; exit}')"
+BACKEND_HOST="\${GW:-${fallbackHost}}"
+BASE_URL="http://\${BACKEND_HOST}:${backendPort}"
+log_message "=== infinigpu driver install from \$BASE_URL (gateway=\${GW:-none}) ==="
+mkdir -p /tmp/infinigpu-driver && cd /tmp/infinigpu-driver || exit 0
+ok=0
+for attempt in 1 2 3 4 5; do
+    log_message "Downloading infinigpu driver (attempt \$attempt/5) ..."
+    if curl -fsS --connect-timeout 10 --max-time 180 -o source.tar.gz "\${BASE_URL}/gpu-driver/linux/source" 2>>"\$LOG_FILE"; then ok=1; break; fi
+    sleep 5
+done
+if [ "\$ok" != "1" ]; then log_message "[FAIL] could not download infinigpu driver"; exit 0; fi
+tar xzf source.tar.gz 2>>"\$LOG_FILE" || { log_message "[FAIL] extract failed"; exit 0; }
+chmod +x install.sh 2>/dev/null || true
+./install.sh 2>&1 | tee -a "\$LOG_FILE"
+cd / && rm -rf /tmp/infinigpu-driver
+systemctl disable infinigpu-driver-install.service 2>/dev/null || true
+log_message "=== infinigpu driver install completed ==="
+IGPUEOF
+chmod +x /usr/local/sbin/install_infinigpu_driver.sh
+
+cat > /etc/systemd/system/infinigpu-driver-install.service << 'IGPUUNITEOF'
+[Unit]
+Description=Install infinigpu guest GPU driver (first boot)
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/usr/local/sbin/install_infinigpu_driver.sh
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/install_infinigpu_driver.sh
+TimeoutStartSec=600
+
+[Install]
+WantedBy=multi-user.target
+IGPUUNITEOF
+systemctl enable infinigpu-driver-install.service
+echo "=== infinigpu driver first-boot installer staged ==="
+%end
+`
   }
 
   /**

@@ -1,6 +1,7 @@
 import { Express } from 'express'
 import isoUploadRouter from '../routes/isoUpload'
 import infiniserviceRouter from '../routes/infiniservice'
+import gpuDriverRouter from '../routes/gpuDriver'
 import scriptsRouter from '../routes/scripts'
 import wallpapersRouter from '../routes/wallpapers'
 import clusterRouter from '../routes/cluster'
@@ -16,6 +17,9 @@ export const configureRoutes = (app: Express): void => {
 
   // Mount the InfiniService router for serving binaries and scripts
   app.use('/infiniservice', infiniserviceRouter)
+
+  // Mount the infinigpu guest-driver router (served to GPU VMs during OS install)
+  app.use('/gpu-driver', gpuDriverRouter)
 
   // Mount the scripts router for serving script content during first boot
   app.use('/scripts', scriptsRouter)

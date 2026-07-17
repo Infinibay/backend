@@ -15,6 +15,9 @@ export class UnattendedManagerBase {
 
   configFileName: string | null = null
   isoPath: string | null = null
+  // Set by CreateMachineServiceV2 when the VM's department has infinigpu enabled;
+  // subclasses inject the guest GPU-driver auto-install into their unattended config.
+  gpuEnabled = false
 
   public async generateConfig (): Promise<string> {
     return ''

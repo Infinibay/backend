@@ -315,6 +315,11 @@ NETWORK_HELPER_EOF`,
       // the in-target download can run here.
       ...this.generateInfiniServiceInstallCommands(),
 
+      // infinigpu virtual-GPU guest driver (only when the department has GPUs). It
+      // builds via DKMS against the installed kernel on first boot, so it runs as a
+      // first-boot oneshot, NOT in the installer chroot.
+      ...(this.gpuEnabled ? this.generateGpuDriverInstallCommands() : []),
+
       // Create post-installation script
       `cat > /target/var/lib/cloud/scripts/per-instance/post_install.py << 'EOF'
 ${this.generateMasterInstallScript()}
@@ -470,6 +475,66 @@ EOF`,
     ]
 
     return commands
+  }
+
+  /**
+   * infinigpu guest DRM driver auto-install (Ubuntu/Debian). Runs ONLY on first
+   * boot (systemd oneshot) because the driver builds via DKMS against the installed
+   * kernel — the installer chroot runs the installer's kernel, so an in-target build
+   * would target the wrong kernel. Non-fatal to the OS install: the tarball is
+   * fetched from the same gateway-resolved backend as infiniservice.
+   */
+  private generateGpuDriverInstallCommands (): string[] {
+    const backendPort = process.env.PORT || '4000'
+    const fallbackHost = process.env.APP_HOST || 'localhost'
+    return [
+      `cat > /target/var/lib/cloud/scripts/per-instance/install_infinigpu_driver.sh << 'EOF'
+#!/bin/bash
+set -o pipefail
+LOG_FILE="/var/log/infinigpu_driver_install.log"
+log_message() { echo "\$(date '+%Y-%m-%d %H:%M:%S') - \$1" | tee -a "\$LOG_FILE"; }
+
+GW="\$(ip route 2>/dev/null | awk '/^default/{print \$3; exit}')"
+BACKEND_HOST="\${GW:-${fallbackHost}}"
+BASE_URL="http://\${BACKEND_HOST}:${backendPort}"
+log_message "=== infinigpu driver install from \$BASE_URL (gateway=\${GW:-none}) ==="
+
+mkdir -p /tmp/infinigpu-driver && cd /tmp/infinigpu-driver || exit 1
+ok=0
+for attempt in 1 2 3 4 5; do
+    log_message "Downloading infinigpu driver (attempt \$attempt/5) ..."
+    if curl -fsS --connect-timeout 10 --max-time 180 -o source.tar.gz "\${BASE_URL}/gpu-driver/linux/source" 2>>"\$LOG_FILE"; then ok=1; break; fi
+    sleep 5
+done
+if [ "\$ok" != "1" ]; then log_message "[FAIL] could not download infinigpu driver"; exit 0; fi
+
+tar xzf source.tar.gz 2>>"\$LOG_FILE" || { log_message "[FAIL] extract failed"; exit 0; }
+chmod +x install.sh 2>/dev/null || true
+./install.sh 2>&1 | tee -a "\$LOG_FILE"
+
+cd / && rm -rf /tmp/infinigpu-driver
+systemctl disable infinigpu-driver-install.service 2>/dev/null || true
+log_message "=== infinigpu driver install completed ==="
+EOF`,
+      'chmod +x /target/var/lib/cloud/scripts/per-instance/install_infinigpu_driver.sh',
+
+      `cat > /target/etc/systemd/system/infinigpu-driver-install.service << 'EOF'
+[Unit]
+Description=Install infinigpu guest GPU driver (first boot)
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/var/lib/cloud/scripts/per-instance/install_infinigpu_driver.sh
+
+[Service]
+Type=oneshot
+ExecStart=/var/lib/cloud/scripts/per-instance/install_infinigpu_driver.sh
+TimeoutStartSec=600
+
+[Install]
+WantedBy=multi-user.target
+EOF`,
+      'curtin in-target -- systemctl enable infinigpu-driver-install.service'
+    ]
   }
 
 

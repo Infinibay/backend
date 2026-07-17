@@ -572,16 +572,25 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
     const infiniServiceCommands = this.generateInfiniServiceInstallCommands(10)
     commands = commands.concat(infiniServiceCommands)
 
+    // infinigpu virtual-GPU guest driver (only when the department has GPUs). The
+    // Windows driver is not shippable yet, so this is a best-effort/marker slot kept
+    // symmetric with the Linux installers (see generateGpuDriverInstallCommands).
+    const gpuDriverCommands = this.gpuEnabled
+      ? this.generateGpuDriverInstallCommands(10 + infiniServiceCommands.length)
+      : []
+    commands = commands.concat(gpuDriverCommands)
+
     // Application installations intentionally remain in FirstLogon.
     // Custom scripts (from blueprint) are handled by InfiniService post-boot
     // via VirtioSocketWatcherService — this is the standard path for ALL OS types.
-    const apps = this.generateAppsToInstallScripts(10 + infiniServiceCommands.length)
+    const appsIdx = 10 + infiniServiceCommands.length + gpuDriverCommands.length
+    const apps = this.generateAppsToInstallScripts(appsIdx)
 
     commands = commands.concat(apps)
 
     commands.push({
       $: { 'wcm:action': 'add' },
-      Order: 10 + infiniServiceCommands.length + apps.length,
+      Order: appsIdx + apps.length,
       Description: 'Restart System',
       RequiresUserInput: false,
       CommandLine: 'shutdown /r /t 0'
@@ -706,6 +715,27 @@ export class UnattendedWindowsManager extends UnattendedManagerBase {
     ]
 
     return commands
+  }
+
+  /**
+   * infinigpu virtual-GPU guest driver install (Windows). PENDING: the Windows guest
+   * driver (IddCx indirect display + its KMDF PCI companion) is an unbuilt, unsigned
+   * skeleton and cannot deliver frames yet, so we do NOT install a non-functional
+   * driver — we log the pending state to keep the first-boot flow symmetric with the
+   * Linux installers. When a signed driver package is served at
+   * /gpu-driver/windows/source, replace this body with a downloadViaGateway(...) +
+   * `pnputil /add-driver ... /install` step (test-signing required for dev builds).
+   */
+  private generateGpuDriverInstallCommands (idx: number): any[] {
+    return [
+      {
+        $: { 'wcm:action': 'add' },
+        Order: idx,
+        Description: 'infinigpu GPU driver (pending — Windows driver not yet shippable)',
+        RequiresUserInput: false,
+        CommandLine: 'powershell -Command "Write-Output \'infinigpu: GPU is enabled for this VM; the Windows guest driver is not yet available and will be auto-installed once it ships.\'"'
+      }
+    ]
   }
 
   /**

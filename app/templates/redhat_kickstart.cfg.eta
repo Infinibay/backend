@@ -123,6 +123,10 @@ flatpak
 <%= it.infiniServicePostCommands %>
 <% } %>
 
+<% if (it.gpuDriverPostCommands && it.gpuDriverPostCommands.trim()) { %>
+<%= it.gpuDriverPostCommands %>
+<% } %>
+
 <% if (it.applicationsPostCommands && it.applicationsPostCommands.trim()) { %>
 <%= it.applicationsPostCommands %>
 <% } %>
