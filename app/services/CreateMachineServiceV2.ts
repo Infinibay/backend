@@ -25,6 +25,7 @@ import si from 'systeminformation'
 import portfinder from 'portfinder'
 
 import { PrismaClient, Machine, MachineTemplate, MachineConfiguration, GoldenImage } from '@prisma/client'
+import { getGpuBrokerService, extractGpuPolicy, DepartmentGpuPolicy } from './GpuBrokerService'
 
 type TemplateWithGoldenImage = MachineTemplate & { goldenImage: GoldenImage | null }
 import {
@@ -200,6 +201,9 @@ export class CreateMachineServiceV2 {
 
       // Rollback
       await this.rollback(machine, expectedDiskPath)
+      // Release any GPU admission ticket taken in buildVMConfig (idempotent — a
+      // no-op for non-GPU VMs). infinization reaps its own device server.
+      getGpuBrokerService().release(machine.id)
 
       throw new Error(`Error creating machine: ${error.message}`)
     }
@@ -580,6 +584,21 @@ export class CreateMachineServiceV2 {
 
       // UUID for QEMU - must match internalName for consistent socket/PID paths
       uuid: machine.internalName
+    }
+
+    // infinigpu (opt-in): if the VM's department has GPU enabled, admit it against
+    // the host broker (fail-closed — throws if over VRAM/concurrency cap) and
+    // attach a virtual GPU. Non-GPU departments are untouched. `extractGpuPolicy`
+    // reads the 7 policy fields structurally so a Prisma client that predates the
+    // migration simply yields gpuEnabled=undefined → GPU skipped.
+    if (machine.departmentId) {
+      const dept = await this.prisma.department.findUnique({ where: { id: machine.departmentId } })
+      const policy = dept ? extractGpuPolicy(dept as unknown as DepartmentGpuPolicy) : null
+      if (policy?.gpuEnabled) {
+        const gpuCfg = getGpuBrokerService().admit({ vmId: machine.id, departmentId: machine.departmentId, policy })
+        config.gpu = { pixelPort: gpuCfg.pixelPort }
+        this.debug.info(`infinigpu: admitted VM ${machine.id} — pixelPort ${gpuCfg.pixelPort}, ${gpuCfg.vramReservedMB} MB reserved`)
+      }
     }
 
     return config

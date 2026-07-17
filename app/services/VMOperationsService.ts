@@ -12,6 +12,7 @@ import { isPowerActionLocked, GOLDEN_IMAGE_BUILD_BUSY_MESSAGE } from '../constan
 import { NodeDispatcher } from './node/NodeDispatcher'
 import { type NodeExecutor } from './node/NodeExecutor'
 import { getVirtioSocketWatcherService } from './VirtioSocketWatcherService'
+import { getGpuBrokerService, extractGpuPolicy, DepartmentGpuPolicy } from './GpuBrokerService'
 import { OverlayCoordinatorService } from './network/OverlayCoordinatorService'
 
 export interface VMOperationResult {
@@ -113,10 +114,14 @@ export class VMOperationsService {
   async forcePowerOff (machineId: string): Promise<VMOperationResult> {
     const locked = await this.assertPowerActionAllowed(machineId, 'force power off')
     if (locked) return locked
-    return this.runOperation(
+    const result = await this.runOperation(
       machineId, 'Force powering off', 'Machine forcefully powered off', 'Failed to force power off machine',
       (infinization) => infinization.stopVM(machineId, { graceful: false, force: true })
     )
+    // Free the GPU admission ticket once the VM is really off (idempotent / no-op
+    // for non-GPU VMs). infinization reaps the per-VM device server itself.
+    if (result.success) getGpuBrokerService().release(machineId)
+    return result
   }
 
   /**
@@ -125,10 +130,12 @@ export class VMOperationsService {
   async gracefulPowerOff (machineId: string): Promise<VMOperationResult> {
     const locked = await this.assertPowerActionAllowed(machineId, 'power off')
     if (locked) return locked
-    return this.runOperation(
+    const result = await this.runOperation(
       machineId, 'Gracefully powering off', 'Machine powered off', 'Failed to power off machine',
       (infinization) => infinization.stopVM(machineId, { graceful: true, timeout: 120000, force: true })
     )
+    if (result.success) getGpuBrokerService().release(machineId)
+    return result
   }
 
   /**
@@ -218,13 +225,48 @@ export class VMOperationsService {
     // into start too, so a VM created with the sandbox disabled does not re-enable
     // it on stop/start. Default keeps the sandbox ON. Travels in the config over the
     // verb RPC, so it applies whether the VM runs locally or on a remote node.
-    const startConfig = process.env.INFINIZATION_DISABLE_SANDBOX === '1' ? { disableSandbox: true } : undefined
-    return this.runOperation(
+    // infinigpu (opt-in): admit + attach a virtual GPU when the VM's department
+    // has GPU enabled. Fail-closed — a denied admission stops the power-on. A VM
+    // already holding a ticket (e.g. re-entrant start) reuses its pixel port.
+    let gpuConfig: { pixelPort: number } | undefined
+    if (placement?.departmentId) {
+      const dept = await this.prisma.department.findUnique({ where: { id: placement.departmentId } })
+      const policy = dept ? extractGpuPolicy(dept as unknown as DepartmentGpuPolicy) : null
+      if (policy?.gpuEnabled) {
+        const broker = getGpuBrokerService()
+        const existing = broker.getConfig(machineId)
+        if (existing) {
+          gpuConfig = { pixelPort: existing.pixelPort }
+        } else {
+          try {
+            gpuConfig = { pixelPort: broker.admit({ vmId: machineId, departmentId: placement.departmentId, policy }).pixelPort }
+          } catch (error: any) {
+            return { success: false, error: `GPU admission denied: ${error?.message ?? String(error)}` }
+          }
+        }
+      }
+    }
+
+    // Thread the operator's seccomp-sandbox opt-out (read from the master's env)
+    // into start too, so a VM created with the sandbox disabled does not re-enable
+    // it on stop/start. Default keeps the sandbox ON. Travels in the config over the
+    // verb RPC, so it applies whether the VM runs locally or on a remote node.
+    const sandboxOff = process.env.INFINIZATION_DISABLE_SANDBOX === '1'
+    const startConfig = (sandboxOff || gpuConfig)
+      ? { ...(sandboxOff ? { disableSandbox: true } : {}), ...(gpuConfig ? { gpu: gpuConfig } : {}) }
+      : undefined
+    const result = await this.runOperation(
       machineId, 'Starting', 'Machine started successfully', 'Failed to start machine',
       // Only pass a config when there is one, so the default call shape (and the
-      // single-node behavior) is byte-for-byte unchanged when the opt-out is unset.
+      // single-node behavior) is byte-for-byte unchanged when neither the sandbox
+      // opt-out nor GPU is set.
       (infinization) => startConfig ? infinization.startVM(machineId, startConfig) : infinization.startVM(machineId)
     )
+    if (!result.success && gpuConfig) {
+      // Power-on failed — free the GPU ticket (infinization reaps its device server).
+      getGpuBrokerService().release(machineId)
+    }
+    return result
   }
 
   /**

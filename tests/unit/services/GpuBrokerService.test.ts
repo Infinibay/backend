@@ -168,4 +168,33 @@ describe('GpuBrokerService', () => {
       })
     })
   })
+
+  describe('pixel ports', () => {
+    it('assigns a distinct infiniPixel port per admitted VM', () => {
+      const broker = new GpuBrokerService({ totalVramMB: 100000, hostReserveMB: 0, pixelPortMin: 7000, pixelPortMax: 7099 })
+      const a = broker.admit({ vmId: 'a', departmentId: 'd', policy: policy({ vramCapMB: 1024 }) })
+      const b = broker.admit({ vmId: 'b', departmentId: 'd', policy: policy({ vramCapMB: 1024 }) })
+      expect(a.pixelPort).toBe(7000)
+      expect(b.pixelPort).toBe(7001)
+    })
+
+    it('reuses a freed port after release', () => {
+      const broker = new GpuBrokerService({ totalVramMB: 100000, hostReserveMB: 0, pixelPortMin: 7000, pixelPortMax: 7099 })
+      const a = broker.admit({ vmId: 'a', departmentId: 'd', policy: policy({ vramCapMB: 1024 }) })
+      broker.release('a')
+      const b = broker.admit({ vmId: 'b', departmentId: 'd', policy: policy({ vramCapMB: 1024 }) })
+      expect(b.pixelPort).toBe(a.pixelPort)
+    })
+
+    it('denies with NoPixelPort when the pool is exhausted', () => {
+      const broker = new GpuBrokerService({ totalVramMB: 100000, hostReserveMB: 0, pixelPortMin: 7000, pixelPortMax: 7000 })
+      broker.admit({ vmId: 'a', departmentId: 'd', policy: policy({ vramCapMB: 1024 }) })
+      try {
+        broker.admit({ vmId: 'b', departmentId: 'd', policy: policy({ vramCapMB: 1024 }) })
+        fail('expected NoPixelPort')
+      } catch (e) {
+        expect((e as GpuAdmissionError).reason.code).toBe('NoPixelPort')
+      }
+    })
+  })
 })

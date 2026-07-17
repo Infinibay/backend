@@ -59,6 +59,9 @@ export interface GpuBrokerConfig {
   totalVramMB: number
   /** VRAM held back for driver/host, never admitted. */
   hostReserveMB: number
+  /** Inclusive port range the infiniPixel remote-display streams are allocated from. */
+  pixelPortMin: number
+  pixelPortMax: number
 }
 
 /** The resolved per-VM config an admitted VM's device server is launched with. */
@@ -74,6 +77,8 @@ export interface ResolvedVmGpuConfig {
   vramReservedMB: number
   /** Token-bucket burst hint (µs). */
   burstUs: number
+  /** Host port this VM's infiniPixel remote-display stream is served on. */
+  pixelPort: number
 }
 
 export type AdmitDenyReason =
@@ -82,6 +87,7 @@ export type AdmitDenyReason =
   | { code: 'ExceedsVmCap', requestedMB: number, capMB: number }
   | { code: 'AtConcurrencyCap', cap: number }
   | { code: 'InsufficientVram', requestedMB: number, availableMB: number }
+  | { code: 'NoPixelPort', min: number, max: number }
 
 function formatReason (r: AdmitDenyReason): string {
   switch (r.code) {
@@ -90,6 +96,7 @@ function formatReason (r: AdmitDenyReason): string {
     case 'ExceedsVmCap': return `requested ${r.requestedMB} MB exceeds the per-VM VRAM cap ${r.capMB} MB`
     case 'AtConcurrencyCap': return `at the department's concurrent-GPU-VM cap (${r.cap})`
     case 'InsufficientVram': return `insufficient VRAM: requested ${r.requestedMB} MB, ${r.availableMB} MB free`
+    case 'NoPixelPort': return `no free infiniPixel port in range ${r.min}-${r.max}`
   }
 }
 
@@ -123,7 +130,9 @@ export function defaultBrokerConfig (): GpuBrokerConfig {
     // Default: one RTX A5000 worth of VRAM. Override per host once a shared
     // broker (or NVML probe) provides measured capacity.
     totalVramMB: envInt('INFINIGPU_HOST_VRAM_MB', 24 * 1024),
-    hostReserveMB: envInt('INFINIGPU_HOST_VRAM_RESERVE_MB', 1024)
+    hostReserveMB: envInt('INFINIGPU_HOST_VRAM_RESERVE_MB', 1024),
+    pixelPortMin: envInt('INFINIGPU_PIXEL_PORT_MIN', 7000),
+    pixelPortMax: envInt('INFINIGPU_PIXEL_PORT_MAX', 7099)
   }
 }
 
@@ -135,6 +144,9 @@ export class GpuBrokerService {
     this.cfg = { ...defaultBrokerConfig(), ...cfg }
     if (this.cfg.hostReserveMB > this.cfg.totalVramMB) {
       throw new Error(`GpuBroker: hostReserveMB (${this.cfg.hostReserveMB}) exceeds totalVramMB (${this.cfg.totalVramMB})`)
+    }
+    if (this.cfg.pixelPortMin > this.cfg.pixelPortMax) {
+      throw new Error(`GpuBroker: invalid infiniPixel port range ${this.cfg.pixelPortMin}-${this.cfg.pixelPortMax}`)
     }
   }
 
@@ -162,16 +174,19 @@ export class GpuBrokerService {
     const available = this.availableVramMB()
     if (requested > available) throw new GpuAdmissionError({ code: 'InsufficientVram', requestedMB: requested, availableMB: available })
 
+    const pixelPort = this.allocatePixelPort()
+
     const config: ResolvedVmGpuConfig = {
       vmId,
       weight: Math.max(1, policy.gpuTimeWeight),
       vramCapMB: capMB,
       priorityTier: policy.priorityTier,
       vramReservedMB: requested,
-      burstUs: Math.max(0, policy.submissionRateTokens)
+      burstUs: Math.max(0, policy.submissionRateTokens),
+      pixelPort
     }
     this.tickets.set(vmId, { vmId, departmentId, vramReservedMB: requested, config, admittedAt: Date.now() })
-    debug.info(`admitted VM ${vmId} (dept ${departmentId}): ${requested} MB reserved, weight ${config.weight}, ${this.availableVramMB()} MB free after`)
+    debug.info(`admitted VM ${vmId} (dept ${departmentId}): ${requested} MB reserved, weight ${config.weight}, pixelPort ${pixelPort}, ${this.availableVramMB()} MB free after`)
     return config
   }
 
@@ -200,6 +215,16 @@ export class GpuBrokerService {
     let sum = 0
     for (const t of this.tickets.values()) sum += t.vramReservedMB
     return sum
+  }
+
+  /** Lowest free infiniPixel port in the configured range, or throw (fail-closed). */
+  private allocatePixelPort (): number {
+    const inUse = new Set<number>()
+    for (const t of this.tickets.values()) inUse.add(t.config.pixelPort)
+    for (let p = this.cfg.pixelPortMin; p <= this.cfg.pixelPortMax; p++) {
+      if (!inUse.has(p)) return p
+    }
+    throw new GpuAdmissionError({ code: 'NoPixelPort', min: this.cfg.pixelPortMin, max: this.cfg.pixelPortMax })
   }
 
   /** Un-reserved, admittable VRAM (never negative). */
