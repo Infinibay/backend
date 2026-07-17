@@ -600,30 +600,18 @@ export class CreateMachineServiceV2 {
       uuid: machine.internalName
     }
 
-    // infinigpu (opt-in): if the VM's department has GPU enabled, admit it against
-    // the host broker (fail-closed — throws if over VRAM/concurrency cap) and
-    // attach a virtual GPU. Non-GPU departments are untouched. `extractGpuPolicy`
-    // reads the 7 policy fields structurally so a Prisma client that predates the
-    // migration simply yields gpuEnabled=undefined → GPU skipped.
-    if (machine.departmentId) {
-      // Read the GPU policy defensively: if the migration that adds the 7 columns
-      // has not applied, the regenerated Prisma client selects columns that don't
-      // exist (P2022) and this findUnique throws. That must NOT break VM creation —
-      // treat it as "no GPU" and continue. Admission denial below is separate and
-      // still propagates (fail-closed).
-      let policy: DepartmentGpuPolicy | null = null
-      try {
-        const dept = await this.prisma.department.findUnique({ where: { id: machine.departmentId } })
-        policy = dept ? extractGpuPolicy(dept as unknown as DepartmentGpuPolicy) : null
-      } catch (gpuReadErr: any) {
-        this.debug.warn(`infinigpu: GPU policy read failed for machine ${machine.id} (migration not applied?), creating without GPU: ${gpuReadErr?.message}`)
-      }
-      if (policy?.gpuEnabled) {
-        const gpuCfg = getGpuBrokerService().admit({ vmId: machine.id, departmentId: machine.departmentId, policy })
-        config.gpu = { pixelPort: gpuCfg.pixelPort }
-        this.debug.info(`infinigpu: admitted VM ${machine.id} — pixelPort ${gpuCfg.pixelPort}, ${gpuCfg.vramReservedMB} MB reserved`)
-      }
-    }
+    // infinigpu (opt-in): the virtual GPU is deliberately NOT attached for the
+    // install/first-boot launch, even when the department has GPU enabled. Two reasons:
+    //   1. The installer kernel has no infinigpu.ko, and the vfio-user GPU hangs a
+    //      driver-less guest during PCI probe (verified A/B: a GPU-dept VM stalls at
+    //      15 MB with no DHCP lease, while the identical install with no GPU completes
+    //      and downloads normally).
+    //   2. The GPU is a post-setup display anyway — infiniPixel needs the guest driver
+    //      that the unattended install itself lays down (see gpuEnabledForInstall, which
+    //      still injects the driver-install steps for GPU departments).
+    // The GPU is admitted + attached later by VMOperationsService.startVM, gated on
+    // setupComplete, so the first display over infinigpu is a fully-installed guest whose
+    // driver is present. Install/first boot use SPICE (observable).
 
     return config
   }

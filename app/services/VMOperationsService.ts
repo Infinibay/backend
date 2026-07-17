@@ -210,7 +210,7 @@ export class VMOperationsService {
     // a VM whose L2 cannot be built must not power on silently partitioned.
     const placement = await this.prisma.machine.findUnique({
       where: { id: machineId },
-      select: { nodeId: true, departmentId: true }
+      select: { nodeId: true, departmentId: true, configuration: { select: { setupComplete: true } } }
     })
     if (placement?.nodeId && placement.departmentId) {
       try {
@@ -228,8 +228,14 @@ export class VMOperationsService {
     // infinigpu (opt-in): admit + attach a virtual GPU when the VM's department
     // has GPU enabled. Fail-closed — a denied admission stops the power-on. A VM
     // already holding a ticket (e.g. re-entrant start) reuses its pixel port.
+    // Attach the GPU only once the guest is fully installed and its infinigpu driver is
+    // present. setupComplete flips true when infiniservice first reports metrics (post
+    // install, post first boot — see MetricsHandler). Attaching earlier hangs a driver-less
+    // guest at PCI probe (the installer kernel has no infinigpu.ko), so install + first
+    // boot run GPU-less over SPICE and the GPU comes in on the next start. See
+    // CreateMachineServiceV2.buildVMConfig for the create-side half of this policy.
     let gpuConfig: { pixelPort: number } | undefined
-    if (placement?.departmentId) {
+    if (placement?.departmentId && placement.configuration?.setupComplete === true) {
       // Defensive: if the GPU migration hasn't applied, this findUnique throws
       // P2022 (client selects non-existent columns). Don't let that block power-on —
       // treat as "no GPU". Admission denial below stays fail-closed.
