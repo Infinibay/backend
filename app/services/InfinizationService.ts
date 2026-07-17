@@ -24,6 +24,7 @@ import { DISK_OP_STATUSES, OFF_STATUS } from '../constants/machine-status'
 import { reconcileOrphanedMoveMarkers } from './node/VMMigrationService'
 import { loadOverlaySelfIdentity } from './node/overlayIdentity'
 import { reconcileOrphanedMaintenanceLocks } from './MaintenanceService'
+import { getGpuBrokerService, extractGpuPolicy, type DepartmentGpuPolicy } from './GpuBrokerService'
 
 const debug = logger.child({ module: 'infinization-service' })
 
@@ -571,6 +572,27 @@ async function attachToRunningVMs (infinization: Infinization): Promise<void> {
       } catch (error) {
         // VM might have crashed between DB query and attach attempt
         debug.warn(`Failed to attach to VM ${vm.name} (${vm.id}): ${error}`)
+      }
+
+      // infinigpu: re-adopt a GPU VM's surviving device server and rebuild its host broker
+      // ticket. The device (detached) + QEMU (-daemonize) keep running across a backend restart,
+      // so the guest's GPU never drops — but the in-memory broker ledger and the console
+      // resolver's pixel-port lookup are lost on restart. Restoring them here keeps `Connect`
+      // working and the shared-GPU capacity accounting correct after a restart. A VM with no
+      // GPU (or whose device did NOT survive) returns undefined and is skipped — fail-open, this
+      // must never block QMP reconciliation.
+      try {
+        const pixelPort = await infinization.reattachInfinigpuServer(vm.id)
+        if (pixelPort != null && vm.departmentId) {
+          const dept = await prisma.department.findUnique({ where: { id: vm.departmentId } })
+          const policy: DepartmentGpuPolicy | null = dept ? extractGpuPolicy(dept as unknown as DepartmentGpuPolicy) : null
+          if (policy?.gpuEnabled) {
+            getGpuBrokerService().readmit({ vmId: vm.id, departmentId: vm.departmentId, policy, pixelPort })
+            debug.debug(`Re-adopted infinigpu device + restored broker ticket for VM ${vm.name} (${vm.id}) on pixelPort ${pixelPort}`)
+          }
+        }
+      } catch (gpuErr) {
+        debug.warn(`infinigpu re-adopt failed for VM ${vm.name} (${vm.id}): ${gpuErr}`)
       }
     }
 

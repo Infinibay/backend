@@ -190,6 +190,39 @@ export class GpuBrokerService {
     return config
   }
 
+  /**
+   * Restore a ticket for a VM that was ALREADY admitted before a backend restart, reusing the
+   * pixel port its still-running device is streaming on (never re-allocating). This rebuilds the
+   * in-memory ledger — VRAM reservation, concurrency count, and the console resolver's port
+   * lookup — so a GPU VM survives a backend restart transparently (its device + QEMU stay up).
+   *
+   * Unlike {@link admit} this does NOT allocate a port or re-run capacity gates: the VM is a
+   * confirmed survivor, and rejecting it here would only strand a running device. Returns the
+   * restored config, or `undefined` if GPU is (now) disabled. Idempotent: an existing ticket is
+   * returned unchanged.
+   */
+  readmit (params: { vmId: string, departmentId: string, policy: DepartmentGpuPolicy, pixelPort: number, requestedVramMB?: number }): ResolvedVmGpuConfig | undefined {
+    const { vmId, departmentId, policy, pixelPort } = params
+    if (!policy.gpuEnabled) return undefined
+    const existing = this.tickets.get(vmId)
+    if (existing) return existing.config
+
+    const capMB = policy.vramCapMB
+    const requested = params.requestedVramMB ?? capMB
+    const config: ResolvedVmGpuConfig = {
+      vmId,
+      weight: Math.max(1, policy.gpuTimeWeight),
+      vramCapMB: capMB,
+      priorityTier: policy.priorityTier,
+      vramReservedMB: requested,
+      burstUs: Math.max(0, policy.submissionRateTokens),
+      pixelPort
+    }
+    this.tickets.set(vmId, { vmId, departmentId, vramReservedMB: requested, config, admittedAt: Date.now() })
+    debug.info(`restored VM ${vmId} (dept ${departmentId}) after restart: pixelPort ${pixelPort}, ${requested} MB reserved, ${this.availableVramMB()} MB free after`)
+    return config
+  }
+
   /** Drop `vmId`'s ticket (frees its VRAM reservation + concurrency slot). Idempotent. */
   release (vmId: string): boolean {
     const had = this.tickets.delete(vmId)
