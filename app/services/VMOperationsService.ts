@@ -230,8 +230,16 @@ export class VMOperationsService {
     // already holding a ticket (e.g. re-entrant start) reuses its pixel port.
     let gpuConfig: { pixelPort: number } | undefined
     if (placement?.departmentId) {
-      const dept = await this.prisma.department.findUnique({ where: { id: placement.departmentId } })
-      const policy = dept ? extractGpuPolicy(dept as unknown as DepartmentGpuPolicy) : null
+      // Defensive: if the GPU migration hasn't applied, this findUnique throws
+      // P2022 (client selects non-existent columns). Don't let that block power-on —
+      // treat as "no GPU". Admission denial below stays fail-closed.
+      let policy: DepartmentGpuPolicy | null = null
+      try {
+        const dept = await this.prisma.department.findUnique({ where: { id: placement.departmentId } })
+        policy = dept ? extractGpuPolicy(dept as unknown as DepartmentGpuPolicy) : null
+      } catch (gpuReadErr: any) {
+        this.debug.warn(`infinigpu: GPU policy read failed for machine ${machineId} (migration not applied?), starting without GPU: ${gpuReadErr?.message}`)
+      }
       if (policy?.gpuEnabled) {
         const broker = getGpuBrokerService()
         const existing = broker.getConfig(machineId)

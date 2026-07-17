@@ -592,8 +592,18 @@ export class CreateMachineServiceV2 {
     // reads the 7 policy fields structurally so a Prisma client that predates the
     // migration simply yields gpuEnabled=undefined → GPU skipped.
     if (machine.departmentId) {
-      const dept = await this.prisma.department.findUnique({ where: { id: machine.departmentId } })
-      const policy = dept ? extractGpuPolicy(dept as unknown as DepartmentGpuPolicy) : null
+      // Read the GPU policy defensively: if the migration that adds the 7 columns
+      // has not applied, the regenerated Prisma client selects columns that don't
+      // exist (P2022) and this findUnique throws. That must NOT break VM creation —
+      // treat it as "no GPU" and continue. Admission denial below is separate and
+      // still propagates (fail-closed).
+      let policy: DepartmentGpuPolicy | null = null
+      try {
+        const dept = await this.prisma.department.findUnique({ where: { id: machine.departmentId } })
+        policy = dept ? extractGpuPolicy(dept as unknown as DepartmentGpuPolicy) : null
+      } catch (gpuReadErr: any) {
+        this.debug.warn(`infinigpu: GPU policy read failed for machine ${machine.id} (migration not applied?), creating without GPU: ${gpuReadErr?.message}`)
+      }
       if (policy?.gpuEnabled) {
         const gpuCfg = getGpuBrokerService().admit({ vmId: machine.id, departmentId: machine.departmentId, policy })
         config.gpu = { pixelPort: gpuCfg.pixelPort }
