@@ -26,8 +26,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       qemu-system-x86 qemu-utils nftables iproute2 wireguard-tools dnsmasq \
       swtpm swtpm-tools ethtool numactl genisoimage xorriso procps \
       p7zip-full \
+      libvulkan1 \
       postgresql-client curl ca-certificates bash \
     && rm -rf /var/lib/apt/lists/*
+# libvulkan1 = the Vulkan LOADER, needed by the infinigpu-device render path (ash
+# dlopens libvulkan.so.1). The NVIDIA ICD + driver libs (nvidia_icd.json,
+# libGLX_nvidia, libnvidia-encode) are injected at runtime by the NVIDIA CDI spec,
+# but the loader itself must be in the image. Harmless for non-GPU deployments.
 WORKDIR /workspace/backend
 
 # ── dev: environment only; source + infinization are mounted at runtime ──────
