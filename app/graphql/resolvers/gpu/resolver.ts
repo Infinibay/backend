@@ -5,7 +5,8 @@ import { InfinibayContext } from '../../../utils/context'
 import { UserInputError } from '../../../utils/errors'
 import { getEventManager } from '../../../services/EventManager'
 import { getGpuBrokerService, extractGpuPolicy, GpuAdmissionError } from '../../../services/GpuBrokerService'
-import { getEncodedConsoleStreamService } from '../../../services/console/EncodedConsoleStreamService'
+import { getGpuConsoleRelay } from '../../../services/console/GpuConsoleRelay'
+import { getInfinization } from '../../../services/InfinizationService'
 import { resolveConnectHost, hostFromHeader } from '@utils/resolveConnectHost'
 import {
   DepartmentGpuPolicyType,
@@ -169,8 +170,42 @@ export class GpuResolver {
       envHost: process.env.GRAPHIC_HOST,
       requestHost: hostFromHeader(req?.headers['x-forwarded-host'] ?? req?.headers.host)
     })
-    const session = await getEncodedConsoleStreamService().ensureSession(machineId, '127.0.0.1', cfg.pixelPort)
+    // WS-aware relay: forwards the device's frames out AND injects the viewer's mouse/key
+    // input back into the guest over QMP (a GPU VM has no other input path).
+    const session = await getGpuConsoleRelay().ensureSession(machineId, '127.0.0.1', cfg.pixelPort)
     return { url: `ws://${ingressHost}:${session.listenPort}`, pixelPort: cfg.pixelPort }
+  }
+
+  /**
+   * Inject guest input (mouse/keyboard) into a GPU VM via the master's existing QMP
+   * connection — QEMU `input-send-event`. The GPU VM has no SPICE/VNC input path, so
+   * the infiniPixel viewer forwards its winit events here (relayed low-latency over the
+   * console WebSocket in the common case; this mutation is the direct primitive).
+   * `eventsJson` is a JSON array of QMP input events, e.g.
+   *   [{"type":"abs","data":{"axis":"x","value":16384}},
+   *    {"type":"abs","data":{"axis":"y","value":16384}}]
+   *   [{"type":"key","data":{"down":true,"key":{"type":"qcode","data":"a"}}}]
+   */
+  @Mutation(() => Boolean)
+  @Can('vm:console', { id: (a) => a.machineId })
+  async sendGpuConsoleInput (
+    @Arg('machineId', () => ID) machineId: string,
+    @Arg('eventsJson') eventsJson: string
+  ): Promise<boolean> {
+    let events: unknown
+    try {
+      events = JSON.parse(eventsJson)
+    } catch {
+      throw new UserInputError('eventsJson must be valid JSON')
+    }
+    if (!Array.isArray(events) || events.length === 0) {
+      throw new UserInputError('eventsJson must be a non-empty JSON array of QMP input events')
+    }
+    const infinization = await getInfinization()
+    const qmp = infinization.getQMPClient(machineId)
+    if (!qmp) return false
+    await qmp.execute('input-send-event', { events })
+    return true
   }
 }
 

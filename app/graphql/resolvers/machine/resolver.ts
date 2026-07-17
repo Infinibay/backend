@@ -735,6 +735,43 @@ export class MachineMutations {
   }
 
   /**
+   * Executes a RAW shell command inside a VM guest via the infiniservice agent
+   * (UnsafeCommand over the virtio channel), unlike executeCommand which relies on the
+   * QEMU guest agent (qemu-ga, not installed on our images). Returns the guest's stdout on
+   * success, stderr/error on failure. Requires a working host→guest command channel
+   * (infiniservice >= 0.4.1; older served agents silently reject signed commands).
+   */
+  @Mutation(() => CommandExecutionResponseType)
+  @Can('vm:execute', { id: (a) => a.id, scopeVia: 'vm' })
+  async executeRawCommand (
+    @Arg('id') id: string,
+    @Arg('command') command: string,
+    @Ctx() context: InfinibayContext
+  ): Promise<CommandExecutionResponseType> {
+    const { prisma } = context
+    const machine = await prisma.machine.findFirst({ where: { id } })
+    if (!machine) {
+      return { success: false, message: 'Machine not found' }
+    }
+    if (machine.goldenImageBuildId != null) {
+      return { success: false, message: GOLDEN_IMAGE_BUILD_BUSY_MESSAGE }
+    }
+    try {
+      const { getVirtioSocketWatcherService } = await import('../../../services/VirtioSocketWatcherService')
+      const resp = await getVirtioSocketWatcherService().sendUnsafeCommand(id, command, {}, 60000)
+      return {
+        success: !!resp.success,
+        message: resp.success ? (resp.stdout ?? '') : (resp.stderr || resp.error || resp.stdout || 'command failed'),
+        response: resp.stdout ?? undefined
+      }
+    } catch (error) {
+      // Never surface raw error text (host paths/sockets) to the client — log, return generic.
+      this.debug.error(`executeRawCommand infra failure for machine ${id}:`, error)
+      return { success: false, message: 'Failed to execute command on the virtual machine' }
+    }
+  }
+
+  /**
    * Changes the state of a virtual machine using VMOperationsService (infinization).
    *
    * For the 'shutdown' action, this method performs additional post-operation verification

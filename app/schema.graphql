@@ -1534,6 +1534,7 @@ type Mutation {
   executeCommand(command: String!, id: String!): CommandExecutionResponseType!
   executeImmediateMaintenance(input: ExecuteMaintenanceInput!): MaintenanceExecutionResponse!
   executeMaintenanceTask(taskId: ID!): MaintenanceExecutionResponse!
+  executeRawCommand(command: String!, id: String!): CommandExecutionResponseType!
   executeScript(input: ExecuteScriptInput!): ScriptExecutionResponseType!
   flushFirewallRules(vmId: ID!): FlushResultType!
   forcePowerOff(id: String!): SuccessType!
@@ -1597,6 +1598,7 @@ type Mutation {
   runDefenderQuickScan(vmId: ID!): DefenderScanResult!
   scalePool(id: ID!, targetSize: Int!): PoolResult!
   scheduleScript(input: ScheduleScriptInput!): ScheduleScriptResponseType!
+  sendGpuConsoleInput(eventsJson: String!, machineId: ID!): Boolean!
   setDepartmentMember(input: SetDepartmentMemberInput!): DepartmentMemberType!
   setFeatureFlag(enabled: Boolean!, key: String!): FeatureFlagType!
   setNetworkBridgeName(input: BridgeNameInput!): Boolean!
