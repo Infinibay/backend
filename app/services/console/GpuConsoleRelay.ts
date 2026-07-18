@@ -100,8 +100,12 @@ export class GpuConsoleRelay {
       idleTimeoutMs: cfg?.idleTimeoutMs ?? envInt('INFINIPIXEL_PROXY_IDLE_MS', 5 * 60_000),
       maxClientsPerSession: cfg?.maxClientsPerSession ?? envInt('INFINIPIXEL_PROXY_MAX_CLIENTS', 4),
       bindAddr: cfg?.bindAddr ?? (process.env.INFINIPIXEL_PROXY_BIND ?? '0.0.0.0'),
-      sendHighWaterMark: cfg?.sendHighWaterMark ?? envInt('INFINIPIXEL_PROXY_HWM_BYTES', 1024 * 1024),
-      sendLowWaterMark: cfg?.sendLowWaterMark ?? envInt('INFINIPIXEL_PROXY_LWM_BYTES', 256 * 1024)
+      // Interactive-latency bounds, not just anti-OOM. At the 8 Mbps stream bitrate, 1 MiB of
+      // buffered video ≈ 1 s of standing latency — far too much for a software cursor (whose lag
+      // IS the pipeline's standing latency). Cap the relay's contribution to ~256 ms (HWM) with
+      // a 64 KiB resume floor. The hardware cursor (2D-accel PR6) is the real cursor-lag fix.
+      sendHighWaterMark: cfg?.sendHighWaterMark ?? envInt('INFINIPIXEL_PROXY_HWM_BYTES', 256 * 1024),
+      sendLowWaterMark: cfg?.sendLowWaterMark ?? envInt('INFINIPIXEL_PROXY_LWM_BYTES', 64 * 1024)
     }
     if (this.cfg.portMin > this.cfg.portMax) {
       throw new Error(`GpuConsoleRelay: invalid port range ${this.cfg.portMin}-${this.cfg.portMax}`)
