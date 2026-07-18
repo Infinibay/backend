@@ -59,6 +59,12 @@ interface InternalSession {
   bindLabel: string
 }
 
+/** Per-VM ordered input backlog drained one QMP injection at a time (see `inputQueues`). */
+interface InputQueue {
+  items: string[]
+  draining: boolean
+}
+
 export interface GpuConsoleRelayConfig {
   portMin: number
   portMax: number
@@ -75,6 +81,13 @@ type QmpEvent = { type: string, data: Record<string, unknown> }
 export class GpuConsoleRelay {
   private readonly cfg: GpuConsoleRelayConfig
   private readonly sessions = new Map<string, InternalSession>()
+  // Per-VM ORDERED input queue. Each viewer input message becomes a QMP `input-send-event`;
+  // firing them concurrently (fire-and-forget) let rapid events race and reach QEMU out of
+  // order — e.g. `ctrl↓ ctrl↑ x↓` landing as ctrl-still-held (→ phantom Ctrl+X / stuck
+  // modifiers). Draining one at a time preserves order. Bursts of absolute mouse-moves are
+  // COALESCED (only the newest cursor position matters), so a move flood can't stack N QMP
+  // round-trips ahead of the next click/keystroke — the dominant input-lag source.
+  private readonly inputQueues = new Map<string, InputQueue>()
 
   constructor (cfg?: Partial<GpuConsoleRelayConfig>) {
     this.cfg = {
@@ -112,6 +125,7 @@ export class GpuConsoleRelay {
     const s = this.sessions.get(vmId)
     if (!s) return
     this.sessions.delete(vmId)
+    this.inputQueues.delete(vmId)
     if (s.idleTimer) clearTimeout(s.idleTimer)
     for (const c of s.clients) { try { c.terminate() } catch { /* ignore */ } }
     try { s.wss.close() } catch { /* ignore */ }
@@ -189,7 +203,7 @@ export class GpuConsoleRelay {
       // viewer; forward it upstream only if the device ever grows a client channel.
       if (isBinary) return
       const text = data.toString()
-      void this.handleInput(session.vmId, text)
+      this.enqueueInput(session.vmId, text)
     })
     const cleanup = (): void => {
       session.clients.delete(client)
@@ -199,6 +213,38 @@ export class GpuConsoleRelay {
     }
     client.on('close', cleanup)
     client.on('error', cleanup)
+  }
+
+  /**
+   * Enqueue one viewer input message for ordered injection. Consecutive absolute mouse-moves
+   * collapse to the latest (an old cursor position is worthless once a newer one exists), so a
+   * move flood can't push N QMP round-trips ahead of the next click/keystroke.
+   */
+  private enqueueInput (vmId: string, text: string): void {
+    let q = this.inputQueues.get(vmId)
+    if (!q) { q = { items: [], draining: false }; this.inputQueues.set(vmId, q) }
+    const last = q.items.length > 0 ? q.items[q.items.length - 1] : undefined
+    if (isMouseMove(text) && last !== undefined && isMouseMove(last)) {
+      q.items[q.items.length - 1] = text // coalesce: keep only the newest pending move
+    } else {
+      q.items.push(text)
+    }
+    void this.drainInput(vmId)
+  }
+
+  /** Drain a VM's input backlog in order, one QMP injection at a time. */
+  private async drainInput (vmId: string): Promise<void> {
+    const q = this.inputQueues.get(vmId)
+    if (!q || q.draining) return
+    q.draining = true
+    try {
+      while (q.items.length > 0) {
+        const text = q.items.shift() as string
+        await this.handleInput(vmId, text)
+      }
+    } finally {
+      q.draining = false
+    }
   }
 
   /** Translate one viewer input message to QMP events and inject over the VM's monitor. */
@@ -233,6 +279,11 @@ export class GpuConsoleRelay {
   private publicView (s: InternalSession): RelaySession {
     return { vmId: s.vmId, listenPort: s.listenPort, connected: s.clients.size > 0 }
   }
+}
+
+/** Cheap test for an absolute mouse-move message (the viewer emits compact `{"t":"m",...}`). */
+function isMouseMove (text: string): boolean {
+  return text.startsWith('{"t":"m"')
 }
 
 /** Clamp a normalized 0..1 axis into QEMU's absolute 0..32767 range. */
