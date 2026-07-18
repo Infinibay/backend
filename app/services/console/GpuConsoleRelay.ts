@@ -284,7 +284,25 @@ export class GpuConsoleRelay {
       const infinization = await getInfinization()
       const qmp = infinization.getQMPClient(vmId)
       if (!qmp) return // VM not attached (e.g. mid-restart) — drop input rather than throw
-      await qmp.execute('input-send-event', { events })
+      // Bound the injection. Input rides the single in-band QMP monitor, so if QEMU's main loop
+      // is momentarily stalled (e.g. the device server blocking the vfio-user thread), a naive
+      // await would hold this serial drain for the full 30s command timeout — freezing the whole
+      // cursor queue. Cap it: on a stall, abandon THIS injection and keep draining; the newest
+      // coalesced mouse position is re-sent on the next event, so the cursor self-heals instead
+      // of wedging. The device-side fix removes the stall itself; this bounds the worst case and
+      // surfaces it. The `.catch` keeps a late (post-timeout) rejection from going unhandled.
+      const t0 = Date.now()
+      const exec = qmp.execute('input-send-event', { events }).then(() => true).catch(() => false)
+      const injected = await Promise.race([
+        exec,
+        new Promise<boolean>((resolve) => setTimeout(() => resolve(false), INPUT_INJECT_TIMEOUT_MS))
+      ])
+      const dt = Date.now() - t0
+      if (!injected) {
+        debug.warn(`input inject slow VM ${vmId}: abandoned after ${dt}ms (QMP monitor stalled) — cursor will catch up`)
+      } else if (dt > 150) {
+        debug.warn(`input inject slow VM ${vmId}: ${dt}ms on the QMP monitor`)
+      }
     } catch (e) {
       debug.warn(`input inject failed VM ${vmId}: ${e instanceof Error ? e.message : String(e)}`)
     }
@@ -304,6 +322,13 @@ export class GpuConsoleRelay {
     return { vmId: s.vmId, listenPort: s.listenPort, connected: s.clients.size > 0 }
   }
 }
+
+/**
+ * Max time to wait for a single `input-send-event` on the shared QMP monitor before abandoning
+ * it and continuing to drain. Well above a healthy round-trip (sub-ms on a live monitor), so it
+ * only trips on a genuine QEMU main-loop stall — bounding a would-be 30s wedge to under a second.
+ */
+const INPUT_INJECT_TIMEOUT_MS = 800
 
 /** Cheap test for an absolute mouse-move message (the viewer emits compact `{"t":"m",...}`). */
 function isMouseMove (text: string): boolean {
