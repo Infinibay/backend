@@ -73,6 +73,10 @@ export interface GpuConsoleRelayConfig {
   /** Max concurrent viewer connections a single session will accept. */
   maxClientsPerSession: number
   bindAddr: string
+  /** Pause the loopback device upstream once a viewer's outbound buffer exceeds this (bytes). */
+  sendHighWaterMark: number
+  /** Resume the upstream once the viewer's outbound buffer drains below this (bytes). */
+  sendLowWaterMark: number
 }
 
 /** Normalized viewer→server input event (see the module doc for the wire shape). */
@@ -95,7 +99,9 @@ export class GpuConsoleRelay {
       portMax: cfg?.portMax ?? envInt('INFINIPIXEL_PROXY_PORT_MAX', 6139),
       idleTimeoutMs: cfg?.idleTimeoutMs ?? envInt('INFINIPIXEL_PROXY_IDLE_MS', 5 * 60_000),
       maxClientsPerSession: cfg?.maxClientsPerSession ?? envInt('INFINIPIXEL_PROXY_MAX_CLIENTS', 4),
-      bindAddr: cfg?.bindAddr ?? (process.env.INFINIPIXEL_PROXY_BIND ?? '0.0.0.0')
+      bindAddr: cfg?.bindAddr ?? (process.env.INFINIPIXEL_PROXY_BIND ?? '0.0.0.0'),
+      sendHighWaterMark: cfg?.sendHighWaterMark ?? envInt('INFINIPIXEL_PROXY_HWM_BYTES', 1024 * 1024),
+      sendLowWaterMark: cfg?.sendLowWaterMark ?? envInt('INFINIPIXEL_PROXY_LWM_BYTES', 256 * 1024)
     }
     if (this.cfg.portMin > this.cfg.portMax) {
       throw new Error(`GpuConsoleRelay: invalid port range ${this.cfg.portMin}-${this.cfg.portMax}`)
@@ -188,11 +194,29 @@ export class GpuConsoleRelay {
     // Upstream: the per-VM device server's infiniPixel WebSocket (loopback, server-side).
     const upstream = new WebSocket(`ws://${session.upstreamHost}:${session.upstreamPort}`)
     let upstreamOpen = false
+    let upstreamPaused = false
 
     upstream.on('open', () => { upstreamOpen = true })
     upstream.on('message', (data: RawData, isBinary: boolean) => {
-      // Device→viewer: forward encoded frames (binary) verbatim.
-      if (client.readyState === WebSocket.OPEN) client.send(data, { binary: isBinary })
+      // Device→viewer: forward encoded frames (binary) verbatim, then apply BACKPRESSURE.
+      // We must not buffer unboundedly here — a slow viewer would accrue standing latency
+      // equal to the queued bytes (bufferbloat) — and we cannot shed safely at this stage:
+      // the relay has no way to force an IDR, so dropping P-frames would desync the decoder.
+      // Instead, when the viewer's outbound buffer is congested we PAUSE the loopback device
+      // upstream; the congestion signal propagates back through TCP to the pixel Hub, the one
+      // stage that can shed correctly (collapse-to-keyframe + force a fresh IDR).
+      if (client.readyState !== WebSocket.OPEN) return
+      client.send(data, { binary: isBinary }, () => {
+        // Flushed to the socket: resume the upstream once the buffer has drained enough.
+        if (upstreamPaused && client.bufferedAmount < this.cfg.sendLowWaterMark) {
+          upstreamPaused = false
+          try { upstream.resume() } catch { /* ignore */ }
+        }
+      })
+      if (!upstreamPaused && client.bufferedAmount > this.cfg.sendHighWaterMark) {
+        upstreamPaused = true
+        try { upstream.pause() } catch { /* ignore */ }
+      }
     })
     upstream.on('close', () => { try { client.close() } catch { /* ignore */ } })
     upstream.on('error', (e) => { debug.warn(`upstream error VM ${session.vmId}: ${e.message}`); try { client.close() } catch { /* ignore */ } })
