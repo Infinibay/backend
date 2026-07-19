@@ -26,13 +26,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       qemu-system-x86 qemu-utils nftables iproute2 wireguard-tools dnsmasq \
       swtpm swtpm-tools ethtool numactl genisoimage xorriso procps \
       p7zip-full \
-      libvulkan1 ffmpeg \
+      libvulkan1 libegl1 libgl1 libglx0 ffmpeg \
       postgresql-client curl ca-certificates bash \
     && rm -rf /var/lib/apt/lists/*
 # libvulkan1 = the Vulkan LOADER, needed by the infinigpu-device render path (ash
 # dlopens libvulkan.so.1). The NVIDIA ICD + driver libs (nvidia_icd.json,
 # libGLX_nvidia, libnvidia-encode) are injected at runtime by the NVIDIA CDI spec,
 # but the loader itself must be in the image. Harmless for non-GPU deployments.
+# libegl1/libgl1/libglx0 = the GLVND dispatch libraries (libEGL.so.1,
+# libGLdispatch.so.0, libGLX.so.0). NON-OBVIOUS BUT LOAD-BEARING: NVIDIA's Vulkan
+# ICD (libGLX_nvidia) dlopens libEGL.so.1 during vk_icdNegotiateLoaderICDInterfaceVersion,
+# and if it is absent the ICD refuses to initialize — the loader then reports "no
+# drivers" (VK_ERROR_INCOMPATIBLE_DRIVER) and EVERY GPU vkCreateInstance fails, so
+# the guest render is black. The node:20 base does NOT ship them and the CDI spec
+# injects only the NVIDIA vendor libs (libEGL_nvidia), not the GLVND dispatchers.
+# This works under rootless podman — no docker/root engine is required.
 # ffmpeg = the infiniPixel encoder. infinigpu-device (spawned in THIS container)
 # shells out to `ffmpeg -c:v h264_nvenc` (Debian's build loads the CDI-injected
 # libnvidia-encode at runtime; libx264 is the software fallback) to encode each
